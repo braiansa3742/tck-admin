@@ -12,6 +12,9 @@
 <link rel="manifest" href="/manifest.json">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;700;900&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -7563,6 +7566,7 @@ var _mapaVisitas     = [];
 var _mapaMarkers     = [];
 var _mapaRuta        = null;
 var _mapaRutas       = [];
+var _mapaCluster     = null;
 var _mapaGrayMarkers = [];
 var _mapaTrackLines  = {};
 var _mapaTrackMarkers = [];
@@ -7615,6 +7619,8 @@ async function mapaRender() {
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap'
     }).addTo(_mapaInstance);
+    _mapaCluster = L.markerClusterGroup({ maxClusterRadius: 40, showCoverageOnHover: false, zoomToBoundsOnClick: true });
+    _mapaInstance.addLayer(_mapaCluster);
   }
 
   await mapaCargarVisitas();
@@ -7666,6 +7672,7 @@ function mapaActualizar() {
   // Limpiar markers anteriores
   _mapaMarkers.forEach(function(m) { _mapaInstance.removeLayer(m); });
   _mapaMarkers = [];
+  if (_mapaCluster) _mapaCluster.clearLayers();
 
   // Filtrar visitas
   var visitas = _mapaVisitas.filter(function(v) {
@@ -7722,19 +7729,23 @@ function mapaActualizar() {
 
     // Popup con historial al tocar
     var popupIdV = 'popup-vis-' + idx + '-' + Date.now();
-    var popupVisitado = L.popup({ maxWidth: 260, minWidth: 220 })
+    var popupVisitado = L.popup({ maxWidth: 280, minWidth: 240 })
       .setContent(
-        '<div style="font-family:\'Barlow Condensed\',sans-serif;">'
-        + '<div style="font-size:15px;font-weight:900;margin-bottom:2px;">' + v.nombre_cliente + '</div>'
-        + '<div style="font-size:11px;color:#999;margin-bottom:6px;">' + vendedorNombre + ' · ' + hora + (tiempoStr ? ' · ⏱ ' + tiempoStr : '') + '</div>'
-        + '<div style="font-size:12px;font-weight:700;color:' + (sinPed?'#C62828':'#2E7D32') + ';margin-bottom:8px;">' + (sinPed ? '❌ ' + sinPed.motivo_no_compra : '✅ Con pedido') + '</div>'
+        '<div style="font-family:\'Barlow Condensed\',sans-serif;padding:4px 0;">'
+        + '<div style="font-size:17px;font-weight:900;color:#1A0800;margin-bottom:2px;">' + v.nombre_cliente + '</div>'
+        + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">'
+        + '<div style="width:8px;height:8px;border-radius:50%;background:' + color + ';"></div>'
+        + '<div style="font-size:11px;color:#666;">' + vendedorNombre + ' · ' + hora + (tiempoStr ? ' · ⏱ <b>' + tiempoStr + '</b>' : '') + '</div>'
+        + '</div>'
+        + '<div style="background:' + (sinPed?'#FFEBEE':'#E8F5E9') + ';border-radius:8px;padding:6px 10px;margin-bottom:8px;font-size:12px;font-weight:700;color:' + (sinPed?'#C62828':'#2E7D32') + ';">' + (sinPed ? '❌ ' + (sinPed.motivo_no_compra||'Sin motivo') : '✅ Con pedido') + '</div>'
         + '<div id="' + popupIdV + '" style="font-size:12px;color:#999;">⏳ Cargando historial...</div>'
         + '</div>'
       );
 
     var marker = L.marker([v.lat, v.lng], {icon: icon})
-      .bindPopup(popupVisitado)
-      .addTo(_mapaInstance);
+      .bindPopup(popupVisitado);
+    if (_mapaCluster) _mapaCluster.addLayer(marker);
+    else marker.addTo(_mapaInstance);
 
     marker.on('popupopen', function() {
       mapaCargarHistorialCliente(v.nombre_cliente, popupIdV);
@@ -7817,6 +7828,7 @@ function mapaActualizar() {
 async function mapaCargarClientesSinVisita(checkins) {
   _mapaGrayMarkers.forEach(function(m) { _mapaInstance.removeLayer(m); });
   _mapaGrayMarkers = [];
+  // Gray markers go directly on map (not clustered)
 
   try {
     var clientes = await sbFetch('clientes_ubicaciones?lat=not.is.null&order=ultima_visita.desc&select=nombre_cliente,lat,lng,alerta_ubicacion&limit=300');
