@@ -6937,18 +6937,23 @@ async function adminVisitasCargar() {
   var fechaVal    = fechaSelect ? fechaSelect.value : 'hoy';
   var vendVal     = vendSelect  ? vendSelect.value  : 'todos';
 
-  // Calcular fecha
-  var d = new Date();
-  d.setHours(0,0,0,0);
-  if (fechaVal === 'ayer')  d.setDate(d.getDate()-1);
-  if (fechaVal === 'hace2') d.setDate(d.getDate()-2);
-  if (fechaVal === 'hace3') d.setDate(d.getDate()-3);
-  if (fechaVal === 'hace7') d.setDate(d.getDate()-7);
-  var dFin = new Date(d); dFin.setHours(23,59,59,999);
+  // Calcular fecha usando zona horaria Argentina (UTC-3)
+  var offsetMs = 3 * 60 * 60 * 1000;
+  var ahoraAR = new Date(new Date().getTime() - offsetMs);
+  var d = new Date(ahoraAR);
+  d.setUTCHours(0,0,0,0);
+  if (fechaVal === 'ayer')  d.setUTCDate(d.getUTCDate()-1);
+  if (fechaVal === 'hace2') d.setUTCDate(d.getUTCDate()-2);
+  if (fechaVal === 'hace3') d.setUTCDate(d.getUTCDate()-3);
+  if (fechaVal === 'hace7') d.setUTCDate(d.getUTCDate()-7);
+  var dFin = new Date(d); dFin.setUTCHours(23,59,59,999);
+  // Convertir de vuelta a UTC real
+  var dUTC = new Date(d.getTime() + offsetMs);
+  var dFinUTC = new Date(dFin.getTime() + offsetMs);
 
   try {
     // Traer visitas del día
-    var url = 'visitas?fecha=gte.' + d.toISOString() + '&fecha=lte.' + dFin.toISOString() + '&order=fecha.asc&select=*,vendedores(nombre)';
+    var url = 'visitas?fecha=gte.' + dUTC.toISOString() + '&fecha=lte.' + dFinUTC.toISOString() + '&order=fecha.asc&select=*,vendedores(nombre)';
     var visitas = await sbFetch(url);
     if (!visitas) visitas = [];
 
@@ -7656,13 +7661,24 @@ async function mapaRender() {
 
 async function mapaCargarVisitas() {
   try {
-    var d = new Date();
-    d.setHours(0,0,0,0);
-    if (_mapaDiasAtras > 0) d.setDate(d.getDate() - _mapaDiasAtras);
-    var dFin = new Date(d); dFin.setHours(23,59,59,999);
-
-    var desde = d.toISOString();
-    var hasta = dFin.toISOString();
+    // Usar zona horaria Argentina (UTC-3) para el filtro de fechas
+    var offsetMs = 3 * 60 * 60 * 1000; // UTC-3 en ms
+    var ahora = new Date();
+    var ahoraAR = new Date(ahora.getTime() - offsetMs);
+    
+    // Inicio del día en Argentina
+    var dAR = new Date(ahoraAR);
+    dAR.setUTCHours(0, 0, 0, 0);
+    if (_mapaDiasAtras > 0) dAR.setUTCDate(dAR.getUTCDate() - _mapaDiasAtras);
+    
+    // Fin del día en Argentina
+    var dFinAR = new Date(dAR);
+    dFinAR.setUTCHours(23, 59, 59, 999);
+    
+    // Convertir de vuelta a UTC para la query
+    var desde = new Date(dAR.getTime() + offsetMs).toISOString();
+    var hasta = new Date(dFinAR.getTime() + offsetMs).toISOString();
+    
     var query = 'visitas?fecha=gte.' + desde + '&fecha=lte.' + hasta + '&order=fecha.asc&select=*,vendedores(nombre)';
 
     var visitas = await sbFetch(query);
