@@ -3182,47 +3182,7 @@ input[type="date"] {
         <div class="login-btn-name">Administración<div class="login-btn-role">Ver todos los pedidos</div></div>
       </button>
     </div>
-    <script>
 
-async function mapaCargarAlertas() {
-  try {
-    var alertas = await sbFetch('clientes_ubicaciones?alerta_ubicacion=eq.true&select=nombre_cliente,lat,lng,lat_anterior,lng_anterior,ultima_visita&order=ultima_visita.desc');
-    var wrap = document.getElementById('mapa-alertas-wrap');
-    var body = document.getElementById('mapa-alertas-body');
-    var count = document.getElementById('mapa-alertas-count');
-    if (!wrap || !body) return;
-    if (!alertas || !alertas.length) { wrap.style.display = 'none'; return; }
-    wrap.style.display = 'block';
-    if (count) count.textContent = alertas.length + ' alerta' + (alertas.length > 1 ? 's' : '');
-    body.innerHTML = alertas.map(function(a) {
-      var fecha = a.ultima_visita ? new Date(a.ultima_visita).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
-      var dist = '';
-      if (a.lat_anterior && a.lng_anterior) {
-        dist = Math.round(Math.sqrt(Math.pow((a.lat - a.lat_anterior)*111000,2) + Math.pow((a.lng - a.lng_anterior)*111000*Math.cos(a.lat*Math.PI/180),2)));
-      }
-      var nc = a.nombre_cliente.replace(/'/g, "\\'");
-      return '<div style="padding:8px 0;border-bottom:1px solid #FFE0B2;">'
-        + '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:14px;font-weight:900;color:#E65100;">⚠️ ' + a.nombre_cliente + '</div>'
-        + '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + fecha + (dist ? ' · ' + dist + 'm de diferencia' : '') + '</div>'
-        + '<button onclick="mapaLimpiarAlerta(\'' + nc + '\')" style="margin-top:6px;background:#E65100;color:#fff;border:none;border-radius:8px;padding:4px 10px;font-family:\'Barlow Condensed\',sans-serif;font-size:12px;font-weight:700;cursor:pointer;">✓ Marcar como revisada</button>'
-        + '</div>';
-    }).join('');
-  } catch(e) { console.warn('Error alertas:', e); }
-}
-
-async function mapaLimpiarAlerta(nombreCliente) {
-  try {
-    await sbFetch('clientes_ubicaciones?nombre_cliente=eq.' + encodeURIComponent(nombreCliente), {
-      method: 'PATCH',
-      prefer: 'return=minimal',
-      body: JSON.stringify({ alerta_ubicacion: false, lat_anterior: null, lng_anterior: null })
-    });
-    mapaCargarAlertas();
-    toast('✅ Alerta revisada', 'ok');
-  } catch(e) { toast('Error', 'err'); }
-}
-
-</script>
 
 <script>
       // Filtrar botones de login según el dominio — se ejecuta inmediatamente
@@ -3434,9 +3394,9 @@ async function mapaLimpiarAlerta(nombreCliente) {
         <select id="mapa-fecha-sel" onchange="mapaFiltrarFecha(this.value)" style="flex:1;min-width:120px;padding:6px 10px;border-radius:8px;border:none;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;background:#fff;color:#333;">
           <option value="0">Hoy</option>
           <option value="1">Ayer</option>
-          <option value="2">Anteayer</option>
+          <option value="2">Hace 2 días</option>
           <option value="3">Hace 3 días</option>
-          <option value="7">Hace una semana</option>
+          <option value="7">Hace 7 días</option>
         </select>
         <div class="mapa-filtros" id="mapa-filtros-wrap" style="margin:0;padding:0;background:none;border:none;gap:6px;">
           <button class="mapa-chip sel" id="mapa-chip-todos" onclick="mapaFiltrar('todos')">👥 Todos</button>
@@ -7635,7 +7595,7 @@ function mapaFiltrarFecha(dias) {
   mapaCargarVisitas();
 }
 
-async async function mapaRender() {
+async function mapaRender() {
   // Solo admin puede ver el mapa completo
   // Vendedores ven solo sus propias visitas
   var esAdmin = vendedorActual === 'ADMIN';
@@ -7659,7 +7619,7 @@ async async function mapaRender() {
   await mapaCargarVisitas();
 }
 
-async async function mapaCargarVisitas() {
+async function mapaCargarVisitas() {
   try {
     // Usar zona horaria Argentina (UTC-3) para el filtro de fechas
     var offsetMs = 3 * 60 * 60 * 1000; // UTC-3 en ms
@@ -7696,7 +7656,6 @@ function mapaFiltrar(vendedor) {
     var chip = document.getElementById('mapa-chip-' + v);
     if (chip) chip.classList.toggle('sel', v === vendedor);
   });
-  // Si filtramos por vendedor específico, recargar visitas para re-centrar
   mapaActualizar();
 }
 
@@ -7827,15 +7786,8 @@ function mapaActualizar() {
   }
 
   if (bounds.length > 0) {
-    if (_mapaFiltro !== 'todos') {
-      // Vendedor específico — centrar en sus visitas
-      if (bounds.length === 1) _mapaInstance.setView(bounds[0], 16);
-      else _mapaInstance.fitBounds(bounds, {padding: [40,40], maxZoom: 17});
-    } else {
-      // Todos — centrar en TL con zoom moderado, no hacer fitBounds extremo
-      if (bounds.length === 1) _mapaInstance.setView(bounds[0], 16);
-      else _mapaInstance.fitBounds(bounds, {padding: [30,30], maxZoom: 15});
-    }
+    if (bounds.length === 1) _mapaInstance.setView(bounds[0], 16);
+    else _mapaInstance.fitBounds(bounds, {padding: [40,40], maxZoom: 17});
   } else {
     _mapaInstance.setView([-36.375, -62.005], 13); // Trenque Lauquen
   }
@@ -8996,5 +8948,46 @@ async function tomadorConfirmarFinal() {
 
 
 </script>
+
+<script>
+async function mapaCargarAlertas() {
+  try {
+    var alertas = await sbFetch('clientes_ubicaciones?alerta_ubicacion=eq.true&select=nombre_cliente,lat,lng,lat_anterior,lng_anterior,ultima_visita&order=ultima_visita.desc');
+    var wrap = document.getElementById('mapa-alertas-wrap');
+    var body = document.getElementById('mapa-alertas-body');
+    var count = document.getElementById('mapa-alertas-count');
+    if (!wrap || !body) return;
+    if (!alertas || !alertas.length) { wrap.style.display = 'none'; return; }
+    wrap.style.display = 'block';
+    if (count) count.textContent = alertas.length + ' alerta' + (alertas.length > 1 ? 's' : '');
+    body.innerHTML = alertas.map(function(a) {
+      var fecha = a.ultima_visita ? new Date(a.ultima_visita).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
+      var dist = '';
+      if (a.lat_anterior && a.lng_anterior) {
+        dist = Math.round(Math.sqrt(Math.pow((a.lat - a.lat_anterior)*111000,2) + Math.pow((a.lng - a.lng_anterior)*111000*Math.cos(a.lat*Math.PI/180),2)));
+      }
+      var nc = a.nombre_cliente.replace(/'/g, "\'");
+      return '<div style="padding:8px 0;border-bottom:1px solid #FFE0B2;">'
+        + '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:14px;font-weight:900;color:#E65100;">⚠️ ' + a.nombre_cliente + '</div>'
+        + '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + fecha + (dist ? ' · ' + dist + 'm de diferencia' : '') + '</div>'
+        + '<button onclick="mapaLimpiarAlerta(\'' + nc + '\')" style="margin-top:6px;background:#E65100;color:#fff;border:none;border-radius:8px;padding:4px 10px;font-family:\'Barlow Condensed\',sans-serif;font-size:12px;font-weight:700;cursor:pointer;">✓ Marcar como revisada</button>'
+        + '</div>';
+    }).join('');
+  } catch(e) { console.warn('Error alertas:', e); }
+}
+
+async function mapaLimpiarAlerta(nombreCliente) {
+  try {
+    await sbFetch('clientes_ubicaciones?nombre_cliente=eq.' + encodeURIComponent(nombreCliente), {
+      method: 'PATCH',
+      prefer: 'return=minimal',
+      body: JSON.stringify({ alerta_ubicacion: false, lat_anterior: null, lng_anterior: null })
+    });
+    mapaCargarAlertas();
+    toast('✅ Alerta revisada', 'ok');
+  } catch(e) { toast('Error', 'err'); }
+}
+</script>
+
 </body>
 </html>
