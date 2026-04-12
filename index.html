@@ -3183,6 +3183,48 @@ input[type="date"] {
       </button>
     </div>
     <script>
+
+async function mapaCargarAlertas() {
+  try {
+    var alertas = await sbFetch('clientes_ubicaciones?alerta_ubicacion=eq.true&select=nombre_cliente,lat,lng,lat_anterior,lng_anterior,ultima_visita&order=ultima_visita.desc');
+    var wrap = document.getElementById('mapa-alertas-wrap');
+    var body = document.getElementById('mapa-alertas-body');
+    var count = document.getElementById('mapa-alertas-count');
+    if (!wrap || !body) return;
+    if (!alertas || !alertas.length) { wrap.style.display = 'none'; return; }
+    wrap.style.display = 'block';
+    if (count) count.textContent = alertas.length + ' alerta' + (alertas.length > 1 ? 's' : '');
+    body.innerHTML = alertas.map(function(a) {
+      var fecha = a.ultima_visita ? new Date(a.ultima_visita).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
+      var dist = '';
+      if (a.lat_anterior && a.lng_anterior) {
+        dist = Math.round(Math.sqrt(Math.pow((a.lat - a.lat_anterior)*111000,2) + Math.pow((a.lng - a.lng_anterior)*111000*Math.cos(a.lat*Math.PI/180),2)));
+      }
+      var nc = a.nombre_cliente.replace(/'/g, "\\'");
+      return '<div style="padding:8px 0;border-bottom:1px solid #FFE0B2;">'
+        + '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:14px;font-weight:900;color:#E65100;">⚠️ ' + a.nombre_cliente + '</div>'
+        + '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + fecha + (dist ? ' · ' + dist + 'm de diferencia' : '') + '</div>'
+        + '<button onclick="mapaLimpiarAlerta(\'' + nc + '\')" style="margin-top:6px;background:#E65100;color:#fff;border:none;border-radius:8px;padding:4px 10px;font-family:\'Barlow Condensed\',sans-serif;font-size:12px;font-weight:700;cursor:pointer;">✓ Marcar como revisada</button>'
+        + '</div>';
+    }).join('');
+  } catch(e) { console.warn('Error alertas:', e); }
+}
+
+async function mapaLimpiarAlerta(nombreCliente) {
+  try {
+    await sbFetch('clientes_ubicaciones?nombre_cliente=eq.' + encodeURIComponent(nombreCliente), {
+      method: 'PATCH',
+      prefer: 'return=minimal',
+      body: JSON.stringify({ alerta_ubicacion: false, lat_anterior: null, lng_anterior: null })
+    });
+    mapaCargarAlertas();
+    toast('✅ Alerta revisada', 'ok');
+  } catch(e) { toast('Error', 'err'); }
+}
+
+</script>
+
+<script>
       // Filtrar botones de login según el dominio — se ejecuta inmediatamente
       (function() {
         var host = window.location.hostname;
@@ -3433,6 +3475,17 @@ input[type="date"] {
       <div class="mapa-lista-titulo" style="display:flex;align-items:center;justify-content:space-between;">
         <span>Detalle de visitas</span>
         <span id="mapa-lista-count" style="font-size:11px;color:#999;font-weight:400;"></span>
+      </div>
+
+      <!-- Alertas de ubicación -->
+      <div id="mapa-alertas-wrap" style="margin:0 12px 12px;display:none;">
+        <div style="background:#FFF3E0;border:1.5px solid #FFB74D;border-radius:12px;overflow:hidden;">
+          <div style="background:#E65100;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;">
+            <div style="font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:900;color:#fff;">⚠️ Alertas de ubicación</div>
+            <div id="mapa-alertas-count" style="background:rgba(255,255,255,.2);border-radius:20px;padding:2px 10px;font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;color:#fff;"></div>
+          </div>
+          <div id="mapa-alertas-body" style="padding:10px 14px;font-size:13px;color:var(--text);"></div>
+        </div>
       </div>
       <div id="mapa-lista"></div>
 
@@ -5117,6 +5170,7 @@ function cambiarTab(tab) {
   }
   if (tab === 'mapa') {
     mapaRender();
+    mapaCargarAlertas();
     var v = document.getElementById('view-mapa'); if (v) v.scrollTop = 0;
   }
   if (tab === 'gps') {
@@ -7788,7 +7842,8 @@ async function mapaCargarClientesSinVisita(checkins) {
   _mapaGrayMarkers = [];
 
   try {
-    var clientes = await sbFetch('clientes?lat=not.is.null&select=id,nombre,lat,lng,localidad&limit=200');
+    var clientes = await sbFetch('clientes_ubicaciones?lat=not.is.null&order=ultima_visita.desc&select=nombre_cliente,lat,lng,alerta_ubicacion&limit=300');
+    if (clientes) clientes = clientes.map(function(c){ return {nombre: c.nombre_cliente, lat: c.lat, lng: c.lng, alerta: c.alerta_ubicacion}; });
     if (!clientes || !clientes.length) return;
 
     var visitadosHoy = new Set(checkins.map(function(v) { return v.nombre_cliente; }));
