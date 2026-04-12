@@ -3434,9 +3434,9 @@ async function mapaLimpiarAlerta(nombreCliente) {
         <select id="mapa-fecha-sel" onchange="mapaFiltrarFecha(this.value)" style="flex:1;min-width:120px;padding:6px 10px;border-radius:8px;border:none;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;background:#fff;color:#333;">
           <option value="0">Hoy</option>
           <option value="1">Ayer</option>
-          <option value="2">Hace 2 días</option>
+          <option value="2">Anteayer</option>
           <option value="3">Hace 3 días</option>
-          <option value="7">Hace 7 días</option>
+          <option value="7">Hace una semana</option>
         </select>
         <div class="mapa-filtros" id="mapa-filtros-wrap" style="margin:0;padding:0;background:none;border:none;gap:6px;">
           <button class="mapa-chip sel" id="mapa-chip-todos" onclick="mapaFiltrar('todos')">👥 Todos</button>
@@ -7635,7 +7635,7 @@ function mapaFiltrarFecha(dias) {
   mapaCargarVisitas();
 }
 
-async function mapaRender() {
+async async function mapaRender() {
   // Solo admin puede ver el mapa completo
   // Vendedores ven solo sus propias visitas
   var esAdmin = vendedorActual === 'ADMIN';
@@ -7659,7 +7659,7 @@ async function mapaRender() {
   await mapaCargarVisitas();
 }
 
-async function mapaCargarVisitas() {
+async async function mapaCargarVisitas() {
   try {
     // Usar zona horaria Argentina (UTC-3) para el filtro de fechas
     var offsetMs = 3 * 60 * 60 * 1000; // UTC-3 en ms
@@ -7696,6 +7696,7 @@ function mapaFiltrar(vendedor) {
     var chip = document.getElementById('mapa-chip-' + v);
     if (chip) chip.classList.toggle('sel', v === vendedor);
   });
+  // Si filtramos por vendedor específico, recargar visitas para re-centrar
   mapaActualizar();
 }
 
@@ -7826,8 +7827,15 @@ function mapaActualizar() {
   }
 
   if (bounds.length > 0) {
-    if (bounds.length === 1) _mapaInstance.setView(bounds[0], 16);
-    else _mapaInstance.fitBounds(bounds, {padding: [40,40], maxZoom: 17});
+    if (_mapaFiltro !== 'todos') {
+      // Vendedor específico — centrar en sus visitas
+      if (bounds.length === 1) _mapaInstance.setView(bounds[0], 16);
+      else _mapaInstance.fitBounds(bounds, {padding: [40,40], maxZoom: 17});
+    } else {
+      // Todos — centrar en TL con zoom moderado, no hacer fitBounds extremo
+      if (bounds.length === 1) _mapaInstance.setView(bounds[0], 16);
+      else _mapaInstance.fitBounds(bounds, {padding: [30,30], maxZoom: 15});
+    }
   } else {
     _mapaInstance.setView([-36.375, -62.005], 13); // Trenque Lauquen
   }
