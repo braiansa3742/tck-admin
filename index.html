@@ -3319,6 +3319,86 @@ input[type="date"] {
   .tab-nav, .planilla-hdr button, .vet-btn, .planilla-chofer-tabs { display: none !important; }
   .planilla-wrap { padding: 0; }
 }
+
+/* ── Logística nueva ── */
+.log-dia-bloque {
+  background: #fff; border-radius: 14px; margin-bottom: 14px;
+  border: 1.5px solid rgba(21,101,192,.12); overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,.05);
+}
+.log-dia-hdr {
+  background: linear-gradient(135deg, #1565C0, #1976D2);
+  padding: 11px 16px; display: flex; justify-content: space-between; align-items: center;
+}
+.log-dia-nombre {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 19px; font-weight: 900; color: #fff;
+}
+.log-dia-count {
+  background: rgba(255,255,255,.25); border-radius: 20px;
+  padding: 3px 10px; font-size: 11px; font-weight: 800; color: #fff;
+}
+.log-turno-hdr {
+  padding: 8px 16px 6px;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 900;
+  color: #1565C0; text-transform: uppercase; letter-spacing: .5px;
+  background: #F8F9FF; border-bottom: 1px solid rgba(21,101,192,.08);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.log-ciudad-bloque {
+  border-bottom: 1px solid #f0f4ff;
+}
+.log-ciudad-hdr {
+  padding: 10px 16px 8px; display: flex; align-items: center; justify-content: space-between;
+  background: #F0F4FF; cursor: pointer;
+}
+.log-ciudad-nombre {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 16px; font-weight: 900; color: #1565C0;
+}
+.log-ciudad-asignar-todos {
+  display: flex; gap: 6px;
+}
+.log-ciudad-btn {
+  padding: 5px 12px; border-radius: 20px; border: 2px solid rgba(21,101,192,.3);
+  background: #fff; cursor: pointer; font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px; font-weight: 800; color: #1565C0; transition: all .15s;
+  touch-action: manipulation;
+}
+.log-ciudad-btn:active { background: #1565C0; color: #fff; border-color: #1565C0; }
+.log-pedido-row {
+  padding: 11px 16px; border-bottom: 1px solid #f5f8ff;
+  display: flex; align-items: center; gap: 10px;
+}
+.log-pedido-row:last-child { border-bottom: none; }
+.log-pedido-info { flex: 1; min-width: 0; }
+.log-pedido-cliente {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 900; color: var(--text);
+}
+.log-pedido-prods { font-size: 11px; color: var(--text3); margin-top: 2px; line-height: 1.4; }
+.log-pedido-monto {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 900; color: #1565C0;
+  flex-shrink: 0;
+}
+.log-chofer-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: #E3F2FD; color: #1565C0; border-radius: 20px;
+  padding: 4px 10px; font-size: 12px; font-weight: 800;
+  font-family: 'Barlow Condensed', sans-serif;
+}
+.log-chofer-badge button {
+  background: none; border: none; color: #1565C0; cursor: pointer;
+  font-size: 13px; padding: 0; line-height: 1;
+}
+.log-asignar-picker { display: flex; gap: 6px; flex-wrap: wrap; }
+.log-asignar-btn {
+  padding: 7px 14px; border: 2px solid rgba(21,101,192,.25); border-radius: 10px;
+  background: #fff; cursor: pointer; font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px; font-weight: 800; color: #1565C0; transition: all .15s;
+}
+.log-asignar-btn:active { background: #E3F2FD; border-color: #1565C0; }
+.log-sin-fecha {
+  background: #FFF8E1; border-radius: 10px; padding: 12px 14px; margin-bottom: 12px;
+  border: 1.5px solid #FFE082; font-size: 13px; color: #795548;
+}
 </style>
 </head>
 <body>
@@ -3938,22 +4018,29 @@ input[type="date"] {
   <!-- ═══ VIEW LOGÍSTICA ═══ -->
   <div class="view" id="view-logistica">
     <div class="planilla-wrap">
+
+      <!-- Header -->
       <div class="planilla-hdr">
         <div>
-          <div class="planilla-hdr-title">🚚 Planilla de carga</div>
+          <div class="planilla-hdr-title">🚚 Logística</div>
           <div class="planilla-hdr-sub" id="planilla-fecha"></div>
         </div>
         <button onclick="imprimirPlanilla()" class="planilla-imprimir-btn" style="width:auto;padding:8px 16px;font-size:14px;margin:0;">🖨️ Imprimir</button>
       </div>
-      <button class="vet-btn" onclick="abrirCertVet()">🩺 Generar para veterinaria</button>
-      <div class="planilla-chofer-tabs" id="planilla-chofer-tabs">
-        <button class="planilla-chofer-tab sel" data-chofer="Joan" onclick="planillaSelChofer(this)">🚚 Joan</button>
-        <button class="planilla-chofer-tab" data-chofer="Luis" onclick="planillaSelChofer(this)">🚚 Luis</button>
-        <button class="planilla-chofer-tab" data-chofer="todos" onclick="planillaSelChofer(this)">📋 Todos</button>
+
+      <!-- Tabs: Asignar | Por chofer | Vet -->
+      <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
+        <button class="planilla-chofer-tab sel" id="log-tab-asignar"  onclick="logisticaSelTab('asignar',this)">📋 Asignar</button>
+        <button class="planilla-chofer-tab" id="log-tab-joan"    onclick="logisticaSelTab('joan',this)">🚚 Joan</button>
+        <button class="planilla-chofer-tab" id="log-tab-luis"    onclick="logisticaSelTab('luis',this)">🚚 Luis</button>
+        <button class="planilla-chofer-tab" id="log-tab-vet"     onclick="logisticaSelTab('vet',this)">🩺 Vet</button>
       </div>
-      <div id="planilla-contenido">
-        <div class="planilla-empty">Cargando planilla...</div>
+
+      <!-- Contenido dinámico -->
+      <div id="logistica-contenido">
+        <div class="planilla-empty">Cargando...</div>
       </div>
+
     </div>
   </div>
 
@@ -4493,8 +4580,10 @@ async function cargarPedidos(silencioso) {
         items:     limpiar(cols[7]),
         resumen:   limpiar(cols[8]),
         detalle:   limpiar(cols[9]),
-        estado:    limpiar(cols[10]) || 'Pendiente',
-        fila:      i + 1
+        estado:         limpiar(cols[10]) || 'Pendiente',
+        fechaEntrega:   limpiar(cols[11]) || '',
+        turnoEntrega:   limpiar(cols[12]) || '',
+        fila:           i + 1
       });
     }
     sortPedidos(pedidos);
@@ -4790,6 +4879,7 @@ function renderCard(p) {
       '<div class="pedido-head-left">' +
         '<div class="pedido-id">' + p.pedidoId + '</div>' +
         '<div class="pedido-cliente">' + (p.cliente||'(sin nombre)') + '</div>' +
+        (p.fechaEntrega ? '<div style="display:inline-flex;align-items:center;gap:4px;background:' + (p.turnoEntrega==='Mañana'?'#E3F2FD':'#FFF3E0') + ';color:' + (p.turnoEntrega==='Mañana'?'#1565C0':'#E65100') + ';border-radius:20px;padding:2px 8px;font-family:Barlow Condensed,sans-serif;font-size:11px;font-weight:800;margin-top:3px;">' + (p.turnoEntrega==='Mañana'?'🌅':'🌆') + ' ' + p.fechaEntrega + ' · ' + (p.turnoEntrega||'') + '</div>' : '') +
         '<div class="pedido-comercio">' + (p.comercio ? '🏪 '+p.comercio+' · ' : '') + '📍 ' + p.localidad + '</div>' +
         buildProdsPreview(p) +
       '</div>' +
@@ -5367,7 +5457,7 @@ function actualizarMiDiaSiAbierto() {
 var _tabActual = 'pedidos';
 
 function cambiarTab(tab) {
-  if (tab === 'logistica') { setTimeout(renderPlanilla, 100); }
+  if (tab === 'logistica') { setTimeout(renderLogistica, 100); }
   if (_tabActual === tab) return;
   _tabActual = tab;
 
@@ -9132,9 +9222,9 @@ async function cargarAsignaciones() {
         if (_asignaciones[p.pedidoId]) p.choferAsignado = _asignaciones[p.pedidoId];
       });
     }
-    // Si estamos en logística, actualizar la planilla ahora que tenemos las asignaciones
+    // Si estamos en logística, actualizar ahora que tenemos las asignaciones
     if (typeof _tabActual !== 'undefined' && _tabActual === 'logistica') {
-      renderPlanilla();
+      renderLogistica();
     }
   } catch(e) { console.warn('cargarAsignaciones:', e); }
 }
@@ -9191,7 +9281,7 @@ async function asignarChofer(pedidoId, chofer, event) {
     });
     toast('✅ Asignado a ' + chofer, 'ok');
     // Actualizar planilla si está abierta
-    if (_tabActual === 'logistica') renderPlanilla();
+    if (_tabActual === 'logistica') renderLogistica();
   } catch(e) { toast('❌ Error al guardar', 'err'); }
 }
 
@@ -9207,117 +9297,12 @@ async function desasignarChofer(pedidoId, event) {
 
 // ── PLANILLA DE CARGA ─────────────────────────────────────────
 function planillaSelChofer(btn) {
-  document.querySelectorAll('.planilla-chofer-tab').forEach(b => b.classList.remove('sel'));
-  btn.classList.add('sel');
-  _planillaChofer = btn.getAttribute('data-chofer');
-  renderPlanilla();
+  // legacy — redirigir al nuevo sistema
+  const chofer = btn.getAttribute('data-chofer');
+  const tab = chofer === 'Joan' ? 'joan' : chofer === 'Luis' ? 'luis' : 'asignar';
+  logisticaSelTab(tab, btn);
 }
 
-function renderPlanilla() {
-  const el = document.getElementById('planilla-contenido');
-  const fechaEl = document.getElementById('planilla-fecha');
-  const hoy = new Date();
-  if (fechaEl) fechaEl.textContent = hoy.toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
-
-  // Filtrar pedidos confirmados
-  let pedidos = todosLosPedidos.filter(function(p) {
-    if (p.estado !== 'Confirmado') return false;
-    if (_planillaChofer === 'todos') return true; // todos los confirmados, con o sin chofer
-    if (_planillaChofer === 'Joan' || _planillaChofer === 'Luis') {
-      // Si tiene chofer asignado filtrar por ese chofer
-      // Si no tiene chofer asignado, mostrar en Joan por defecto para no perder de vista
-      return p.choferAsignado === _planillaChofer || (!p.choferAsignado && _planillaChofer === 'Joan');
-    }
-    return true;
-  });
-
-  if (!pedidos.length) {
-    el.innerHTML = '<div class="planilla-empty">📭 No hay pedidos confirmados.<br>' +
-      '<small>Los pedidos aparecen aquí cuando el vendedor toca "✅ Ya remití en Xubio".</small></div>';
-    return;
-  }
-
-  // Agrupar por ciudad según ruta fija
-  const porCiudad = {};
-  pedidos.forEach(function(p) {
-    const c = (p.localidad||'Sin ciudad').trim();
-    if (!porCiudad[c]) porCiudad[c] = [];
-    porCiudad[c].push(p);
-  });
-  const ciudades = Object.keys(porCiudad).sort(function(a,b) {
-    const ia = RUTA_FIJA.findIndex(c => a.toLowerCase().includes(c.toLowerCase()));
-    const ib = RUTA_FIJA.findIndex(c => b.toLowerCase().includes(c.toLowerCase()));
-    return (ia===-1?999:ia) - (ib===-1?999:ib);
-  });
-
-  // Calcular totales de productos
-  const totalesProds = {};
-  pedidos.forEach(function(p) {
-    const prods = parsearProductos(p.detalle || p.resumen || '');
-    prods.forEach(function(pr) {
-      if (!totalesProds[pr.nombre]) totalesProds[pr.nombre] = 0;
-      totalesProds[pr.nombre] += pr.cantidad;
-    });
-  });
-
-  let html = '';
-
-  // Resumen de totales por producto
-  html += '<div class="planilla-totales">' +
-    '<div class="planilla-totales-title">📦 Totales a cargar' +
-      (_planillaChofer !== 'todos' ? ' — ' + _planillaChofer : '') +
-      ' (' + pedidos.length + ' pedidos)</div>';
-  Object.keys(totalesProds).sort().forEach(function(prod) {
-    html += '<div class="planilla-total-row">' +
-      '<span>' + prod + '</span>' +
-      '<span class="planilla-total-cant">' + totalesProds[prod] + ' u.</span>' +
-    '</div>';
-  });
-  const totalMonto = pedidos.reduce(function(s,p) { return s + (parseFloat((p.total||'0').toString().replace(/[^0-9.]/g,''))||0); }, 0);
-  html += '<div class="planilla-total-row" style="margin-top:8px;padding-top:8px;border-top:2px solid rgba(21,101,192,.15);">' +
-    '<span style="font-weight:800;">💰 Total del día</span>' +
-    '<span class="planilla-total-cant">$' + Math.round(totalMonto).toLocaleString('es-AR') + '</span>' +
-  '</div>';
-  html += '</div>';
-
-  // Detalle por ciudad y cliente
-  let parada = 1;
-  ciudades.forEach(function(ciudad) {
-    const items = porCiudad[ciudad];
-    html += '<div class="planilla-seccion">' +
-      '<div class="planilla-seccion-hdr">' +
-        '<div class="planilla-seccion-ciudad">📍 ' + ciudad + '</div>' +
-        '<div class="planilla-seccion-count">Parada ' + parada++ + ' · ' + items.length + ' entrega' + (items.length>1?'s':'') + '</div>' +
-      '</div>';
-    items.forEach(function(p) {
-      const prods = parsearProductos(p.detalle || p.resumen || '');
-      const prodsStr = prods.map(function(pr) { return pr.cantidad + 'x ' + pr.nombre; }).join(' · ') || (p.resumen||'—');
-      const monto = parseFloat((p.total||'0').toString().replace(/[^0-9.]/g,''))||0;
-      const choferBadge = _planillaChofer === 'todos' && p.choferAsignado
-        ? ' <span style="background:#E3F2FD;color:#1565C0;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:800;">' + p.choferAsignado + '</span>' : '';
-      html += '<div class="planilla-cliente-row">' +
-        '<div class="planilla-cliente-nombre">' + (p.cliente||'—') + (p.comercio?' · '+p.comercio:'') + choferBadge + '</div>' +
-        '<div class="planilla-cliente-prods">' + prodsStr + '</div>' +
-        '<div class="planilla-cliente-monto">$' + Math.round(monto).toLocaleString('es-AR') + '</div>' +
-      '</div>';
-    });
-    html += '</div>';
-  });
-
-  el.innerHTML = html;
-}
-
-function parsearProductos(detalle) {
-  if (!detalle) return [];
-  const prods = [];
-  const lineas = detalle.replace(/\|/g,'\n').split('\n').filter(Boolean);
-  lineas.forEach(function(linea) {
-    const m = linea.match(/^(\d+)x?\s+(.+?)(?:\s+→|\s*$)/);
-    if (m) prods.push({ cantidad: parseInt(m[1]), nombre: m[2].trim() });
-    else if (linea.trim()) prods.push({ cantidad: 1, nombre: linea.trim() });
-  });
-  return prods;
-}
 
 function imprimirPlanilla() {
   window.print();
@@ -9543,6 +9528,277 @@ function descargarPDFVet() {
 
 function cerrarVetModal() {
   document.getElementById('vet-modal').classList.add('hidden');
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  LOGÍSTICA — SISTEMA COMPLETO
+// ═══════════════════════════════════════════════════════════════
+
+const DIAS_ES_LOG  = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+const MESES_ES_LOG = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+
+let _logTab = 'asignar';
+
+function logisticaSelTab(tab, btn) {
+  _logTab = tab;
+  document.querySelectorAll('.planilla-chofer-tab').forEach(b => b.classList.remove('sel'));
+  if (btn) btn.classList.add('sel');
+  renderLogistica();
+}
+
+function renderLogistica() {
+  const el = document.getElementById('logistica-contenido');
+  if (!el) return;
+  const fechaEl = document.getElementById('planilla-fecha');
+  if (fechaEl) fechaEl.textContent = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' });
+
+  if (_logTab === 'vet')  { renderLogisticaVet(el); return; }
+  if (_logTab === 'joan') { renderLogisticaChofer(el, 'Joan'); return; }
+  if (_logTab === 'luis') { renderLogisticaChofer(el, 'Luis'); return; }
+  renderLogisticaAsignar(el);
+}
+
+function renderLogisticaAsignar(el) {
+  const pedidos = todosLosPedidos.filter(p => p.estado === 'Confirmado');
+
+  if (!pedidos.length) {
+    el.innerHTML = '<div class="planilla-empty">📭 No hay pedidos confirmados.<br><small>Los pedidos aparecen aquí cuando el vendedor toca "✅ Ya remití en Xubio".</small></div>';
+    return;
+  }
+
+  const sinFecha = pedidos.filter(p => !p.fechaEntrega);
+  const conFecha = pedidos.filter(p => p.fechaEntrega);
+
+  // Agrupar por día → turno → ciudad
+  const porDia = {};
+  conFecha.forEach(p => {
+    const dia    = p.fechaEntrega || 'Sin fecha';
+    const turno  = p.turnoEntrega || 'Sin turno';
+    const ciudad = (p.localidad || 'Sin ciudad').trim();
+    if (!porDia[dia]) porDia[dia] = {};
+    if (!porDia[dia][turno]) porDia[dia][turno] = {};
+    if (!porDia[dia][turno][ciudad]) porDia[dia][turno][ciudad] = [];
+    porDia[dia][turno][ciudad].push(p);
+  });
+
+  const diasOrden = Object.keys(porDia).sort((a, b) => {
+    const mesA = extraerMes(a), mesB = extraerMes(b);
+    if (mesA !== mesB) return mesA - mesB;
+    return extraerNumDia(a) - extraerNumDia(b);
+  });
+
+  let html = '';
+
+  if (sinFecha.length) {
+    html += '<div class="log-sin-fecha">⚠️ <strong>' + sinFecha.length + ' pedido' + (sinFecha.length>1?'s':'') + ' sin fecha de entrega.</strong><br>El vendedor necesita definir cuándo se entrega.</div>';
+  }
+
+  diasOrden.forEach(dia => {
+    const turnos   = porDia[dia];
+    const totalDia = Object.values(turnos).reduce((a, t) => a + Object.values(t).reduce((b, c) => b + c.length, 0), 0);
+
+    html += '<div class="log-dia-bloque">';
+    html += '<div class="log-dia-hdr"><div class="log-dia-nombre">📅 ' + dia + '</div><div class="log-dia-count">' + totalDia + ' pedido' + (totalDia>1?'s':'') + '</div></div>';
+
+    ['Mañana','Tarde'].forEach(turno => {
+      if (!turnos[turno]) return;
+      const ciudades   = turnos[turno];
+      const totalTurno = Object.values(ciudades).reduce((a,c) => a + c.length, 0);
+
+      html += '<div class="log-turno-hdr">' +
+        '<span>' + (turno==='Mañana'?'🌅':'🌆') + ' ' + turno + '</span>' +
+        '<span style="font-weight:400;font-size:11px;color:var(--text3);">' + totalTurno + ' entrega' + (totalTurno>1?'s':'') + '</span>' +
+      '</div>';
+
+      const ciudadesOrdenadas = Object.keys(ciudades).sort((a,b) => {
+        const ia = RUTA_FIJA.findIndex(c => a.toLowerCase().includes(c.toLowerCase()));
+        const ib = RUTA_FIJA.findIndex(c => b.toLowerCase().includes(c.toLowerCase()));
+        return (ia===-1?999:ia) - (ib===-1?999:ib);
+      });
+
+      ciudadesOrdenadas.forEach(ciudad => {
+        const items = ciudades[ciudad];
+        const todosAsignados   = items.every(p => p.choferAsignado);
+        const todosMismoChofer = todosAsignados && items.every(p => p.choferAsignado === items[0].choferAsignado);
+        const diaSafe    = dia.replace(/'/g,"\'");
+        const ciudadSafe = ciudad.replace(/'/g,"\'");
+
+        html += '<div class="log-ciudad-bloque">';
+        html += '<div class="log-ciudad-hdr">' +
+          '<div class="log-ciudad-nombre">📍 ' + ciudad + ' <span style="font-size:12px;font-weight:400;color:var(--text3);">(' + items.length + ')</span></div>';
+
+        if (!todosMismoChofer) {
+          html += '<div class="log-ciudad-asignar-todos">' +
+            '<button class="log-ciudad-btn" data-dia="' + diaSafe + '" data-turno="' + turno + '" data-ciudad="' + ciudadSafe + '" data-chofer="Joan" onclick="logAsignarCiudadBtn(this,event)">J</button>' +
+            '<button class="log-ciudad-btn" data-dia="' + diaSafe + '" data-turno="' + turno + '" data-ciudad="' + ciudadSafe + '" data-chofer="Luis" onclick="logAsignarCiudadBtn(this,event)">L</button>' +
+          '</div>';
+        }
+        html += '</div>';
+
+        items.forEach(p => {
+          const prods    = parsearProductos(p.detalle || p.resumen || '');
+          const prodsStr = prods.map(pr => pr.cantidad + 'x ' + pr.nombre).join(' · ') || (p.resumen||'—');
+          const monto    = parseFloat((p.total||'0').toString().replace(/[^0-9.]/g,''))||0;
+          const pidSafe  = p.pedidoId.replace(/'/g,"\'");
+
+          html += '<div class="log-pedido-row">' +
+            '<div class="log-pedido-info">' +
+              '<div class="log-pedido-cliente">' + (p.cliente||'—') + (p.comercio?' <span style="font-weight:400;font-size:12px;">· '+p.comercio+'</span>':'') + '</div>' +
+              '<div class="log-pedido-prods">' + prodsStr + '</div>' +
+            '</div>' +
+            '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;">' +
+              '<div class="log-pedido-monto">$' + Math.round(monto).toLocaleString('es-AR') + '</div>';
+
+          if (p.choferAsignado) {
+            html += '<div class="log-chofer-badge">🚚 ' + p.choferAsignado +
+              ' <button data-pid="' + pidSafe + '" onclick="logDesasignarBtn(this,event)">✕</button></div>';
+          } else {
+            html += '<div class="log-asignar-picker">' +
+              '<button class="log-asignar-btn" data-pid="' + pidSafe + '" data-chofer="Joan" onclick="logAsignarBtn(this,event)">🚚 Joan</button>' +
+              '<button class="log-asignar-btn" data-pid="' + pidSafe + '" data-chofer="Luis" onclick="logAsignarBtn(this,event)">🚚 Luis</button>' +
+            '</div>';
+          }
+
+          html += '</div></div>'; // cerrar derecha + log-pedido-row
+        });
+
+        html += '</div>'; // log-ciudad-bloque
+      });
+    });
+
+    html += '</div>'; // log-dia-bloque
+  });
+
+  el.innerHTML = html;
+}
+
+function renderLogisticaChofer(el, chofer) {
+  const hoy          = new Date();
+  const diaHoyNombre = DIAS_ES_LOG[hoy.getDay()];
+  const diaHoyNum    = hoy.getDate();
+  const mesHoyNombre = MESES_ES_LOG[hoy.getMonth()];
+  const hoyLabel     = diaHoyNombre + ' ' + diaHoyNum + ' de ' + mesHoyNombre;
+
+  const pedidos = todosLosPedidos.filter(p =>
+    p.estado === 'Confirmado' && p.choferAsignado === chofer && p.fechaEntrega === hoyLabel
+  );
+
+  if (!pedidos.length) {
+    el.innerHTML = '<div class="planilla-empty">📭 No hay entregas para ' + chofer + ' hoy.<br><small>(' + hoyLabel + ')</small></div>';
+    return;
+  }
+
+  const totalesProds = {};
+  let totalMonto = 0;
+  pedidos.forEach(p => {
+    parsearProductos(p.detalle || p.resumen || '').forEach(pr => {
+      totalesProds[pr.nombre] = (totalesProds[pr.nombre]||0) + pr.cantidad;
+    });
+    totalMonto += parseFloat((p.total||'0').toString().replace(/[^0-9.]/g,''))||0;
+  });
+
+  const porTurno = {};
+  pedidos.forEach(p => {
+    const turno  = p.turnoEntrega || 'Mañana';
+    const ciudad = (p.localidad||'Sin ciudad').trim();
+    if (!porTurno[turno]) porTurno[turno] = {};
+    if (!porTurno[turno][ciudad]) porTurno[turno][ciudad] = [];
+    porTurno[turno][ciudad].push(p);
+  });
+
+  let html = '<div class="planilla-totales">' +
+    '<div class="planilla-totales-title">📦 ' + chofer + ' · ' + hoyLabel + '</div>';
+  Object.keys(totalesProds).sort().forEach(prod => {
+    html += '<div class="planilla-total-row"><span>' + prod + '</span><span class="planilla-total-cant">' + totalesProds[prod] + ' u.</span></div>';
+  });
+  html += '<div class="planilla-total-row" style="margin-top:8px;padding-top:8px;border-top:2px solid rgba(21,101,192,.15);">' +
+    '<span style="font-weight:800;">💰 Total a cobrar</span>' +
+    '<span class="planilla-total-cant">$' + Math.round(totalMonto).toLocaleString('es-AR') + '</span></div>';
+  html += '</div>';
+
+  html += '<div style="display:flex;gap:8px;margin-bottom:14px;">' +
+    '<button onclick="imprimirPlanilla()" style="flex:1;padding:10px;background:#1565C0;color:#fff;border:none;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:900;cursor:pointer;">🖨️ Imprimir</button>' +
+    '<button id="log-vet-btn2" onclick="logisticaSelTab(&quot;vet&quot;,document.getElementById(&quot;log-tab-vet&quot;))" style="flex:1;padding:10px;background:#1B5E20;color:#fff;border:none;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:900;cursor:pointer;">🩺 Vet</button>' +
+  '</div>';
+
+  ['Mañana','Tarde'].forEach(turno => {
+    const ciudades = porTurno[turno];
+    if (!ciudades || !Object.keys(ciudades).length) return;
+    html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">' + (turno==='Mañana'?'🌅':'🌆') + ' Turno ' + turno + '</div>';
+    const ords = Object.keys(ciudades).sort((a,b) => {
+      const ia = RUTA_FIJA.findIndex(c => a.toLowerCase().includes(c.toLowerCase()));
+      const ib = RUTA_FIJA.findIndex(c => b.toLowerCase().includes(c.toLowerCase()));
+      return (ia===-1?999:ia) - (ib===-1?999:ib);
+    });
+    let parada = 1;
+    ords.forEach(ciudad => {
+      const items = ciudades[ciudad];
+      html += '<div class="planilla-seccion"><div class="planilla-seccion-hdr"><div class="planilla-seccion-ciudad">📍 ' + ciudad + '</div><div class="planilla-seccion-count">Parada ' + parada++ + '</div></div>';
+      items.forEach(p => {
+        const prodsStr = parsearProductos(p.detalle||p.resumen||'').map(pr => pr.cantidad+'x '+pr.nombre).join(' · ') || (p.resumen||'—');
+        const monto = parseFloat((p.total||'0').toString().replace(/[^0-9.]/g,''))||0;
+        html += '<div class="planilla-cliente-row"><div class="planilla-cliente-nombre">' + (p.cliente||'—') + (p.comercio?' · '+p.comercio:'') + '</div><div class="planilla-cliente-prods">' + prodsStr + '</div><div class="planilla-cliente-monto">$' + Math.round(monto).toLocaleString('es-AR') + '</div></div>';
+      });
+      html += '</div>';
+    });
+  });
+
+  el.innerHTML = html;
+}
+
+function renderLogisticaVet(el) {
+  el.innerHTML = '<div style="padding:10px 0;"><button class="vet-btn" onclick="abrirCertVet()">🩺 Generar certificado veterinario</button></div>';
+}
+
+function extraerNumDia(label) {
+  const m = (label||'').match(/(\d+)/);
+  return m ? parseInt(m[1]) : 99;
+}
+
+function extraerMes(label) {
+  const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  const l = (label||'').toLowerCase();
+  for (let i = 0; i < MESES.length; i++) { if (l.includes(MESES[i])) return i; }
+  return 12;
+}
+
+function logAsignarBtn(btn, event) {
+  event.stopPropagation();
+  asignarChofer(btn.getAttribute('data-pid'), btn.getAttribute('data-chofer'), event);
+  setTimeout(renderLogistica, 600);
+}
+
+function logDesasignarBtn(btn, event) {
+  event.stopPropagation();
+  desasignarChofer(btn.getAttribute('data-pid'), event);
+  setTimeout(renderLogistica, 600);
+}
+
+function logAsignarCiudadBtn(btn, event) {
+  event.stopPropagation();
+  const dia    = btn.getAttribute('data-dia');
+  const turno  = btn.getAttribute('data-turno');
+  const ciudad = btn.getAttribute('data-ciudad');
+  const chofer = btn.getAttribute('data-chofer');
+  logAsignarCiudad(dia, turno, ciudad, chofer, event);
+}
+
+async function logAsignarCiudad(dia, turno, ciudad, chofer, event) {
+  event.stopPropagation();
+  const pedidos = todosLosPedidos.filter(p =>
+    p.estado === 'Confirmado' &&
+    p.fechaEntrega === dia &&
+    p.turnoEntrega === turno &&
+    (p.localidad||'Sin ciudad').trim() === ciudad &&
+    !p.choferAsignado
+  );
+  if (!pedidos.length) { toast('Ya asignados', 'ok'); return; }
+  toast('Asignando ' + pedidos.length + ' pedidos a ' + chofer + '...', 'ok');
+  for (const p of pedidos) {
+    await asignarChofer(p.pedidoId, chofer, event);
+  }
+  setTimeout(renderLogistica, 800);
 }
 </script>
 
