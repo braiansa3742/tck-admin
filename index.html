@@ -3262,6 +3262,63 @@ input[type="date"] {
   text-align: center; padding: 40px 20px;
   color: var(--text3); font-size: 14px;
 }
+
+/* ── Certificado Veterinario ── */
+.vet-btn {
+  width: 100%; padding: 14px; margin-bottom: 12px;
+  background: linear-gradient(135deg, #1B5E20, #2E7D32);
+  border: none; border-radius: 12px; color: #fff;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 18px;
+  font-weight: 900; cursor: pointer; letter-spacing: .5px;
+}
+.vet-modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 800;
+  display: flex; align-items: flex-end;
+}
+.vet-modal-overlay.hidden { display: none; }
+.vet-sheet {
+  background: #fff; border-radius: 22px 22px 0 0; width: 100%;
+  max-height: 90vh; overflow-y: auto;
+  padding: 22px 20px calc(22px + env(safe-area-inset-bottom));
+}
+.vet-titulo {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 24px;
+  font-weight: 900; color: #1B5E20; margin-bottom: 4px;
+}
+.vet-sub { font-size: 13px; color: var(--text3); margin-bottom: 18px; }
+.vet-ciudad-bloque {
+  background: #F1F8E9; border-radius: 12px; padding: 14px 16px;
+  margin-bottom: 10px; border: 1.5px solid rgba(27,94,32,.15);
+}
+.vet-ciudad-nombre {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 18px;
+  font-weight: 900; color: #1B5E20; margin-bottom: 8px;
+}
+.vet-categoria-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 5px 0; border-bottom: 1px solid rgba(27,94,32,.1); font-size: 14px;
+}
+.vet-categoria-row:last-child { border-bottom: none; }
+.vet-cat-nombre { color: var(--text); font-weight: 600; }
+.vet-cat-datos { font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 800; color: #1B5E20; }
+.vet-wa-btn {
+  width: 100%; padding: 14px; margin-top: 14px;
+  background: linear-gradient(135deg, #25D366, #1a9e4e);
+  border: none; border-radius: 12px; color: #fff;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 18px;
+  font-weight: 900; cursor: pointer;
+}
+.vet-close-btn {
+  width: 100%; padding: 12px; margin-top: 8px;
+  background: #f5f5f5; border: none; border-radius: 12px;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 16px;
+  font-weight: 700; color: var(--text3); cursor: pointer;
+}
+
+@media print {
+  .tab-nav, .planilla-hdr button, .vet-btn, .planilla-chofer-tabs { display: none !important; }
+  .planilla-wrap { padding: 0; }
+}
 </style>
 </head>
 <body>
@@ -3877,6 +3934,39 @@ input[type="date"] {
   </div>
 
 </div>
+
+  <!-- ═══ VIEW LOGÍSTICA ═══ -->
+  <div class="view" id="view-logistica">
+    <div class="planilla-wrap">
+      <div class="planilla-hdr">
+        <div>
+          <div class="planilla-hdr-title">🚚 Planilla de carga</div>
+          <div class="planilla-hdr-sub" id="planilla-fecha"></div>
+        </div>
+        <button onclick="imprimirPlanilla()" class="planilla-imprimir-btn" style="width:auto;padding:8px 16px;font-size:14px;margin:0;">🖨️ Imprimir</button>
+      </div>
+      <button class="vet-btn" onclick="abrirCertVet()">🩺 Generar para veterinaria</button>
+      <div class="planilla-chofer-tabs" id="planilla-chofer-tabs">
+        <button class="planilla-chofer-tab sel" data-chofer="Joan" onclick="planillaSelChofer(this)">🚚 Joan</button>
+        <button class="planilla-chofer-tab" data-chofer="Luis" onclick="planillaSelChofer(this)">🚚 Luis</button>
+        <button class="planilla-chofer-tab" data-chofer="todos" onclick="planillaSelChofer(this)">📋 Todos</button>
+      </div>
+      <div id="planilla-contenido">
+        <div class="planilla-empty">Cargando planilla...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal veterinaria -->
+  <div class="vet-modal-overlay hidden" id="vet-modal">
+    <div class="vet-sheet">
+      <div class="vet-titulo">🩺 Certificado Veterinario</div>
+      <div class="vet-sub" id="vet-sub"></div>
+      <div id="vet-contenido"></div>
+      <button class="vet-wa-btn" onclick="enviarVetWA()">📲 Enviar por WhatsApp a Alejandra</button>
+      <button class="vet-close-btn" onclick="cerrarVetModal()">Cerrar</button>
+    </div>
+  </div>
 
 <!-- TAB NAV -->
 <nav class="tab-nav" id="tab-nav">
@@ -9220,6 +9310,188 @@ function imprimirPlanilla() {
 
 // Inicializar al cambiar a tab logística
 const _origCambiarTab = typeof cambiarTab === 'function' ? cambiarTab : null;
+
+
+// ════════════════════════════════════════════════════════════════
+//  CERTIFICADO VETERINARIO
+// ════════════════════════════════════════════════════════════════
+
+// Tabla: producto → [categoría vet, kg por unidad]
+const VET_TABLA = {
+  "Pollo Ginosa":                ["Pollo entero", 20],
+  "Pollo Optimo":                ["Pollo entero", 20],
+  "Suprema":                     ["Trozado", 5],
+  "Suprema IQF":                 ["Trozado", 15],
+  "Suprema B IQF":               ["Trozado", 20],
+  "Fino de Ave Cocida":          ["Trozado", 10],
+  "Alita Congelada Granel":      ["Trozado", 15],
+  "MDM - Carne Molida de Pollo": ["Trozado", 20],
+  "Cuarto Trasero IQF":          ["Trozado", 15],
+  "Medallon de Pollo Clasico":   ["Rebozados", 6],
+  "Medallon Pollo c/Cheddar":    ["Rebozados", 6],
+  "Medallon Pollo JyQ":          ["Rebozados", 6],
+  "Medallon Pollo y Espinaca":   ["Rebozados", 6],
+  "Formita Clasica":             ["Rebozados", 6],
+  "Formitas Pollo JyQ":          ["Rebozados", 6],
+  "Nuggets de Pollo Crocante":   ["Rebozados", 6],
+  "Bocadito de Papa y Jamon":    ["Rebozados", 6],
+  "Pechuguitas al Verdeo":       ["Rebozados", 6],
+  "Filet Merluza Finas Hierbas": ["Rebozados", 6],
+  "Filet de Merluza Rebozado":   ["Rebozados", 6],
+  "Filet Merluza a Granel":      ["Rebozados", 10],
+  "Milanesa de Nalga":           ["Rebozados", 5],
+  "Milanesa de Pollo":           ["Rebozados", 5],
+  "Hamburguesa 100% Carne":      ["Rebozados", 4],
+  "Papa Baston Balcarce":        ["Frutas y Verduras", 2.5],
+  "Pulpa de Palta":              ["Frutas y Verduras", 0.45],
+  "Arandanos Solimeno":          ["Frutas y Verduras", 0.5],
+  "Brocoli":                     ["Frutas y Verduras", 0.5],
+  "Espinacas":                   ["Frutas y Verduras", 0.5],
+  "Morron":                      ["Frutas y Verduras", 0.5],
+  "Primavera":                   ["Frutas y Verduras", 0.5],
+  "Frutos Rojos":                ["Frutas y Verduras", 0.5],
+  "Cebolla":                     ["Frutas y Verduras", 0.5],
+  "Ravioles de Calabaza":        ["Frutas y Verduras", 0.5],
+  "Raviolones Espinaca y Mozz":  ["Frutas y Verduras", 0.5],
+  "Gnoquis de Papa":             ["Frutas y Verduras", 0.5],
+  "Gnoquis de Espinaca":         ["Frutas y Verduras", 0.5],
+  "Sorrentinos Jamon y Queso":   ["Frutas y Verduras", 0.5],
+  "Sorrentinos Ricota 4 Quesos": ["Frutas y Verduras", 0.4],
+  "Hamburguesa de Garbanzos":    ["Frutas y Verduras", 0.4],
+  "Hamburguesa de Lentejas":     ["Frutas y Verduras", 0.4],
+  "Hamburguesa de Quinoa":       ["Frutas y Verduras", 0.4],
+  "Hamburguesa de Arvejas":      ["Frutas y Verduras", 0.4],
+  "Hamburguesa de Hongos":       ["Frutas y Verduras", 0.4],
+  "Hamburguesa de Espinaca":     ["Frutas y Verduras", 0.4],
+  "Hamburguesa Mexicana":        ["Frutas y Verduras", 0.4],
+  "Hamburguesa 5 Vegetales":     ["Frutas y Verduras", 0.4],
+  "Maple N° 2":                  ["Huevos", 1.8],
+  "Maple N° 1":                  ["Huevos", 1.8],
+  "Cajita 1/2 Docena N° 2":      ["Huevos", 0.36]
+};
+
+const VET_ORDEN_CATS = ["Pollo entero", "Trozado", "Rebozados", "Frutas y Verduras", "Huevos"];
+// Número de teléfono de la veterinaria (Alejandra Brucart)
+const VET_TEL = '5492317000000'; // ← actualizar con el número real
+
+let _vetDatos = null; // datos calculados para el WA
+
+function abrirCertVet() {
+  const modal = document.getElementById('vet-modal');
+  const contenido = document.getElementById('vet-contenido');
+  const sub = document.getElementById('vet-sub');
+  modal.classList.remove('hidden');
+
+  // Tomar pedidos confirmados con chofer asignado del día
+  const pedidos = todosLosPedidos.filter(function(p) {
+    return p.estado === 'Confirmado' && p.choferAsignado;
+  });
+
+  const hoy = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' });
+  sub.textContent = hoy + ' · ' + pedidos.length + ' pedidos confirmados';
+
+  if (!pedidos.length) {
+    contenido.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text3);">No hay pedidos confirmados asignados a choferes hoy.</div>';
+    return;
+  }
+
+  // Calcular por ciudad
+  const porCiudad = {};
+  pedidos.forEach(function(p) {
+    const ciudad = (p.localidad || 'Sin ciudad').trim();
+    if (!porCiudad[ciudad]) porCiudad[ciudad] = {};
+    const prods = parsearProductosVet(p.detalle || p.resumen || '');
+    prods.forEach(function(pr) {
+      const key = normalizarNombreVet(pr.nombre);
+      const mapeo = VET_TABLA[key];
+      if (!mapeo) return;
+      const cat = mapeo[0];
+      const kg  = mapeo[1] * pr.cantidad;
+      const uds = pr.cantidad;
+      if (!porCiudad[ciudad][cat]) porCiudad[ciudad][cat] = { uds: 0, kg: 0 };
+      porCiudad[ciudad][cat].uds += uds;
+      porCiudad[ciudad][cat].kg  += kg;
+    });
+  });
+
+  // Ordenar ciudades por ruta fija
+  const ciudades = Object.keys(porCiudad).sort(function(a, b) {
+    const ia = RUTA_FIJA.findIndex(c => a.toLowerCase().includes(c.toLowerCase()));
+    const ib = RUTA_FIJA.findIndex(c => b.toLowerCase().includes(c.toLowerCase()));
+    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+  });
+
+  _vetDatos = { ciudades, porCiudad, hoy };
+
+  // Renderizar
+  let html = '';
+  ciudades.forEach(function(ciudad) {
+    const cats = porCiudad[ciudad];
+    if (!Object.keys(cats).length) return;
+    html += '<div class="vet-ciudad-bloque">' +
+      '<div class="vet-ciudad-nombre">📍 ' + ciudad + '</div>';
+    VET_ORDEN_CATS.forEach(function(cat) {
+      if (!cats[cat]) return;
+      const d = cats[cat];
+      html += '<div class="vet-categoria-row">' +
+        '<span class="vet-cat-nombre">' + cat + '</span>' +
+        '<span class="vet-cat-datos">' + d.uds + ' unid · ' + Math.round(d.kg) + ' kg</span>' +
+      '</div>';
+    });
+    html += '</div>';
+  });
+
+  contenido.innerHTML = html;
+}
+
+function normalizarNombreVet(nombre) {
+  // Normalizar tildes y variaciones menores
+  return (nombre || '').trim()
+    .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e')
+    .replace(/[íìï]/g,'i').replace(/[óòö]/g,'o')
+    .replace(/[úùü]/g,'u').replace(/ñ/g,'n');
+}
+
+function parsearProductosVet(detalle) {
+  if (!detalle) return [];
+  const prods = [];
+  const lineas = detalle.replace(/\|/g,'\n').split('\n').filter(Boolean);
+  lineas.forEach(function(linea) {
+    const m = linea.match(/^(\d+)x?\s+(.+?)(?:\s+→|\s+\(|\s*$)/);
+    if (m) prods.push({ cantidad: parseInt(m[1]) || 1, nombre: m[2].trim() });
+    else if (linea.trim()) prods.push({ cantidad: 1, nombre: linea.replace(/^\d+x?\s*/,'').trim() });
+  });
+  return prods;
+}
+
+function enviarVetWA() {
+  if (!_vetDatos) return;
+  const { ciudades, porCiudad, hoy } = _vetDatos;
+  let msg = '🩺 *INFORME VETERINARIO TCK*\n';
+  msg += '📅 ' + hoy + '\n';
+  msg += '🏭 The Chicken Kings S.R.L\n';
+  msg += 'San Lorenzo N° 460, Trenque Lauquen\n\n';
+
+  ciudades.forEach(function(ciudad) {
+    const cats = porCiudad[ciudad];
+    if (!Object.keys(cats).length) return;
+    msg += '📍 *' + ciudad.toUpperCase() + '*\n';
+    VET_ORDEN_CATS.forEach(function(cat) {
+      if (!cats[cat]) return;
+      const d = cats[cat];
+      msg += '  • ' + cat + ': ' + d.uds + ' unid / ' + Math.round(d.kg) + ' kg\n';
+    });
+    msg += '\n';
+  });
+
+  msg += '\nPor favor completar el Certificado Sanitario Provincial.\nGracias! 🙏';
+
+  window.open('https://wa.me/' + VET_TEL + '?text=' + encodeURIComponent(msg));
+}
+
+function cerrarVetModal() {
+  document.getElementById('vet-modal').classList.add('hidden');
+}
 </script>
 
 
