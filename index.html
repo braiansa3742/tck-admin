@@ -4216,6 +4216,7 @@ var _gpsHizoPedido  = false; // true si tomó pedido en el checkin activo
 
 let vendedorActual = null;
 let todosLosPedidos = [];
+let _pedidosCache   = [];
 var _estadosCambiados = {}; // pedidoId -> {estado, timestamp}
 let filtroActual = 'todos';
 let filtroFecha = 'hoy';
@@ -4552,6 +4553,12 @@ async function cargarPedidos(silencioso) {
     });
     // Marcar chofer asignado
   pedidos.forEach(function(p) { if (_asignaciones[p.pedidoId]) p.choferAsignado = _asignaciones[p.pedidoId]; });
+  // Cache: nunca perder pedidos entre refreshes
+  if (_pedidosCache.length > 0 && pedidos.length < _pedidosCache.length) {
+    var idsN = new Set(pedidos.map(function(p) { return p.pedidoId; }));
+    _pedidosCache.forEach(function(cp) { if (!idsN.has(cp.pedidoId)) pedidos.push(cp); });
+  }
+  _pedidosCache = pedidos.slice();
   todosLosPedidos = pedidos;
 
     if (!silencioso) {
@@ -9125,6 +9132,10 @@ async function cargarAsignaciones() {
         if (_asignaciones[p.pedidoId]) p.choferAsignado = _asignaciones[p.pedidoId];
       });
     }
+    // Si estamos en logística, actualizar la planilla ahora que tenemos las asignaciones
+    if (typeof _tabActual !== 'undefined' && _tabActual === 'logistica') {
+      renderPlanilla();
+    }
   } catch(e) { console.warn('cargarAsignaciones:', e); }
 }
 
@@ -9208,17 +9219,21 @@ function renderPlanilla() {
   const hoy = new Date();
   if (fechaEl) fechaEl.textContent = hoy.toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
 
-  // Filtrar pedidos confirmados con chofer asignado
+  // Filtrar pedidos confirmados
   let pedidos = todosLosPedidos.filter(function(p) {
     if (p.estado !== 'Confirmado') return false;
-    if (_planillaChofer === 'todos') return !!p.choferAsignado;
-    return p.choferAsignado === _planillaChofer;
+    if (_planillaChofer === 'todos') return true; // todos los confirmados, con o sin chofer
+    if (_planillaChofer === 'Joan' || _planillaChofer === 'Luis') {
+      // Si tiene chofer asignado filtrar por ese chofer
+      // Si no tiene chofer asignado, mostrar en Joan por defecto para no perder de vista
+      return p.choferAsignado === _planillaChofer || (!p.choferAsignado && _planillaChofer === 'Joan');
+    }
+    return true;
   });
 
   if (!pedidos.length) {
-    el.innerHTML = '<div class="planilla-empty">📭 No hay pedidos confirmados asignados' +
-      (_planillaChofer !== 'todos' ? ' a ' + _planillaChofer : '') + '.<br>' +
-      '<small>Confirmá pedidos en Xubio y asignales un chofer.</small></div>';
+    el.innerHTML = '<div class="planilla-empty">📭 No hay pedidos confirmados.<br>' +
+      '<small>Los pedidos aparecen aquí cuando el vendedor toca "✅ Ya remití en Xubio".</small></div>';
     return;
   }
 
