@@ -3963,7 +3963,7 @@ input[type="date"] {
       <div class="vet-titulo">🩺 Certificado Veterinario</div>
       <div class="vet-sub" id="vet-sub"></div>
       <div id="vet-contenido"></div>
-      <button class="vet-wa-btn" onclick="enviarVetWA()">📲 Enviar por WhatsApp a Alejandra</button>
+      <button class="vet-wa-btn" onclick="descargarPDFVet()">📥 Descargar PDF para veterinaria</button>
       <button class="vet-close-btn" onclick="cerrarVetModal()">Cerrar</button>
     </div>
   </div>
@@ -9464,29 +9464,66 @@ function parsearProductosVet(detalle) {
   return prods;
 }
 
-function enviarVetWA() {
+function descargarPDFVet() {
   if (!_vetDatos) return;
   const { ciudades, porCiudad, hoy } = _vetDatos;
-  let msg = '🩺 *INFORME VETERINARIO TCK*\n';
-  msg += '📅 ' + hoy + '\n';
-  msg += '🏭 The Chicken Kings S.R.L\n';
-  msg += 'San Lorenzo N° 460, Trenque Lauquen\n\n';
+  const fecha = new Date();
+  const fechaStr = fecha.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
 
+  // Construir HTML del PDF
+  let rows = '';
   ciudades.forEach(function(ciudad) {
     const cats = porCiudad[ciudad];
     if (!Object.keys(cats).length) return;
-    msg += '📍 *' + ciudad.toUpperCase() + '*\n';
+    // Fila de ciudad
+    rows += '<tr style="background:#1565C0;">' +
+      '<td colspan="3" style="padding:8px 12px;color:#fff;font-family:Arial,sans-serif;font-size:14px;font-weight:bold;">📍 ' + ciudad.toUpperCase() + '</td>' +
+    '</tr>';
     VET_ORDEN_CATS.forEach(function(cat) {
       if (!cats[cat]) return;
       const d = cats[cat];
-      msg += '  • ' + cat + ': ' + d.uds + ' unid / ' + Math.round(d.kg) + ' kg\n';
+      const kgNum = Math.round(d.kg);
+      // Formato con número en letras (simplificado)
+      rows += '<tr>' +
+        '<td style="padding:7px 12px;font-family:Arial,sans-serif;font-size:13px;border-bottom:1px solid #e0e0e0;">' + cat + '</td>' +
+        '<td style="padding:7px 12px;font-family:Arial,sans-serif;font-size:13px;border-bottom:1px solid #e0e0e0;text-align:center;">' + d.uds + ' unidades</td>' +
+        '<td style="padding:7px 12px;font-family:Arial,sans-serif;font-size:13px;border-bottom:1px solid #e0e0e0;text-align:center;font-weight:bold;">' + kgNum + ' kg</td>' +
+      '</tr>';
     });
-    msg += '\n';
   });
 
-  msg += '\nPor favor completar el Certificado Sanitario Provincial.\nGracias! 🙏';
+  const html = '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+    '<title>Informe Veterinario TCK - ' + fechaStr + '</title>' +
+    '<style>' +
+      'body { font-family: Arial, sans-serif; margin: 30px; color: #333; }' +
+      'h1 { color: #1B5E20; font-size: 20px; margin-bottom: 4px; }' +
+      '.sub { color: #666; font-size: 13px; margin-bottom: 20px; }' +
+      '.empresa { background: #F1F8E9; border-left: 4px solid #1B5E20; padding: 10px 16px; margin-bottom: 20px; font-size: 13px; }' +
+      'table { width: 100%; border-collapse: collapse; }' +
+      'th { background: #1B5E20; color: #fff; padding: 10px 12px; font-size: 13px; text-align: left; }' +
+      'tr:nth-child(even) { background: #f9f9f9; }' +
+      '.footer { margin-top: 30px; padding-top: 15px; border-top: 1px solid #ccc; font-size: 11px; color: #999; text-align: center; }' +
+      '@media print { button { display: none; } }' +
+    '</style></head><body>' +
+    '<h1>INFORME PARA CERTIFICADO VETERINARIO</h1>' +
+    '<div class="sub">Generado el ' + fechaStr + ' · TCK The Chicken Kings S.R.L</div>' +
+    '<div class="empresa">' +
+      '<strong>Establecimiento:</strong> The Chicken Kings S.R.L (N° 107/20662)<br>' +
+      '<strong>Dirección:</strong> San Lorenzo N° 460, Trenque Lauquen<br>' +
+      '<strong>Categoría:</strong> Cámara Frigorífica de Aves y Productos Congelados' +
+    '</div>' +
+    '<table><thead><tr>' +
+      '<th>Producto / Categoría</th><th style="text-align:center;">Unidades</th><th style="text-align:center;">Kg</th>' +
+    '</tr></thead><tbody>' + rows + '</tbody></table>' +
+    '<div class="footer">Documento generado por sistema TCK · ' + fechaStr + '</div>' +
+    '</body></html>';
 
-  window.open('https://wa.me/' + VET_TEL + '?text=' + encodeURIComponent(msg));
+  // Abrir en nueva ventana e imprimir (genera PDF nativo)
+  const win = window.open('', '_blank');
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  setTimeout(function() { win.print(); }, 500);
 }
 
 function cerrarVetModal() {
