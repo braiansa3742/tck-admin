@@ -3141,6 +3141,127 @@ input[type="date"] {
   color: var(--text);
   background: #fff;
 }
+
+/* ── Asignar chofer ── */
+.btn-asignar {
+  background: linear-gradient(135deg, #1565C0, #1976D2);
+  color: #fff; border: none; border-radius: 8px; padding: 8px 14px;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 800;
+  cursor: pointer; letter-spacing: .3px; transition: opacity .15s; margin-top: 10px;
+}
+.btn-asignar:active { opacity: .8; }
+.chofer-asignado-badge {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 10px;
+  background: #E3F2FD; color: #1565C0; border-radius: 20px;
+  padding: 5px 12px; font-size: 12px; font-weight: 800;
+  font-family: 'Barlow Condensed', sans-serif; letter-spacing: .3px;
+}
+.chofer-asignado-badge button {
+  background: none; border: none; color: #1565C0; cursor: pointer;
+  font-size: 14px; padding: 0; line-height: 1;
+}
+.chofer-picker { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.chofer-picker-btn {
+  flex: 1; min-width: 90px; padding: 10px 12px;
+  border: 2px solid rgba(21,101,192,.25); border-radius: 10px;
+  background: #fff; cursor: pointer;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 16px; font-weight: 800;
+  color: #1565C0; transition: all .15s; text-align: center;
+}
+.chofer-picker-btn:active { background: #E3F2FD; border-color: #1565C0; }
+.chofer-picker-cancel {
+  width: 100%; margin-top: 4px; padding: 8px; background: none;
+  border: none; color: var(--text3); font-size: 13px; cursor: pointer;
+}
+
+/* ── Planilla de carga ── */
+.planilla-wrap { padding: 12px 16px; }
+.planilla-hdr {
+  background: linear-gradient(135deg, #1565C0, #0D47A1);
+  border-radius: 14px; padding: 16px; margin-bottom: 16px;
+  display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;
+}
+.planilla-hdr-title {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 22px;
+  font-weight: 900; color: #fff;
+}
+.planilla-hdr-sub { font-size: 12px; color: rgba(255,255,255,.7); margin-top: 2px; }
+.planilla-chofer-tabs {
+  display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;
+}
+.planilla-chofer-tab {
+  padding: 8px 18px; border: 2px solid rgba(21,101,192,.25);
+  border-radius: 20px; background: #fff; cursor: pointer;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 15px;
+  font-weight: 800; color: #1565C0; transition: all .15s;
+}
+.planilla-chofer-tab.sel {
+  background: #1565C0; color: #fff; border-color: #1565C0;
+}
+.planilla-seccion {
+  background: #fff; border-radius: 14px; margin-bottom: 12px;
+  border: 1.5px solid rgba(21,101,192,.1); overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,.05);
+}
+.planilla-seccion-hdr {
+  background: linear-gradient(135deg, #1565C0, #1976D2);
+  padding: 11px 16px; display: flex; justify-content: space-between;
+  align-items: center;
+}
+.planilla-seccion-ciudad {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 18px;
+  font-weight: 900; color: #fff;
+}
+.planilla-seccion-count {
+  background: rgba(255,255,255,.25); border-radius: 20px;
+  padding: 3px 10px; font-size: 11px; font-weight: 800; color: #fff;
+}
+.planilla-cliente-row {
+  padding: 12px 16px; border-bottom: 1px solid #f0f4ff;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.planilla-cliente-row:last-child { border-bottom: none; }
+.planilla-cliente-nombre {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 16px;
+  font-weight: 900; color: var(--text);
+}
+.planilla-cliente-prods {
+  font-size: 12px; color: var(--text2); line-height: 1.6;
+}
+.planilla-cliente-monto {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 15px;
+  font-weight: 800; color: #1565C0;
+}
+.planilla-totales {
+  background: #F8F9FF; border-radius: 14px; padding: 16px;
+  margin-bottom: 16px; border: 1.5px solid rgba(21,101,192,.1);
+}
+.planilla-totales-title {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 16px;
+  font-weight: 900; color: var(--text); margin-bottom: 10px;
+  text-transform: uppercase; letter-spacing: .5px;
+}
+.planilla-total-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 7px 0; border-bottom: 1px solid rgba(21,101,192,.08);
+  font-size: 14px; color: var(--text);
+}
+.planilla-total-row:last-child { border-bottom: none; }
+.planilla-total-cant {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 18px;
+  font-weight: 900; color: #1565C0;
+}
+.planilla-imprimir-btn {
+  width: 100%; padding: 14px; margin-bottom: 16px;
+  background: linear-gradient(135deg, #1565C0, #1976D2);
+  border: none; border-radius: 12px; color: #fff;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 18px;
+  font-weight: 900; cursor: pointer; letter-spacing: .5px;
+}
+.planilla-empty {
+  text-align: center; padding: 40px 20px;
+  color: var(--text3); font-size: 14px;
+}
 </style>
 </head>
 <body>
@@ -3780,6 +3901,7 @@ input[type="date"] {
     <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/></svg>
     <span>Mapa</span>
   </button>
+  <button class="tab-btn" id="tab-btn-logistica" onclick="cambiarTab('logistica')"><span class="tab-icon">🚚</span><span class="tab-label">Logística</span></button>
   <button class="tab-btn" id="tab-btn-reportes" onclick="cambiarTab('reportes')">
     <span class="tab-icon">📈</span>
     <span class="tab-label">Reportes</span>
@@ -4212,6 +4334,7 @@ function login(nombre) {
     : 'Tus pedidos de hoy — ' + new Date().toLocaleDateString('es-AR');
   document.getElementById('filtros-vendedor').style.display = esAdmin ? 'flex' : 'none';
   cargarPedidos();
+  cargarAsignaciones();
   mostrarTabs();
   mostrarBotonesManual();
   checkPrimeraVez();
@@ -4337,7 +4460,9 @@ async function cargarPedidos(silencioso) {
         delete _estadosCambiados[p.pedidoId];
       }
     });
-    todosLosPedidos = pedidos;
+    // Marcar chofer asignado
+  pedidos.forEach(function(p) { if (_asignaciones[p.pedidoId]) p.choferAsignado = _asignaciones[p.pedidoId]; });
+  todosLosPedidos = pedidos;
 
     if (!silencioso) {
       var dups = pedidos.filter(function(p){return p.esDuplicado;});
@@ -4544,6 +4669,21 @@ function renderCard(p) {
   if (esAdmin && p.estado !== 'Pendiente') btns += '<button class="btn-estado btn-pendiente-again" onclick="cambiarEstado(\'' + p.pedidoId + '\',' + p.fila + ',\'Pendiente\',event)">⏳ Pendiente</button>';
   if (esAdmin && p.estado !== 'Cancelado') btns += '<button class="btn-estado btn-cancelar" onclick="confirmarCancelar(\'' + p.pedidoId + '\',' + p.fila + ',event)">❌ Cancelar</button>';
 
+  // Botón asignar chofer — pedidos confirmados
+  var asignarHtml = '';
+  if (p.estado === 'Confirmado') {
+    if (p.choferAsignado) {
+      asignarHtml = '<div style="margin-top:10px;">' +
+        '<span class="chofer-asignado-badge">🚚 ' + p.choferAsignado +
+        ' <button data-pid="' + p.pedidoId + '" onclick="desasignarChoferBtn(this,event)" title="Cambiar">✕</button>' +
+        '</span></div>';
+    } else {
+      asignarHtml = '<div style="margin-top:10px;">' +
+        '<button class="btn-asignar" data-pedido="' + p.pedidoId + '" onclick="mostrarPickerChofer(this,event)">🚚 Asignar a chofer</button>' +
+        '</div>';
+    }
+  }
+
   var vendedorRow = esAdmin ? '<div class="pedido-detalle-row"><span class="pdr-label">Vendedor</span><span class="pdr-val">' + p.vendedor + '</span></div>' : '';
   var detalle = p.detalle ? p.detalle.replace(/\|/g,'\n').replace(/ · /g,' — ') : (p.resumen || '');
   var hora = (p.fechaHora||'').split(' ')[1] || (p.fechaHora||'').split('T')[1] || '';
@@ -4571,6 +4711,7 @@ function renderCard(p) {
       (detalle ? '<div class="pedido-productos">' + detalle + '</div>' : '') +
       dupAlert +
       '<div class="pedido-acciones">' + btns + '</div>' +
+      asignarHtml +
       buildXubioPanel(p, id) +
       '<div class="nota-wrap">' +
         '<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;">' +
@@ -5129,6 +5270,7 @@ function actualizarMiDiaSiAbierto() {
 var _tabActual = 'pedidos';
 
 function cambiarTab(tab) {
+  if (tab === 'logistica') { setTimeout(renderPlanilla, 100); }
   if (_tabActual === tab) return;
   _tabActual = tab;
 
@@ -8864,6 +9006,220 @@ async function tomadorConfirmarFinal() {
 }
 
 
+
+
+// ════════════════════════════════════════════════════════════════
+//  ASIGNACIÓN CHOFERES + PLANILLA DE CARGA
+// ════════════════════════════════════════════════════════════════
+
+const RUTA_FIJA = [
+  'Trenque Lauquen','Pehuajó','Henderson','Carlos Casares',
+  'Daireaux','Pellegrini','Salliqueló','Tres Lomas',
+  'Guaminí','30 de Agosto','Lincoln','Quemú Quemú'
+];
+
+let _asignaciones    = {};
+let _planillaChofer  = 'Joan';
+
+// ── CARGAR ASIGNACIONES DESDE SUPABASE ───────────────────────
+async function cargarAsignaciones() {
+  try {
+    const hoyStr = new Date().toISOString().split('T')[0];
+    const rows = await sbFetch('entregas?fecha_asignacion=gte.' + hoyStr + 'T00:00:00&select=pedido_id,chofer');
+    if (rows && rows.length) {
+      rows.forEach(function(r) {
+        if (r.pedido_id && r.chofer) _asignaciones[r.pedido_id] = r.chofer;
+      });
+      // Marcar en pedidos ya cargados
+      todosLosPedidos.forEach(function(p) {
+        if (_asignaciones[p.pedidoId]) p.choferAsignado = _asignaciones[p.pedidoId];
+      });
+    }
+  } catch(e) { console.warn('cargarAsignaciones:', e); }
+}
+
+// ── PICKER CHOFER ─────────────────────────────────────────────
+function mostrarPickerChofer(btn, event) {
+  event.stopPropagation();
+  const pedidoId = btn.getAttribute('data-pedido');
+  const wrap = btn.parentElement;
+  wrap.innerHTML =
+    '<div class="chofer-picker">' +
+      '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Joan" onclick="asignarChoferBtn(this,event)">🚚 Joan</button>' +
+      '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Luis" onclick="asignarChoferBtn(this,event)">🚚 Luis</button>' +
+    '</div>' +
+    '<button class="chofer-picker-cancel" data-pid="' + pedidoId + '" onclick="cancelarPickerChoferBtn(this,event)">Cancelar</button>';
+}
+
+function asignarChoferBtn(btn, event) {
+  asignarChofer(btn.getAttribute('data-pid'), btn.getAttribute('data-chofer'), event);
+}
+
+function cancelarPickerChoferBtn(btn, event) {
+  event.stopPropagation();
+  const p = todosLosPedidos.find(x => x.pedidoId === btn.getAttribute('data-pid'));
+  if (p) { const id = p.pedidoId.replace(/[^a-zA-Z0-9]/g,'-'); const c = document.getElementById('card-'+id); if (c) c.outerHTML = renderCard(p); }
+}
+
+function desasignarChoferBtn(btn, event) {
+  event.stopPropagation();
+  desasignarChofer(btn.getAttribute('data-pid'), event);
+}
+
+async function asignarChofer(pedidoId, chofer, event) {
+  if (event) event.stopPropagation();
+  const p = todosLosPedidos.find(x => x.pedidoId === pedidoId);
+  if (!p) return;
+  _asignaciones[pedidoId] = chofer;
+  p.choferAsignado = chofer;
+  const id = pedidoId.replace(/[^a-zA-Z0-9]/g,'-');
+  const card = document.getElementById('card-'+id);
+  if (card) card.outerHTML = renderCard(p);
+  try {
+    const tel = (p.telCliente||'').replace(/\D/g,'');
+    await sbFetch('entregas', {
+      method: 'POST',
+      headers: { 'Prefer': 'resolution=merge-duplicates' },
+      body: JSON.stringify({
+        pedido_id: pedidoId, chofer: chofer,
+        cliente: p.cliente||'', telefono_cliente: tel||null,
+        ciudad: p.localidad||'', estado: 'pendiente',
+        monto: parseFloat((p.total||'0').toString().replace(/[^0-9.]/g,''))||0,
+        nota: p.resumen||''
+      })
+    });
+    toast('✅ Asignado a ' + chofer, 'ok');
+    // Actualizar planilla si está abierta
+    if (_tabActual === 'logistica') renderPlanilla();
+  } catch(e) { toast('❌ Error al guardar', 'err'); }
+}
+
+async function desasignarChofer(pedidoId, event) {
+  if (event) event.stopPropagation();
+  if (!confirm('¿Desasignar el chofer de este pedido?')) return;
+  delete _asignaciones[pedidoId];
+  const p = todosLosPedidos.find(x => x.pedidoId === pedidoId);
+  if (p) { delete p.choferAsignado; const id = pedidoId.replace(/[^a-zA-Z0-9]/g,'-'); const c = document.getElementById('card-'+id); if (c) c.outerHTML = renderCard(p); }
+  try { await sbFetch('entregas?pedido_id=eq.' + encodeURIComponent(pedidoId), { method: 'DELETE' }); } catch(e) {}
+  if (_tabActual === 'logistica') renderPlanilla();
+}
+
+// ── PLANILLA DE CARGA ─────────────────────────────────────────
+function planillaSelChofer(btn) {
+  document.querySelectorAll('.planilla-chofer-tab').forEach(b => b.classList.remove('sel'));
+  btn.classList.add('sel');
+  _planillaChofer = btn.getAttribute('data-chofer');
+  renderPlanilla();
+}
+
+function renderPlanilla() {
+  const el = document.getElementById('planilla-contenido');
+  const fechaEl = document.getElementById('planilla-fecha');
+  const hoy = new Date();
+  if (fechaEl) fechaEl.textContent = hoy.toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+
+  // Filtrar pedidos confirmados con chofer asignado
+  let pedidos = todosLosPedidos.filter(function(p) {
+    if (p.estado !== 'Confirmado') return false;
+    if (_planillaChofer === 'todos') return !!p.choferAsignado;
+    return p.choferAsignado === _planillaChofer;
+  });
+
+  if (!pedidos.length) {
+    el.innerHTML = '<div class="planilla-empty">📭 No hay pedidos confirmados asignados' +
+      (_planillaChofer !== 'todos' ? ' a ' + _planillaChofer : '') + '.<br>' +
+      '<small>Confirmá pedidos en Xubio y asignales un chofer.</small></div>';
+    return;
+  }
+
+  // Agrupar por ciudad según ruta fija
+  const porCiudad = {};
+  pedidos.forEach(function(p) {
+    const c = (p.localidad||'Sin ciudad').trim();
+    if (!porCiudad[c]) porCiudad[c] = [];
+    porCiudad[c].push(p);
+  });
+  const ciudades = Object.keys(porCiudad).sort(function(a,b) {
+    const ia = RUTA_FIJA.findIndex(c => a.toLowerCase().includes(c.toLowerCase()));
+    const ib = RUTA_FIJA.findIndex(c => b.toLowerCase().includes(c.toLowerCase()));
+    return (ia===-1?999:ia) - (ib===-1?999:ib);
+  });
+
+  // Calcular totales de productos
+  const totalesProds = {};
+  pedidos.forEach(function(p) {
+    const prods = parsearProductos(p.detalle || p.resumen || '');
+    prods.forEach(function(pr) {
+      if (!totalesProds[pr.nombre]) totalesProds[pr.nombre] = 0;
+      totalesProds[pr.nombre] += pr.cantidad;
+    });
+  });
+
+  let html = '';
+
+  // Resumen de totales por producto
+  html += '<div class="planilla-totales">' +
+    '<div class="planilla-totales-title">📦 Totales a cargar' +
+      (_planillaChofer !== 'todos' ? ' — ' + _planillaChofer : '') +
+      ' (' + pedidos.length + ' pedidos)</div>';
+  Object.keys(totalesProds).sort().forEach(function(prod) {
+    html += '<div class="planilla-total-row">' +
+      '<span>' + prod + '</span>' +
+      '<span class="planilla-total-cant">' + totalesProds[prod] + ' u.</span>' +
+    '</div>';
+  });
+  const totalMonto = pedidos.reduce(function(s,p) { return s + (parseFloat((p.total||'0').toString().replace(/[^0-9.]/g,''))||0); }, 0);
+  html += '<div class="planilla-total-row" style="margin-top:8px;padding-top:8px;border-top:2px solid rgba(21,101,192,.15);">' +
+    '<span style="font-weight:800;">💰 Total del día</span>' +
+    '<span class="planilla-total-cant">$' + Math.round(totalMonto).toLocaleString('es-AR') + '</span>' +
+  '</div>';
+  html += '</div>';
+
+  // Detalle por ciudad y cliente
+  let parada = 1;
+  ciudades.forEach(function(ciudad) {
+    const items = porCiudad[ciudad];
+    html += '<div class="planilla-seccion">' +
+      '<div class="planilla-seccion-hdr">' +
+        '<div class="planilla-seccion-ciudad">📍 ' + ciudad + '</div>' +
+        '<div class="planilla-seccion-count">Parada ' + parada++ + ' · ' + items.length + ' entrega' + (items.length>1?'s':'') + '</div>' +
+      '</div>';
+    items.forEach(function(p) {
+      const prods = parsearProductos(p.detalle || p.resumen || '');
+      const prodsStr = prods.map(function(pr) { return pr.cantidad + 'x ' + pr.nombre; }).join(' · ') || (p.resumen||'—');
+      const monto = parseFloat((p.total||'0').toString().replace(/[^0-9.]/g,''))||0;
+      const choferBadge = _planillaChofer === 'todos' && p.choferAsignado
+        ? ' <span style="background:#E3F2FD;color:#1565C0;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:800;">' + p.choferAsignado + '</span>' : '';
+      html += '<div class="planilla-cliente-row">' +
+        '<div class="planilla-cliente-nombre">' + (p.cliente||'—') + (p.comercio?' · '+p.comercio:'') + choferBadge + '</div>' +
+        '<div class="planilla-cliente-prods">' + prodsStr + '</div>' +
+        '<div class="planilla-cliente-monto">$' + Math.round(monto).toLocaleString('es-AR') + '</div>' +
+      '</div>';
+    });
+    html += '</div>';
+  });
+
+  el.innerHTML = html;
+}
+
+function parsearProductos(detalle) {
+  if (!detalle) return [];
+  const prods = [];
+  const lineas = detalle.replace(/\|/g,'\n').split('\n').filter(Boolean);
+  lineas.forEach(function(linea) {
+    const m = linea.match(/^(\d+)x?\s+(.+?)(?:\s+→|\s*$)/);
+    if (m) prods.push({ cantidad: parseInt(m[1]), nombre: m[2].trim() });
+    else if (linea.trim()) prods.push({ cantidad: 1, nombre: linea.trim() });
+  });
+  return prods;
+}
+
+function imprimirPlanilla() {
+  window.print();
+}
+
+// Inicializar al cambiar a tab logística
+const _origCambiarTab = typeof cambiarTab === 'function' ? cambiarTab : null;
 </script>
 
 
