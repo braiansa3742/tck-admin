@@ -3157,9 +3157,12 @@ input[type="date"] {
   font-family: 'Barlow Condensed', sans-serif; letter-spacing: .3px;
 }
 .chofer-asignado-badge button {
-  background: none; border: none; color: #1565C0; cursor: pointer;
-  font-size: 14px; padding: 0; line-height: 1;
+  background: rgba(21,101,192,.15); border: none; color: #1565C0; cursor: pointer;
+  font-size: 14px; padding: 0; line-height: 1; border-radius: 50%;
+  width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
+  touch-action: manipulation;
 }
+.chofer-asignado-badge button:active { background: rgba(21,101,192,.3); }
 .chofer-picker { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .chofer-picker-btn {
   flex: 1; min-width: 90px; padding: 10px 12px;
@@ -3379,15 +3382,18 @@ input[type="date"] {
   flex-shrink: 0;
 }
 .log-chofer-badge {
-  display: inline-flex; align-items: center; gap: 5px;
+  display: inline-flex; align-items: center; gap: 6px;
   background: #E3F2FD; color: #1565C0; border-radius: 20px;
-  padding: 4px 10px; font-size: 12px; font-weight: 800;
+  padding: 6px 8px 6px 12px; font-size: 13px; font-weight: 800;
   font-family: 'Barlow Condensed', sans-serif;
 }
 .log-chofer-badge button {
-  background: none; border: none; color: #1565C0; cursor: pointer;
-  font-size: 13px; padding: 0; line-height: 1;
+  background: rgba(21,101,192,.15); border: none; color: #1565C0; cursor: pointer;
+  font-size: 14px; padding: 0; line-height: 1; border-radius: 50%;
+  width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
+  touch-action: manipulation; flex-shrink: 0;
 }
+.log-chofer-badge button:active { background: rgba(21,101,192,.3); }
 .log-asignar-picker { display: flex; gap: 6px; flex-wrap: wrap; }
 .log-asignar-btn {
   padding: 11px 18px; border: 2px solid rgba(21,101,192,.3); border-radius: 12px;
@@ -9473,26 +9479,39 @@ function normalizarNombreVet(nombre) {
 
 function parsearProductos(detalle) {
   if (!detalle) return [];
-  const prods = [];
-  const lineas = detalle.replace(/\|/g,'\n').split('\n').filter(Boolean);
+  // Consolida duplicados por nombre normalizado
+  var mapa = {};
+  var lineas = detalle.replace(/\|/g,'\n').split('\n');
   lineas.forEach(function(linea) {
-    const m = linea.match(/^(\d+)x?\s+(.+?)(?:\s+→|\s+\(|\s*$)/);
-    if (m) prods.push({ cantidad: parseInt(m[1]) || 1, nombre: m[2].trim() });
-    else if (linea.trim()) prods.push({ cantidad: 1, nombre: linea.replace(/^\d+x?\s*/,'').trim() });
+    linea = linea.trim();
+    if (!linea) return;
+    var nombre = null, cant = 1;
+    // Patrón *Nombre* — nombre entre asteriscos (formato campo), ignorar resto
+    var mAst = linea.match(/^\*([^*]+)\*/);
+    if (mAst) {
+      nombre = mAst[1].trim();
+    } else {
+      // Patrón "Nx Nombre (presentacion) → $precio"
+      var m = linea.match(/^(\d+)x?\s+(.+?)(?:\s+\(|\s+→|\s*$)/);
+      if (m) {
+        cant = parseInt(m[1]) || 1;
+        nombre = m[2].trim().replace(/\*/g,'');
+      }
+    }
+    if (!nombre || nombre.charAt(0) === '$') return;
+    var norm = nombre.toLowerCase().replace(/[^a-z0-9]/gi,'');
+    if (mapa[norm]) {
+      mapa[norm].cantidad += cant;
+    } else {
+      mapa[norm] = { nombre: nombre, cantidad: cant };
+    }
   });
-  return prods;
+  return Object.values(mapa);
 }
 
 function parsearProductosVet(detalle) {
-  if (!detalle) return [];
-  const prods = [];
-  const lineas = detalle.replace(/\|/g,'\n').split('\n').filter(Boolean);
-  lineas.forEach(function(linea) {
-    const m = linea.match(/^(\d+)x?\s+(.+?)(?:\s+→|\s+\(|\s*$)/);
-    if (m) prods.push({ cantidad: parseInt(m[1]) || 1, nombre: m[2].trim() });
-    else if (linea.trim()) prods.push({ cantidad: 1, nombre: linea.replace(/^\d+x?\s*/,'').trim() });
-  });
-  return prods;
+  // Reusar parsearProductos que ya maneja ambos formatos y consolida duplicados
+  return parsearProductos(detalle);
 }
 
 function descargarPDFVet() {
