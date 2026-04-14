@@ -5457,17 +5457,19 @@ function actualizarMiDiaSiAbierto() {
 var _tabActual = 'pedidos';
 
 function cambiarTab(tab) {
-  if (tab === 'logistica') { setTimeout(renderLogistica, 100); }
   if (_tabActual === tab) return;
   _tabActual = tab;
 
-  // Views
-  ['pedidos','midia','clientes','gps','mapa','reportes'].forEach(function(t) {
+  // Views — incluye logistica
+  ['pedidos','midia','clientes','gps','mapa','reportes','logistica'].forEach(function(t) {
     var v = document.getElementById('view-' + t);
     var b = document.getElementById('tab-btn-' + t);
     if (v) v.classList.toggle('active', t === tab);
     if (b) b.classList.toggle('active', t === tab);
   });
+
+  // Logística — renderizar DESPUÉS de activar el view
+  if (tab === 'logistica') { setTimeout(renderLogistica, 100); }
 
   // Cuando se abre Mi Día, renderizar
   if (tab === 'clientes') {
