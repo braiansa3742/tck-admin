@@ -3358,9 +3358,9 @@ input[type="date"] {
   display: flex; gap: 6px;
 }
 .log-ciudad-btn {
-  padding: 5px 12px; border-radius: 20px; border: 2px solid rgba(21,101,192,.3);
+  padding: 8px 16px; border-radius: 20px; border: 2px solid rgba(21,101,192,.3);
   background: #fff; cursor: pointer; font-family: 'Barlow Condensed', sans-serif;
-  font-size: 13px; font-weight: 800; color: #1565C0; transition: all .15s;
+  font-size: 15px; font-weight: 900; color: #1565C0; transition: all .15s;
   touch-action: manipulation;
 }
 .log-ciudad-btn:active { background: #1565C0; color: #fff; border-color: #1565C0; }
@@ -3390,10 +3390,12 @@ input[type="date"] {
 }
 .log-asignar-picker { display: flex; gap: 6px; flex-wrap: wrap; }
 .log-asignar-btn {
-  padding: 7px 14px; border: 2px solid rgba(21,101,192,.25); border-radius: 10px;
+  padding: 11px 18px; border: 2px solid rgba(21,101,192,.3); border-radius: 12px;
   background: #fff; cursor: pointer; font-family: 'Barlow Condensed', sans-serif;
-  font-size: 14px; font-weight: 800; color: #1565C0; transition: all .15s;
+  font-size: 16px; font-weight: 900; color: #1565C0; transition: all .15s;
+  touch-action: manipulation; min-width: 80px; text-align: center;
 }
+.log-asignar-btn:active { background: #E3F2FD; border-color: #1565C0; }
 .log-asignar-btn:active { background: #E3F2FD; border-color: #1565C0; }
 .log-sin-fecha {
   background: #FFF8E1; border-radius: 10px; padding: 12px 14px; margin-bottom: 12px;
@@ -4013,8 +4015,6 @@ input[type="date"] {
     </div>
   </div>
 
-</div>
-
   <!-- ═══ VIEW LOGÍSTICA ═══ -->
   <div class="view" id="view-logistica">
     <div class="planilla-wrap">
@@ -4054,6 +4054,8 @@ input[type="date"] {
       <button class="vet-close-btn" onclick="cerrarVetModal()">Cerrar</button>
     </div>
   </div>
+
+</div>
 
 <!-- TAB NAV -->
 <nav class="tab-nav" id="tab-nav">
@@ -9469,6 +9471,18 @@ function normalizarNombreVet(nombre) {
     .replace(/[úùü]/g,'u').replace(/ñ/g,'n');
 }
 
+function parsearProductos(detalle) {
+  if (!detalle) return [];
+  const prods = [];
+  const lineas = detalle.replace(/\|/g,'\n').split('\n').filter(Boolean);
+  lineas.forEach(function(linea) {
+    const m = linea.match(/^(\d+)x?\s+(.+?)(?:\s+→|\s+\(|\s*$)/);
+    if (m) prods.push({ cantidad: parseInt(m[1]) || 1, nombre: m[2].trim() });
+    else if (linea.trim()) prods.push({ cantidad: 1, nombre: linea.replace(/^\d+x?\s*/,'').trim() });
+  });
+  return prods;
+}
+
 function parsearProductosVet(detalle) {
   if (!detalle) return [];
   const prods = [];
@@ -9584,138 +9598,76 @@ function renderLogisticaAsignar(el) {
     return;
   }
 
-  const sinFecha = pedidos.filter(p => !p.fechaEntrega);
-  const conFecha = pedidos.filter(p => p.fechaEntrega);
+  const fmt = n => '$' + Math.round(n).toLocaleString('es-AR');
+  const totalMonto = pedidos.reduce((a,p) => a + (parseFloat((p.total||'0').toString().replace(/[^0-9.,]/g,'').replace(',','.')) || 0), 0);
+  const asignados  = pedidos.filter(p => p.choferAsignado).length;
 
-  // Agrupar por día → turno → ciudad
-  const porDia = {};
-  conFecha.forEach(p => {
-    const dia    = p.fechaEntrega || 'Sin fecha';
-    const turno  = p.turnoEntrega || 'Sin turno';
+  // ── Resumen ──
+  let html = '<div style="background:#F0F4FF;border-radius:12px;padding:12px 16px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">';
+  html += '<div>';
+  html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:#1565C0;">' + pedidos.length + ' pedidos confirmados</div>';
+  html += '<div style="font-size:12px;color:var(--text3);margin-top:2px;">' + asignados + ' asignados · ' + (pedidos.length - asignados) + ' sin chofer</div>';
+  html += '</div>';
+  html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#1565C0;">' + fmt(totalMonto) + '</div>';
+  html += '</div>';
+
+  // ── Agrupar por ciudad en orden ruta ──
+  const porCiudad = {};
+  pedidos.forEach(p => {
     const ciudad = (p.localidad || 'Sin ciudad').trim();
-    if (!porDia[dia]) porDia[dia] = {};
-    if (!porDia[dia][turno]) porDia[dia][turno] = {};
-    if (!porDia[dia][turno][ciudad]) porDia[dia][turno][ciudad] = [];
-    porDia[dia][turno][ciudad].push(p);
+    if (!porCiudad[ciudad]) porCiudad[ciudad] = [];
+    porCiudad[ciudad].push(p);
   });
 
-  const diasOrden = Object.keys(porDia).sort((a, b) => {
-    const mesA = extraerMes(a), mesB = extraerMes(b);
-    if (mesA !== mesB) return mesA - mesB;
-    return extraerNumDia(a) - extraerNumDia(b);
+  const todasCiudades = Object.keys(porCiudad).sort((a,b) => {
+    const ia = RUTA_FIJA.findIndex(c => a.toLowerCase().includes(c.toLowerCase()));
+    const ib = RUTA_FIJA.findIndex(c => b.toLowerCase().includes(c.toLowerCase()));
+    if (ia === -1 && ib === -1) return a.localeCompare(b);
+    return (ia===-1?999:ia) - (ib===-1?999:ib);
   });
 
-  let html = '';
+  todasCiudades.forEach(ciudad => {
+    const items = porCiudad[ciudad];
+    const totalCiudad = items.reduce((a,p) => a + (parseFloat((p.total||'0').toString().replace(/[^0-9.,]/g,'').replace(',','.')) || 0), 0);
+    const mismoCh = items.every(p => p.choferAsignado) && items.every(p => p.choferAsignado === items[0].choferAsignado);
+    const ciudadSafe = ciudad.replace(/"/g,'&quot;');
 
-  if (sinFecha.length) {
-    // Mostrar los pedidos sin fecha en un bloque expandible
-    html += '<div class="log-sin-fecha">';
-    html += '<div style="margin-bottom:8px;">⚠️ <strong>' + sinFecha.length + ' pedido' + (sinFecha.length>1?'s':'') + ' sin fecha de entrega definida</strong> — asignales una fecha desde el tab Pedidos.</div>';
-    
-    // Agrupar por ciudad
-    const sinFechaPorCiudad = {};
-    sinFecha.forEach(p => {
-      const ciudad = (p.localidad||'Sin ciudad').trim();
-      if (!sinFechaPorCiudad[ciudad]) sinFechaPorCiudad[ciudad] = [];
-      sinFechaPorCiudad[ciudad].push(p);
-    });
-    
-    Object.keys(sinFechaPorCiudad).sort().forEach(ciudad => {
-      const items = sinFechaPorCiudad[ciudad];
-      html += '<div style="margin-bottom:6px;"><strong>📍 ' + ciudad + '</strong> (' + items.length + ')</div>';
-      items.forEach(p => {
-        const monto = parseFloat((p.total||'0').toString().replace(/[^0-9.]/g,''))||0;
-        const pidSafe = p.pedidoId.replace(/'/g, "\'");
-        html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(121,85,72,.15);">';
-        html += '<div style="font-size:13px;">' + (p.cliente||'—') + (p.comercio ? ' · ' + p.comercio : '') + '</div>';
-        html += '<div style="display:flex;align-items:center;gap:6px;">';
-        html += '<span style="font-size:12px;font-weight:800;">$' + Math.round(monto).toLocaleString('es-AR') + '</span>';
-        if (p.choferAsignado) {
-          html += '<span style="background:#E3F2FD;color:#1565C0;border-radius:20px;padding:2px 8px;font-size:11px;font-weight:800;">🚚 ' + p.choferAsignado + '</span>';
-        } else {
-          html += '<button class="log-asignar-btn" data-pid="' + pidSafe + '" data-chofer="Joan" onclick="logAsignarBtn(this,event)" style="padding:4px 8px;font-size:11px;">J</button>';
-          html += '<button class="log-asignar-btn" data-pid="' + pidSafe + '" data-chofer="Luis" onclick="logAsignarBtn(this,event)" style="padding:4px 8px;font-size:11px;">L</button>';
-        }
-        html += '</div></div>';
-      });
-    });
+    html += '<div class="log-ciudad-bloque">';
+    html += '<div class="log-ciudad-hdr">';
+    html += '<div class="log-ciudad-nombre">📍 ' + ciudad + ' <span style="font-size:12px;font-weight:400;color:var(--text3);">(' + items.length + ' · ' + fmt(totalCiudad) + ')</span></div>';
+    if (!mismoCh) {
+      html += '<div class="log-ciudad-asignar-todos">';
+      html += '<button class="log-ciudad-btn" data-dia="" data-turno="" data-ciudad="' + ciudadSafe + '" data-chofer="Joan" onclick="logAsignarCiudadBtn(this,event)">J</button>';
+      html += '<button class="log-ciudad-btn" data-dia="" data-turno="" data-ciudad="' + ciudadSafe + '" data-chofer="Luis" onclick="logAsignarCiudadBtn(this,event)">L</button>';
+      html += '</div>';
+    }
     html += '</div>';
-  }
 
-  diasOrden.forEach(dia => {
-    const turnos   = porDia[dia];
-    const totalDia = Object.values(turnos).reduce((a, t) => a + Object.values(t).reduce((b, c) => b + c.length, 0), 0);
+    items.forEach(p => {
+      const monto   = parseFloat((p.total||'0').toString().replace(/[^0-9.,]/g,'').replace(',','.')) || 0;
+      const pidSafe = p.pedidoId.replace(/"/g,'&quot;');
+      const entregaBadge = p.fechaEntrega ? ' <span style="background:#E3F2FD;color:#1565C0;border-radius:20px;padding:1px 6px;font-size:10px;font-weight:800;">' + (p.turnoEntrega==='Mañana'?'🌅':'🌆') + ' ' + p.fechaEntrega.split(' ').slice(0,2).join(' ') + '</span>' : '';
+      const prods = parsearProductos(p.detalle||p.resumen||'');
 
-    html += '<div class="log-dia-bloque">';
-    html += '<div class="log-dia-hdr"><div class="log-dia-nombre">📅 ' + dia + '</div><div class="log-dia-count">' + totalDia + ' pedido' + (totalDia>1?'s':'') + '</div></div>';
-
-    ['Mañana','Tarde'].forEach(turno => {
-      if (!turnos[turno]) return;
-      const ciudades   = turnos[turno];
-      const totalTurno = Object.values(ciudades).reduce((a,c) => a + c.length, 0);
-
-      html += '<div class="log-turno-hdr">' +
-        '<span>' + (turno==='Mañana'?'🌅':'🌆') + ' ' + turno + '</span>' +
-        '<span style="font-weight:400;font-size:11px;color:var(--text3);">' + totalTurno + ' entrega' + (totalTurno>1?'s':'') + '</span>' +
-      '</div>';
-
-      const ciudadesOrdenadas = Object.keys(ciudades).sort((a,b) => {
-        const ia = RUTA_FIJA.findIndex(c => a.toLowerCase().includes(c.toLowerCase()));
-        const ib = RUTA_FIJA.findIndex(c => b.toLowerCase().includes(c.toLowerCase()));
-        return (ia===-1?999:ia) - (ib===-1?999:ib);
-      });
-
-      ciudadesOrdenadas.forEach(ciudad => {
-        const items = ciudades[ciudad];
-        const todosAsignados   = items.every(p => p.choferAsignado);
-        const todosMismoChofer = todosAsignados && items.every(p => p.choferAsignado === items[0].choferAsignado);
-        const diaSafe    = dia.replace(/'/g,"\'");
-        const ciudadSafe = ciudad.replace(/'/g,"\'");
-
-        html += '<div class="log-ciudad-bloque">';
-        html += '<div class="log-ciudad-hdr">' +
-          '<div class="log-ciudad-nombre">📍 ' + ciudad + ' <span style="font-size:12px;font-weight:400;color:var(--text3);">(' + items.length + ')</span></div>';
-
-        if (!todosMismoChofer) {
-          html += '<div class="log-ciudad-asignar-todos">' +
-            '<button class="log-ciudad-btn" data-dia="' + diaSafe + '" data-turno="' + turno + '" data-ciudad="' + ciudadSafe + '" data-chofer="Joan" onclick="logAsignarCiudadBtn(this,event)">J</button>' +
-            '<button class="log-ciudad-btn" data-dia="' + diaSafe + '" data-turno="' + turno + '" data-ciudad="' + ciudadSafe + '" data-chofer="Luis" onclick="logAsignarCiudadBtn(this,event)">L</button>' +
-          '</div>';
-        }
+      html += '<div class="log-pedido-row">';
+      html += '<div class="log-pedido-info">';
+      html += '<div class="log-pedido-cliente">' + (p.cliente||'—') + (p.comercio ? ' <span style="font-weight:400;font-size:12px;">· '+p.comercio+'</span>' : '') + entregaBadge + '</div>';
+      if (prods.length) html += '<div class="log-pedido-prods">' + prods.map(pr => pr.cantidad+'x '+pr.nombre).join(' · ') + '</div>';
+      html += '</div>';
+      html += '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0;">';
+      html += '<div class="log-pedido-monto">' + fmt(monto) + '</div>';
+      if (p.choferAsignado) {
+        html += '<div class="log-chofer-badge">🚚 ' + p.choferAsignado + ' <button data-pid="' + pidSafe + '" onclick="logDesasignarBtn(this,event)">✕</button></div>';
+      } else {
+        html += '<div class="log-asignar-picker">';
+        html += '<button class="log-asignar-btn" data-pid="' + pidSafe + '" data-chofer="Joan" onclick="logAsignarBtn(this,event)">🚚 Joan</button>';
+        html += '<button class="log-asignar-btn" data-pid="' + pidSafe + '" data-chofer="Luis" onclick="logAsignarBtn(this,event)">🚚 Luis</button>';
         html += '</div>';
-
-        items.forEach(p => {
-          const prods    = parsearProductos(p.detalle || p.resumen || '');
-          const prodsStr = prods.map(pr => pr.cantidad + 'x ' + pr.nombre).join(' · ') || (p.resumen||'—');
-          const monto    = parseFloat((p.total||'0').toString().replace(/[^0-9.]/g,''))||0;
-          const pidSafe  = p.pedidoId.replace(/'/g,"\'");
-
-          html += '<div class="log-pedido-row">' +
-            '<div class="log-pedido-info">' +
-              '<div class="log-pedido-cliente">' + (p.cliente||'—') + (p.comercio?' <span style="font-weight:400;font-size:12px;">· '+p.comercio+'</span>':'') + '</div>' +
-              '<div class="log-pedido-prods">' + prodsStr + '</div>' +
-            '</div>' +
-            '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;">' +
-              '<div class="log-pedido-monto">$' + Math.round(monto).toLocaleString('es-AR') + '</div>';
-
-          if (p.choferAsignado) {
-            html += '<div class="log-chofer-badge">🚚 ' + p.choferAsignado +
-              ' <button data-pid="' + pidSafe + '" onclick="logDesasignarBtn(this,event)">✕</button></div>';
-          } else {
-            html += '<div class="log-asignar-picker">' +
-              '<button class="log-asignar-btn" data-pid="' + pidSafe + '" data-chofer="Joan" onclick="logAsignarBtn(this,event)">🚚 Joan</button>' +
-              '<button class="log-asignar-btn" data-pid="' + pidSafe + '" data-chofer="Luis" onclick="logAsignarBtn(this,event)">🚚 Luis</button>' +
-            '</div>';
-          }
-
-          html += '</div></div>'; // cerrar derecha + log-pedido-row
-        });
-
-        html += '</div>'; // log-ciudad-bloque
-      });
+      }
+      html += '</div></div>';
     });
 
-    html += '</div>'; // log-dia-bloque
+    html += '</div>';
   });
 
   el.innerHTML = html;
@@ -9916,13 +9868,15 @@ function logAsignarCiudadBtn(btn, event) {
 
 async function logAsignarCiudad(dia, turno, ciudad, chofer, event) {
   event.stopPropagation();
-  const pedidos = todosLosPedidos.filter(p =>
-    p.estado === 'Confirmado' &&
-    p.fechaEntrega === dia &&
-    p.turnoEntrega === turno &&
-    (p.localidad||'Sin ciudad').trim() === ciudad &&
-    !p.choferAsignado
-  );
+  const pedidos = todosLosPedidos.filter(p => {
+    if (p.estado !== 'Confirmado') return false;
+    if (p.choferAsignado) return false;
+    if ((p.localidad||'Sin ciudad').trim() !== ciudad) return false;
+    // Si se especifica día/turno, filtrar por ellos; si no, asignar todos de esa ciudad
+    if (dia && p.fechaEntrega !== dia) return false;
+    if (turno && p.turnoEntrega !== turno) return false;
+    return true;
+  });
   if (!pedidos.length) { toast('Ya asignados', 'ok'); return; }
   toast('Asignando ' + pedidos.length + ' pedidos a ' + chofer + '...', 'ok');
   for (const p of pedidos) {
