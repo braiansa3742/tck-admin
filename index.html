@@ -9273,23 +9273,31 @@ async function asignarChofer(pedidoId, chofer, event) {
   const id = pedidoId.replace(/[^a-zA-Z0-9]/g,'-');
   const card = document.getElementById('card-'+id);
   if (card) card.outerHTML = renderCard(p);
+  // Guardar en Supabase (no crítico — la asignación ya está en memoria)
   try {
     const tel = (p.telCliente||'').replace(/\D/g,'');
+    const montoNum = parseFloat((p.total||'0').toString().replace(/[^0-9.,]/g,'').replace(',','.')) || 0;
     await sbFetch('entregas', {
       method: 'POST',
-      headers: { 'Prefer': 'resolution=merge-duplicates' },
+      headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
       body: JSON.stringify({
-        pedido_id: pedidoId, chofer: chofer,
-        cliente: p.cliente||'', telefono_cliente: tel||null,
-        ciudad: p.localidad||'', estado: 'pendiente',
-        monto: parseFloat((p.total||'0').toString().replace(/[^0-9.]/g,''))||0,
-        nota: p.resumen||''
+        pedido_id:        pedidoId,
+        chofer:           chofer,
+        cliente:          p.cliente || '',
+        telefono_cliente: tel || null,
+        ciudad:           p.localidad || '',
+        estado:           'pendiente',
+        monto:            montoNum,
+        nota:             p.resumen || '',
+        fecha_asignacion: new Date().toISOString()
       })
     });
-    toast('✅ Asignado a ' + chofer, 'ok');
-    // Actualizar planilla si está abierta
-    if (_tabActual === 'logistica') renderLogistica();
-  } catch(e) { toast('❌ Error al guardar', 'err'); }
+  } catch(e) {
+    // La asignación queda en memoria aunque Supabase falle
+    console.warn('asignarChofer Supabase:', e);
+  }
+  toast('✅ Asignado a ' + chofer, 'ok');
+  if (_tabActual === 'logistica') renderLogistica();
 }
 
 async function desasignarChofer(pedidoId, event) {
@@ -9391,11 +9399,9 @@ function abrirCertVet() {
 
   // Tomar todos los pedidos confirmados (con o sin chofer asignado)
   // Excluir localidades que no son ciudades reales
-  const LOCALIDADES_IGNORAR = ['campo', 'campo tck', 'catalogo web tck', 'sin especificar', ''];
+  // Incluir TODOS los confirmados — el vet necesita todo lo que sale
   const pedidos = todosLosPedidos.filter(function(p) {
-    if (p.estado !== 'Confirmado') return false;
-    const loc = (p.localidad || '').trim().toLowerCase();
-    return !LOCALIDADES_IGNORAR.includes(loc);
+    return p.estado === 'Confirmado';
   });
 
   const hoy = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' });
@@ -9519,9 +9525,9 @@ function descargarPDFVet() {
     '<h1>INFORME PARA CERTIFICADO VETERINARIO</h1>' +
     '<div class="sub">Generado el ' + fechaStr + ' · TCK The Chicken Kings S.R.L</div>' +
     '<div class="empresa">' +
-      '<strong>Establecimiento:</strong> The Chicken Kings S.R.L (N° 107/20662)<br>' +
+      '<strong>Razón Social:</strong> The Chicken Kings S.R.L<br>' +
       '<strong>Dirección:</strong> San Lorenzo N° 460, Trenque Lauquen<br>' +
-      '<strong>Categoría:</strong> Cámara Frigorífica de Aves y Productos Congelados' +
+      '<strong>Actividad:</strong> Distribución de Aves y Productos Congelados' +
     '</div>' +
     '<table><thead><tr>' +
       '<th>Producto / Categoría</th><th style="text-align:center;">Unidades</th><th style="text-align:center;">Kg</th>' +
@@ -9722,12 +9728,9 @@ function renderLogisticaChofer(el, chofer) {
   const mesHoyNombre = MESES_ES_LOG[hoy.getMonth()];
   const hoyLabel     = diaHoyNombre + ' ' + diaHoyNum + ' de ' + mesHoyNombre;
 
-  // Mostrar pedidos asignados a este chofer, independientemente de si tienen fecha
-  // Los pedidos con fecha del día de hoy + los sin fecha también se incluyen
   const pedidos = todosLosPedidos.filter(p => {
     if (p.estado !== 'Confirmado') return false;
     if (p.choferAsignado !== chofer) return false;
-    // Incluir si tiene fecha de hoy, o si no tiene fecha definida
     return !p.fechaEntrega || p.fechaEntrega === hoyLabel;
   });
 
@@ -9736,59 +9739,139 @@ function renderLogisticaChofer(el, chofer) {
     return;
   }
 
+  // ── Agrupar por ciudad en orden de ruta ──
+  const porCiudad = {};
+  pedidos.forEach(p => {
+    const ciudad = (p.localidad||'Sin ciudad').trim();
+    if (!porCiudad[ciudad]) porCiudad[ciudad] = [];
+    porCiudad[ciudad].push(p);
+  });
+
+  const ciudadesRuta = Object.keys(porCiudad).sort((a,b) => {
+    const ia = RUTA_FIJA.findIndex(c => a.toLowerCase().includes(c.toLowerCase()));
+    const ib = RUTA_FIJA.findIndex(c => b.toLowerCase().includes(c.toLowerCase()));
+    return (ia===-1?999:ia) - (ib===-1?999:ib);
+  });
+
+  // ── Totales por producto (para saber cuánto cargar) ──
   const totalesProds = {};
   let totalMonto = 0;
+  let totalBultos = 0;
   pedidos.forEach(p => {
     parsearProductos(p.detalle || p.resumen || '').forEach(pr => {
-      totalesProds[pr.nombre] = (totalesProds[pr.nombre]||0) + pr.cantidad;
+      if (!totalesProds[pr.nombre]) totalesProds[pr.nombre] = 0;
+      totalesProds[pr.nombre] += pr.cantidad;
+      totalBultos += pr.cantidad;
     });
-    totalMonto += parseFloat((p.total||'0').toString().replace(/[^0-9.]/g,''))||0;
+    totalMonto += parseFloat((p.total||'0').toString().replace(/[^0-9.,]/g,'').replace(',','.')) || 0;
   });
 
-  const porTurno = {};
-  pedidos.forEach(p => {
-    const turno  = p.turnoEntrega || 'Mañana';
-    const ciudad = (p.localidad||'Sin ciudad').trim();
-    if (!porTurno[turno]) porTurno[turno] = {};
-    if (!porTurno[turno][ciudad]) porTurno[turno][ciudad] = [];
-    porTurno[turno][ciudad].push(p);
-  });
+  const fmt = n => '$' + Math.round(n).toLocaleString('es-AR');
 
-  let html = '<div class="planilla-totales">' +
-    '<div class="planilla-totales-title">📦 ' + chofer + ' · ' + hoyLabel + '</div>';
-  Object.keys(totalesProds).sort().forEach(prod => {
-    html += '<div class="planilla-total-row"><span>' + prod + '</span><span class="planilla-total-cant">' + totalesProds[prod] + ' u.</span></div>';
-  });
-  html += '<div class="planilla-total-row" style="margin-top:8px;padding-top:8px;border-top:2px solid rgba(21,101,192,.15);">' +
-    '<span style="font-weight:800;">💰 Total a cobrar</span>' +
-    '<span class="planilla-total-cant">$' + Math.round(totalMonto).toLocaleString('es-AR') + '</span></div>';
+  let html = '';
+
+  // ══ SECCIÓN 1: RESUMEN DE CARGA ══════════════════════════════
+  html += '<div style="background:linear-gradient(135deg,#1565C0,#1976D2);border-radius:14px;padding:16px;margin-bottom:16px;">';
+  html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#fff;margin-bottom:2px;">🚚 ' + chofer + ' — ' + hoyLabel + '</div>';
+  html += '<div style="font-size:12px;color:rgba(255,255,255,.75);">' + pedidos.length + ' entrega' + (pedidos.length>1?'s':'') + ' · ' + totalBultos + ' bultos · ' + fmt(totalMonto) + '</div>';
   html += '</div>';
 
-  html += '<div style="display:flex;gap:8px;margin-bottom:14px;">' +
-    '<button onclick="imprimirPlanilla()" style="flex:1;padding:10px;background:#1565C0;color:#fff;border:none;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:900;cursor:pointer;">🖨️ Imprimir</button>' +
-    '<button id="log-vet-btn2" onclick="logisticaSelTab(&quot;vet&quot;,document.getElementById(&quot;log-tab-vet&quot;))" style="flex:1;padding:10px;background:#1B5E20;color:#fff;border:none;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:900;cursor:pointer;">🩺 Vet</button>' +
-  '</div>';
+  // Botones acción
+  html += '<div style="display:flex;gap:8px;margin-bottom:16px;">';
+  html += '<button onclick="imprimirPlanilla()" style="flex:1;padding:10px;background:#1565C0;color:#fff;border:none;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;cursor:pointer;">🖨️ Imprimir</button>';
+  html += '<button onclick="logisticaSelTab(&quot;vet&quot;,document.getElementById(&quot;log-tab-vet&quot;))" style="flex:1;padding:10px;background:#1B5E20;color:#fff;border:none;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;cursor:pointer;">🩺 Vet</button>';
+  html += '</div>';
 
-  ['Mañana','Tarde'].forEach(turno => {
-    const ciudades = porTurno[turno];
-    if (!ciudades || !Object.keys(ciudades).length) return;
-    html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">' + (turno==='Mañana'?'🌅':'🌆') + ' Turno ' + turno + '</div>';
-    const ords = Object.keys(ciudades).sort((a,b) => {
-      const ia = RUTA_FIJA.findIndex(c => a.toLowerCase().includes(c.toLowerCase()));
-      const ib = RUTA_FIJA.findIndex(c => b.toLowerCase().includes(c.toLowerCase()));
-      return (ia===-1?999:ia) - (ib===-1?999:ib);
-    });
-    let parada = 1;
-    ords.forEach(ciudad => {
-      const items = ciudades[ciudad];
-      html += '<div class="planilla-seccion"><div class="planilla-seccion-hdr"><div class="planilla-seccion-ciudad">📍 ' + ciudad + '</div><div class="planilla-seccion-count">Parada ' + parada++ + '</div></div>';
-      items.forEach(p => {
-        const prodsStr = parsearProductos(p.detalle||p.resumen||'').map(pr => pr.cantidad+'x '+pr.nombre).join(' · ') || (p.resumen||'—');
-        const monto = parseFloat((p.total||'0').toString().replace(/[^0-9.]/g,''))||0;
-        html += '<div class="planilla-cliente-row"><div class="planilla-cliente-nombre">' + (p.cliente||'—') + (p.comercio?' · '+p.comercio:'') + '</div><div class="planilla-cliente-prods">' + prodsStr + '</div><div class="planilla-cliente-monto">$' + Math.round(monto).toLocaleString('es-AR') + '</div></div>';
+  // ── LISTA DE PRODUCTOS A CARGAR ──────────────────────────────
+  html += '<div class="planilla-totales" style="margin-bottom:16px;">';
+  html += '<div class="planilla-totales-title">📦 Productos a cargar — totales</div>';
+  Object.keys(totalesProds).sort().forEach(prod => {
+    const cant = totalesProds[prod];
+    html += '<div class="planilla-total-row">';
+    html += '<span>' + prod + '</span>';
+    html += '<span class="planilla-total-cant" style="font-size:22px;">' + cant + ' u.</span>';
+    html += '</div>';
+  });
+  html += '<div class="planilla-total-row" style="margin-top:8px;padding-top:8px;border-top:2px solid rgba(21,101,192,.15);">';
+  html += '<span style="font-weight:800;">💰 Total a cobrar</span>';
+  html += '<span class="planilla-total-cant">' + fmt(totalMonto) + '</span>';
+  html += '</div></div>';
+
+  // ══ SECCIÓN 2: ORDEN DE CARGA (ruta INVERSA) ══════════════════
+  // El camión carga en orden INVERSO a la ruta: lo último que entrega va primero (fondo del camión)
+  const ciudadesInversa = [...ciudadesRuta].reverse();
+
+  html += '<div style="background:#FFF8E1;border:1.5px solid #FFE082;border-radius:14px;padding:14px 16px;margin-bottom:16px;">';
+  html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:16px;font-weight:900;color:#795548;margin-bottom:10px;">📥 ORDEN DE CARGA AL CAMIÓN</div>';
+  html += '<div style="font-size:11px;color:#795548;margin-bottom:10px;">Lo que se carga PRIMERO va al fondo (se entrega ÚLTIMO)</div>';
+
+  ciudadesInversa.forEach((ciudad, idx) => {
+    const items = porCiudad[ciudad];
+    const totalCiudad = items.reduce((a,p) => a + (parseFloat((p.total||'0').toString().replace(/[^0-9.,]/g,'').replace(',','.')) || 0), 0);
+    const prodsCiudad = {};
+    items.forEach(p => {
+      parsearProductos(p.detalle||p.resumen||'').forEach(pr => {
+        prodsCiudad[pr.nombre] = (prodsCiudad[pr.nombre]||0) + pr.cantidad;
       });
+    });
+    const prodStr = Object.keys(prodsCiudad).map(k => prodsCiudad[k] + 'x ' + k).join(', ');
+
+    html += '<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid rgba(121,85,72,.12);">';
+    html += '<div style="background:#795548;color:#fff;border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;flex-shrink:0;">' + (idx+1) + '</div>';
+    html += '<div style="flex:1;">';
+    html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:900;color:#4E342E;">' + ciudad + ' <span style="font-weight:400;font-size:12px;color:#795548;">(' + items.length + ' entrega' + (items.length>1?'s':'') + ' · ' + fmt(totalCiudad) + ')</span></div>';
+    html += '<div style="font-size:11px;color:#795548;margin-top:2px;">' + prodStr + '</div>';
+    html += '</div></div>';
+  });
+  html += '</div>';
+
+  // ══ SECCIÓN 3: DETALLE POR PARADA (orden de entrega) ══════════
+  html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:900;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">🗺️ Orden de entrega</div>';
+
+  let parada = 1;
+  ciudadesRuta.forEach(ciudad => {
+    const items = porCiudad[ciudad];
+    const totalCiudad = items.reduce((a,p) => a + (parseFloat((p.total||'0').toString().replace(/[^0-9.,]/g,'').replace(',','.')) || 0), 0);
+
+    html += '<div class="planilla-seccion">';
+    html += '<div class="planilla-seccion-hdr">';
+    html += '<div class="planilla-seccion-ciudad">📍 ' + ciudad + '</div>';
+    html += '<div class="planilla-seccion-count">Parada ' + parada++ + ' · ' + fmt(totalCiudad) + '</div>';
+    html += '</div>';
+
+    items.forEach(p => {
+      const prods = parsearProductos(p.detalle||p.resumen||'');
+      const monto = parseFloat((p.total||'0').toString().replace(/[^0-9.,]/g,'').replace(',','.')) || 0;
+      const tel = (p.telCliente||'').replace(/\D/g,'');
+      const waNum = tel ? (tel.startsWith('549') ? tel : '549' + tel) : '';
+
+      html += '<div class="planilla-cliente-row">';
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">';
+      html += '<div class="planilla-cliente-nombre">' + (p.cliente||'—') + (p.comercio ? ' <span style="font-weight:400;font-size:12px;">· '+p.comercio+'</span>' : '') + '</div>';
+      html += '<div class="planilla-cliente-monto">' + fmt(monto) + '</div>';
+      html += '</div>';
+
+      // Productos a bajar — listados claramente
+      if (prods.length) {
+        html += '<div style="background:#F0F4FF;border-radius:8px;padding:8px 10px;margin-bottom:6px;">';
+        prods.forEach(pr => {
+          html += '<div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0;">';
+          html += '<span>📦 ' + pr.nombre + '</span>';
+          html += '<span style="font-family:Barlow Condensed,sans-serif;font-weight:900;color:#1565C0;">' + pr.cantidad + ' u.</span>';
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+
+      // Botón WA si hay teléfono
+      if (waNum) {
+        const msg = encodeURIComponent('Hola ' + (p.cliente||'') + '! 🐔 Soy el repartidor de TCK. Estoy en camino a ' + ciudad + ' con tu pedido. En breve llego! 🚚');
+        html += '<a href="https://wa.me/' + waNum + '?text=' + msg + '" style="display:inline-flex;align-items:center;gap:4px;background:#25D366;color:#fff;border-radius:8px;padding:5px 10px;font-size:12px;font-weight:700;text-decoration:none;margin-top:2px;">📲 Avisar</a>';
+      }
+
       html += '</div>';
     });
+    html += '</div>';
   });
 
   el.innerHTML = html;
