@@ -4053,10 +4053,41 @@ input[type="date"] {
   <!-- Modal veterinaria -->
   <div class="vet-modal-overlay hidden" id="vet-modal">
     <div class="vet-sheet">
-      <div class="vet-titulo">🩺 Certificado Veterinario</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <div class="vet-titulo">🩺 Certificado Veterinario</div>
+        <button onclick="cerrarVetModal()" style="background:var(--cream2);border:none;border-radius:50%;width:32px;height:32px;font-size:18px;cursor:pointer;flex-shrink:0;">✕</button>
+      </div>
       <div class="vet-sub" id="vet-sub"></div>
+
+      <!-- Selector chofer + vehículo -->
+      <div id="vet-config" style="background:#F0F4FF;border-radius:12px;padding:14px;margin-bottom:14px;">
+        <div style="font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:700;color:var(--text3);margin-bottom:10px;">Configurar planilla:</div>
+        <div style="display:flex;gap:10px;margin-bottom:10px;">
+          <div style="flex:1;">
+            <label style="font-size:12px;font-weight:700;color:var(--text3);display:block;margin-bottom:4px;">Chofer</label>
+            <select id="vet-chofer-sel" onchange="vetActualizarVehiculo()" style="width:100%;padding:8px 10px;border-radius:10px;border:1.5px solid var(--cream3);font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:700;background:#fff;">
+              <option value="">— Elegir —</option>
+              <option value="Joan">🚚 Joan</option>
+              <option value="Luis">🚚 Luis</option>
+            </select>
+          </div>
+          <div style="flex:1;">
+            <label style="font-size:12px;font-weight:700;color:var(--text3);display:block;margin-bottom:4px;">Vehículo</label>
+            <select id="vet-vehiculo-sel" style="width:100%;padding:8px 10px;border-radius:10px;border:1.5px solid var(--cream3);font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:700;background:#fff;">
+              <option value="">— Elegir —</option>
+              <option value="Daily AG308YN">Daily · AG308YN</option>
+              <option value="Iveco Tector AG495LU">Iveco Tector · AG495LU</option>
+              <option value="Iveco Tector AF979ZU">Iveco Tector · AF979ZU</option>
+            </select>
+          </div>
+        </div>
+        <button onclick="vetGenerar()" style="width:100%;padding:11px;background:#1565C0;color:#fff;border:none;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:16px;font-weight:900;cursor:pointer;touch-action:manipulation;">Generar planilla</button>
+      </div>
+
       <div id="vet-contenido"></div>
-      <button class="vet-wa-btn" onclick="descargarPDFVet()">📥 Descargar PDF para veterinaria</button>
+      <div id="vet-acciones" style="display:none;">
+        <button class="vet-wa-btn" onclick="descargarPDFVet()">📥 Descargar PDF</button>
+      </div>
       <button class="vet-close-btn" onclick="cerrarVetModal()">Cerrar</button>
     </div>
   </div>
@@ -9341,59 +9372,68 @@ const _origCambiarTab = typeof cambiarTab === 'function' ? cambiarTab : null;
 
 // Tabla: producto → [categoría vet, kg por unidad]
 const VET_TABLA = {
-  "Pollo Ginosa":                ["Pollo entero", 20],
-  "Pollo Optimo":                ["Pollo entero", 20],
-  "Suprema":                     ["Trozado", 5],
-  "Suprema IQF":                 ["Trozado", 15],
-  "Suprema B IQF":               ["Trozado", 20],
-  "Fino de Ave Cocida":          ["Trozado", 10],
-  "Alita Congelada Granel":      ["Trozado", 15],
-  "MDM - Carne Molida de Pollo": ["Trozado", 20],
-  "Cuarto Trasero IQF":          ["Trozado", 15],
-  "Medallon de Pollo Clasico":   ["Rebozados", 6],
-  "Medallon Pollo c/Cheddar":    ["Rebozados", 6],
-  "Medallon Pollo JyQ":          ["Rebozados", 6],
-  "Medallon Pollo y Espinaca":   ["Rebozados", 6],
-  "Formita Clasica":             ["Rebozados", 6],
-  "Formitas Pollo JyQ":          ["Rebozados", 6],
-  "Nuggets de Pollo Crocante":   ["Rebozados", 6],
-  "Bocadito de Papa y Jamon":    ["Rebozados", 6],
-  "Pechuguitas al Verdeo":       ["Rebozados", 6],
-  "Filet Merluza Finas Hierbas": ["Rebozados", 6],
-  "Filet de Merluza Rebozado":   ["Rebozados", 6],
-  "Filet Merluza a Granel":      ["Rebozados", 10],
-  "Milanesa de Nalga":           ["Rebozados", 5],
-  "Milanesa de Pollo":           ["Rebozados", 5],
-  "Hamburguesa 100% Carne":      ["Rebozados", 4],
-  "Papa Baston Balcarce":        ["Frutas y Verduras", 2.5],
-  "Pulpa de Palta":              ["Frutas y Verduras", 0.45],
-  "Arandanos Solimeno":          ["Frutas y Verduras", 0.5],
-  "Brocoli":                     ["Frutas y Verduras", 0.5],
-  "Espinacas":                   ["Frutas y Verduras", 0.5],
-  "Morron":                      ["Frutas y Verduras", 0.5],
-  "Primavera":                   ["Frutas y Verduras", 0.5],
-  "Frutos Rojos":                ["Frutas y Verduras", 0.5],
-  "Cebolla":                     ["Frutas y Verduras", 0.5],
-  "Ravioles de Calabaza":        ["Frutas y Verduras", 0.5],
-  "Raviolones Espinaca y Mozz":  ["Frutas y Verduras", 0.5],
-  "Gnoquis de Papa":             ["Frutas y Verduras", 0.5],
-  "Gnoquis de Espinaca":         ["Frutas y Verduras", 0.5],
-  "Sorrentinos Jamon y Queso":   ["Frutas y Verduras", 0.5],
-  "Sorrentinos Ricota 4 Quesos": ["Frutas y Verduras", 0.4],
-  "Hamburguesa de Garbanzos":    ["Frutas y Verduras", 0.4],
-  "Hamburguesa de Lentejas":     ["Frutas y Verduras", 0.4],
-  "Hamburguesa de Quinoa":       ["Frutas y Verduras", 0.4],
-  "Hamburguesa de Arvejas":      ["Frutas y Verduras", 0.4],
-  "Hamburguesa de Hongos":       ["Frutas y Verduras", 0.4],
-  "Hamburguesa de Espinaca":     ["Frutas y Verduras", 0.4],
-  "Hamburguesa Mexicana":        ["Frutas y Verduras", 0.4],
-  "Hamburguesa 5 Vegetales":     ["Frutas y Verduras", 0.4],
-  "Maple N° 2":                  ["Huevos", 1.8],
-  "Maple N° 1":                  ["Huevos", 1.8],
-  "Cajita 1/2 Docena N° 2":      ["Huevos", 0.36]
+  // POLLO ENTERO
+  "Pollo A":                     ["Pollo entero",      20],
+  "Pollo B":                     ["Pollo entero",      20],
+  "Pollo Ginosa":                ["Pollo entero",      20],
+  "Pollo Optimo":                ["Pollo entero",      20],
+  // TROZADOS
+  "Suprema":                     ["Trozados",           5],
+  "Suprema IQF":                 ["Trozados",          15],
+  "Suprema B IQF":               ["Trozados",          20],
+  "Fino de Ave Cocida":          ["Trozados",          10],
+  "Alita Congelada Granel":      ["Trozados",          15],
+  "MDM - Carne Molida de Pollo": ["Trozados",          20],
+  "Cuarto Trasero IQF":          ["Trozados",          15],
+  // REBOZADOS
+  "Medallon de Pollo Clasico":   ["Rebozados",          6],
+  "Medallon Pollo c/Cheddar":    ["Rebozados",          6],
+  "Medallon Pollo JyQ":          ["Rebozados",          6],
+  "Medallon Pollo y Espinaca":   ["Rebozados",          6],
+  "Formita Clasica":             ["Rebozados",          6],
+  "Formitas Pollo JyQ":          ["Rebozados",          6],
+  "Nuggets de Pollo Crocante":   ["Rebozados",          6],
+  "Bocadito de Papa y Jamon":    ["Rebozados",          6],
+  "Pechuguitas al Verdeo":       ["Rebozados",          6],
+  "Filet Merluza Finas Hierbas": ["Rebozados",          6],
+  "Filet de Merluza Rebozado":   ["Rebozados",          6],
+  "Filet Merluza a Granel":      ["Rebozados",         10],
+  "Milanesa de Nalga":           ["Rebozados",          5],
+  "Milanesa de Pollo":           ["Rebozados",          5],
+  "Hamburguesa 100% Carne":      ["Rebozados",          4],
+  // FRUTAS Y VERDURAS
+  "Papa Baston Balcarce":        ["Frutas y verduras",  2.5],
+  "Pulpa de Palta":              ["Frutas y verduras",  0.45],
+  "Arandanos Solimeno":          ["Frutas y verduras",  0.5],
+  "Arándanos Solimeno":          ["Frutas y verduras",  0.5],
+  "Brocoli":                     ["Frutas y verduras",  0.5],
+  "Espinacas":                   ["Frutas y verduras",  0.5],
+  "Morron":                      ["Frutas y verduras",  0.5],
+  "Primavera":                   ["Frutas y verduras",  0.5],
+  "Frutos Rojos":                ["Frutas y verduras",  0.5],
+  "Cebolla":                     ["Frutas y verduras",  0.5],
+  "Hamburguesa de Garbanzos":    ["Frutas y verduras",  0.4],
+  "Hamburguesa de Lentejas":     ["Frutas y verduras",  0.4],
+  "Hamburguesa de Quinoa":       ["Frutas y verduras",  0.4],
+  "Hamburguesa de Arvejas":      ["Frutas y verduras",  0.4],
+  "Hamburguesa de Hongos":       ["Frutas y verduras",  0.4],
+  "Hamburguesa de Espinaca":     ["Frutas y verduras",  0.4],
+  "Hamburguesa Mexicana":        ["Frutas y verduras",  0.4],
+  "Hamburguesa 5 Vegetales":     ["Frutas y verduras",  0.4],
+  // PASTAS
+  "Ravioles de Calabaza":        ["Pastas",             0.5],
+  "Raviolones Espinaca y Mozz":  ["Pastas",             0.5],
+  "Gnoquis de Papa":             ["Pastas",             0.5],
+  "Gnoquis de Espinaca":         ["Pastas",             0.5],
+  "Sorrentinos Jamon y Queso":   ["Pastas",             0.5],
+  "Sorrentinos Ricota 4 Quesos": ["Pastas",             0.4],
+  // HUEVOS
+  "Maple N° 2":                  ["Huevo",              1.5],
+  "Maple N° 1":                  ["Huevo",              1.8],
+  "Cajita 1/2 Docena N° 2":      ["Huevo",              0.3]
 };
 
-const VET_ORDEN_CATS = ["Pollo entero", "Trozado", "Rebozados", "Frutas y Verduras", "Huevos"];
+const VET_ORDEN_CATS = ["Pollo entero", "Trozados", "Rebozados", "Frutas y verduras", "Pastas", "Huevo"];
 // Número de teléfono de la veterinaria (Alejandra Brucart)
 const VET_TEL = '5492317000000'; // ← actualizar con el número real
 
@@ -9401,41 +9441,62 @@ let _vetDatos = null; // datos calculados para el WA
 
 function abrirCertVet() {
   const modal = document.getElementById('vet-modal');
-  const contenido = document.getElementById('vet-contenido');
-  const sub = document.getElementById('vet-sub');
   modal.classList.remove('hidden');
-
-  // Tomar todos los pedidos confirmados (con o sin chofer asignado)
-  // Excluir localidades que no son ciudades reales
-  // Incluir TODOS los confirmados — el vet necesita todo lo que sale
-  const pedidos = todosLosPedidos.filter(function(p) {
-    return p.estado === 'Confirmado';
-  });
-
+  // Resetear
+  document.getElementById('vet-contenido').innerHTML = '';
+  document.getElementById('vet-acciones').style.display = 'none';
+  document.getElementById('vet-chofer-sel').value = '';
+  document.getElementById('vet-vehiculo-sel').value = '';
+  // Mostrar fecha
   const hoy = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' });
-  sub.textContent = hoy + ' · ' + pedidos.length + ' pedidos confirmados';
+  document.getElementById('vet-sub').textContent = hoy;
+  _vetDatos = null;
+}
+
+function vetActualizarVehiculo() {
+  // Podría pre-seleccionar vehículo por chofer en el futuro
+}
+
+function vetGenerar() {
+  const chofer   = document.getElementById('vet-chofer-sel').value;
+  const vehiculo = document.getElementById('vet-vehiculo-sel').value;
+
+  if (!chofer)   { toast('Elegí un chofer', 'err'); return; }
+  if (!vehiculo) { toast('Elegí un vehículo', 'err'); return; }
+
+  // Pedidos confirmados asignados a este chofer
+  const pedidos = todosLosPedidos.filter(p =>
+    p.estado === 'Confirmado' && p.choferAsignado === chofer
+  );
 
   if (!pedidos.length) {
-    contenido.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text3);">No hay pedidos confirmados asignados a choferes hoy.</div>';
+    document.getElementById('vet-contenido').innerHTML =
+      '<div style="text-align:center;padding:20px;color:var(--text3);">No hay pedidos confirmados asignados a ' + chofer + '.</div>';
     return;
   }
 
-  // Calcular por ciudad
+  // Agrupar por ciudad → categoría
+  const LOCALIDADES_IGNORAR = ['campo', 'campo tck', 'catalogo web tck', ''];
   const porCiudad = {};
+  let totalUds = 0, totalKg = 0;
+
   pedidos.forEach(function(p) {
     const ciudad = (p.localidad || 'Sin ciudad').trim();
+    if (LOCALIDADES_IGNORAR.includes(ciudad.toLowerCase())) return;
     if (!porCiudad[ciudad]) porCiudad[ciudad] = {};
-    const prods = parsearProductosVet(p.detalle || p.resumen || '');
+
+    const prods = parsearProductos(p.detalle || p.resumen || '');
     prods.forEach(function(pr) {
-      const key = normalizarNombreVet(pr.nombre);
-      const mapeo = VET_TABLA[key];
+      const key    = normalizarNombreVet(pr.nombre);
+      const mapeo  = VET_TABLA[key] || VET_TABLA[pr.nombre];
       if (!mapeo) return;
       const cat = mapeo[0];
-      const kg  = mapeo[1] * pr.cantidad;
-      const uds = pr.cantidad;
+      const kgU = mapeo[1];
       if (!porCiudad[ciudad][cat]) porCiudad[ciudad][cat] = { uds: 0, kg: 0 };
-      porCiudad[ciudad][cat].uds += uds;
-      porCiudad[ciudad][cat].kg  += kg;
+      porCiudad[ciudad][cat].uds += pr.cantidad;
+      porCiudad[ciudad][cat].kg  += kgU * pr.cantidad;
+      totalUds += pr.cantidad;
+      totalKg  += kgU * pr.cantidad;
     });
   });
 
@@ -9446,134 +9507,132 @@ function abrirCertVet() {
     return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
   });
 
-  _vetDatos = { ciudades, porCiudad, hoy };
+  const hoy     = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' });
+  const fechaPDF = new Date().toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
 
-  // Renderizar
+  _vetDatos = { chofer, vehiculo, ciudades, porCiudad, hoy, fechaPDF, totalUds, totalKg };
+
+  // Renderizar tabla
   let html = '';
+
+  // Encabezado
+  html += '<div style="background:#1565C0;border-radius:12px;padding:14px 16px;margin-bottom:14px;color:#fff;">';
+  html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;">The Chicken Kings S.R.L.</div>';
+  html += '<div style="font-size:12px;opacity:.85;margin-top:2px;">Remito Veterinario · ' + hoy + '</div>';
+  html += '<div style="display:flex;gap:16px;margin-top:8px;font-size:13px;">';
+  html += '<span>🚚 <strong>' + chofer + '</strong></span>';
+  html += '<span>🚛 <strong>' + vehiculo + '</strong></span>';
+  html += '</div></div>';
+
+  // Tabla por ciudad
   ciudades.forEach(function(ciudad) {
     const cats = porCiudad[ciudad];
     if (!Object.keys(cats).length) return;
-    html += '<div class="vet-ciudad-bloque">' +
-      '<div class="vet-ciudad-nombre">📍 ' + ciudad + '</div>';
+
+    // Totales ciudad
+    let cityUds = 0, cityKg = 0;
+    VET_ORDEN_CATS.forEach(function(c) {
+      if (cats[c]) { cityUds += cats[c].uds; cityKg += cats[c].kg; }
+    });
+
+    html += '<div style="margin-bottom:14px;border-radius:12px;overflow:hidden;border:1.5px solid var(--cream3);">';
+
+    // Header ciudad
+    html += '<div style="background:#1565C0;color:#fff;padding:8px 14px;display:flex;justify-content:space-between;align-items:center;">';
+    html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:16px;font-weight:900;">' + ciudad + '</div>';
+    html += '<div style="font-size:12px;opacity:.85;">' + cityUds + ' u · ' + Math.round(cityKg) + ' kg</div>';
+    html += '</div>';
+
+    // Filas por categoría
     VET_ORDEN_CATS.forEach(function(cat) {
       if (!cats[cat]) return;
       const d = cats[cat];
-      html += '<div class="vet-categoria-row">' +
-        '<span class="vet-cat-nombre">' + cat + '</span>' +
-        '<span class="vet-cat-datos">' + d.uds + ' unid · ' + Math.round(d.kg) + ' kg</span>' +
-      '</div>';
+      html += '<div style="display:flex;padding:8px 14px;border-bottom:1px solid var(--cream2);align-items:center;">';
+      html += '<div style="flex:1;font-size:13px;color:var(--text);">' + cat + '</div>';
+      html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:700;color:var(--text);min-width:60px;text-align:right;">' + d.uds + ' u.</div>';
+      html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;color:#1565C0;min-width:70px;text-align:right;">' + Math.round(d.kg * 10) / 10 + ' kg</div>';
+      html += '</div>';
     });
     html += '</div>';
   });
 
-  contenido.innerHTML = html;
+  // Total general
+  html += '<div style="background:#1B5E20;color:#fff;border-radius:12px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;">';
+  html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:16px;font-weight:900;">TOTAL GENERAL</div>';
+  html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:16px;font-weight:900;">' + totalUds + ' u. · ' + Math.round(totalKg) + ' kg</div>';
+  html += '</div>';
+
+  document.getElementById('vet-contenido').innerHTML = html;
+  document.getElementById('vet-acciones').style.display = 'block';
 }
 
-function normalizarNombreVet(nombre) {
-  // Normalizar tildes y variaciones menores
-  return (nombre || '').trim()
-    .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e')
-    .replace(/[íìï]/g,'i').replace(/[óòö]/g,'o')
-    .replace(/[úùü]/g,'u').replace(/ñ/g,'n');
-}
-
-function parsearProductos(detalle) {
-  if (!detalle) return [];
-  // Consolida duplicados por nombre normalizado
-  var mapa = {};
-  var lineas = detalle.replace(/\|/g,'\n').split('\n');
-  lineas.forEach(function(linea) {
-    linea = linea.trim();
-    if (!linea) return;
-    var nombre = null, cant = 1;
-    // Patrón *Nombre* — nombre entre asteriscos (formato campo), ignorar resto
-    var mAst = linea.match(/^\*([^*]+)\*/);
-    if (mAst) {
-      nombre = mAst[1].trim();
-    } else {
-      // Patrón "Nx Nombre (presentacion) → $precio"
-      var m = linea.match(/^(\d+)x?\s+(.+?)(?:\s+\(|\s+→|\s*$)/);
-      if (m) {
-        cant = parseInt(m[1]) || 1;
-        nombre = m[2].trim().replace(/\*/g,'');
-      }
-    }
-    if (!nombre || nombre.charAt(0) === '$') return;
-    var norm = nombre.toLowerCase().replace(/[^a-z0-9]/gi,'');
-    if (mapa[norm]) {
-      mapa[norm].cantidad += cant;
-    } else {
-      mapa[norm] = { nombre: nombre, cantidad: cant };
-    }
-  });
-  return Object.values(mapa);
-}
-
-function parsearProductosVet(detalle) {
-  // Reusar parsearProductos que ya maneja ambos formatos y consolida duplicados
-  return parsearProductos(detalle);
-}
 
 function descargarPDFVet() {
-  if (!_vetDatos) return;
-  const { ciudades, porCiudad, hoy } = _vetDatos;
-  const fecha = new Date();
-  const fechaStr = fecha.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
+  if (!_vetDatos) { toast('Generá la planilla primero', 'err'); return; }
+  const { chofer, vehiculo, ciudades, porCiudad, hoy, fechaPDF, totalUds, totalKg } = _vetDatos;
 
-  // Construir HTML del PDF
   let rows = '';
+  let grandUds = 0, grandKg = 0;
+
   ciudades.forEach(function(ciudad) {
     const cats = porCiudad[ciudad];
     if (!Object.keys(cats).length) return;
-    // Fila de ciudad
-    rows += '<tr style="background:#1565C0;">' +
-      '<td colspan="3" style="padding:8px 12px;color:#fff;font-family:Arial,sans-serif;font-size:14px;font-weight:bold;">📍 ' + ciudad.toUpperCase() + '</td>' +
-    '</tr>';
+    let cityUds = 0, cityKg = 0;
+    VET_ORDEN_CATS.forEach(function(c) {
+      if (cats[c]) { cityUds += cats[c].uds; cityKg += cats[c].kg; }
+    });
+    grandUds += cityUds; grandKg += cityKg;
+
+    rows += '<tr style="background:#1565C0;color:#fff;">' +
+      '<td colspan="3" style="padding:8px 12px;font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:900;">' +
+      '📍 ' + ciudad + '</td>' +
+      '<td style="padding:8px 12px;text-align:right;font-weight:900;">' + cityUds + '</td>' +
+      '<td style="padding:8px 12px;text-align:right;font-weight:900;">' + Math.round(cityKg) + '</td>' +
+      '</tr>';
+
     VET_ORDEN_CATS.forEach(function(cat) {
       if (!cats[cat]) return;
       const d = cats[cat];
-      const kgNum = Math.round(d.kg);
-      // Formato con número en letras (simplificado)
       rows += '<tr>' +
-        '<td style="padding:7px 12px;font-family:Arial,sans-serif;font-size:13px;border-bottom:1px solid #e0e0e0;">' + cat + '</td>' +
-        '<td style="padding:7px 12px;font-family:Arial,sans-serif;font-size:13px;border-bottom:1px solid #e0e0e0;text-align:center;">' + d.uds + ' unidades</td>' +
-        '<td style="padding:7px 12px;font-family:Arial,sans-serif;font-size:13px;border-bottom:1px solid #e0e0e0;text-align:center;font-weight:bold;">' + kgNum + ' kg</td>' +
-      '</tr>';
+        '<td></td>' +
+        '<td colspan="2" style="padding:6px 12px;font-size:13px;">' + cat + '</td>' +
+        '<td style="padding:6px 12px;text-align:right;font-size:13px;">' + d.uds + '</td>' +
+        '<td style="padding:6px 12px;text-align:right;font-size:13px;font-weight:700;">' + (Math.round(d.kg * 10) / 10) + '</td>' +
+        '</tr>';
     });
   });
 
   const html = '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
-    '<title>Informe Veterinario TCK - ' + fechaStr + '</title>' +
-    '<style>' +
-      'body { font-family: Arial, sans-serif; margin: 30px; color: #333; }' +
-      'h1 { color: #1B5E20; font-size: 20px; margin-bottom: 4px; }' +
-      '.sub { color: #666; font-size: 13px; margin-bottom: 20px; }' +
-      '.empresa { background: #F1F8E9; border-left: 4px solid #1B5E20; padding: 10px 16px; margin-bottom: 20px; font-size: 13px; }' +
-      'table { width: 100%; border-collapse: collapse; }' +
-      'th { background: #1B5E20; color: #fff; padding: 10px 12px; font-size: 13px; text-align: left; }' +
-      'tr:nth-child(even) { background: #f9f9f9; }' +
-      '.footer { margin-top: 30px; padding-top: 15px; border-top: 1px solid #ccc; font-size: 11px; color: #999; text-align: center; }' +
-      '@media print { button { display: none; } }' +
+    '<style>body{font-family:Arial,sans-serif;padding:24px;color:#222;font-size:13px;}' +
+    'h2{color:#1565C0;margin:0 0 4px;}p{margin:2px 0 0;color:#555;font-size:12px;}' +
+    'table{width:100%;border-collapse:collapse;margin-top:16px;}' +
+    'th{background:#1565C0;color:#fff;padding:8px 12px;text-align:left;font-size:13px;}' +
+    'th:last-child,th:nth-last-child(2){text-align:right;}' +
+    'tr:nth-child(even){background:#f5f7ff;}' +
+    'td{border-bottom:1px solid #e0e0e0;}' +
+    '.total{background:#1B5E20!important;color:#fff;font-weight:900;}' +
+    '.total td{color:#fff;padding:10px 12px;font-weight:900;border:none;}' +
+    '@media print{button{display:none}}' +
     '</style></head><body>' +
-    '<h1>INFORME PARA CERTIFICADO VETERINARIO</h1>' +
-    '<div class="sub">Generado el ' + fechaStr + ' · TCK The Chicken Kings S.R.L</div>' +
-    '<div class="empresa">' +
-      '<strong>Razón Social:</strong> The Chicken Kings S.R.L<br>' +
-      '<strong>Dirección:</strong> San Lorenzo N° 460, Trenque Lauquen<br>' +
-      '<strong>Actividad:</strong> Distribución de Aves y Productos Congelados' +
-    '</div>' +
+    '<h2>INFORME PARA CERTIFICADO VETERINARIO</h2>' +
+    '<p>Generado el ' + fechaPDF + ' · TCK The Chicken Kings S.R.L</p>' +
+    '<p style="margin-top:8px;">Chofer: <strong>' + chofer + '</strong> &nbsp;|&nbsp; Vehículo: <strong>' + vehiculo + '</strong></p>' +
+    '<p>Establecimiento: The Chicken Kings S.R.L · San Lorenzo N° 460, Trenque Lauquen</p>' +
     '<table><thead><tr>' +
-      '<th>Producto / Categoría</th><th style="text-align:center;">Unidades</th><th style="text-align:center;">Kg</th>' +
-    '</tr></thead><tbody>' + rows + '</tbody></table>' +
-    '<div class="footer">Documento generado por sistema TCK · ' + fechaStr + '</div>' +
+    '<th></th><th>Destino</th><th>Categoría</th>' +
+    '<th style="text-align:right">Unidades</th><th style="text-align:right">Kg</th>' +
+    '</tr></thead><tbody>' + rows +
+    '<tr class="total"><td colspan="3">TOTAL GENERAL</td>' +
+    '<td style="text-align:right">' + grandUds + '</td>' +
+    '<td style="text-align:right">' + Math.round(grandKg) + '</td></tr>' +
+    '</tbody></table>' +
+    '<p style="margin-top:24px;text-align:center;color:#aaa;font-size:11px;">Documento generado por sistema TCK · ' + fechaPDF + '</p>' +
     '</body></html>';
 
-  // Abrir en nueva ventana e imprimir (genera PDF nativo)
   const win = window.open('', '_blank');
   win.document.write(html);
   win.document.close();
-  win.focus();
-  setTimeout(function() { win.print(); }, 500);
+  setTimeout(() => win.print(), 500);
 }
 
 function cerrarVetModal() {
