@@ -4581,7 +4581,7 @@ async function cargarPedidos(silencioso) {
         resumen:   limpiar(cols[8]),
         detalle:   limpiar(cols[9]),
         estado:         limpiar(cols[10]) || 'Pendiente',
-        fechaEntrega:   limpiar(cols[11]) || '',
+        fechaEntrega:   esFechaEntregaValida(limpiar(cols[11])) ? limpiar(cols[11]) : '',
         turnoEntrega:   limpiar(cols[12]) || '',
         fila:           i + 1
       });
@@ -4661,6 +4661,11 @@ async function cargarPedidos(silencioso) {
     if (!silencioso) document.getElementById('lista-pedidos').innerHTML =
       '<div class="empty">❌ Error al cargar pedidos.<br>Verificá tu conexión.</div>';
   }
+}
+
+function esFechaEntregaValida(s) {
+  if (!s) return false;
+  return /^(Lunes|Martes|Mi|Jueves|Viernes|S[aá]b|Domingo)/i.test(s.trim());
 }
 
 function limpiar(s) { return s ? s.trim().replace(/^"|"$/g,'').trim() : ''; }
@@ -9384,9 +9389,13 @@ function abrirCertVet() {
   const sub = document.getElementById('vet-sub');
   modal.classList.remove('hidden');
 
-  // Tomar pedidos confirmados con chofer asignado del día
+  // Tomar todos los pedidos confirmados (con o sin chofer asignado)
+  // Excluir localidades que no son ciudades reales
+  const LOCALIDADES_IGNORAR = ['campo', 'campo tck', 'catalogo web tck', 'sin especificar', ''];
   const pedidos = todosLosPedidos.filter(function(p) {
-    return p.estado === 'Confirmado' && p.choferAsignado;
+    if (p.estado !== 'Confirmado') return false;
+    const loc = (p.localidad || '').trim().toLowerCase();
+    return !LOCALIDADES_IGNORAR.includes(loc);
   });
 
   const hoy = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' });
@@ -9593,7 +9602,38 @@ function renderLogisticaAsignar(el) {
   let html = '';
 
   if (sinFecha.length) {
-    html += '<div class="log-sin-fecha">⚠️ <strong>' + sinFecha.length + ' pedido' + (sinFecha.length>1?'s':'') + ' sin fecha de entrega.</strong><br>El vendedor necesita definir cuándo se entrega.</div>';
+    // Mostrar los pedidos sin fecha en un bloque expandible
+    html += '<div class="log-sin-fecha">';
+    html += '<div style="margin-bottom:8px;">⚠️ <strong>' + sinFecha.length + ' pedido' + (sinFecha.length>1?'s':'') + ' sin fecha de entrega definida</strong> — asignales una fecha desde el tab Pedidos.</div>';
+    
+    // Agrupar por ciudad
+    const sinFechaPorCiudad = {};
+    sinFecha.forEach(p => {
+      const ciudad = (p.localidad||'Sin ciudad').trim();
+      if (!sinFechaPorCiudad[ciudad]) sinFechaPorCiudad[ciudad] = [];
+      sinFechaPorCiudad[ciudad].push(p);
+    });
+    
+    Object.keys(sinFechaPorCiudad).sort().forEach(ciudad => {
+      const items = sinFechaPorCiudad[ciudad];
+      html += '<div style="margin-bottom:6px;"><strong>📍 ' + ciudad + '</strong> (' + items.length + ')</div>';
+      items.forEach(p => {
+        const monto = parseFloat((p.total||'0').toString().replace(/[^0-9.]/g,''))||0;
+        const pidSafe = p.pedidoId.replace(/'/g, "\'");
+        html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(121,85,72,.15);">';
+        html += '<div style="font-size:13px;">' + (p.cliente||'—') + (p.comercio ? ' · ' + p.comercio : '') + '</div>';
+        html += '<div style="display:flex;align-items:center;gap:6px;">';
+        html += '<span style="font-size:12px;font-weight:800;">$' + Math.round(monto).toLocaleString('es-AR') + '</span>';
+        if (p.choferAsignado) {
+          html += '<span style="background:#E3F2FD;color:#1565C0;border-radius:20px;padding:2px 8px;font-size:11px;font-weight:800;">🚚 ' + p.choferAsignado + '</span>';
+        } else {
+          html += '<button class="log-asignar-btn" data-pid="' + pidSafe + '" data-chofer="Joan" onclick="logAsignarBtn(this,event)" style="padding:4px 8px;font-size:11px;">J</button>';
+          html += '<button class="log-asignar-btn" data-pid="' + pidSafe + '" data-chofer="Luis" onclick="logAsignarBtn(this,event)" style="padding:4px 8px;font-size:11px;">L</button>';
+        }
+        html += '</div></div>';
+      });
+    });
+    html += '</div>';
   }
 
   diasOrden.forEach(dia => {
@@ -9682,12 +9722,17 @@ function renderLogisticaChofer(el, chofer) {
   const mesHoyNombre = MESES_ES_LOG[hoy.getMonth()];
   const hoyLabel     = diaHoyNombre + ' ' + diaHoyNum + ' de ' + mesHoyNombre;
 
-  const pedidos = todosLosPedidos.filter(p =>
-    p.estado === 'Confirmado' && p.choferAsignado === chofer && p.fechaEntrega === hoyLabel
-  );
+  // Mostrar pedidos asignados a este chofer, independientemente de si tienen fecha
+  // Los pedidos con fecha del día de hoy + los sin fecha también se incluyen
+  const pedidos = todosLosPedidos.filter(p => {
+    if (p.estado !== 'Confirmado') return false;
+    if (p.choferAsignado !== chofer) return false;
+    // Incluir si tiene fecha de hoy, o si no tiene fecha definida
+    return !p.fechaEntrega || p.fechaEntrega === hoyLabel;
+  });
 
   if (!pedidos.length) {
-    el.innerHTML = '<div class="planilla-empty">📭 No hay entregas para ' + chofer + ' hoy.<br><small>(' + hoyLabel + ')</small></div>';
+    el.innerHTML = '<div class="planilla-empty">📭 No hay entregas asignadas a ' + chofer + '.<br><small>Asigná pedidos confirmados en el tab Asignar.</small></div>';
     return;
   }
 
