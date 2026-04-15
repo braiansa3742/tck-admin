@@ -8288,10 +8288,13 @@ async function mapaCargarClientesSinVisita(checkins) {
     var visitadosHoy = new Set(checkins.map(function(v) { return v.nombre_cliente; }));
     var noVisitados = clientes.filter(function(c) { return !visitadosHoy.has(c.nombre); });
 
-    // Puntos grises con popup enriquecido
+    // Puntos grises con popup enriquecido — naranja si tiene alerta
     noVisitados.forEach(function(c) {
-      var iconHtml = '<div style="background:#BDBDBD;color:#fff;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:900;box-shadow:0 1px 4px rgba(0,0,0,.2);opacity:.8">•</div>';
-      var icon = L.divIcon({ html: iconHtml, iconSize: [18,18], iconAnchor: [9,9], className: '' });
+      var tieneAlerta = c.alerta;
+      var iconColor = tieneAlerta ? '#E65100' : '#BDBDBD';
+      var iconSymbol = tieneAlerta ? '!' : '•';
+      var iconHtml = '<div style="background:' + iconColor + ';color:#fff;border-radius:50%;width:' + (tieneAlerta?'22px':'18px') + ';height:' + (tieneAlerta?'22px':'18px') + ';display:flex;align-items:center;justify-content:center;font-size:' + (tieneAlerta?'12px':'9px') + ';font-weight:900;box-shadow:0 1px 4px rgba(0,0,0,.3);opacity:.9">' + iconSymbol + '</div>';
+      var icon = L.divIcon({ html: iconHtml, iconSize: tieneAlerta?[22,22]:[18,18], iconAnchor: tieneAlerta?[11,11]:[9,9], className: '' });
 
       // Popup con loading — se llena al abrirse
       var popupId = 'popup-cli-' + (c.id || c.nombre.replace(/\s/g,''));
