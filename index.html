@@ -4050,7 +4050,7 @@ input[type="date"] {
   </div>
 
   <!-- Modal veterinaria -->
-  <div class="vet-modal-overlay hidden" id="vet-modal">
+  <div class="vet-modal-overlay hidden" id="vet-modal" class="hidden">
     <div class="vet-sheet">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
         <div class="vet-titulo">🩺 Certificado Veterinario</div>
@@ -9450,18 +9450,25 @@ const VET_TEL = '5492317000000'; // ← actualizar con el número real
 
 let _vetDatos = null; // datos calculados para el WA
 
-function abrirCertVet() {
+function abrirCertVet(choferPresel) {
   const modal = document.getElementById('vet-modal');
   modal.classList.remove('hidden');
   // Resetear
   document.getElementById('vet-contenido').innerHTML = '';
   document.getElementById('vet-acciones').style.display = 'none';
-  document.getElementById('vet-chofer-sel').value = '';
   document.getElementById('vet-vehiculo-sel').value = '';
   // Mostrar fecha
   const hoy = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' });
   document.getElementById('vet-sub').textContent = hoy;
   _vetDatos = null;
+  // Pre-seleccionar chofer si viene del tab Joan/Luis
+  if (choferPresel) {
+    document.getElementById('vet-chofer-sel').value = choferPresel;
+    // Generar automáticamente
+    setTimeout(vetGenerar, 100);
+  } else {
+    document.getElementById('vet-chofer-sel').value = '';
+  }
 }
 
 function vetActualizarVehiculo() {
@@ -9983,7 +9990,7 @@ function renderLogisticaChofer(el, chofer) {
   // Botones acción
   html += '<div style="display:flex;gap:8px;margin-bottom:16px;">';
   html += '<button onclick="imprimirPlanilla()" style="flex:1;padding:10px;background:#1565C0;color:#fff;border:none;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;cursor:pointer;">🖨️ Imprimir</button>';
-  html += '<button onclick="logisticaSelTab(&quot;vet&quot;,document.getElementById(&quot;log-tab-vet&quot;))" style="flex:1;padding:10px;background:#1B5E20;color:#fff;border:none;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;cursor:pointer;">🩺 Vet</button>';
+  html += '<button onclick="abrirCertVet(\'' + chofer + '\')" style="flex:1;padding:10px;background:#1B5E20;color:#fff;border:none;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;cursor:pointer;">🩺 Vet</button>';
   html += '</div>';
 
   // ── LISTA DE PRODUCTOS A CARGAR ──────────────────────────────
