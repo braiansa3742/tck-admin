@@ -9423,65 +9423,66 @@ function vetBuscarMapeo(nombreProducto) {
 
 // Tabla: producto → [categoría vet, kg por unidad]
 const VET_TABLA = {
+  // formato: [categoría, kg/unidad, presentación]
   // POLLO ENTERO
-  "Pollo A":                     ["Pollo entero",      20],
-  "Pollo B":                     ["Pollo entero",      20],
-  "Pollo Ginosa":                ["Pollo entero",      20],
-  "Pollo Optimo":                ["Pollo entero",      20],
+  "Pollo A":                     ["Pollo entero",      20,   "Caja 20 kg"],
+  "Pollo B":                     ["Pollo entero",      20,   "Caja 20 kg"],
+  "Pollo Ginosa":                ["Pollo entero",      20,   "Caja 20 kg"],
+  "Pollo Optimo":                ["Pollo entero",      20,   "Caja 20 kg"],
   // TROZADOS
-  "Suprema":                     ["Trozados",           5],
-  "Suprema IQF":                 ["Trozados",          15],
-  "Suprema B IQF":               ["Trozados",          20],
-  "Fino de Ave Cocida":          ["Trozados",          10],
-  "Alita Congelada Granel":      ["Trozados",          15],
-  "MDM - Carne Molida de Pollo": ["Trozados",          20],
-  "Cuarto Trasero IQF":          ["Trozados",          15],
+  "Suprema":                     ["Trozados",           5,   "Bolsa 5 kg"],
+  "Suprema IQF":                 ["Trozados",          15,   "Caja 15 kg"],
+  "Suprema B IQF":               ["Trozados",          20,   "Caja 20 kg"],
+  "Fino de Ave Cocida":          ["Trozados",          10,   "Caja 10 kg"],
+  "Alita Congelada Granel":      ["Trozados",          15,   "Caja 15 kg"],
+  "MDM - Carne Molida de Pollo": ["Trozados",          20,   "Caja 20 kg"],
+  "Cuarto Trasero IQF":          ["Trozados",          15,   "Caja 15 kg"],
   // REBOZADOS
-  "Medallon de Pollo Clasico":   ["Rebozados",          6],
-  "Medallon Pollo c/Cheddar":    ["Rebozados",          6],
-  "Medallon Pollo JyQ":          ["Rebozados",          6],
-  "Medallon Pollo y Espinaca":   ["Rebozados",          6],
-  "Formita Clasica":             ["Rebozados",          6],
-  "Formitas Pollo JyQ":          ["Rebozados",          6],
-  "Nuggets de Pollo Crocante":   ["Rebozados",          6],
-  "Bocadito de Papa y Jamon":    ["Rebozados",          6],
-  "Pechuguitas al Verdeo":       ["Rebozados",          6],
-  "Filet Merluza Finas Hierbas": ["Rebozados",          6],
-  "Filet de Merluza Rebozado":   ["Rebozados",          6],
-  "Filet Merluza a Granel":      ["Rebozados",         10],
-  "Milanesa de Nalga":           ["Rebozados",          5],
-  "Milanesa de Pollo":           ["Rebozados",          5],
-  "Hamburguesa 100% Carne":      ["Rebozados",          4],
-  // FRUTAS Y VERDURAS
-  "Papa Baston Balcarce":        ["Frutas y verduras",  2.5],
-  "Pulpa de Palta":              ["Frutas y verduras",  0.45],
-  "Arandanos Solimeno":          ["Frutas y verduras",  0.5],
-  "Arándanos Solimeno":          ["Frutas y verduras",  0.5],
-  "Brocoli":                     ["Frutas y verduras",  0.5],
-  "Espinacas":                   ["Frutas y verduras",  0.5],
-  "Morron":                      ["Frutas y verduras",  0.5],
-  "Primavera":                   ["Frutas y verduras",  0.5],
-  "Frutos Rojos":                ["Frutas y verduras",  0.5],
-  "Cebolla":                     ["Frutas y verduras",  0.5],
-  "Hamburguesa de Garbanzos":    ["Frutas y verduras",  0.4],
-  "Hamburguesa de Lentejas":     ["Frutas y verduras",  0.4],
-  "Hamburguesa de Quinoa":       ["Frutas y verduras",  0.4],
-  "Hamburguesa de Arvejas":      ["Frutas y verduras",  0.4],
-  "Hamburguesa de Hongos":       ["Frutas y verduras",  0.4],
-  "Hamburguesa de Espinaca":     ["Frutas y verduras",  0.4],
-  "Hamburguesa Mexicana":        ["Frutas y verduras",  0.4],
-  "Hamburguesa 5 Vegetales":     ["Frutas y verduras",  0.4],
-  // PASTAS
-  "Ravioles de Calabaza":        ["Pastas",             0.5],
-  "Raviolones Espinaca y Mozz":  ["Pastas",             0.5],
-  "Gnoquis de Papa":             ["Pastas",             0.5],
-  "Gnoquis de Espinaca":         ["Pastas",             0.5],
-  "Sorrentinos Jamon y Queso":   ["Pastas",             0.5],
-  "Sorrentinos Ricota 4 Quesos": ["Pastas",             0.4],
-  // HUEVOS
-  "Maple N° 2":                  ["Huevo",              1.5],
-  "Maple N° 1":                  ["Huevo",              1.8],
-  "Cajita 1/2 Docena N° 2":      ["Huevo",              0.3]
+  "Medallon de Pollo Clasico":   ["Rebozados",          6,   "Caja 6 kg"],
+  "Medallon Pollo c/Cheddar":    ["Rebozados",          6,   "Caja 6 kg"],
+  "Medallon Pollo JyQ":          ["Rebozados",          6,   "Caja 6 kg"],
+  "Medallon Pollo y Espinaca":   ["Rebozados",          6,   "Caja 6 kg"],
+  "Formita Clasica":             ["Rebozados",          6,   "Caja 6 kg"],
+  "Formitas Pollo JyQ":          ["Rebozados",          6,   "Caja 6 kg"],
+  "Nuggets de Pollo Crocante":   ["Rebozados",          6,   "Caja 6 kg"],
+  "Bocadito de Papa y Jamon":    ["Rebozados",          6,   "Caja 6 kg"],
+  "Pechuguitas al Verdeo":       ["Rebozados",          6,   "Caja 6 kg"],
+  "Filet Merluza Finas Hierbas": ["Rebozados",          6,   "Caja 6 kg"],
+  "Filet de Merluza Rebozado":   ["Rebozados",          6,   "Caja 6 kg"],
+  "Filet Merluza a Granel":      ["Rebozados",         10,   "Caja 10 kg"],
+  "Milanesa de Nalga":           ["Rebozados",          5,   "Caja 5 kg"],
+  "Milanesa de Pollo":           ["Rebozados",          5,   "Caja 5 kg"],
+  "Hamburguesa 100% Carne":      ["Rebozados",          4,   "Caja 4 kg"],
+  // FRUTAS Y VERDURAS — bolsas retail
+  "Papa Baston Balcarce":        ["Frutas y verduras",  2.5, "Bolsa 2.5 kg"],
+  "Pulpa de Palta":              ["Frutas y verduras",  0.45,"Bolsa 450 g"],
+  "Arandanos Solimeno":          ["Frutas y verduras",  0.5, "Bolsa 500 g"],
+  "Arándanos Solimeno":          ["Frutas y verduras",  0.5, "Bolsa 500 g"],
+  "Brocoli":                     ["Frutas y verduras",  0.5, "Bolsa 500 g"],
+  "Espinacas":                   ["Frutas y verduras",  0.5, "Bolsa 500 g"],
+  "Morron":                      ["Frutas y verduras",  0.5, "Bolsa 500 g"],
+  "Primavera":                   ["Frutas y verduras",  0.5, "Bolsa 500 g"],
+  "Frutos Rojos":                ["Frutas y verduras",  0.5, "Bolsa 500 g"],
+  "Cebolla":                     ["Frutas y verduras",  0.5, "Bolsa 500 g"],
+  "Hamburguesa de Garbanzos":    ["Frutas y verduras",  0.4, "Bolsa 400 g"],
+  "Hamburguesa de Lentejas":     ["Frutas y verduras",  0.4, "Bolsa 400 g"],
+  "Hamburguesa de Quinoa":       ["Frutas y verduras",  0.4, "Bolsa 400 g"],
+  "Hamburguesa de Arvejas":      ["Frutas y verduras",  0.4, "Bolsa 400 g"],
+  "Hamburguesa de Hongos":       ["Frutas y verduras",  0.4, "Bolsa 400 g"],
+  "Hamburguesa de Espinaca":     ["Frutas y verduras",  0.4, "Bolsa 400 g"],
+  "Hamburguesa Mexicana":        ["Frutas y verduras",  0.4, "Bolsa 400 g"],
+  "Hamburguesa 5 Vegetales":     ["Frutas y verduras",  0.4, "Bolsa 400 g"],
+  // PASTAS — bolsas retail
+  "Ravioles de Calabaza":        ["Pastas",             0.5, "Bolsa 500 g"],
+  "Raviolones Espinaca y Mozz":  ["Pastas",             0.5, "Bolsa 500 g"],
+  "Gnoquis de Papa":             ["Pastas",             0.5, "Bolsa 500 g"],
+  "Gnoquis de Espinaca":         ["Pastas",             0.5, "Bolsa 500 g"],
+  "Sorrentinos Jamon y Queso":   ["Pastas",             0.5, "Bolsa 500 g"],
+  "Sorrentinos Ricota 4 Quesos": ["Pastas",             0.4, "Bolsa 400 g"],
+  // HUEVO
+  "Maple N° 2":                  ["Huevo",              1.5, "Maple 30 u. N°2"],
+  "Maple N° 1":                  ["Huevo",              1.8, "Maple 30 u. N°1"],
+  "Cajita 1/2 Docena N° 2":      ["Huevo",              0.3, "Cajita 6 u. N°2"]
 };
 
 const VET_ORDEN_CATS = ["Pollo entero", "Trozados", "Rebozados", "Frutas y verduras", "Pastas", "Huevo"];
@@ -9684,13 +9685,16 @@ function descargarPlanillaCarga(choferParam) {
     if (!items || !items.length) return;
     const catUds = items.reduce((a, i) => a + i.cantidad, 0);
     rowsTotal += '<tr style="background:#E8F5E9;">' +
-      '<td colspan="2" style="padding:7px 12px;font-weight:900;color:#1B5E20;font-size:13px;text-transform:uppercase;letter-spacing:.4px;">' + cat + '</td>' +
+      '<td colspan="3" style="padding:7px 12px;font-weight:900;color:#1B5E20;font-size:13px;text-transform:uppercase;letter-spacing:.4px;">' + cat + '</td>' +
       '<td style="padding:7px 12px;text-align:right;font-weight:900;color:#1B5E20;font-size:13px;">' + catUds + ' u.</td></tr>';
     items.sort((a,b) => a.nombre.localeCompare(b.nombre)).forEach(function(item) {
       grandTotal += item.cantidad;
+      const mapeo = vetBuscarMapeo(item.nombre);
+      const presentacion = mapeo ? mapeo[2] || '' : '';
       rowsTotal += '<tr>' +
-        '<td style="width:18px;padding:5px 4px 5px 20px;font-size:15px;color:#aaa;">□</td>' +
-        '<td style="padding:5px 12px 5px 4px;font-size:13px;color:#333;">' + item.nombre + '</td>' +
+        '<td style="width:28px;padding:5px 4px 5px 20px;"><div style="width:20px;height:20px;border:2px solid #555;border-radius:3px;"></div></td>' +
+        '<td style="padding:5px 4px 5px 4px;font-size:13px;color:#333;">' + item.nombre + '</td>' +
+        '<td style="padding:5px 8px;font-size:11px;color:#888;font-style:italic;">' + presentacion + '</td>' +
         '<td style="padding:5px 12px;text-align:right;font-size:16px;font-weight:900;color:#222;">' + item.cantidad + '</td></tr>';
     });
   });
@@ -9737,12 +9741,15 @@ function descargarPlanillaCarga(choferParam) {
       if (!cats[cat]) return;
       const catTotal = Object.values(cats[cat]).reduce((a,b) => a+b, 0);
       rowsCiudad += '<tr style="background:#E8F5E9;">' +
-        '<td colspan="2" style="padding:5px 12px 5px 20px;font-size:12px;font-weight:700;color:#1B5E20;text-transform:uppercase;">' + cat + '</td>' +
+        '<td colspan="3" style="padding:5px 12px 5px 20px;font-size:12px;font-weight:700;color:#1B5E20;text-transform:uppercase;">' + cat + '</td>' +
         '<td style="padding:5px 12px;text-align:right;font-size:12px;font-weight:700;color:#1B5E20;">' + catTotal + ' u.</td></tr>';
       Object.keys(cats[cat]).sort().forEach(function(nombre) {
+        const mapeo = vetBuscarMapeo(nombre);
+        const presentacion = mapeo ? mapeo[2] || '' : '';
         rowsCiudad += '<tr>' +
-          '<td style="width:18px;padding:4px 4px 4px 32px;font-size:14px;color:#aaa;">□</td>' +
-          '<td style="padding:4px 12px 4px 4px;font-size:12px;color:#333;">' + nombre + '</td>' +
+          '<td style="width:28px;padding:4px 4px 4px 32px;"><div style="width:20px;height:20px;border:2px solid #555;border-radius:3px;"></div></td>' +
+          '<td style="padding:4px 4px 4px 4px;font-size:12px;color:#333;">' + nombre + '</td>' +
+          '<td style="padding:4px 8px;font-size:10px;color:#888;font-style:italic;">' + presentacion + '</td>' +
           '<td style="padding:4px 12px;text-align:right;font-size:14px;font-weight:900;color:#222;">' + cats[cat][nombre] + '</td></tr>';
       });
     });
@@ -9786,7 +9793,7 @@ function descargarPlanillaCarga(choferParam) {
     // ── SECCIÓN 1: TOTALES GLOBALES ──
     '<h2>📊 TOTALES A SACAR DE CÁMARA</h2>' +
     '<table><tbody>' + rowsTotal +
-    '<tr class="total-row"><td></td><td style="padding:10px 12px;font-weight:900;font-size:15px;">TOTAL BULTOS</td>' +
+    '<tr class="total-row"><td></td><td colspan="2" style="padding:10px 12px;font-weight:900;font-size:15px;">TOTAL BULTOS</td>' +
     '<td style="padding:10px 12px;text-align:right;font-weight:900;font-size:15px;">' + grandTotal + '</td></tr>' +
     '</tbody></table>' +
 
