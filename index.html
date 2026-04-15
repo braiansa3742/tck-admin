@@ -4599,8 +4599,10 @@ async function cargarPedidos(silencioso) {
   if (!silencioso) document.getElementById('lista-pedidos').innerHTML =
     '<div class="loading"><div class="loading-spinner"></div>Cargando pedidos...</div>';
   try {
+    console.log('[TCK] cargarPedidos iniciando, silencioso:', silencioso);
     var res = await fetch(SHEET_CSV + '&t=' + Date.now());
     var csv = await res.text();
+    console.log('[TCK] CSV recibido, líneas:', csv.trim().split('\n').length, 'chars:', csv.length);
     var lines = csv.trim().split('\n');
     var pedidos = [];
     for (var i = 1; i < lines.length; i++) {
@@ -4690,6 +4692,7 @@ async function cargarPedidos(silencioso) {
   }
   _pedidosCache = pedidos.slice();
   todosLosPedidos = pedidos;
+  console.log('[TCK] todosLosPedidos cargados:', pedidos.length, '| Confirmados:', pedidos.filter(function(p){return p.estado==='Confirmado';}).length);
 
     if (!silencioso) {
       var dups = pedidos.filter(function(p){return p.esDuplicado;});
@@ -4699,6 +4702,7 @@ async function cargarPedidos(silencioso) {
     renderPedidos();
     actualizarMiDiaSiAbierto();
     } catch(e) {
+    console.error('[TCK] cargarPedidos ERROR:', e.message, e.stack);
     if (!silencioso) document.getElementById('lista-pedidos').innerHTML =
       '<div class="empty">❌ Error al cargar pedidos.<br>Verificá tu conexión.</div>';
   }
@@ -9766,6 +9770,48 @@ function logisticaSelTab(tab, btn) {
   document.querySelectorAll('.planilla-chofer-tab').forEach(b => b.classList.remove('sel'));
   if (btn) btn.classList.add('sel');
   renderLogistica();
+}
+
+// ── PARSEAR PRODUCTOS DEL DETALLE ─────────────────────────────
+function parsearProductos(detalle) {
+  var resultado = [];
+  if (!detalle) return resultado;
+  var partes = detalle.split('|').map(function(s){ return s.trim(); });
+  partes.forEach(function(parte) {
+    if (!parte) return;
+    var nombre = '', cantidad = 1, emoji = '';
+
+    // Formato campo: "1x Nombre del producto (x ...) → $..."
+    var mCampo = parte.match(/^(\d+)x\s+(.+?)(?:\s*\(|\s*→)/);
+    if (mCampo) {
+      cantidad = parseInt(mCampo[1]) || 1;
+      nombre   = mCampo[2].trim();
+      resultado.push({ nombre: nombre, cantidad: cantidad, emoji: emoji });
+      return;
+    }
+
+    // Formato catalogo: "🐔 *Nombre* | N cajas ... x $... → $..."
+    var mCat = parte.match(/^(\S+)\s+\*(.+?)\*/);
+    if (mCat) {
+      // Verificar si es emoji
+      var posibleEmoji = mCat[1];
+      emoji   = posibleEmoji.length <= 2 ? posibleEmoji : '';
+      nombre  = mCat[2].trim();
+      // Buscar cantidad: "N cajas" o "N bolsas" o "N maples"
+      var mCant = parte.match(/\|\s*(\d+)\s+(?:caja|bolsa|maple|paquete|unidad|caja|lata)/i);
+      if (mCant) cantidad = parseInt(mCant[1]) || 1;
+      resultado.push({ nombre: nombre, cantidad: cantidad, emoji: emoji });
+      return;
+    }
+
+    // Formato Xubio: "*Nombre* (x ...) → $..."
+    var mXubio = parte.match(/\*(.+?)\*/);
+    if (mXubio) {
+      nombre = mXubio[1].trim();
+      resultado.push({ nombre: nombre, cantidad: 1, emoji: '' });
+    }
+  });
+  return resultado;
 }
 
 function renderLogistica() {
