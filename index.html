@@ -3695,11 +3695,11 @@ input[type="date"] {
       <!-- Subtabs: Operativo | Cobertura -->
       <div style="display:flex;gap:0;border-bottom:2px solid rgba(255,255,255,.15);">
         <button id="mapa-subtab-operativo" onclick="mapaSelSubtab('operativo')"
-          style="flex:1;padding:9px;background:rgba(255,255,255,.18);border:none;color:#fff;font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:900;cursor:pointer;border-bottom:3px solid #FFD700;letter-spacing:.3px;">
+          style="flex:1;padding:10px 8px;background:rgba(255,255,255,.18);border:none;color:#fff;font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:900;cursor:pointer;border-bottom:3px solid #FFD700;letter-spacing:.3px;display:flex;align-items:center;justify-content:center;gap:5px;">
           📍 Operativo
         </button>
         <button id="mapa-subtab-cobertura" onclick="mapaSelSubtab('cobertura')"
-          style="flex:1;padding:9px;background:transparent;border:none;color:rgba(255,255,255,.65);font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:900;cursor:pointer;border-bottom:3px solid transparent;letter-spacing:.3px;">
+          style="flex:1;padding:10px 8px;background:transparent;border:none;color:rgba(255,255,255,.65);font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:900;cursor:pointer;border-bottom:3px solid transparent;letter-spacing:.3px;display:flex;align-items:center;justify-content:center;gap:5px;">
           📊 Cobertura
         </button>
       </div>
@@ -3788,18 +3788,20 @@ input[type="date"] {
         </div>
         <!-- Mapa de burbujas -->
         <div id="cob-mapa-container" style="height:340px;background:#e8eaf6;"></div>
-        <!-- Leyenda -->
-        <div style="padding:8px 14px;display:flex;gap:16px;align-items:center;background:#f5f7ff;border-top:1px solid #E8EAF6;flex-wrap:wrap;">
+        <div style="padding:8px 14px;display:flex;gap:12px;align-items:center;background:#f5f7ff;border-top:1px solid #E8EAF6;flex-wrap:wrap;">
           <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text3);">
-            <div style="width:12px;height:12px;border-radius:50%;background:#2E7D32;"></div> Creciendo
+            <div style="width:11px;height:11px;border-radius:50%;background:#2E7D32;"></div> Creciendo +5%
           </div>
           <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text3);">
-            <div style="width:12px;height:12px;border-radius:50%;background:#C62828;"></div> Cayendo
+            <div style="width:11px;height:11px;border-radius:50%;background:#F57C00;"></div> Estable
           </div>
           <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text3);">
-            <div style="width:12px;height:12px;border-radius:50%;background:#1565C0;"></div> Estable
+            <div style="width:11px;height:11px;border-radius:50%;background:#C62828;"></div> Cayendo -5%
           </div>
-          <div style="font-size:11px;color:var(--text3);margin-left:auto;">Tamaño = volumen de ventas</div>
+          <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text3);">
+            <div style="width:11px;height:11px;border-radius:50%;background:#1565C0;"></div> Sin comparativa
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-left:auto;">Tamaño = volumen</div>
         </div>
         <!-- Tabla de ciudades -->
         <div style="padding:12px 14px 0;">
@@ -10744,51 +10746,66 @@ async function coberturaRender() {
       _cobInstancia = null;
     }
 
-    _cobInstancia = L.map('cob-mapa-container', { zoomControl: true, scrollWheelZoom: false })
-      .setView([-36.2, -62.2], 8);
+    _cobInstancia = L.map('cob-mapa-container', { zoomControl: true, scrollWheelZoom: true })
+      .setView([-36.3, -62.2], 9);
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    // Mapa con más contraste — CartoDB voyager
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
       attribution: '© CartoDB',
       subdomains: 'abcd',
       maxZoom: 14
     }).addTo(_cobInstancia);
 
-    // Agregar burbujas por ciudad
+    // Burbujas por ciudad — tamaño proporcional pero acotado
     const maxMonto = Math.max(...ciudades.map(c => c.monto));
 
     ciudades.forEach(c => {
       const coords = CIUDADES_COORDS[c.ciudad];
       if (!coords) return;
 
-      const radio = Math.max(16, Math.round(Math.sqrt(c.monto / maxMonto) * 52));
+      // Radio entre 8px y 28px
+      const radio = Math.max(8, Math.round(Math.sqrt(c.monto / maxMonto) * 28));
       const color = c.crecimiento === null ? '#1565C0'
         : c.crecimiento > 5  ? '#2E7D32'
         : c.crecimiento < -5 ? '#C62828'
-        : '#1565C0';
+        : '#F57C00';
 
-      const pct = totalMonto > 0 ? (c.monto / totalMonto * 100).toFixed(1) : '0';
+      const pct    = totalMonto > 0 ? (c.monto / totalMonto * 100).toFixed(1) : '0';
       const crecStr = c.crecimiento !== null
         ? (c.crecimiento > 0 ? '▲ +' : '▼ ') + Math.abs(c.crecimiento).toFixed(1) + '%'
         : 'Sin comparativa';
 
-      const marker = L.circleMarker([coords.lat, coords.lng], {
+      // Círculo
+      const circle = L.circleMarker([coords.lat, coords.lng], {
         radius:      radio,
         fillColor:   color,
         color:       '#fff',
         weight:      2,
         opacity:     1,
-        fillOpacity: 0.8
+        fillOpacity: 0.85
       }).addTo(_cobInstancia);
 
-      marker.bindPopup(
+      // Etiqueta con nombre y monto debajo del círculo
+      const label = L.divIcon({
+        html: '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:11px;font-weight:800;color:#1A0800;text-align:center;white-space:nowrap;text-shadow:1px 1px 2px #fff,-1px -1px 2px #fff,1px -1px 2px #fff,-1px 1px 2px #fff;">' +
+              c.ciudad + '<br><span style="color:' + color + ';font-size:10px;">' + fmt(c.monto) + '</span></div>',
+        className: '',
+        iconSize:   [120, 30],
+        iconAnchor: [60, -radio - 4]
+      });
+      L.marker([coords.lat, coords.lng], { icon: label, interactive: false }).addTo(_cobInstancia);
+
+      circle.bindPopup(
         '<div style="font-family:\'Barlow Condensed\',sans-serif;min-width:180px;">' +
         '<div style="font-size:17px;font-weight:900;color:#1A0800;margin-bottom:6px;">📍 ' + c.ciudad + '</div>' +
-        '<div style="font-size:20px;font-weight:900;color:' + color + ';margin-bottom:4px;">' + fmt(c.monto) + '</div>' +
-        '<div style="font-size:12px;color:#666;margin-bottom:2px;">🧾 ' + c.pedidos + ' pedidos · 👥 ' + c.clientes + ' clientes</div>' +
-        '<div style="font-size:12px;color:#666;margin-bottom:2px;">📦 Peso: ' + pct + '%</div>' +
-        '<div style="font-size:12px;color:' + color + ';font-weight:700;">' + crecStr + '</div>' +
-        '<div style="font-size:11px;color:#999;margin-top:4px;">👤 ' + c.vendedores + '</div>' +
-        '</div>'
+        '<div style="font-size:22px;font-weight:900;color:' + color + ';margin-bottom:6px;">' + fmt(c.monto) + '</div>' +
+        '<table style="font-size:12px;color:#666;width:100%;border-collapse:collapse;">' +
+        '<tr><td>🧾 Pedidos</td><td style="text-align:right;font-weight:700;">' + c.pedidos + '</td></tr>' +
+        '<tr><td>👥 Clientes</td><td style="text-align:right;font-weight:700;">' + c.clientes + '</td></tr>' +
+        '<tr><td>📦 Peso</td><td style="text-align:right;font-weight:700;">' + pct + '%</td></tr>' +
+        '<tr><td>📈 Crecim.</td><td style="text-align:right;font-weight:700;color:' + color + ';">' + crecStr + '</td></tr>' +
+        '<tr><td>👤 Vendedor</td><td style="text-align:right;font-weight:700;">' + c.vendedores + '</td></tr>' +
+        '</table></div>'
       );
     });
 
