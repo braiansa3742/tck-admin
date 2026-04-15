@@ -4031,7 +4031,7 @@ input[type="date"] {
           <div class="planilla-hdr-title">🚚 Logística</div>
           <div class="planilla-hdr-sub" id="planilla-fecha"></div>
         </div>
-        <button onclick="imprimirPlanilla()" class="planilla-imprimir-btn" style="width:auto;padding:8px 16px;font-size:14px;margin:0;">🖨️ Imprimir</button>
+        
       </div>
 
       <!-- Tabs: Asignar | Por chofer | Vet -->
@@ -9629,9 +9629,29 @@ function vetGenerar() {
 }
 
 
-function descargarPlanillaCarga() {
-  if (!_vetDatos) { toast('Generá la planilla primero', 'err'); return; }
-  const { chofer, vehiculo, ciudades, porCiudad, hoy, fechaPDF, totalUds } = _vetDatos;
+function descargarPlanillaCarga(choferParam) {
+  // Obtener chofer: parámetro → tab activo → _vetDatos
+  let chofer = choferParam;
+  if (!chofer && _logTab === 'joan') chofer = 'Joan';
+  if (!chofer && _logTab === 'luis') chofer = 'Luis';
+  if (!chofer && _vetDatos) chofer = _vetDatos.chofer;
+  if (!chofer) { toast('Seleccioná un chofer primero', 'err'); return; }
+
+  // Vehículo: de _vetDatos si coincide, sino primer vehículo asignado
+  let vehiculo = (_vetDatos && _vetDatos.chofer === chofer) ? _vetDatos.vehiculo : '';
+  // Intentar detectar vehículo de Supabase (asignaciones)
+  if (!vehiculo) {
+    const pedidosChofer = todosLosPedidos.filter(p => p.estado === 'Confirmado' && p.choferAsignado === chofer);
+    // Por ahora dejamos vacío si no hay datos — se puede completar a mano
+    vehiculo = vehiculo || '—';
+  }
+
+  const hoyDate0 = new Date();
+  const hoy = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'][hoyDate0.getDay() === 0 ? 6 : hoyDate0.getDay()-1]
+    + ', ' + hoyDate0.getDate() + ' de '
+    + ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'][hoyDate0.getMonth()];
+  const fechaPDF = String(hoyDate0.getDate()).padStart(2,'0') + '/'
+    + String(hoyDate0.getMonth()+1).padStart(2,'0') + '/' + hoyDate0.getFullYear();
 
   // Pedidos confirmados de este chofer
   const pedidos = todosLosPedidos.filter(p =>
@@ -10108,10 +10128,10 @@ function renderLogisticaChofer(el, chofer) {
   html += '<div style="font-size:12px;color:rgba(255,255,255,.75);">' + pedidos.length + ' entrega' + (pedidos.length>1?'s':'') + ' · ' + totalBultos + ' bultos · ' + fmt(totalMonto) + '</div>';
   html += '</div>';
 
-  // Botones acción
+  // Botones acción — solo lo que tiene sentido en este tab
   html += '<div style="display:flex;gap:8px;margin-bottom:16px;">';
-  html += '<button onclick="imprimirPlanilla()" style="flex:1;padding:10px;background:#1565C0;color:#fff;border:none;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;cursor:pointer;">🖨️ Imprimir</button>';
-  html += '<button onclick="abrirCertVet(\'' + chofer + '\')" style="flex:1;padding:10px;background:#1B5E20;color:#fff;border:none;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;cursor:pointer;">🩺 Vet</button>';
+  html += '<button onclick="descargarPlanillaCarga(\'' + chofer + '\')" style="flex:1;padding:10px;background:#1B5E20;color:#fff;border:none;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;cursor:pointer;touch-action:manipulation;">🖨️ Planilla de Carga</button>';
+  html += '<button onclick="abrirCertVet(\'' + chofer + '\')" style="flex:1;padding:10px;background:#1565C0;color:#fff;border:none;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;cursor:pointer;touch-action:manipulation;">🩺 Vet</button>';
   html += '</div>';
 
   // ── LISTA DE PRODUCTOS A CARGAR ──────────────────────────────
@@ -10124,18 +10144,15 @@ function renderLogisticaChofer(el, chofer) {
     html += '<span class="planilla-total-cant" style="font-size:22px;">' + cant + ' u.</span>';
     html += '</div>';
   });
-  html += '<div class="planilla-total-row" style="margin-top:8px;padding-top:8px;border-top:2px solid rgba(21,101,192,.15);">';
-  html += '<span style="font-weight:800;">💰 Total a cobrar</span>';
-  html += '<span class="planilla-total-cant">' + fmt(totalMonto) + '</span>';
-  html += '</div></div>';
+  html += '</div>';
 
   // ══ SECCIÓN 2: ORDEN DE CARGA (ruta INVERSA) ══════════════════
   // El camión carga en orden INVERSO a la ruta: lo último que entrega va primero (fondo del camión)
   const ciudadesInversa = [...ciudadesRuta].reverse();
 
   html += '<div style="background:#FFF8E1;border:1.5px solid #FFE082;border-radius:14px;padding:14px 16px;margin-bottom:16px;">';
-  html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:16px;font-weight:900;color:#795548;margin-bottom:10px;">📥 ORDEN DE CARGA AL CAMIÓN</div>';
-  html += '<div style="font-size:11px;color:#795548;margin-bottom:10px;">Lo que se carga PRIMERO va al fondo (se entrega ÚLTIMO)</div>';
+  html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:16px;font-weight:900;color:#795548;margin-bottom:6px;">📥 ORDEN DE CARGA AL CAMIÓN</div>';
+  html += '<div style="font-size:11px;color:#795548;background:#FFF3CD;border-radius:6px;padding:6px 10px;margin-bottom:10px;">⚠️ Cargar en este orden numérico. El Nº1 entra <strong>primero al fondo</strong> del camión (última entrega). El último número entra <strong>al frente</strong> (primera entrega).</div>';
 
   ciudadesInversa.forEach((ciudad, idx) => {
     const items = porCiudad[ciudad];
@@ -10151,7 +10168,7 @@ function renderLogisticaChofer(el, chofer) {
     html += '<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid rgba(121,85,72,.12);">';
     html += '<div style="background:#795548;color:#fff;border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;flex-shrink:0;">' + (idx+1) + '</div>';
     html += '<div style="flex:1;">';
-    html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:900;color:#4E342E;">' + ciudad + ' <span style="font-weight:400;font-size:12px;color:#795548;">(' + items.length + ' entrega' + (items.length>1?'s':'') + ' · ' + fmt(totalCiudad) + ')</span></div>';
+    html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:900;color:#4E342E;">' + ciudad + ' <span style="font-weight:400;font-size:12px;color:#795548;">(' + items.length + ' entrega' + (items.length>1?'s':'') + ')</span></div>';
     html += '<div style="font-size:11px;color:#795548;margin-top:2px;">' + prodStr + '</div>';
     html += '</div></div>';
   });
