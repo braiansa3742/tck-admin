@@ -3688,77 +3688,125 @@ input[type="date"] {
   <div class="view" id="view-mapa">
     <div class="mapa-wrap">
       <div class="mapa-hdr">
-        <div class="mapa-hdr-titulo">🗺️ Mapa de vendedores</div>
+        <div class="mapa-hdr-titulo">🗺️ Mapa</div>
         <div style="font-size:12px;opacity:.8;margin-top:2px" id="mapa-fecha-label">Hoy</div>
       </div>
 
-      <!-- Filtros: fecha + vendedor -->
-      <div style="background:rgba(0,0,0,.15);padding:8px 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-        <select id="mapa-fecha-sel" onchange="mapaFiltrarFecha(this.value)" style="flex:1;min-width:120px;padding:6px 10px;border-radius:8px;border:none;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;background:#fff;color:#333;">
-          <option value="0">Hoy</option>
-          <option value="1">Ayer</option>
-          <option value="2">Hace 2 días</option>
-          <option value="3">Hace 3 días</option>
-          <option value="7">Hace 7 días</option>
-        </select>
-        <div class="mapa-filtros" id="mapa-filtros-wrap" style="margin:0;padding:0;background:none;border:none;gap:6px;">
-          <button class="mapa-chip sel" id="mapa-chip-todos" onclick="mapaFiltrar('todos')">👥 Todos</button>
-          <button class="mapa-chip" id="mapa-chip-Juan" onclick="mapaFiltrar('Juan')">Juan</button>
-          <button class="mapa-chip" id="mapa-chip-Lisandro" onclick="mapaFiltrar('Lisandro')">Lisandro</button>
-        </div>
+      <!-- Subtabs: Operativo | Cobertura -->
+      <div style="display:flex;gap:0;border-bottom:2px solid rgba(255,255,255,.15);">
+        <button id="mapa-subtab-operativo" onclick="mapaSelSubtab('operativo')"
+          style="flex:1;padding:9px;background:rgba(255,255,255,.18);border:none;color:#fff;font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:900;cursor:pointer;border-bottom:3px solid #FFD700;letter-spacing:.3px;">
+          📍 Operativo
+        </button>
+        <button id="mapa-subtab-cobertura" onclick="mapaSelSubtab('cobertura')"
+          style="flex:1;padding:9px;background:transparent;border:none;color:rgba(255,255,255,.65);font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:900;cursor:pointer;border-bottom:3px solid transparent;letter-spacing:.3px;">
+          📊 Cobertura
+        </button>
       </div>
 
-      <!-- Mapa Leaflet -->
-      <div id="mapa-container"></div>
-
-      <!-- Stats mejorados: 4 columnas -->
-      <div class="mapa-stats" style="grid-template-columns:repeat(4,1fr);">
-        <div class="mapa-stat">
-          <div class="mapa-stat-num" id="mapa-stat-visitados">—</div>
-          <div class="mapa-stat-label">Visitados</div>
-        </div>
-        <div class="mapa-stat">
-          <div class="mapa-stat-num" id="mapa-stat-con-pedido" style="color:var(--green2)">—</div>
-          <div class="mapa-stat-label">Con pedido</div>
-        </div>
-        <div class="mapa-stat">
-          <div class="mapa-stat-num" id="mapa-stat-sin-pedido" style="color:var(--orange)">—</div>
-          <div class="mapa-stat-label">Sin pedido</div>
-        </div>
-        <div class="mapa-stat">
-          <div class="mapa-stat-num" id="mapa-stat-no-visitados" style="color:#9E9E9E">—</div>
-          <div class="mapa-stat-label">Sin visitar</div>
-        </div>
-      </div>
-
-      <!-- Leyenda de colores (solo cuando hay varios vendedores) -->
-      <div id="mapa-leyenda" style="display:none;padding:8px 14px;background:#fafafa;border-top:1px solid #f0f0f0;display:flex;gap:16px;flex-wrap:wrap;"></div>
-
-      <!-- Lista de visitas mejorada -->
-      <div class="mapa-lista-titulo" style="display:flex;align-items:center;justify-content:space-between;">
-        <span>Detalle de visitas</span>
-        <span id="mapa-lista-count" style="font-size:11px;color:#999;font-weight:400;"></span>
-      </div>
-
-      <!-- Alertas de ubicación -->
-      <div id="mapa-alertas-wrap" style="margin:0 12px 12px;display:none;">
-        <div style="background:#FFF3E0;border:1.5px solid #FFB74D;border-radius:12px;overflow:hidden;">
-          <div style="background:#E65100;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;">
-            <div style="font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:900;color:#fff;">⚠️ Alertas de ubicación</div>
-            <div id="mapa-alertas-count" style="background:rgba(255,255,255,.2);border-radius:20px;padding:2px 10px;font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;color:#fff;"></div>
+      <!-- ── PANEL OPERATIVO ── -->
+      <div id="mapa-panel-operativo">
+        <!-- Filtros: fecha + vendedor -->
+        <div style="background:rgba(0,0,0,.15);padding:8px 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <select id="mapa-fecha-sel" onchange="mapaFiltrarFecha(this.value)" style="flex:1;min-width:120px;padding:6px 10px;border-radius:8px;border:none;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;background:#fff;color:#333;">
+            <option value="0">Hoy</option>
+            <option value="1">Ayer</option>
+            <option value="2">Hace 2 días</option>
+            <option value="3">Hace 3 días</option>
+            <option value="7">Hace 7 días</option>
+          </select>
+          <div class="mapa-filtros" id="mapa-filtros-wrap" style="margin:0;padding:0;background:none;border:none;gap:6px;">
+            <button class="mapa-chip sel" id="mapa-chip-todos" onclick="mapaFiltrar('todos')">👥 Todos</button>
+            <button class="mapa-chip" id="mapa-chip-Juan" onclick="mapaFiltrar('Juan')">Juan</button>
+            <button class="mapa-chip" id="mapa-chip-Lisandro" onclick="mapaFiltrar('Lisandro')">Lisandro</button>
           </div>
-          <div id="mapa-alertas-body" style="padding:10px 14px;font-size:13px;color:var(--text);"></div>
+        </div>
+
+        <!-- Mapa Leaflet -->
+        <div id="mapa-container"></div>
+
+        <!-- Stats -->
+        <div class="mapa-stats" style="grid-template-columns:repeat(4,1fr);">
+          <div class="mapa-stat">
+            <div class="mapa-stat-num" id="mapa-stat-visitados">—</div>
+            <div class="mapa-stat-label">Visitados</div>
+          </div>
+          <div class="mapa-stat">
+            <div class="mapa-stat-num" id="mapa-stat-con-pedido" style="color:var(--green2)">—</div>
+            <div class="mapa-stat-label">Con pedido</div>
+          </div>
+          <div class="mapa-stat">
+            <div class="mapa-stat-num" id="mapa-stat-sin-pedido" style="color:var(--orange)">—</div>
+            <div class="mapa-stat-label">Sin pedido</div>
+          </div>
+          <div class="mapa-stat">
+            <div class="mapa-stat-num" id="mapa-stat-no-visitados" style="color:#9E9E9E">—</div>
+            <div class="mapa-stat-label">Sin visitar</div>
+          </div>
+        </div>
+
+        <div id="mapa-leyenda" style="display:none;padding:8px 14px;background:#fafafa;border-top:1px solid #f0f0f0;display:flex;gap:16px;flex-wrap:wrap;"></div>
+        <div class="mapa-lista-titulo" style="display:flex;align-items:center;justify-content:space-between;">
+          <span>Detalle de visitas</span>
+          <span id="mapa-lista-count" style="font-size:11px;color:#999;font-weight:400;"></span>
+        </div>
+        <div id="mapa-alertas-wrap" style="margin:0 12px 12px;display:none;">
+          <div style="background:#FFF3E0;border:1.5px solid #FFB74D;border-radius:12px;overflow:hidden;">
+            <div style="background:#E65100;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;">
+              <div style="font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:900;color:#fff;">⚠️ Alertas de ubicación</div>
+              <div id="mapa-alertas-count" style="background:rgba(255,255,255,.2);border-radius:20px;padding:2px 10px;font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;color:#fff;"></div>
+            </div>
+            <div id="mapa-alertas-body" style="padding:10px 14px;font-size:13px;color:var(--text);"></div>
+          </div>
+        </div>
+        <div id="mapa-lista"></div>
+        <div id="mapa-no-visitados-wrap" style="display:none;">
+          <div onclick="mapaToggleNoVisitados()" style="padding:10px 14px;background:#f5f5f5;border-top:1px solid #eee;cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
+            <span style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;color:#666;">⚪ Clientes sin visitar hoy</span>
+            <span id="mapa-no-vis-count" style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:900;color:#9E9E9E;"></span>
+          </div>
+          <div id="mapa-no-visitados-lista" style="display:none;max-height:200px;overflow-y:auto;"></div>
         </div>
       </div>
-      <div id="mapa-lista"></div>
 
-      <!-- Clientes no visitados (colapsable) -->
-      <div id="mapa-no-visitados-wrap" style="display:none;">
-        <div onclick="mapaToggleNoVisitados()" style="padding:10px 14px;background:#f5f5f5;border-top:1px solid #eee;cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
-          <span style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;color:#666;">⚪ Clientes sin visitar hoy</span>
-          <span id="mapa-no-vis-count" style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:900;color:#9E9E9E;"></span>
+      <!-- ── PANEL COBERTURA ── -->
+      <div id="mapa-panel-cobertura" style="display:none;">
+        <!-- Filtros cobertura -->
+        <div style="background:rgba(0,0,0,.15);padding:8px 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <select id="cob-periodo-sel" onchange="coberturaRender()" style="flex:1;min-width:130px;padding:6px 10px;border-radius:8px;border:none;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;background:#fff;color:#333;">
+            <option value="30">Últimos 30 días</option>
+            <option value="60">Últimos 60 días</option>
+            <option value="90">Últimos 90 días</option>
+            <option value="0">Todo el tiempo</option>
+          </select>
+          <select id="cob-vendedor-sel" onchange="coberturaRender()" style="flex:1;min-width:110px;padding:6px 10px;border-radius:8px;border:none;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;background:#fff;color:#333;">
+            <option value="todos">Todos</option>
+            <option value="Miguel">Miguel</option>
+            <option value="Juan">Juan</option>
+            <option value="Lisandro">Lisandro</option>
+          </select>
         </div>
-        <div id="mapa-no-visitados-lista" style="display:none;max-height:200px;overflow-y:auto;"></div>
+        <!-- Mapa de burbujas -->
+        <div id="cob-mapa-container" style="height:340px;background:#e8eaf6;"></div>
+        <!-- Leyenda -->
+        <div style="padding:8px 14px;display:flex;gap:16px;align-items:center;background:#f5f7ff;border-top:1px solid #E8EAF6;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text3);">
+            <div style="width:12px;height:12px;border-radius:50%;background:#2E7D32;"></div> Creciendo
+          </div>
+          <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text3);">
+            <div style="width:12px;height:12px;border-radius:50%;background:#C62828;"></div> Cayendo
+          </div>
+          <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text3);">
+            <div style="width:12px;height:12px;border-radius:50%;background:#1565C0;"></div> Estable
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-left:auto;">Tamaño = volumen de ventas</div>
+        </div>
+        <!-- Tabla de ciudades -->
+        <div style="padding:12px 14px 0;">
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;">Ranking por ciudad</div>
+          <div id="cob-tabla"></div>
+        </div>
+        <div style="height:20px;"></div>
       </div>
 
     </div>
@@ -10544,6 +10592,240 @@ async function logAsignarCiudad(dia, turno, ciudad, chofer, event) {
 </script>
 
 <script>
+// ══════════════════════════════════════════════════════════
+// MAPA — SUBTABS: OPERATIVO / COBERTURA
+// ══════════════════════════════════════════════════════════
+let _mapaSubtab = 'operativo';
+let _cobInstancia = null;
+
+function mapaSelSubtab(tab) {
+  _mapaSubtab = tab;
+  const btnOp  = document.getElementById('mapa-subtab-operativo');
+  const btnCob = document.getElementById('mapa-subtab-cobertura');
+  const panOp  = document.getElementById('mapa-panel-operativo');
+  const panCob = document.getElementById('mapa-panel-cobertura');
+  if (!btnOp || !btnCob) return;
+
+  if (tab === 'operativo') {
+    btnOp.style.background  = 'rgba(255,255,255,.18)';
+    btnOp.style.color       = '#fff';
+    btnOp.style.borderBottom= '3px solid #FFD700';
+    btnCob.style.background = 'transparent';
+    btnCob.style.color      = 'rgba(255,255,255,.65)';
+    btnCob.style.borderBottom = '3px solid transparent';
+    if (panOp)  panOp.style.display  = '';
+    if (panCob) panCob.style.display = 'none';
+    // Invalidar mapa operativo para que se redibuje
+    if (_mapaInstance) setTimeout(() => _mapaInstance.invalidateSize(), 50);
+  } else {
+    btnCob.style.background  = 'rgba(255,255,255,.18)';
+    btnCob.style.color       = '#fff';
+    btnCob.style.borderBottom= '3px solid #FFD700';
+    btnOp.style.background   = 'transparent';
+    btnOp.style.color        = 'rgba(255,255,255,.65)';
+    btnOp.style.borderBottom = '3px solid transparent';
+    if (panOp)  panOp.style.display  = 'none';
+    if (panCob) panCob.style.display = '';
+    coberturaRender();
+  }
+}
+
+// ── Coordenadas de ciudades de la zona TCK ──
+const CIUDADES_COORDS = {
+  'Trenque Lauquen': { lat: -35.9717, lng: -62.7308 },
+  'Pehuajó':         { lat: -35.8500, lng: -61.8996 },
+  'Pehuajo':         { lat: -35.8500, lng: -61.8996 },
+  'Henderson':       { lat: -36.3003, lng: -61.7163 },
+  'Carlos Casares':  { lat: -35.6222, lng: -61.3659 },
+  'Daireaux':        { lat: -36.5993, lng: -61.7489 },
+  'Pellegrini':      { lat: -36.2660, lng: -63.1636 },
+  'Salliqueló':      { lat: -36.7495, lng: -62.9606 },
+  'Salliquelo':      { lat: -36.7495, lng: -62.9606 },
+  'Tres Lomas':      { lat: -36.4581, lng: -62.8658 },
+  'Guaminí':         { lat: -37.0124, lng: -62.4167 },
+  'Guamini':         { lat: -37.0124, lng: -62.4167 },
+  '30 de Agosto':    { lat: -36.3934, lng: -62.5326 },
+  'Lincoln':         { lat: -34.8642, lng: -61.5276 },
+  'Quemú Quemú':     { lat: -36.0551, lng: -63.5597 },
+  'América':         { lat: -35.4724, lng: -62.9806 },
+  'America':         { lat: -35.4724, lng: -62.9806 },
+  'Bolívar':         { lat: -36.2346, lng: -61.1079 },
+  'Bolivar':         { lat: -36.2346, lng: -61.1079 },
+  'Salazar':         { lat: -36.3522, lng: -61.6842 },
+  'Beruti':          { lat: -36.1167, lng: -62.4167 },
+  'Madero':          { lat: -35.9833, lng: -61.8667 },
+  'Paso':            { lat: -36.0000, lng: -61.7667 },
+  'Campo':           { lat: -35.9717, lng: -62.7308 }, // fallback a TL
+};
+
+async function coberturaRender() {
+  const tablaEl = document.getElementById('cob-tabla');
+  const mapaEl  = document.getElementById('cob-mapa-container');
+  if (!tablaEl || !mapaEl) return;
+
+  tablaEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text3);">Cargando datos...</div>';
+
+  // Leer filtros
+  const diasSel   = parseInt(document.getElementById('cob-periodo-sel').value) || 0;
+  const vendSel   = document.getElementById('cob-vendedor-sel').value || 'todos';
+
+  try {
+    // Leer todos los pedidos del Sheet CSV
+    const res  = await fetch(SHEET_CSV + '&_t=' + Date.now());
+    const csv  = await res.text();
+    const lines = csv.trim().split('\n');
+
+    const hoy    = new Date();
+    const desde  = diasSel > 0 ? new Date(hoy.getTime() - diasSel * 86400000) : null;
+    // Período anterior para comparar crecimiento
+    const desdePrev = diasSel > 0 ? new Date(hoy.getTime() - diasSel * 2 * 86400000) : null;
+    const hastaPrev = desde;
+
+    const parseMonto = t => parseInt((t||'0').toString().replace(/[^0-9]/g,'')) || 0;
+
+    // Acumular por ciudad — período actual y anterior
+    const porCiudad = {};
+    const porCiudadPrev = {};
+
+    for (let i = 1; i < lines.length; i++) {
+      const cols = parseCsv(lines[i]);
+      if (!cols[0] || !/^TCK-\d{8}-/.test(cols[0].trim())) continue;
+      const estado = (cols[10]||'').trim();
+      if (estado === 'Cancelado') continue;
+
+      const fecha    = new Date((cols[1]||'').replace(' ','T'));
+      const ciudad   = (cols[5]||'Sin ciudad').trim();
+      const vendedor = (cols[2]||'').trim();
+      const cliente  = (cols[3]||'').trim();
+      const monto    = parseMonto(cols[6]);
+
+      if (vendSel !== 'todos' && !vendedor.toLowerCase().includes(vendSel.toLowerCase())) continue;
+
+      // Período actual
+      if (!desde || fecha >= desde) {
+        if (!porCiudad[ciudad]) porCiudad[ciudad] = { ciudad, monto: 0, pedidos: 0, clientes: new Set(), vendedores: new Set() };
+        porCiudad[ciudad].monto    += monto;
+        porCiudad[ciudad].pedidos  += 1;
+        porCiudad[ciudad].clientes.add(cliente);
+        porCiudad[ciudad].vendedores.add(vendedor);
+      }
+
+      // Período anterior (para crecimiento)
+      if (desdePrev && fecha >= desdePrev && fecha < hastaPrev) {
+        if (!porCiudadPrev[ciudad]) porCiudadPrev[ciudad] = { monto: 0 };
+        porCiudadPrev[ciudad].monto += monto;
+      }
+    }
+
+    // Convertir a array y calcular crecimiento
+    const ciudades = Object.values(porCiudad)
+      .map(c => ({
+        ...c,
+        clientes:  c.clientes.size,
+        vendedores: [...c.vendedores].join(', '),
+        montoPrev: porCiudadPrev[c.ciudad] ? porCiudadPrev[c.ciudad].monto : 0,
+        crecimiento: porCiudadPrev[c.ciudad] && porCiudadPrev[c.ciudad].monto > 0
+          ? ((c.monto - porCiudadPrev[c.ciudad].monto) / porCiudadPrev[c.ciudad].monto * 100)
+          : null
+      }))
+      .sort((a,b) => b.monto - a.monto);
+
+    if (!ciudades.length) {
+      tablaEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text3);">Sin datos para el período seleccionado.</div>';
+      return;
+    }
+
+    const totalMonto = ciudades.reduce((s,c) => s + c.monto, 0);
+    const fmt = n => '$' + Math.round(n).toLocaleString('es-AR');
+
+    // ── Inicializar mapa Leaflet en el contenedor de cobertura ──
+    if (_cobInstancia) {
+      _cobInstancia.remove();
+      _cobInstancia = null;
+    }
+
+    _cobInstancia = L.map('cob-mapa-container', { zoomControl: true, scrollWheelZoom: false })
+      .setView([-36.2, -62.2], 8);
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '© CartoDB',
+      subdomains: 'abcd',
+      maxZoom: 14
+    }).addTo(_cobInstancia);
+
+    // Agregar burbujas por ciudad
+    const maxMonto = Math.max(...ciudades.map(c => c.monto));
+
+    ciudades.forEach(c => {
+      const coords = CIUDADES_COORDS[c.ciudad];
+      if (!coords) return;
+
+      const radio = Math.max(16, Math.round(Math.sqrt(c.monto / maxMonto) * 52));
+      const color = c.crecimiento === null ? '#1565C0'
+        : c.crecimiento > 5  ? '#2E7D32'
+        : c.crecimiento < -5 ? '#C62828'
+        : '#1565C0';
+
+      const pct = totalMonto > 0 ? (c.monto / totalMonto * 100).toFixed(1) : '0';
+      const crecStr = c.crecimiento !== null
+        ? (c.crecimiento > 0 ? '▲ +' : '▼ ') + Math.abs(c.crecimiento).toFixed(1) + '%'
+        : 'Sin comparativa';
+
+      const marker = L.circleMarker([coords.lat, coords.lng], {
+        radius:      radio,
+        fillColor:   color,
+        color:       '#fff',
+        weight:      2,
+        opacity:     1,
+        fillOpacity: 0.8
+      }).addTo(_cobInstancia);
+
+      marker.bindPopup(
+        '<div style="font-family:\'Barlow Condensed\',sans-serif;min-width:180px;">' +
+        '<div style="font-size:17px;font-weight:900;color:#1A0800;margin-bottom:6px;">📍 ' + c.ciudad + '</div>' +
+        '<div style="font-size:20px;font-weight:900;color:' + color + ';margin-bottom:4px;">' + fmt(c.monto) + '</div>' +
+        '<div style="font-size:12px;color:#666;margin-bottom:2px;">🧾 ' + c.pedidos + ' pedidos · 👥 ' + c.clientes + ' clientes</div>' +
+        '<div style="font-size:12px;color:#666;margin-bottom:2px;">📦 Peso: ' + pct + '%</div>' +
+        '<div style="font-size:12px;color:' + color + ';font-weight:700;">' + crecStr + '</div>' +
+        '<div style="font-size:11px;color:#999;margin-top:4px;">👤 ' + c.vendedores + '</div>' +
+        '</div>'
+      );
+    });
+
+    // ── Tabla de ranking ──
+    let html = '';
+    ciudades.forEach((c, i) => {
+      const pct   = totalMonto > 0 ? (c.monto / totalMonto * 100) : 0;
+      const color = c.crecimiento === null ? '#1565C0'
+        : c.crecimiento > 5  ? '#2E7D32'
+        : c.crecimiento < -5 ? '#C62828' : '#1565C0';
+      const crecBadge = c.crecimiento !== null
+        ? '<span style="background:' + (c.crecimiento > 5 ? '#E8F5E9' : c.crecimiento < -5 ? '#FFEBEE' : '#E3F2FD') +
+          ';color:' + color + ';border-radius:20px;padding:2px 8px;font-size:11px;font-weight:800;">' +
+          (c.crecimiento > 0 ? '▲ +' : '▼ ') + Math.abs(c.crecimiento).toFixed(1) + '%</span>'
+        : '';
+
+      html += '<div style="padding:10px 12px;border-bottom:1px solid #F0F4FF;display:flex;align-items:center;gap:10px;">';
+      html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:16px;font-weight:900;color:#9E9E9E;width:22px;text-align:center;">' + (i+1) + '</div>';
+      html += '<div style="flex:1;min-width:0;">';
+      html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:15px;font-weight:900;color:#1A0800;">' + c.ciudad + '</div>';
+      html += '<div style="margin-top:3px;"><div style="background:#E8EAF6;border-radius:4px;height:5px;overflow:hidden;"><div style="background:' + color + ';height:100%;width:' + pct.toFixed(1) + '%;border-radius:4px;"></div></div></div>';
+      html += '<div style="font-size:11px;color:var(--text3);margin-top:2px;">👥 ' + c.clientes + ' clientes · 🧾 ' + c.pedidos + ' pedidos · ' + pct.toFixed(1) + '%</div>';
+      html += '</div>';
+      html += '<div style="text-align:right;flex-shrink:0;">';
+      html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:16px;font-weight:900;color:' + color + ';">' + fmt(c.monto) + '</div>';
+      html += '<div style="margin-top:3px;">' + crecBadge + '</div>';
+      html += '</div></div>';
+    });
+
+    tablaEl.innerHTML = html || '<div style="text-align:center;padding:20px;color:var(--text3);">Sin datos</div>';
+
+  } catch(e) {
+    tablaEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text3);">❌ Error al cargar datos.</div>';
+    console.error('coberturaRender:', e);
+  }
+}
+
 async function mapaCargarAlertas() {
   try {
     var alertas = await sbFetch('clientes_ubicaciones?alerta_ubicacion=eq.true&select=nombre_cliente,lat,lng,lat_anterior,lng_anterior,ultima_visita&order=ultima_visita.desc');
