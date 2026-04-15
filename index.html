@@ -4698,12 +4698,12 @@ async function cargarPedidos(silencioso) {
     actualizarStats();
     renderPedidos();
     actualizarMiDiaSiAbierto();
-    // Si logística está abierta, refrescar también
-    if (_tabActual === 'logistica') renderLogistica();
     } catch(e) {
     if (!silencioso) document.getElementById('lista-pedidos').innerHTML =
       '<div class="empty">❌ Error al cargar pedidos.<br>Verificá tu conexión.</div>';
   }
+  // Siempre refrescar logística si está abierta (independiente de silencioso)
+  if (_tabActual === 'logistica') renderLogistica();
 }
 
 function esFechaEntregaValida(s) {
