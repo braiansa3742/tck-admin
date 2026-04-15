@@ -9696,8 +9696,6 @@ function descargarPlanillaCarga(choferParam) {
   });
 
   // ── DESGLOSE POR CIUDAD (orden inverso de ruta = orden de carga) ──
-  const ciudadesInverso = [...ciudades].reverse();
-  // También incluir ciudades con pedidos que no tengan categorías vet (solo productos)
   const porCiudadProds = {};
   pedidos.forEach(function(p) {
     const ciudadRaw = (p.localidad || '').trim();
