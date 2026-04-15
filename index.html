@@ -4039,7 +4039,6 @@ input[type="date"] {
         <button class="planilla-chofer-tab sel" id="log-tab-asignar"  onclick="logisticaSelTab('asignar',this)">📋 Asignar</button>
         <button class="planilla-chofer-tab" id="log-tab-joan"    onclick="logisticaSelTab('joan',this)">🚚 Joan</button>
         <button class="planilla-chofer-tab" id="log-tab-luis"    onclick="logisticaSelTab('luis',this)">🚚 Luis</button>
-        <button class="planilla-chofer-tab" id="log-tab-vet"     onclick="logisticaSelTab('vet',this)">🩺 Vet</button>
       </div>
 
       <!-- Contenido dinámico -->
@@ -4697,6 +4696,8 @@ async function cargarPedidos(silencioso) {
     actualizarStats();
     renderPedidos();
     actualizarMiDiaSiAbierto();
+    // Si logística está abierta, refrescar también
+    if (_tabActual === 'logistica') renderLogistica();
     } catch(e) {
     if (!silencioso) document.getElementById('lista-pedidos').innerHTML =
       '<div class="empty">❌ Error al cargar pedidos.<br>Verificá tu conexión.</div>';
@@ -5514,7 +5515,10 @@ function cambiarTab(tab) {
   });
 
   // Logística — renderizar DESPUÉS de activar el view
-  if (tab === 'logistica') { setTimeout(renderLogistica, 100); }
+  if (tab === 'logistica') {
+    // Renderizar inmediatamente con lo que hay, y de nuevo cuando carguen pedidos
+    setTimeout(renderLogistica, 50);
+  }
 
   // Cuando se abre Mi Día, renderizar
   if (tab === 'clientes') {
@@ -9768,7 +9772,7 @@ function renderLogistica() {
   const fechaEl = document.getElementById('planilla-fecha');
   if (fechaEl) fechaEl.textContent = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' });
 
-  if (_logTab === 'vet')  { renderLogisticaVet(el); return; }
+  // Tab vet accesible desde Joan/Luis, no como subtab independiente
   if (_logTab === 'joan') { renderLogisticaChofer(el, 'Joan'); return; }
   if (_logTab === 'luis') { renderLogisticaChofer(el, 'Luis'); return; }
   renderLogisticaAsignar(el);
