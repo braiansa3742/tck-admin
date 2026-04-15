@@ -4861,7 +4861,21 @@ function renderPedidos() {
   actualizarBadgePendientes();
   var lista = pedidosFiltrados();
   var cont = document.getElementById('lista-pedidos');
-  if (!lista.length) { cont.innerHTML = '<div class="empty">📭 No hay pedidos para mostrar</div>'; return; }
+  if (!lista.length) {
+    var hoyDbg = new Date(); hoyDbg.setHours(0,0,0,0);
+    var primerPed = todosLosPedidos[0];
+    var dbgMsg = '';
+    if (primerPed && filtroFecha === 'hoy') {
+      var fP = fechaPedido(primerPed);
+      dbgMsg = '<div style="font-size:10px;color:var(--text3);margin-top:8px;background:#F5F5F5;border-radius:8px;padding:8px;text-align:left;">' +
+        'Total sistema: <strong>' + todosLosPedidos.length + '</strong> &nbsp;|&nbsp; ' +
+        'Hoy browser: <strong>' + hoyDbg.toLocaleDateString('es-AR') + '</strong><br>' +
+        'Último ID: <strong>' + primerPed.pedidoId + '</strong><br>' +
+        'Fecha parseada: <strong>' + fP.toLocaleDateString('es-AR') + '</strong></div>';
+    }
+    cont.innerHTML = '<div class="empty">📭 No hay pedidos para mostrar' + dbgMsg + '</div>';
+    return;
+  }
   cont.innerHTML = lista.map(function(p){ return renderCard(p); }).join('');
 }
 
@@ -9381,6 +9395,32 @@ const _origCambiarTab = typeof cambiarTab === 'function' ? cambiarTab : null;
 //  CERTIFICADO VETERINARIO
 // ════════════════════════════════════════════════════════════════
 
+// Normaliza texto para comparación: sin acentos, minúsculas, sin puntuación extra
+function normalizarNombreVet(s) {
+  if (!s) return '';
+  return s.trim()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[°ºª]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Lookup tolerante: directo → normalizado → substring
+function vetBuscarMapeo(nombreProducto) {
+  if (!nombreProducto) return null;
+  if (VET_TABLA[nombreProducto]) return VET_TABLA[nombreProducto];
+  const keyNorm = normalizarNombreVet(nombreProducto);
+  for (const k in VET_TABLA) {
+    if (normalizarNombreVet(k) === keyNorm) return VET_TABLA[k];
+  }
+  for (const k in VET_TABLA) {
+    const kn = normalizarNombreVet(k);
+    if (keyNorm.includes(kn) || kn.includes(keyNorm)) return VET_TABLA[k];
+  }
+  return null;
+}
+
 // Tabla: producto → [categoría vet, kg por unidad]
 const VET_TABLA = {
   // POLLO ENTERO
@@ -9510,8 +9550,7 @@ function vetGenerar() {
 
     const prods = parsearProductos(p.detalle || p.resumen || '');
     prods.forEach(function(pr) {
-      const key    = normalizarNombreVet(pr.nombre);
-      const mapeo  = VET_TABLA[key] || VET_TABLA[pr.nombre];
+      const mapeo  = vetBuscarMapeo(pr.nombre);
       if (!mapeo) return;
       const cat = mapeo[0];
       const kgU = mapeo[1];
@@ -9605,8 +9644,7 @@ function descargarPlanillaCarga() {
     const prods = parsearProductos(p.detalle || p.resumen || '');
     prods.forEach(function(pr) {
       // Buscar el nombre TCK correcto via VET_TABLA
-      const key   = normalizarNombreVet(pr.nombre);
-      const mapeo = VET_TABLA[key] || VET_TABLA[pr.nombre];
+      const mapeo = vetBuscarMapeo(pr.nombre);
       // Usar el nombre TCK canónico si existe, sino usar el nombre del pedido
       const nombreTCK = pr.nombre; // parsearProductos ya devuelve nombres limpios
       if (!totalesProd[nombreTCK]) totalesProd[nombreTCK] = { cantidad: 0, cat: mapeo ? mapeo[0] : 'Otros' };
