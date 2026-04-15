@@ -9633,104 +9633,174 @@ function descargarPlanillaCarga() {
   if (!_vetDatos) { toast('Generá la planilla primero', 'err'); return; }
   const { chofer, vehiculo, ciudades, porCiudad, hoy, fechaPDF, totalUds } = _vetDatos;
 
-  // Calcular totales por producto (nombre TCK limpio) desde los pedidos
+  // Pedidos confirmados de este chofer
   const pedidos = todosLosPedidos.filter(p =>
     p.estado === 'Confirmado' && p.choferAsignado === chofer
   );
 
-  // Acumular por nombre TCK normalizado
-  const totalesProd = {}; // nombre → cantidad
+  // ── TOTALES GLOBALES por categoría → producto ──────────────────
+  const totalesProd = {};
   pedidos.forEach(function(p) {
-    const prods = parsearProductos(p.detalle || p.resumen || '');
-    prods.forEach(function(pr) {
-      // Buscar el nombre TCK correcto via VET_TABLA
+    parsearProductos(p.detalle || p.resumen || '').forEach(function(pr) {
       const mapeo = vetBuscarMapeo(pr.nombre);
-      // Usar el nombre TCK canónico si existe, sino usar el nombre del pedido
-      const nombreTCK = pr.nombre; // parsearProductos ya devuelve nombres limpios
-      if (!totalesProd[nombreTCK]) totalesProd[nombreTCK] = { cantidad: 0, cat: mapeo ? mapeo[0] : 'Otros' };
-      totalesProd[nombreTCK].cantidad += pr.cantidad;
+      const cat   = mapeo ? mapeo[0] : 'Otros';
+      if (!totalesProd[pr.nombre]) totalesProd[pr.nombre] = { cantidad: 0, cat };
+      totalesProd[pr.nombre].cantidad += pr.cantidad;
     });
   });
 
-  // Agrupar por categoría
-  const porCat = {};
-  VET_ORDEN_CATS.forEach(c => porCat[c] = []);
-  porCat['Otros'] = [];
-
-  Object.keys(totalesProd).sort().forEach(function(nombre) {
-    const d   = totalesProd[nombre];
-    const cat = d.cat;
-    if (!porCat[cat]) porCat[cat] = [];
-    porCat[cat].push({ nombre, cantidad: d.cantidad });
+  const porCatTotal = {};
+  VET_ORDEN_CATS.forEach(c => porCatTotal[c] = []);
+  porCatTotal['Otros'] = [];
+  Object.keys(totalesProd).forEach(function(nombre) {
+    const d = totalesProd[nombre];
+    if (!porCatTotal[d.cat]) porCatTotal[d.cat] = [];
+    porCatTotal[d.cat].push({ nombre, cantidad: d.cantidad });
   });
 
-  // Construir filas HTML
-  let rows = '';
-  let grandTotal = 0;
-  const allCats = [...VET_ORDEN_CATS, 'Otros'];
-
-  allCats.forEach(function(cat) {
-    const items = porCat[cat];
+  let rowsTotal = '', grandTotal = 0;
+  [...VET_ORDEN_CATS, 'Otros'].forEach(function(cat) {
+    const items = porCatTotal[cat];
     if (!items || !items.length) return;
-
-    // Header categoría
     const catUds = items.reduce((a, i) => a + i.cantidad, 0);
-    rows += '<tr style="background:#E3F2FD;">' +
-      '<td colspan="2" style="padding:8px 12px;font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;color:#1565C0;text-transform:uppercase;letter-spacing:.5px;">' +
-      cat + '</td>' +
-      '<td style="padding:8px 12px;text-align:right;font-family:Barlow Condensed,sans-serif;font-weight:900;color:#1565C0;">' + catUds + ' u.</td>' +
-      '</tr>';
-
-    // Productos de la categoría
+    rowsTotal += '<tr style="background:#E8F5E9;">' +
+      '<td colspan="2" style="padding:7px 12px;font-weight:900;color:#1B5E20;font-size:13px;text-transform:uppercase;letter-spacing:.4px;">' + cat + '</td>' +
+      '<td style="padding:7px 12px;text-align:right;font-weight:900;color:#1B5E20;font-size:13px;">' + catUds + ' u.</td></tr>';
     items.sort((a,b) => a.nombre.localeCompare(b.nombre)).forEach(function(item) {
       grandTotal += item.cantidad;
-      rows += '<tr>' +
-        '<td style="padding:6px 12px 6px 24px;font-size:13px;color:#333;">' + item.nombre + '</td>' +
-        '<td></td>' +
-        '<td style="padding:6px 12px;text-align:right;font-family:Barlow Condensed,sans-serif;font-size:16px;font-weight:900;color:#222;">' + item.cantidad + '</td>' +
-        '</tr>';
+      rowsTotal += '<tr>' +
+        '<td style="width:18px;padding:5px 4px 5px 20px;font-size:15px;color:#aaa;">□</td>' +
+        '<td style="padding:5px 12px 5px 4px;font-size:13px;color:#333;">' + item.nombre + '</td>' +
+        '<td style="padding:5px 12px;text-align:right;font-size:16px;font-weight:900;color:#222;">' + item.cantidad + '</td></tr>';
     });
   });
 
+  // ── DESGLOSE POR CIUDAD (orden inverso de ruta = orden de carga) ──
+  const ciudadesInverso = [...ciudades].reverse();
+  // También incluir ciudades con pedidos que no tengan categorías vet (solo productos)
+  const porCiudadProds = {};
+  pedidos.forEach(function(p) {
+    const ciudadRaw = (p.localidad || '').trim();
+    const FALSAS = ['campo', 'campo tck', 'catalogo web tck', ''];
+    const ciudad = FALSAS.includes(ciudadRaw.toLowerCase()) ? '⚠️ Sin localidad' : ciudadRaw;
+    if (!porCiudadProds[ciudad]) porCiudadProds[ciudad] = {};
+    parsearProductos(p.detalle || p.resumen || '').forEach(function(pr) {
+      const mapeo = vetBuscarMapeo(pr.nombre);
+      const cat   = mapeo ? mapeo[0] : 'Otros';
+      if (!porCiudadProds[ciudad][cat]) porCiudadProds[ciudad][cat] = {};
+      if (!porCiudadProds[ciudad][cat][pr.nombre]) porCiudadProds[ciudad][cat][pr.nombre] = 0;
+      porCiudadProds[ciudad][cat][pr.nombre] += pr.cantidad;
+    });
+  });
+
+  // Ordenar ciudades en orden inverso de ruta para la sección de carga
+  const todasCiudades = Object.keys(porCiudadProds);
+  todasCiudades.sort(function(a, b) {
+    const ia = RUTA_FIJA.findIndex(c => a.toLowerCase().includes(c.toLowerCase()));
+    const ib = RUTA_FIJA.findIndex(c => b.toLowerCase().includes(c.toLowerCase()));
+    const ra = ia === -1 ? 999 : ia;
+    const rb = ib === -1 ? 999 : ib;
+    return rb - ra; // INVERSO: última parada primero (se carga al fondo)
+  });
+
+  let rowsCiudad = '';
+  let numParada = todasCiudades.length;
+  todasCiudades.forEach(function(ciudad) {
+    const cats = porCiudadProds[ciudad];
+    let cityTotal = 0;
+    [...VET_ORDEN_CATS, 'Otros'].forEach(c => {
+      if (cats[c]) Object.values(cats[c]).forEach(q => cityTotal += q);
+    });
+    rowsCiudad += '<tr style="background:#1B5E20;color:#fff;">' +
+      '<td colspan="3" style="padding:9px 12px;font-size:14px;font-weight:900;">' +
+      '📍 Parada ' + numParada-- + ' — ' + ciudad +
+      '<span style="float:right;opacity:.8;font-size:12px;">' + cityTotal + ' bultos</span></td></tr>';
+    [...VET_ORDEN_CATS, 'Otros'].forEach(function(cat) {
+      if (!cats[cat]) return;
+      const catTotal = Object.values(cats[cat]).reduce((a,b) => a+b, 0);
+      rowsCiudad += '<tr style="background:#E8F5E9;">' +
+        '<td colspan="2" style="padding:5px 12px 5px 20px;font-size:12px;font-weight:700;color:#1B5E20;text-transform:uppercase;">' + cat + '</td>' +
+        '<td style="padding:5px 12px;text-align:right;font-size:12px;font-weight:700;color:#1B5E20;">' + catTotal + ' u.</td></tr>';
+      Object.keys(cats[cat]).sort().forEach(function(nombre) {
+        rowsCiudad += '<tr>' +
+          '<td style="width:18px;padding:4px 4px 4px 32px;font-size:14px;color:#aaa;">□</td>' +
+          '<td style="padding:4px 12px 4px 4px;font-size:12px;color:#333;">' + nombre + '</td>' +
+          '<td style="padding:4px 12px;text-align:right;font-size:14px;font-weight:900;color:#222;">' + cats[cat][nombre] + '</td></tr>';
+      });
+    });
+  });
+
+  // ── FECHA formateada para nombre de archivo ────────────────────
+  const hoyDate = new Date();
+  const dd = String(hoyDate.getDate()).padStart(2,'0');
+  const mm = String(hoyDate.getMonth()+1).padStart(2,'0');
+  const aaaa = hoyDate.getFullYear();
+
   const html = '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+    '<title>Carga_' + chofer + '_' + dd + '-' + mm + '-' + aaaa + '</title>' +
     '<style>' +
-    'body{font-family:Arial,sans-serif;padding:24px;color:#222;font-size:13px;}' +
-    'h2{color:#1B5E20;margin:0 0 2px;font-size:20px;}' +
-    '.sub{color:#555;font-size:12px;margin:2px 0;}' +
-    '.info{display:flex;gap:24px;margin:10px 0 16px;font-size:13px;}' +
-    'table{width:100%;border-collapse:collapse;margin-top:4px;}' +
-    'th{background:#1B5E20;color:#fff;padding:9px 12px;text-align:left;font-size:13px;font-weight:700;}' +
-    'th:last-child{text-align:right;}' +
-    'tr:nth-child(even){background:#f9f9f9;}' +
+    'body{font-family:Arial,sans-serif;padding:20px;color:#222;font-size:13px;max-width:800px;margin:0 auto;}' +
+    'h1{color:#1B5E20;margin:0 0 2px;font-size:22px;font-weight:900;}' +
+    'h2{color:#1B5E20;margin:20px 0 8px;font-size:16px;font-weight:900;border-bottom:2px solid #1B5E20;padding-bottom:4px;}' +
+    '.sub{color:#555;font-size:12px;margin:2px 0 10px;}' +
+    '.info{display:flex;gap:24px;margin:10px 0 6px;font-size:13px;background:#F1F8E9;border-radius:8px;padding:10px 14px;}' +
+    'table{width:100%;border-collapse:collapse;margin-top:4px;margin-bottom:16px;}' +
     'td{border-bottom:1px solid #eee;vertical-align:middle;}' +
-    '.total-row{background:#1B5E20!important;}' +
-    '.total-row td{color:#fff;padding:10px 12px;font-weight:900;font-size:15px;border:none;}' +
-    '@media print{button{display:none;}.no-print{display:none}}' +
+    'tr:nth-child(even) td{background:#fafafa;}' +
+    '.total-row td{background:#1B5E20!important;color:#fff;padding:10px 12px;font-weight:900;font-size:15px;border:none;}' +
+    '.firma{margin-top:28px;border:1.5px dashed #aaa;border-radius:8px;padding:16px 20px;}' +
+    '.firma-title{font-weight:900;font-size:13px;color:#333;margin-bottom:12px;}' +
+    '.firma-line{border-bottom:1px solid #333;margin-bottom:20px;height:28px;}' +
+    '.firma-label{font-size:11px;color:#888;margin-top:4px;}' +
+    '.page-break{page-break-before:always;}' +
+    '@media print{.no-print{display:none!important;}}' +
     '</style></head><body>' +
-    '<h2>📦 PLANILLA DE CARGA</h2>' +
+
+    // ── ENCABEZADO ──
+    '<h1>📦 PLANILLA DE CARGA</h1>' +
     '<div class="sub">The Chicken Kings S.R.L. · ' + hoy + '</div>' +
     '<div class="info">' +
     '<span>🚚 <strong>Chofer:</strong> ' + chofer + '</span>' +
     '<span>🚛 <strong>Vehículo:</strong> ' + vehiculo + '</span>' +
     '<span>📋 <strong>Pedidos:</strong> ' + pedidos.length + '</span>' +
     '</div>' +
-    '<table>' +
-    '<thead><tr><th>Producto</th><th></th><th style="text-align:right">Unidades</th></tr></thead>' +
-    '<tbody>' + rows +
-    '<tr class="total-row">' +
-    '<td colspan="2">TOTAL BULTOS A CARGAR</td>' +
-    '<td style="text-align:right">' + grandTotal + '</td>' +
-    '</tr></tbody></table>' +
-    '<div class="no-print" style="margin-top:20px;text-align:center;">' +
-    '<button onclick="window.print()" style="padding:12px 32px;background:#1B5E20;color:#fff;border:none;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;">🖨️ Imprimir</button>' +
+
+    // ── SECCIÓN 1: TOTALES GLOBALES ──
+    '<h2>📊 TOTALES A SACAR DE CÁMARA</h2>' +
+    '<table><tbody>' + rowsTotal +
+    '<tr class="total-row"><td></td><td style="padding:10px 12px;font-weight:900;font-size:15px;">TOTAL BULTOS</td>' +
+    '<td style="padding:10px 12px;text-align:right;font-weight:900;font-size:15px;">' + grandTotal + '</td></tr>' +
+    '</tbody></table>' +
+
+    // ── FIRMA DEL CHOFER ──
+    '<div class="firma">' +
+    '<div class="firma-title">✍️ Conformidad de recepción de mercadería</div>' +
+    '<div style="display:flex;gap:40px;">' +
+    '<div style="flex:1;"><div class="firma-line"></div><div class="firma-label">Firma del chofer (' + chofer + ')</div></div>' +
+    '<div style="flex:1;"><div class="firma-line"></div><div class="firma-label">Aclaración</div></div>' +
+    '<div style="width:120px;"><div class="firma-line"></div><div class="firma-label">Hora de salida</div></div>' +
     '</div>' +
-    '<p style="margin-top:24px;text-align:center;color:#aaa;font-size:11px;">Generado por sistema TCK · ' + fechaPDF + '</p>' +
+    '<div style="margin-top:12px;font-size:11px;color:#888;">' +
+    'Declaro haber recibido conforme la totalidad de la mercadería detallada arriba (' + grandTotal + ' bultos) para su entrega en ruta. Fecha: ' + fechaPDF + '</div>' +
+    '</div>' +
+
+    // ── SECCIÓN 2: DESGLOSE POR CIUDAD (orden de carga = inverso de ruta) ──
+    '<h2 class="page-break">🗺️ ORDEN DE CARGA POR CIUDAD</h2>' +
+    '<div class="sub" style="margin-bottom:10px;">⚠️ Cargar en este orden — la primera parada se carga ÚLTIMA (queda al frente del camión)</div>' +
+    '<table><tbody>' + rowsCiudad + '</tbody></table>' +
+
+    '<div class="no-print" style="margin-top:20px;text-align:center;">' +
+    '<button onclick="window.print()" style="padding:12px 32px;background:#1B5E20;color:#fff;border:none;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;margin-right:12px;">🖨️ Imprimir</button>' +
+    '</div>' +
+    '<p style="margin-top:20px;text-align:center;color:#aaa;font-size:10px;">Generado por sistema TCK · ' + fechaPDF + '</p>' +
     '</body></html>';
 
   const win = window.open('', '_blank');
+  if (!win) { toast('Habilitá las ventanas emergentes del browser', 'err'); return; }
+  win.document.title = 'Carga_' + chofer + '_' + dd + '-' + mm + '-' + aaaa;
   win.document.write(html);
   win.document.close();
-  setTimeout(() => win.print(), 500);
+  setTimeout(() => win.print(), 600);
 }
 
 function descargarPDFVet() {
@@ -9768,7 +9838,13 @@ function descargarPDFVet() {
     });
   });
 
-  const html = '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+  const hoyDateV = new Date();
+  const ddV = String(hoyDateV.getDate()).padStart(2,'0');
+  const mmV = String(hoyDateV.getMonth()+1).padStart(2,'0');
+  const aaV = hoyDateV.getFullYear();
+  const tituloVet = 'Vet_' + chofer + '_' + ddV + '-' + mmV + '-' + aaV;
+
+  const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + tituloVet + '</title>' +
     '<style>body{font-family:Arial,sans-serif;padding:24px;color:#222;font-size:13px;}' +
     'h2{color:#1565C0;margin:0 0 4px;}p{margin:2px 0 0;color:#555;font-size:12px;}' +
     'table{width:100%;border-collapse:collapse;margin-top:16px;}' +
@@ -9796,6 +9872,8 @@ function descargarPDFVet() {
     '</body></html>';
 
   const win = window.open('', '_blank');
+  if (!win) { toast('Habilitá las ventanas emergentes del browser', 'err'); return; }
+  win.document.title = tituloVet;
   win.document.write(html);
   win.document.close();
   setTimeout(() => win.print(), 500);
