@@ -9483,24 +9483,29 @@ function vetGenerar() {
   if (!vehiculo) { toast('Elegí un vehículo', 'err'); return; }
 
   // Pedidos confirmados asignados a este chofer
-  const pedidos = todosLosPedidos.filter(p =>
+  // Si no hay asignados, usar todos los confirmados (Supabase puede no haber cargado)
+  let pedidos = todosLosPedidos.filter(p =>
     p.estado === 'Confirmado' && p.choferAsignado === chofer
   );
+  const sinAsignar = pedidos.length === 0;
+  if (sinAsignar) {
+    pedidos = todosLosPedidos.filter(p => p.estado === 'Confirmado');
+  }
 
   if (!pedidos.length) {
     document.getElementById('vet-contenido').innerHTML =
-      '<div style="text-align:center;padding:20px;color:var(--text3);">No hay pedidos confirmados asignados a ' + chofer + '.</div>';
+      '<div style="text-align:center;padding:20px;color:var(--text3);">No hay pedidos confirmados.</div>';
     return;
   }
 
   // Agrupar por ciudad → categoría
-  const LOCALIDADES_IGNORAR = ['campo', 'campo tck', 'catalogo web tck', ''];
   const porCiudad = {};
   let totalUds = 0, totalKg = 0;
 
   pedidos.forEach(function(p) {
-    const ciudad = (p.localidad || 'Sin ciudad').trim();
-    if (LOCALIDADES_IGNORAR.includes(ciudad.toLowerCase())) return;
+    const ciudadRaw = (p.localidad || '').trim();
+    const FALSAS = ['campo', 'campo tck', 'catalogo web tck', ''];
+    const ciudad = FALSAS.includes(ciudadRaw.toLowerCase()) ? '⚠️ Sin localidad' : ciudadRaw;
     if (!porCiudad[ciudad]) porCiudad[ciudad] = {};
 
     const prods = parsearProductos(p.detalle || p.resumen || '');
