@@ -3201,6 +3201,35 @@ input[type="date"] {
 .planilla-chofer-tab.sel {
   background: #1565C0; color: #fff; border-color: #1565C0;
 }
+/* ── Seguimiento ── */
+.seg-progress-wrap { background: #E8EAF6; border-radius: 20px; height: 8px; overflow: hidden; margin: 8px 0 4px; }
+.seg-progress-bar { height: 100%; border-radius: 20px; transition: width .5s; }
+.seg-row { padding: 10px 14px; border-bottom: 1px solid #F0F4FF; display: flex; align-items: center; gap: 10px; }
+.seg-row:last-child { border-bottom: none; }
+.seg-row-nombre { font-family: 'Barlow Condensed',sans-serif; font-size: 15px; font-weight: 900; color: #1A0800; flex: 1; }
+.seg-row-ciudad { font-size: 11px; color: var(--text3); }
+.seg-row-monto { font-family: 'Barlow Condensed',sans-serif; font-size: 15px; font-weight: 900; color: #1A237E; }
+.seg-badge-entregado { background: #E8F5E9; color: #2E7D32; border-radius: 20px; padding: 2px 9px; font-size: 11px; font-weight: 800; }
+.seg-badge-pendiente { background: #FFF3E0; color: #E65100; border-radius: 20px; padding: 2px 9px; font-size: 11px; font-weight: 800; }
+.seg-cobro-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; margin-top: 10px; }
+.seg-cobro-item { background: rgba(255,255,255,.1); border-radius: 8px; padding: 6px; text-align: center; }
+.seg-cobro-label { font-size: 9px; color: rgba(255,255,255,.55); text-transform: uppercase; letter-spacing: .3px; }
+.seg-cobro-val { font-family: 'Barlow Condensed',sans-serif; font-size: 14px; font-weight: 900; color: #fff; }
+/* ── Cheques ── */
+.cheque-card { background: #fff; border-radius: 12px; margin-bottom: 8px; border: 1.5px solid #E8EAF6; overflow: hidden; box-shadow: 0 1px 6px rgba(0,0,0,.05); }
+.cheque-card-hdr { padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #F0F4FF; }
+.cheque-cliente { font-family: 'Barlow Condensed',sans-serif; font-size: 16px; font-weight: 900; color: #1A0800; }
+.cheque-monto { font-family: 'Barlow Condensed',sans-serif; font-size: 18px; font-weight: 900; color: #1A237E; }
+.cheque-body { padding: 10px 14px; display: grid; grid-template-columns: repeat(2,1fr); gap: 6px; }
+.cheque-field { font-size: 11px; color: var(--text3); }
+.cheque-field strong { display: block; font-size: 13px; color: var(--text); font-weight: 700; }
+.cheque-estado-btn { padding: 5px 12px; border: none; border-radius: 20px; cursor: pointer; font-family: 'Barlow Condensed',sans-serif; font-size: 13px; font-weight: 800; touch-action: manipulation; }
+.cheque-estado-recibido { background: #FFF3E0; color: #E65100; }
+.cheque-estado-depositado { background: #E3F2FD; color: #1565C0; }
+.cheque-estado-acreditado { background: #E8F5E9; color: #2E7D32; }
+.cheque-estado-rechazado { background: #FFEBEE; color: #C62828; }
+.cheque-vence-hoy { border-color: #E65100 !important; }
+.cheque-vence-pasado { border-color: #C62828 !important; background: #FFF8F8; }
 .planilla-seccion {
   background: #fff; border-radius: 14px; margin-bottom: 12px;
   border: 1.5px solid rgba(21,101,192,.1); overflow: hidden;
@@ -4044,6 +4073,8 @@ input[type="date"] {
         <button class="planilla-chofer-tab sel" id="log-tab-asignar"  onclick="logisticaSelTab('asignar',this)">📋 Asignar</button>
         <button class="planilla-chofer-tab" id="log-tab-joan"    onclick="logisticaSelTab('joan',this)">🚚 Joan</button>
         <button class="planilla-chofer-tab" id="log-tab-luis"    onclick="logisticaSelTab('luis',this)">🚚 Luis</button>
+        <button class="planilla-chofer-tab" id="log-tab-seguimiento" onclick="logisticaSelTab('seguimiento',this)">📊 Seguimiento</button>
+        <button class="planilla-chofer-tab" id="log-tab-cheques" onclick="logisticaSelTab('cheques',this)">📋 Cheques</button>
       </div>
 
       <!-- Contenido dinámico -->
@@ -9981,6 +10012,8 @@ function renderLogistica() {
   // Tab vet accesible desde Joan/Luis, no como subtab independiente
   if (_logTab === 'joan') { renderLogisticaChofer(el, 'Joan'); return; }
   if (_logTab === 'luis') { renderLogisticaChofer(el, 'Luis'); return; }
+  if (_logTab === 'seguimiento') { renderLogisticaSeguimiento(el); return; }
+  if (_logTab === 'cheques') { renderLogisticaCheques(el); return; }
   renderLogisticaAsignar(el);
 }
 
@@ -10236,6 +10269,108 @@ function renderLogisticaChofer(el, chofer) {
   });
 
   el.innerHTML = html;
+}
+
+// ══════════════════════════════════════════════════════════
+// SEGUIMIENTO DEL REPARTO
+// ══════════════════════════════════════════════════════════
+async function renderLogisticaSeguimiento(el) {
+  el.innerHTML = '<div class="planilla-empty"><div class="loading-spinner" style="margin:0 auto 12px;"></div>Cargando seguimiento...</div>';
+  try {
+    const hoyStr = new Date().toISOString().split('T')[0];
+    const entregas = await sbFetch('entregas?fecha_asignacion=gte.' + hoyStr + 'T00:00:00&select=*&order=chofer.asc') || [];
+    if (!entregas.length) { el.innerHTML = '<div class="planilla-empty">📭 No hay entregas asignadas hoy.</div>'; return; }
+    const parseMonto = m => { const n = parseFloat(m)||0; return n < 1000 && n > 0 ? n*1000 : n; };
+    const fmt = n => '$' + Math.round(n).toLocaleString('es-AR');
+    const porChofer = { Joan: [], Luis: [] };
+    entregas.forEach(e => { if (porChofer[e.chofer]) porChofer[e.chofer].push(e); });
+    let html = '';
+    const totalEntregas = entregas.length;
+    const entregadas = entregas.filter(e => e.estado === 'entregado').length;
+    const pendientes = totalEntregas - entregadas;
+    const pct = totalEntregas ? Math.round(entregadas/totalEntregas*100) : 0;
+    const cobros = { efectivo: 0, transferencia: 0, cheque: 0, cuenta_corriente: 0 };
+    let totalCobrado = 0;
+    entregas.filter(e => e.estado === 'entregado').forEach(e => {
+      const m = parseMonto(e.monto); totalCobrado += m;
+      if (cobros[e.forma_cobro] !== undefined) cobros[e.forma_cobro] += m;
+    });
+    const totalDia = entregas.reduce((s,e) => s + parseMonto(e.monto), 0);
+    html += '<div style="background:linear-gradient(135deg,#1A237E,#283593);border-radius:14px;padding:14px 16px;margin-bottom:14px;">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
+    html += '<div><div style="font-size:11px;color:rgba(255,255,255,.6);text-transform:uppercase;letter-spacing:.8px;">Total del día</div><div style="font-family:Barlow Condensed,sans-serif;font-size:28px;font-weight:900;color:#fff;">' + fmt(totalDia) + '</div><div style="font-size:11px;color:rgba(255,255,255,.5);">Cobrado: ' + fmt(totalCobrado) + '</div></div>';
+    html += '<div style="text-align:right"><div style="font-size:11px;color:rgba(255,255,255,.6);text-transform:uppercase;letter-spacing:.8px;">Entregas</div><div style="font-family:Barlow Condensed,sans-serif;font-size:28px;font-weight:900;color:#fff;">' + entregadas + '<span style="font-size:16px;opacity:.6;"> / ' + totalEntregas + '</span></div><div style="font-size:11px;color:rgba(255,255,255,.5);">' + pendientes + ' pendientes</div></div></div>';
+    html += '<div class="seg-progress-wrap"><div class="seg-progress-bar" style="width:' + pct + '%;background:#FFD700;"></div></div>';
+    html += '<div style="font-size:10px;color:rgba(255,255,255,.5);text-align:center;margin-bottom:10px;">' + pct + '% completado</div>';
+    html += '<div class="seg-cobro-grid"><div class="seg-cobro-item"><div class="seg-cobro-label">💵 Efectivo</div><div class="seg-cobro-val">' + fmt(cobros.efectivo) + '</div></div><div class="seg-cobro-item"><div class="seg-cobro-label">📲 Transfer.</div><div class="seg-cobro-val">' + fmt(cobros.transferencia) + '</div></div><div class="seg-cobro-item"><div class="seg-cobro-label">📋 Cheque</div><div class="seg-cobro-val">' + fmt(cobros.cheque) + '</div></div><div class="seg-cobro-item"><div class="seg-cobro-label">📒 Cta.Cte.</div><div class="seg-cobro-val">' + fmt(cobros.cuenta_corriente) + '</div></div></div></div>';
+    ['Joan','Luis'].forEach(chofer => {
+      const items = porChofer[chofer];
+      if (!items.length) return;
+      const ent = items.filter(e => e.estado === 'entregado').length;
+      const tot = items.reduce((s,e) => s + parseMonto(e.monto), 0);
+      const cob = items.filter(e=>e.estado==='entregado').reduce((s,e)=>s+parseMonto(e.monto),0);
+      const pctC = items.length ? Math.round(ent/items.length*100) : 0;
+      const color = chofer === 'Joan' ? '#2E7D32' : '#E65100';
+      html += '<div style="background:#fff;border-radius:14px;margin-bottom:10px;border:1.5px solid #E8EAF6;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.05);">';
+      html += '<div style="background:' + (chofer==='Joan'?'linear-gradient(135deg,#1B5E20,#2E7D32)':'linear-gradient(135deg,#BF360C,#E64A19)') + ';padding:10px 16px;display:flex;align-items:center;justify-content:space-between;"><div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:#fff;">🚚 ' + chofer + '</div><div style="text-align:right"><div style="font-family:Barlow Condensed,sans-serif;font-size:20px;font-weight:900;color:#fff;">' + ent + ' / ' + items.length + '</div><div style="font-size:10px;color:rgba(255,255,255,.65);">' + fmt(cob) + ' cobrado</div></div></div>';
+      html += '<div style="padding:10px 16px 6px;"><div class="seg-progress-wrap" style="margin-top:0;"><div class="seg-progress-bar" style="width:' + pctC + '%;background:' + color + ';"></div></div><div style="font-size:10px;color:var(--text3);text-align:center;margin-bottom:8px;">' + pctC + '% · total: ' + fmt(tot) + '</div></div>';
+      items.forEach(e => {
+        const m = parseMonto(e.monto);
+        const hora = e.fecha_entrega ? new Date(e.fecha_entrega).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}) : '—';
+        html += '<div class="seg-row"><div style="flex:1;min-width:0;"><div class="seg-row-nombre">' + (e.cliente||'—') + '</div><div class="seg-row-ciudad">📍 ' + (e.ciudad||'—') + (e.comercio?' · 🏪 '+e.comercio:'') + '</div>' + (e.estado==='entregado'?'<div style="font-size:11px;color:var(--text3);margin-top:1px;">🕐 '+hora+' · '+(e.forma_cobro||'—').replace('_',' ')+'</div>':'') + '</div><div style="text-align:right;flex-shrink:0;"><div class="seg-row-monto">' + fmt(m) + '</div><div>' + (e.estado==='entregado'?'<span class="seg-badge-entregado">✅ Entregado</span>':'<span class="seg-badge-pendiente">⏳ Pendiente</span>') + '</div></div></div>';
+      });
+      html += '</div>';
+    });
+    html += '<button onclick="renderLogisticaSeguimiento(document.getElementById(\'logistica-contenido\'))" style="width:100%;padding:11px;background:#F5F7FF;border:1.5px solid #E8EAF6;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:800;color:#1A237E;cursor:pointer;margin-top:4px;">🔄 Actualizar</button>';
+    el.innerHTML = html;
+  } catch(e) { el.innerHTML = '<div class="planilla-empty">❌ Error al cargar.</div>'; console.error(e); }
+}
+
+// ══════════════════════════════════════════════════════════
+// PANEL DE CHEQUES
+// ══════════════════════════════════════════════════════════
+async function renderLogisticaCheques(el) {
+  el.innerHTML = '<div class="planilla-empty"><div class="loading-spinner" style="margin:0 auto 12px;"></div>Cargando cheques...</div>';
+  try {
+    const cheques = await sbFetch('cheques_recibidos?order=fecha_vencimiento.asc&select=*') || [];
+    const fmt = n => '$' + Math.round(n).toLocaleString('es-AR');
+    const hoy = new Date(); hoy.setHours(0,0,0,0);
+    if (!cheques.length) { el.innerHTML = '<div class="planilla-empty">📋 No hay cheques registrados.<br><small style="color:var(--text3);">Aparecen acá cuando el chofer los registra al entregar.</small></div>'; return; }
+    const pendientes = cheques.filter(c => c.estado !== 'acreditado' && c.estado !== 'rechazado');
+    const totalPend = pendientes.reduce((s,c) => s+(parseFloat(c.monto)||0), 0);
+    const vencenHoy = pendientes.filter(c => { const v=new Date(c.fecha_vencimiento); v.setHours(0,0,0,0); return v.getTime()===hoy.getTime(); }).length;
+    const vencidos  = pendientes.filter(c => { const v=new Date(c.fecha_vencimiento); v.setHours(0,0,0,0); return v<hoy; }).length;
+    let html = '<div style="background:#F5F7FF;border-radius:12px;padding:12px 16px;margin-bottom:14px;display:flex;gap:12px;">';
+    html += '<div style="flex:1;text-align:center;"><div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;">En circulación</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#1A237E;">' + fmt(totalPend) + '</div></div>';
+    if (vencenHoy) html += '<div style="flex:1;text-align:center;background:#FFF3E0;border-radius:10px;padding:6px;"><div style="font-size:10px;color:#E65100;text-transform:uppercase;letter-spacing:.8px;">Vencen hoy</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#E65100;">' + vencenHoy + '</div></div>';
+    if (vencidos)  html += '<div style="flex:1;text-align:center;background:#FFEBEE;border-radius:10px;padding:6px;"><div style="font-size:10px;color:#C62828;text-transform:uppercase;letter-spacing:.8px;">Vencidos</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#C62828;">' + vencidos + '</div></div>';
+    html += '</div>';
+    const ESTADOS = { recibido:{label:'Recibido',cls:'cheque-estado-recibido',next:'depositado'}, depositado:{label:'Depositado',cls:'cheque-estado-depositado',next:'acreditado'}, acreditado:{label:'Acreditado',cls:'cheque-estado-acreditado',next:null}, rechazado:{label:'Rechazado',cls:'cheque-estado-rechazado',next:null} };
+    cheques.forEach(c => {
+      const venc = new Date(c.fecha_vencimiento); venc.setHours(0,0,0,0);
+      const dias = Math.round((venc-hoy)/86400000);
+      const vStr = dias===0?'⚠️ Vence HOY':dias<0?'🔴 Venció hace '+Math.abs(dias)+'d':'Vence en '+dias+'d';
+      const cls = dias<0?'cheque-vence-pasado':dias===0?'cheque-vence-hoy':'';
+      const est = ESTADOS[c.estado]||ESTADOS.recibido;
+      html += '<div class="cheque-card '+cls+'"><div class="cheque-card-hdr"><div><div class="cheque-cliente">'+(c.cliente||'—')+'</div><div style="font-size:11px;color:var(--text3);">🚚 '+(c.chofer||'—')+' · '+new Date(c.created_at||Date.now()).toLocaleDateString('es-AR')+'</div></div><div style="text-align:right;"><div class="cheque-monto">'+fmt(c.monto||0)+'</div><div style="display:flex;gap:6px;align-items:center;margin-top:4px;">';
+      if (est.next) { html += '<button class="cheque-estado-btn '+est.cls+'" onclick="avanzarEstadoCheque(\''+c.id+'\',\''+est.next+'\')">'+est.label+' →</button><button onclick="marcarChequeRechazado(\''+c.id+'\')" style="padding:3px 8px;background:#FFEBEE;color:#C62828;border:none;border-radius:20px;font-size:11px;font-weight:800;cursor:pointer;">✕</button>'; }
+      else { html += '<span class="cheque-estado-btn '+est.cls+'">'+est.label+'</span>'; }
+      html += '</div></div></div><div class="cheque-body"><div class="cheque-field"><span>Banco</span><strong>'+(c.banco||'—')+'</strong></div><div class="cheque-field"><span>N° cheque</span><strong>'+(c.numero_cheque||'—')+'</strong></div><div class="cheque-field"><span>Emisor</span><strong>'+(c.emisor||'—')+'</strong></div><div class="cheque-field"><span>Vencimiento</span><strong>'+venc.toLocaleDateString('es-AR')+' · '+vStr+'</strong></div></div>';
+      html += '<div style="padding:8px 14px 10px;"><a href="https://www.bcra.gob.ar/BCRAyVos/Consulta_Deudores.asp" target="_blank" style="display:flex;align-items:center;gap:6px;background:#F5F7FF;border:1px solid #E8EAF6;border-radius:8px;padding:7px 12px;text-decoration:none;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:700;color:#1A237E;">🔍 Consultar BCRA · '+(c.emisor||'emisor')+'</a></div></div>';
+    });
+    el.innerHTML = html;
+  } catch(e) { el.innerHTML = '<div class="planilla-empty">❌ Error. ¿Existe la tabla cheques_recibidos?</div>'; console.error(e); }
+}
+
+async function avanzarEstadoCheque(id, nuevoEstado) {
+  try {
+    await sbFetch('cheques_recibidos?id=eq.'+id, { method:'PATCH', body:JSON.stringify({estado:nuevoEstado}) });
+    renderLogistica(); toast('✅ Cheque actualizado','ok');
+  } catch(e) { toast('❌ Error','err'); }
+}
+async function marcarChequeRechazado(id) {
+  if (!confirm('¿Marcar como RECHAZADO?')) return;
+  await avanzarEstadoCheque(id,'rechazado');
 }
 
 function renderLogisticaVet(el) {
