@@ -3348,61 +3348,66 @@ input[type="date"] {
   display: flex; align-items: center; justify-content: space-between;
 }
 .log-ciudad-bloque {
-  border-bottom: 1px solid #f0f4ff;
+  background: #fff; border-radius: 14px; margin-bottom: 10px;
+  border: 1.5px solid #E8EAF6; overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,.05);
 }
 .log-ciudad-hdr {
-  padding: 10px 16px 8px; display: flex; align-items: center; justify-content: space-between;
-  background: #F0F4FF; cursor: pointer;
+  padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;
+  background: linear-gradient(135deg, #1A237E, #283593);
+  cursor: pointer;
 }
 .log-ciudad-nombre {
-  font-family: 'Barlow Condensed', sans-serif; font-size: 16px; font-weight: 900; color: #1565C0;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 16px; font-weight: 900; color: #fff;
 }
-.log-ciudad-asignar-todos {
-  display: flex; gap: 6px;
-}
+.log-ciudad-nombre span { color: rgba(255,255,255,.65); font-weight: 400; }
+.log-ciudad-asignar-todos { display: flex; gap: 6px; }
 .log-ciudad-btn {
-  padding: 8px 16px; border-radius: 20px; border: 2px solid rgba(21,101,192,.3);
-  background: #fff; cursor: pointer; font-family: 'Barlow Condensed', sans-serif;
-  font-size: 15px; font-weight: 900; color: #1565C0; transition: all .15s;
+  padding: 6px 14px; border-radius: 20px; border: 1.5px solid rgba(255,255,255,.4);
+  background: rgba(255,255,255,.15); cursor: pointer; font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px; font-weight: 900; color: #fff; transition: all .15s;
   touch-action: manipulation;
 }
-.log-ciudad-btn:active { background: #1565C0; color: #fff; border-color: #1565C0; }
+.log-ciudad-btn:active { background: rgba(255,255,255,.35); }
 .log-pedido-row {
-  padding: 11px 16px; border-bottom: 1px solid #f5f8ff;
-  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-bottom: 1px solid #F3F4F6;
+  display: flex; align-items: center; gap: 10px; background: #fff;
 }
 .log-pedido-row:last-child { border-bottom: none; }
+.log-pedido-row:nth-child(even) { background: #FAFBFF; }
 .log-pedido-info { flex: 1; min-width: 0; }
 .log-pedido-cliente {
-  font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 900; color: var(--text);
+  font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 900; color: #1A0800;
 }
-.log-pedido-prods { font-size: 11px; color: var(--text3); margin-top: 2px; line-height: 1.4; }
+.log-pedido-prods { font-size: 11px; color: var(--text3); margin-top: 2px; line-height: 1.5; }
 .log-pedido-monto {
-  font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 900; color: #1565C0;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 16px; font-weight: 900; color: #1A237E;
   flex-shrink: 0;
 }
+/* Badge chofer asignado - diferente color por chofer */
 .log-chofer-badge {
   display: inline-flex; align-items: center; gap: 6px;
-  background: #E3F2FD; color: #1565C0; border-radius: 20px;
-  padding: 6px 8px 6px 12px; font-size: 13px; font-weight: 800;
+  border-radius: 20px; padding: 5px 8px 5px 11px; font-size: 12px; font-weight: 800;
   font-family: 'Barlow Condensed', sans-serif;
 }
+.log-chofer-badge.joan { background: #E8F5E9; color: #2E7D32; }
+.log-chofer-badge.luis { background: #FFF3E0; color: #E65100; }
 .log-chofer-badge button {
-  background: rgba(21,101,192,.15); border: none; color: #1565C0; cursor: pointer;
-  font-size: 14px; padding: 0; line-height: 1; border-radius: 50%;
-  width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.08); border: none; cursor: pointer;
+  font-size: 12px; padding: 0; line-height: 1; border-radius: 50%;
+  width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;
   touch-action: manipulation; flex-shrink: 0;
 }
-.log-chofer-badge button:active { background: rgba(21,101,192,.3); }
+.log-chofer-badge button:active { background: rgba(0,0,0,.18); }
 .log-asignar-picker { display: flex; gap: 6px; flex-wrap: wrap; }
 .log-asignar-btn {
-  padding: 11px 18px; border: 2px solid rgba(21,101,192,.3); border-radius: 12px;
-  background: #fff; cursor: pointer; font-family: 'Barlow Condensed', sans-serif;
-  font-size: 16px; font-weight: 900; color: #1565C0; transition: all .15s;
+  padding: 9px 16px; border: 2px solid #E0E0E0; border-radius: 10px;
+  background: #FAFAFA; cursor: pointer; font-family: 'Barlow Condensed', sans-serif;
+  font-size: 15px; font-weight: 900; color: var(--text2); transition: all .15s;
   touch-action: manipulation; min-width: 80px; text-align: center;
 }
-.log-asignar-btn:active { background: #E3F2FD; border-color: #1565C0; }
-.log-asignar-btn:active { background: #E3F2FD; border-color: #1565C0; }
+.log-asignar-btn.joan:hover, .log-asignar-btn.joan:active { background: #E8F5E9; border-color: #2E7D32; color: #2E7D32; }
+.log-asignar-btn.luis:hover, .log-asignar-btn.luis:active { background: #FFF3E0; border-color: #E65100; color: #E65100; }
 .log-sin-fecha {
   background: #FFF8E1; border-radius: 10px; padding: 12px 14px; margin-bottom: 12px;
   border: 1.5px solid #FFE082; font-size: 13px; color: #795548;
@@ -10004,7 +10009,8 @@ function renderLogisticaAsignar(el) {
   }
 
   const fmt = n => '$' + Math.round(n).toLocaleString('es-AR');
-  const totalMonto = pedidos.reduce((a,p) => a + (parseFloat((p.total||'0').toString().replace(/[^0-9.,]/g,'').replace(',','.')) || 0), 0);
+  const parseMonto = t => parseInt((t||'0').toString().replace(/[^0-9]/g,'')) || 0;
+  const totalMonto = pedidos.reduce((a,p) => a + parseMonto(p.total), 0);
   const asignados  = pedidos.filter(p => p.choferAsignado).length;
 
   // ── Resumen ──
@@ -10033,13 +10039,13 @@ function renderLogisticaAsignar(el) {
 
   todasCiudades.forEach(ciudad => {
     const items = porCiudad[ciudad];
-    const totalCiudad = items.reduce((a,p) => a + (parseFloat((p.total||'0').toString().replace(/[^0-9.,]/g,'').replace(',','.')) || 0), 0);
+    const totalCiudad = items.reduce((a,p) => a + parseMonto(p.total), 0);
     const mismoCh = items.every(p => p.choferAsignado) && items.every(p => p.choferAsignado === items[0].choferAsignado);
     const ciudadSafe = ciudad.replace(/"/g,'&quot;');
 
     html += '<div class="log-ciudad-bloque">';
     html += '<div class="log-ciudad-hdr">';
-    html += '<div class="log-ciudad-nombre">📍 ' + ciudad + ' <span style="font-size:12px;font-weight:400;color:var(--text3);">(' + items.length + ' · ' + fmt(totalCiudad) + ')</span></div>';
+    html += '<div class="log-ciudad-nombre">📍 ' + ciudad + ' <span>(' + items.length + ' · ' + fmt(totalCiudad) + ')</span></div>';
     if (!mismoCh) {
       html += '<div class="log-ciudad-asignar-todos">';
       html += '<button class="log-ciudad-btn" data-dia="" data-turno="" data-ciudad="' + ciudadSafe + '" data-chofer="Joan" onclick="logAsignarCiudadBtn(this,event)">J</button>';
@@ -10049,7 +10055,7 @@ function renderLogisticaAsignar(el) {
     html += '</div>';
 
     items.forEach(p => {
-      const monto   = parseFloat((p.total||'0').toString().replace(/[^0-9.,]/g,'').replace(',','.')) || 0;
+      const monto   = parseMonto(p.total);
       const pidSafe = p.pedidoId.replace(/"/g,'&quot;');
       const entregaBadge = p.fechaEntrega ? ' <span style="background:#E3F2FD;color:#1565C0;border-radius:20px;padding:1px 6px;font-size:10px;font-weight:800;">' + (p.turnoEntrega==='Mañana'?'🌅':'🌆') + ' ' + p.fechaEntrega.split(' ').slice(0,2).join(' ') + '</span>' : '';
       const prods = parsearProductos(p.detalle||p.resumen||'');
@@ -10062,11 +10068,12 @@ function renderLogisticaAsignar(el) {
       html += '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0;">';
       html += '<div class="log-pedido-monto">' + fmt(monto) + '</div>';
       if (p.choferAsignado) {
-        html += '<div class="log-chofer-badge">🚚 ' + p.choferAsignado + ' <button data-pid="' + pidSafe + '" onclick="logDesasignarBtn(this,event)">✕</button></div>';
+        const chClass = (p.choferAsignado||'').toLowerCase();
+        html += '<div class="log-chofer-badge ' + chClass + '">🚚 ' + p.choferAsignado + ' <button data-pid="' + pidSafe + '" onclick="logDesasignarBtn(this,event)">✕</button></div>';
       } else {
         html += '<div class="log-asignar-picker">';
-        html += '<button class="log-asignar-btn" data-pid="' + pidSafe + '" data-chofer="Joan" onclick="logAsignarBtn(this,event)">🚚 Joan</button>';
-        html += '<button class="log-asignar-btn" data-pid="' + pidSafe + '" data-chofer="Luis" onclick="logAsignarBtn(this,event)">🚚 Luis</button>';
+        html += '<button class="log-asignar-btn joan" data-pid="' + pidSafe + '" data-chofer="Joan" onclick="logAsignarBtn(this,event)">🚚 Joan</button>';
+        html += '<button class="log-asignar-btn luis" data-pid="' + pidSafe + '" data-chofer="Luis" onclick="logAsignarBtn(this,event)">🚚 Luis</button>';
         html += '</div>';
       }
       html += '</div></div>';
