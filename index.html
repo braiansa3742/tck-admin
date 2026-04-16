@@ -783,6 +783,13 @@ body {
 .btn-entregar { background: var(--blue2); color: var(--blue); border-color: var(--blue); }
 .btn-entregar:hover { background: var(--blue); color: #fff; }
 .btn-cancelar { background: #FFEBEE; color: #C62828; border-color: #C62828; }
+.btn-aprobar { background: #E8F5E9; color: #1B5E20; border-color: #2E7D32; }
+.btn-aprobar:hover { background: #2E7D32; color: #fff; }
+.btn-rechazar { background: #FFEBEE; color: #B71C1C; border-color: #C62828; }
+.btn-rechazar:hover { background: #C62828; color: #fff; }
+.revision-info { background: #EDE7F6; border:1.5px solid #B39DDB; border-radius:10px; padding:10px 14px; margin-bottom:8px; font-size:12px; color:#4527A0; }
+.revision-info strong { display:block; font-size:13px; font-weight:800; margin-bottom:4px; }
+.revision-card { border-left: 4px solid #7C4DFF !important; background: #FAFAFE; }
 .btn-cancelar:hover { background: #C62828; color: #fff; }
 .btn-pendiente-again { background: var(--orange2); color: var(--orange); border-color: var(--orange); }
 .btn-pendiente-again:hover { background: var(--orange); color: #fff; }
@@ -3466,48 +3473,13 @@ input[type="date"] {
 <div class="login-wrap" id="login-wrap">
   <div class="login-box">
     <div class="login-titulo">Ingresá</div>
-    <div class="login-sub" id="login-sub">Seleccioná tu nombre</div>
+    <div class="login-sub" id="login-sub">Acceso de administración</div>
     <div id="paso1">
-      <button class="login-btn" id="login-btn-miguel" onclick="seleccionarVendedor('Miguel','M','#8B0000')">
-        <div class="login-av">M</div>
-        <div class="login-btn-name">Miguel Martínez<div class="login-btn-role">Vendedor</div></div>
-      </button>
-      <button class="login-btn" id="login-btn-juan" onclick="seleccionarVendedor('Juan','J','#8B0000')">
-        <div class="login-av">J</div>
-        <div class="login-btn-name">Juan Cruz<div class="login-btn-role">Vendedor</div></div>
-      </button>
-      <button class="login-btn" id="login-btn-lisandro" onclick="seleccionarVendedor('Lisandro','L','#5C3A1E')">
-        <div class="login-av" style="background:var(--text2);">L</div>
-        <div class="login-btn-name">Lisandro<div class="login-btn-role">Vendedor</div></div>
-      </button>
-      <button class="login-btn" id="login-btn-admin" onclick="seleccionarVendedor('ADMIN','A','#B8860B')" style="margin-top:8px;border-color:var(--gold);background:var(--cream2);">
-        <div class="login-av" style="background:var(--gold);color:var(--text);">A</div>
+      <button class="login-btn" id="login-btn-admin" onclick="seleccionarVendedor('ADMIN','A','#B8860B')" style="border-color:var(--gold);background:var(--cream2);">
+        <div class="login-av" style="background:var(--gold);color:var(--text);">👑</div>
         <div class="login-btn-name">Administración<div class="login-btn-role">Ver todos los pedidos</div></div>
       </button>
     </div>
-
-
-<script>
-      // Filtrar botones de login según el dominio — se ejecuta inmediatamente
-      (function() {
-        var host = window.location.hostname;
-        var esAdmin  = host === 'tckadmin.lat'  || host === 'www.tckadmin.lat';
-        var esVentas = host === 'tckventas.com' || host === 'www.tckventas.com';
-        if (esAdmin) {
-          // tckadmin.lat — solo mostrar Admin, ocultar vendedores
-          ['login-btn-miguel','login-btn-juan','login-btn-lisandro'].forEach(function(id) {
-            var el = document.getElementById(id);
-            if (el) el.style.display = 'none';
-          });
-          var sub = document.getElementById('login-sub');
-          if (sub) sub.textContent = 'Acceso de administración';
-        } else if (esVentas) {
-          // tckventas.com — ocultar Admin, solo mostrar vendedores
-          var admin = document.getElementById('login-btn-admin');
-          if (admin) admin.style.display = 'none';
-        }
-      })();
-    </script>
     <div id="paso2" style="display:none;">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;padding:12px 16px;background:var(--cream2);border-radius:12px;">
         <div id="pin-av" style="width:44px;height:44px;border-radius:50%;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:900;flex-shrink:0;"></div>
@@ -4807,7 +4779,8 @@ function actualizarStats() {
   }, 0);
   document.getElementById('stat-total').textContent = activos.length;
   document.getElementById('stat-monto').textContent = '$' + total.toLocaleString('es-AR');
-  document.getElementById('stat-pend').textContent = activos.filter(function(p){return p.estado==='Pendiente';}).length;
+  var enRevision = activos.filter(function(p){return p.estado==='En revisión';}).length;
+  document.getElementById('stat-pend').textContent = activos.filter(function(p){return p.estado==='Pendiente';}).length + (enRevision ? ' (+' + enRevision + ' rev.)' : '');
   document.getElementById('stat-conf').textContent = activos.filter(function(p){return p.estado==='Confirmado';}).length;
   document.getElementById('stat-entregado').textContent = activos.filter(function(p){return p.estado==='Entregado';}).length;
 }
@@ -4955,7 +4928,7 @@ function badgeHtml(p) {
 function renderCard(p) {
   var id = p.pedidoId.replace(/[^a-zA-Z0-9]/g,'-');
   var esAdmin = vendedorActual === 'ADMIN';
-  var claseCard = p.tipoDuplicado === 'exacto' ? ' dup-exacto' : p.esDuplicado ? ' dup-parcial' : '';
+  var claseCard = p.estado === 'En revisión' ? ' revision-card' : p.tipoDuplicado === 'exacto' ? ' dup-exacto' : p.esDuplicado ? ' dup-parcial' : '';
 
   var dupAlert = '';
   if (p.tipoDuplicado === 'exacto') {
@@ -4971,12 +4944,17 @@ function renderCard(p) {
   }
 
   var btns = '';
-  if (p.estado !== 'Confirmado') btns += '<button class="btn-estado btn-confirmar" onclick="cambiarEstado(\'' + p.pedidoId + '\',' + p.fila + ',\'Confirmado\',event)">✅ Ya remití en Xubio</button>';
-  if (p.estado !== 'Entregado')  btns += '<button class="btn-estado btn-entregar" onclick="cambiarEstado(\'' + p.pedidoId + '\',' + p.fila + ',\'Entregado\',event)">📦 Entregado</button>';
-  if (esAdmin && p.estado !== 'Pendiente') btns += '<button class="btn-estado btn-pendiente-again" onclick="cambiarEstado(\'' + p.pedidoId + '\',' + p.fila + ',\'Pendiente\',event)">⏳ Pendiente</button>';
-  if (esAdmin && p.estado !== 'Cancelado') btns += '<button class="btn-estado btn-cancelar" onclick="confirmarCancelar(\'' + p.pedidoId + '\',' + p.fila + ',event)">❌ Cancelar</button>';
-
-  // Botón asignar chofer — pedidos confirmados
+  if (p.estado === 'En revisión') {
+    if (esAdmin) {
+      btns += '<button class="btn-estado btn-aprobar" onclick="aprobarPedidoConDescuento(\'' + p.pedidoId + '\', ' + p.fila + ', event)">✅ Aprobar descuento</button>';
+      btns += '<button class="btn-estado btn-rechazar" onclick="rechazarPedidoConDescuento(\'' + p.pedidoId + '\', ' + p.fila + ', event)">❌ Rechazar</button>';
+    }
+  } else {
+    if (p.estado !== 'Confirmado') btns += '<button class="btn-estado btn-confirmar" onclick="cambiarEstado(\'' + p.pedidoId + '\',' + p.fila + ',\'Confirmado\',event)">✅ Ya remití en Xubio</button>';
+    if (p.estado !== 'Entregado')  btns += '<button class="btn-estado btn-entregar"  onclick="cambiarEstado(\'' + p.pedidoId + '\',' + p.fila + ',\'Entregado\',event)">📦 Entregado</button>';
+    if (esAdmin && p.estado !== 'Pendiente') btns += '<button class="btn-estado btn-pendiente-again" onclick="cambiarEstado(\'' + p.pedidoId + '\',' + p.fila + ',\'Pendiente\',event)">⏳ Pendiente</button>';
+    if (esAdmin && p.estado !== 'Cancelado') btns += '<button class="btn-estado btn-cancelar" onclick="confirmarCancelar(\'' + p.pedidoId + '\',' + p.fila + ',event)">❌ Cancelar</button>';
+  }  // Botón asignar chofer — pedidos confirmados
   var asignarHtml = '';
   if (p.estado === 'Confirmado') {
     if (p.choferAsignado) {
@@ -5017,6 +4995,7 @@ function renderCard(p) {
       '<div class="pedido-detalle-row"><span class="pdr-label">Total</span><span class="pdr-val" style="color:var(--red);font-family:\'Barlow Condensed\',sans-serif;font-size:18px;font-weight:900;">' + fmtTotal(p.total) + '</span></div>' +
       '<div class="pedido-detalle-row"><span class="pdr-label">Fecha/Hora</span><span class="pdr-val">' + p.fechaHora + '</span></div>' +
       (detalle ? '<div class="pedido-productos">' + detalle + '</div>' : '') +
+      (p.estado === 'En revisión' && p.nota && p.nota.includes('DESCUENTOS:') ? (function(){ var m = p.nota.match(/DESCUENTOS: (.+?)(?:\|\||$)/); return '<div class="revision-info"><strong>🔍 Pedido con descuento — requiere aprobación</strong>' + (m ? m[1].trim() : '') + '</div>'; })() : '') +
       dupAlert +
       '<div class="pedido-acciones">' + btns + '</div>' +
       asignarHtml +
@@ -5299,6 +5278,46 @@ function generarMensaje(modo) {
 
 
 // ── CAMBIAR ESTADO ────────────────────────────────────────────────
+async function aprobarPedidoConDescuento(pedidoId, fila, event) {
+  if (event) event.stopPropagation();
+  if (!confirm('¿Aprobar este pedido con descuento? Pasará a Pendiente.')) return;
+  await cambiarEstado(pedidoId, fila, 'Pendiente', event);
+  toast('✅ Pedido aprobado', 'ok');
+}
+
+function rechazarPedidoConDescuento(pedidoId, fila, event) {
+  if (event) event.stopPropagation();
+  var modal = document.createElement('div');
+  modal.id = 'rechazo-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:600;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;';
+  modal.innerHTML = '<div style="background:#fff;border-radius:16px;padding:24px 20px;width:100%;max-width:380px;">'
+    + '<div style="font-family:Barlow Condensed,sans-serif;font-size:20px;font-weight:900;color:#1A0800;margin-bottom:8px;">Rechazar descuento</div>'
+    + '<div style="font-size:13px;color:#666;margin-bottom:16px;">El pedido vuelve al vendedor para que lo edite. Motivo:</div>'
+    + '<textarea id="rechazo-motivo" placeholder="Ej: El descuento no fue negociado..." rows="3" style="width:100%;padding:10px;border:1.5px solid #E0E0E0;border-radius:10px;font-size:14px;box-sizing:border-box;resize:none;"></textarea>'
+    + '<div id="rechazo-err" style="font-size:11px;color:#C62828;margin-top:4px;min-height:14px;"></div>'
+    + '<div style="display:flex;gap:8px;margin-top:16px;">'
+    + '<button onclick="document.getElementById(&quot;rechazo-modal&quot;).remove()" style="flex:1;padding:11px;background:#F5F5F5;border:none;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:700;cursor:pointer;">Cancelar</button>'
+    + '<button onclick="confirmarRechazoDescuento(\'' + pedidoId + '\', ' + fila + ')" style="flex:2;padding:11px;background:#C62828;color:#fff;border:none;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:16px;font-weight:900;cursor:pointer;">Rechazar</button>'
+    + '</div></div>';
+  document.body.appendChild(modal);
+  modal.onclick = function(e){ if(e.target===modal) modal.remove(); };
+  setTimeout(function(){ var el=document.getElementById('rechazo-motivo'); if(el) el.focus(); }, 100);
+}
+
+async function confirmarRechazoDescuento(pedidoId, fila) {
+  var motivo = (document.getElementById('rechazo-motivo')?.value||'').trim();
+  if (!motivo) { document.getElementById('rechazo-err').textContent = 'Escribí el motivo'; return; }
+  document.querySelector('div[style*="z-index:600"]')?.remove();
+  try {
+    var params = new URLSearchParams({ accion:'cambiarEstado', pedidoId:pedidoId, fila:fila, estado:'Pendiente' });
+    await fetch(APPS_SCRIPT_URL + '?' + params.toString(), { mode:'no-cors' });
+    var p = todosLosPedidos.find(function(x){ return x.pedidoId===pedidoId; });
+    if (p) { p.estado='Pendiente'; p.nota='RECHAZADO: ' + motivo; }
+    renderPedidos();
+    toast('Pedido rechazado — volvió a Pendiente', 'ok');
+  } catch(e) { toast('Error al rechazar', 'err'); }
+}
+
 function confirmarCancelar(pedidoId, fila, event) {
   event.stopPropagation();
   if (confirm('⚠️ ¿Seguro que querés cancelar este pedido?\nEsta acción quedará registrada.')) {
