@@ -3690,23 +3690,21 @@ input[type="date"] {
       <div class="mapa-hdr">
         <div class="mapa-hdr-titulo">🗺️ Mapa</div>
         <div style="font-size:12px;opacity:.8;margin-top:2px" id="mapa-fecha-label">Hoy</div>
-      </div>
-
-      <!-- Subtabs: Operativo | Cobertura -->
-      <div style="display:flex;gap:0;border-bottom:2px solid rgba(255,255,255,.15);">
-        <button id="mapa-subtab-operativo" onclick="mapaSelSubtab('operativo')"
-          style="flex:1;padding:10px 8px;background:rgba(255,255,255,.18);border:none;color:#fff;font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:900;cursor:pointer;border-bottom:3px solid #FFD700;letter-spacing:.3px;display:flex;align-items:center;justify-content:center;gap:5px;">
-          📍 Operativo
-        </button>
-        <button id="mapa-subtab-cobertura" onclick="mapaSelSubtab('cobertura')"
-          style="flex:1;padding:10px 8px;background:transparent;border:none;color:rgba(255,255,255,.65);font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:900;cursor:pointer;border-bottom:3px solid transparent;letter-spacing:.3px;display:flex;align-items:center;justify-content:center;gap:5px;">
-          📊 Cobertura
-        </button>
+        <!-- Subtabs DENTRO del header rojo -->
+        <div style="display:flex;gap:6px;margin-top:12px;">
+          <button id="mapa-subtab-operativo" onclick="mapaSelSubtab('operativo')"
+            style="flex:1;padding:8px 6px;background:rgba(255,255,255,.25);border:1.5px solid rgba(255,255,255,.4);border-radius:8px;color:#fff;font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:900;cursor:pointer;touch-action:manipulation;">
+            📍 Operativo
+          </button>
+          <button id="mapa-subtab-cobertura" onclick="mapaSelSubtab('cobertura')"
+            style="flex:1;padding:8px 6px;background:transparent;border:1.5px solid rgba(255,255,255,.25);border-radius:8px;color:rgba(255,255,255,.55);font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:900;cursor:pointer;touch-action:manipulation;">
+            📊 Cobertura
+          </button>
+        </div>
       </div>
 
       <!-- ── PANEL OPERATIVO ── -->
       <div id="mapa-panel-operativo">
-        <!-- Filtros: fecha + vendedor -->
         <div style="background:rgba(0,0,0,.15);padding:8px 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
           <select id="mapa-fecha-sel" onchange="mapaFiltrarFecha(this.value)" style="flex:1;min-width:120px;padding:6px 10px;border-radius:8px;border:none;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;background:#fff;color:#333;">
             <option value="0">Hoy</option>
@@ -3721,30 +3719,13 @@ input[type="date"] {
             <button class="mapa-chip" id="mapa-chip-Lisandro" onclick="mapaFiltrar('Lisandro')">Lisandro</button>
           </div>
         </div>
-
-        <!-- Mapa Leaflet -->
         <div id="mapa-container"></div>
-
-        <!-- Stats -->
         <div class="mapa-stats" style="grid-template-columns:repeat(4,1fr);">
-          <div class="mapa-stat">
-            <div class="mapa-stat-num" id="mapa-stat-visitados">—</div>
-            <div class="mapa-stat-label">Visitados</div>
-          </div>
-          <div class="mapa-stat">
-            <div class="mapa-stat-num" id="mapa-stat-con-pedido" style="color:var(--green2)">—</div>
-            <div class="mapa-stat-label">Con pedido</div>
-          </div>
-          <div class="mapa-stat">
-            <div class="mapa-stat-num" id="mapa-stat-sin-pedido" style="color:var(--orange)">—</div>
-            <div class="mapa-stat-label">Sin pedido</div>
-          </div>
-          <div class="mapa-stat">
-            <div class="mapa-stat-num" id="mapa-stat-no-visitados" style="color:#9E9E9E">—</div>
-            <div class="mapa-stat-label">Sin visitar</div>
-          </div>
+          <div class="mapa-stat"><div class="mapa-stat-num" id="mapa-stat-visitados">—</div><div class="mapa-stat-label">Visitados</div></div>
+          <div class="mapa-stat"><div class="mapa-stat-num" id="mapa-stat-con-pedido" style="color:var(--green2)">—</div><div class="mapa-stat-label">Con pedido</div></div>
+          <div class="mapa-stat"><div class="mapa-stat-num" id="mapa-stat-sin-pedido" style="color:var(--orange)">—</div><div class="mapa-stat-label">Sin pedido</div></div>
+          <div class="mapa-stat"><div class="mapa-stat-num" id="mapa-stat-no-visitados" style="color:#9E9E9E">—</div><div class="mapa-stat-label">Sin visitar</div></div>
         </div>
-
         <div id="mapa-leyenda" style="display:none;padding:8px 14px;background:#fafafa;border-top:1px solid #f0f0f0;display:flex;gap:16px;flex-wrap:wrap;"></div>
         <div class="mapa-lista-titulo" style="display:flex;align-items:center;justify-content:space-between;">
           <span>Detalle de visitas</span>
@@ -3771,44 +3752,25 @@ input[type="date"] {
 
       <!-- ── PANEL COBERTURA ── -->
       <div id="mapa-panel-cobertura" style="display:none;">
-        <!-- Filtros cobertura -->
-        <div style="background:rgba(0,0,0,.15);padding:8px 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-          <select id="cob-periodo-sel" onchange="coberturaRender()" style="flex:1;min-width:130px;padding:6px 10px;border-radius:8px;border:none;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;background:#fff;color:#333;">
+        <!-- Filtros -->
+        <div style="padding:10px 12px;background:#F5F7FF;border-bottom:1px solid #E8EAF6;display:flex;gap:8px;flex-wrap:wrap;">
+          <select id="cob-periodo-sel" onchange="coberturaRender()" style="flex:1;min-width:130px;padding:8px 10px;border-radius:10px;border:1.5px solid #E0E0E0;font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:700;color:#333;background:#fff;">
             <option value="30">Últimos 30 días</option>
             <option value="60">Últimos 60 días</option>
             <option value="90">Últimos 90 días</option>
             <option value="0">Todo el tiempo</option>
           </select>
-          <select id="cob-vendedor-sel" onchange="coberturaRender()" style="flex:1;min-width:110px;padding:6px 10px;border-radius:8px;border:none;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;background:#fff;color:#333;">
+          <select id="cob-vendedor-sel" onchange="coberturaRender()" style="flex:1;min-width:110px;padding:8px 10px;border-radius:10px;border:1.5px solid #E0E0E0;font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:700;color:#333;background:#fff;">
             <option value="todos">Todos</option>
             <option value="Miguel">Miguel</option>
             <option value="Juan">Juan</option>
             <option value="Lisandro">Lisandro</option>
           </select>
         </div>
-        <!-- Mapa de burbujas -->
-        <div id="cob-mapa-container" style="height:340px;background:#e8eaf6;"></div>
-        <div style="padding:8px 14px;display:flex;gap:12px;align-items:center;background:#f5f7ff;border-top:1px solid #E8EAF6;flex-wrap:wrap;">
-          <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text3);">
-            <div style="width:11px;height:11px;border-radius:50%;background:#2E7D32;"></div> Creciendo +5%
-          </div>
-          <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text3);">
-            <div style="width:11px;height:11px;border-radius:50%;background:#F57C00;"></div> Estable
-          </div>
-          <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text3);">
-            <div style="width:11px;height:11px;border-radius:50%;background:#C62828;"></div> Cayendo -5%
-          </div>
-          <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text3);">
-            <div style="width:11px;height:11px;border-radius:50%;background:#1565C0;"></div> Sin comparativa
-          </div>
-          <div style="font-size:11px;color:var(--text3);margin-left:auto;">Tamaño = volumen</div>
+        <!-- Contenido dinámico -->
+        <div id="cob-contenido" style="padding:12px 14px;">
+          <div style="text-align:center;padding:40px 20px;color:var(--text3);">Seleccioná un período para ver el análisis</div>
         </div>
-        <!-- Tabla de ciudades -->
-        <div style="padding:12px 14px 0;">
-          <div style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;">Ranking por ciudad</div>
-          <div id="cob-tabla"></div>
-        </div>
-        <div style="height:20px;"></div>
       </div>
 
     </div>
@@ -10598,7 +10560,6 @@ async function logAsignarCiudad(dia, turno, ciudad, chofer, event) {
 // MAPA — SUBTABS: OPERATIVO / COBERTURA
 // ══════════════════════════════════════════════════════════
 let _mapaSubtab = 'operativo';
-let _cobInstancia = null;
 
 function mapaSelSubtab(tab) {
   _mapaSubtab = tab;
@@ -10607,96 +10568,77 @@ function mapaSelSubtab(tab) {
   const panOp  = document.getElementById('mapa-panel-operativo');
   const panCob = document.getElementById('mapa-panel-cobertura');
   if (!btnOp || !btnCob) return;
-
   if (tab === 'operativo') {
-    btnOp.style.background  = 'rgba(255,255,255,.18)';
+    btnOp.style.background  = 'rgba(255,255,255,.25)';
+    btnOp.style.borderColor = 'rgba(255,255,255,.4)';
     btnOp.style.color       = '#fff';
-    btnOp.style.borderBottom= '3px solid #FFD700';
     btnCob.style.background = 'transparent';
-    btnCob.style.color      = 'rgba(255,255,255,.65)';
-    btnCob.style.borderBottom = '3px solid transparent';
+    btnCob.style.borderColor= 'rgba(255,255,255,.25)';
+    btnCob.style.color      = 'rgba(255,255,255,.55)';
     if (panOp)  panOp.style.display  = '';
     if (panCob) panCob.style.display = 'none';
-    // Invalidar mapa operativo para que se redibuje
     if (_mapaInstance) setTimeout(() => _mapaInstance.invalidateSize(), 50);
   } else {
-    btnCob.style.background  = 'rgba(255,255,255,.18)';
+    btnCob.style.background  = 'rgba(255,255,255,.25)';
+    btnCob.style.borderColor = 'rgba(255,255,255,.4)';
     btnCob.style.color       = '#fff';
-    btnCob.style.borderBottom= '3px solid #FFD700';
     btnOp.style.background   = 'transparent';
-    btnOp.style.color        = 'rgba(255,255,255,.65)';
-    btnOp.style.borderBottom = '3px solid transparent';
+    btnOp.style.borderColor  = 'rgba(255,255,255,.25)';
+    btnOp.style.color        = 'rgba(255,255,255,.55)';
     if (panOp)  panOp.style.display  = 'none';
     if (panCob) panCob.style.display = '';
     coberturaRender();
   }
 }
 
-// ── Coordenadas de ciudades de la zona TCK ──
-const CIUDADES_COORDS = {
-  'Trenque Lauquen': { lat: -35.9717, lng: -62.7308 },
-  'Pehuajó':         { lat: -35.8500, lng: -61.8996 },
-  'Pehuajo':         { lat: -35.8500, lng: -61.8996 },
-  'Henderson':       { lat: -36.3003, lng: -61.7163 },
-  'Carlos Casares':  { lat: -35.6222, lng: -61.3659 },
-  'Daireaux':        { lat: -36.5993, lng: -61.7489 },
-  'Pellegrini':      { lat: -36.2660, lng: -63.1636 },
-  'Salliqueló':      { lat: -36.7495, lng: -62.9606 },
-  'Salliquelo':      { lat: -36.7495, lng: -62.9606 },
-  'Tres Lomas':      { lat: -36.4581, lng: -62.8658 },
-  'Guaminí':         { lat: -37.0124, lng: -62.4167 },
-  'Guamini':         { lat: -37.0124, lng: -62.4167 },
-  '30 de Agosto':    { lat: -36.3934, lng: -62.5326 },
-  'Lincoln':         { lat: -34.8642, lng: -61.5276 },
-  'Quemú Quemú':     { lat: -36.0551, lng: -63.5597 },
-  'América':         { lat: -35.4724, lng: -62.9806 },
-  'America':         { lat: -35.4724, lng: -62.9806 },
-  'Bolívar':         { lat: -36.2346, lng: -61.1079 },
-  'Bolivar':         { lat: -36.2346, lng: -61.1079 },
-  'Salazar':         { lat: -36.3522, lng: -61.6842 },
-  'Beruti':          { lat: -36.1167, lng: -62.4167 },
-  'Madero':          { lat: -35.9833, lng: -61.8667 },
-  'Paso':            { lat: -36.0000, lng: -61.7667 },
-  'Campo':           { lat: -35.9717, lng: -62.7308 }, // fallback a TL
+// ══════════════════════════════════════════════════════════
+// COBERTURA COMERCIAL — análisis por ciudad sin Leaflet
+// ══════════════════════════════════════════════════════════
+const VENDEDOR_COLORES = {
+  'Miguel':   { bg: '#E3F2FD', txt: '#1565C0', dot: '#1565C0' },
+  'Juan':     { bg: '#E8F5E9', txt: '#2E7D32', dot: '#2E7D32' },
+  'Lisandro': { bg: '#FFF3E0', txt: '#E65100', dot: '#E65100' },
+};
+
+// Ciudades que son pedidos de oficina — renombrar para claridad
+const CIUDAD_ALIAS = {
+  'Campo':               'TL — Pedidos de oficina',
+  'Campo Trenque Lauquen': 'TL — Pedidos de oficina',
+  'Trenque Lauquen':     'Trenque Lauquen',
 };
 
 async function coberturaRender() {
-  const tablaEl = document.getElementById('cob-tabla');
-  const mapaEl  = document.getElementById('cob-mapa-container');
-  if (!tablaEl || !mapaEl) return;
+  const el = document.getElementById('cob-contenido');
+  if (!el) return;
+  el.innerHTML = '<div style="text-align:center;padding:40px 20px;"><div class="loading-spinner" style="margin:0 auto 12px;"></div>Calculando cobertura...</div>';
 
-  tablaEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text3);">Cargando datos...</div>';
-
-  // Leer filtros
-  const diasSel   = parseInt(document.getElementById('cob-periodo-sel').value) || 0;
-  const vendSel   = document.getElementById('cob-vendedor-sel').value || 'todos';
+  const diasSel  = parseInt(document.getElementById('cob-periodo-sel')?.value) || 30;
+  const vendSel  = document.getElementById('cob-vendedor-sel')?.value || 'todos';
 
   try {
-    // Leer todos los pedidos del Sheet CSV
     const res  = await fetch(SHEET_CSV + '&_t=' + Date.now());
     const csv  = await res.text();
     const lines = csv.trim().split('\n');
 
-    const hoy    = new Date();
-    const desde  = diasSel > 0 ? new Date(hoy.getTime() - diasSel * 86400000) : null;
-    // Período anterior para comparar crecimiento
-    const desdePrev = diasSel > 0 ? new Date(hoy.getTime() - diasSel * 2 * 86400000) : null;
-    const hastaPrev = desde;
+    const hoy      = new Date();
+    const desde    = diasSel > 0 ? new Date(hoy.getTime() - diasSel * 86400000) : null;
+    const desdePrev= diasSel > 0 ? new Date(hoy.getTime() - diasSel * 2 * 86400000) : null;
+    const hastaPrev= desde;
 
-    const parseMonto = t => parseInt((t||'0').toString().replace(/[^0-9]/g,'')) || 0;
+    const parseMonto = t => { const n = parseInt((t||'0').toString().replace(/[^0-9]/g,'')); return n < 1000 && n > 0 ? n*1000 : n; };
 
-    // Acumular por ciudad — período actual y anterior
+    // Acumular por ciudad
     const porCiudad = {};
     const porCiudadPrev = {};
 
     for (let i = 1; i < lines.length; i++) {
       const cols = parseCsv(lines[i]);
       if (!cols[0] || !/^TCK-\d{8}-/.test(cols[0].trim())) continue;
-      const estado = (cols[10]||'').trim();
-      if (estado === 'Cancelado') continue;
+      if ((cols[10]||'').trim() === 'Cancelado') continue;
 
       const fecha    = new Date((cols[1]||'').replace(' ','T'));
-      const ciudad   = (cols[5]||'Sin ciudad').trim();
+      const rawCiudad = (cols[5]||'Sin ciudad').trim();
+      const ciudad   = CIUDAD_ALIAS[rawCiudad] || rawCiudad;
       const vendedor = (cols[2]||'').trim();
       const cliente  = (cols[3]||'').trim();
       const monto    = parseMonto(cols[6]);
@@ -10705,140 +10647,114 @@ async function coberturaRender() {
 
       // Período actual
       if (!desde || fecha >= desde) {
-        if (!porCiudad[ciudad]) porCiudad[ciudad] = { ciudad, monto: 0, pedidos: 0, clientes: new Set(), vendedores: new Set() };
-        porCiudad[ciudad].monto    += monto;
-        porCiudad[ciudad].pedidos  += 1;
+        if (!porCiudad[ciudad]) porCiudad[ciudad] = { ciudad, monto:0, pedidos:0, clientes:new Set(), vendedores:{} };
+        porCiudad[ciudad].monto   += monto;
+        porCiudad[ciudad].pedidos += 1;
         porCiudad[ciudad].clientes.add(cliente);
-        porCiudad[ciudad].vendedores.add(vendedor);
+        if (!porCiudad[ciudad].vendedores[vendedor]) porCiudad[ciudad].vendedores[vendedor] = {monto:0,pedidos:0};
+        porCiudad[ciudad].vendedores[vendedor].monto   += monto;
+        porCiudad[ciudad].vendedores[vendedor].pedidos += 1;
       }
-
-      // Período anterior (para crecimiento)
+      // Período anterior
       if (desdePrev && fecha >= desdePrev && fecha < hastaPrev) {
-        if (!porCiudadPrev[ciudad]) porCiudadPrev[ciudad] = { monto: 0 };
+        if (!porCiudadPrev[ciudad]) porCiudadPrev[ciudad] = {monto:0};
         porCiudadPrev[ciudad].monto += monto;
       }
     }
 
-    // Convertir a array y calcular crecimiento
-    const ciudades = Object.values(porCiudad)
-      .map(c => ({
-        ...c,
-        clientes:  c.clientes.size,
-        vendedores: [...c.vendedores].join(', '),
-        montoPrev: porCiudadPrev[c.ciudad] ? porCiudadPrev[c.ciudad].monto : 0,
-        crecimiento: porCiudadPrev[c.ciudad] && porCiudadPrev[c.ciudad].monto > 0
-          ? ((c.monto - porCiudadPrev[c.ciudad].monto) / porCiudadPrev[c.ciudad].monto * 100)
-          : null
-      }))
-      .sort((a,b) => b.monto - a.monto);
+    const ciudades = Object.values(porCiudad).map(c => ({
+      ...c,
+      clientes:   c.clientes.size,
+      montoPrev:  porCiudadPrev[c.ciudad]?.monto || 0,
+      crecimiento: porCiudadPrev[c.ciudad]?.monto > 0
+        ? ((c.monto - porCiudadPrev[c.ciudad].monto) / porCiudadPrev[c.ciudad].monto * 100)
+        : null
+    })).sort((a,b) => b.monto - a.monto);
 
     if (!ciudades.length) {
-      tablaEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text3);">Sin datos para el período seleccionado.</div>';
+      el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);">Sin datos para el período seleccionado.</div>';
       return;
     }
 
-    const totalMonto = ciudades.reduce((s,c) => s + c.monto, 0);
+    const totalMonto  = ciudades.reduce((s,c) => s+c.monto, 0);
+    const totalPed    = ciudades.reduce((s,c) => s+c.pedidos, 0);
+    const totalCli    = new Set();
+    ciudades.forEach(c => { /* conteo aproximado */ });
     const fmt = n => '$' + Math.round(n).toLocaleString('es-AR');
+    const fmtK = n => n >= 1000000 ? '$' + (n/1000000).toFixed(1) + 'M' : n >= 1000 ? '$' + Math.round(n/1000) + 'k' : '$' + n;
 
-    // ── Inicializar mapa Leaflet en el contenedor de cobertura ──
-    if (_cobInstancia) {
-      _cobInstancia.remove();
-      _cobInstancia = null;
-    }
-
-    _cobInstancia = L.map('cob-mapa-container', { zoomControl: true, scrollWheelZoom: true })
-      .setView([-36.3, -62.2], 9);
-
-    // Mapa con más contraste — CartoDB voyager
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      attribution: '© CartoDB',
-      subdomains: 'abcd',
-      maxZoom: 14
-    }).addTo(_cobInstancia);
-
-    // Burbujas por ciudad — tamaño proporcional pero acotado
-    const maxMonto = Math.max(...ciudades.map(c => c.monto));
-
-    ciudades.forEach(c => {
-      const coords = CIUDADES_COORDS[c.ciudad];
-      if (!coords) return;
-
-      // Radio entre 8px y 28px
-      const radio = Math.max(8, Math.round(Math.sqrt(c.monto / maxMonto) * 28));
-      const color = c.crecimiento === null ? '#1565C0'
-        : c.crecimiento > 5  ? '#2E7D32'
-        : c.crecimiento < -5 ? '#C62828'
-        : '#F57C00';
-
-      const pct    = totalMonto > 0 ? (c.monto / totalMonto * 100).toFixed(1) : '0';
-      const crecStr = c.crecimiento !== null
-        ? (c.crecimiento > 0 ? '▲ +' : '▼ ') + Math.abs(c.crecimiento).toFixed(1) + '%'
-        : 'Sin comparativa';
-
-      // Círculo
-      const circle = L.circleMarker([coords.lat, coords.lng], {
-        radius:      radio,
-        fillColor:   color,
-        color:       '#fff',
-        weight:      2,
-        opacity:     1,
-        fillOpacity: 0.85
-      }).addTo(_cobInstancia);
-
-      // Etiqueta con nombre y monto debajo del círculo
-      const label = L.divIcon({
-        html: '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:11px;font-weight:800;color:#1A0800;text-align:center;white-space:nowrap;text-shadow:1px 1px 2px #fff,-1px -1px 2px #fff,1px -1px 2px #fff,-1px 1px 2px #fff;">' +
-              c.ciudad + '<br><span style="color:' + color + ';font-size:10px;">' + fmt(c.monto) + '</span></div>',
-        className: '',
-        iconSize:   [120, 30],
-        iconAnchor: [60, -radio - 4]
-      });
-      L.marker([coords.lat, coords.lng], { icon: label, interactive: false }).addTo(_cobInstancia);
-
-      circle.bindPopup(
-        '<div style="font-family:\'Barlow Condensed\',sans-serif;min-width:180px;">' +
-        '<div style="font-size:17px;font-weight:900;color:#1A0800;margin-bottom:6px;">📍 ' + c.ciudad + '</div>' +
-        '<div style="font-size:22px;font-weight:900;color:' + color + ';margin-bottom:6px;">' + fmt(c.monto) + '</div>' +
-        '<table style="font-size:12px;color:#666;width:100%;border-collapse:collapse;">' +
-        '<tr><td>🧾 Pedidos</td><td style="text-align:right;font-weight:700;">' + c.pedidos + '</td></tr>' +
-        '<tr><td>👥 Clientes</td><td style="text-align:right;font-weight:700;">' + c.clientes + '</td></tr>' +
-        '<tr><td>📦 Peso</td><td style="text-align:right;font-weight:700;">' + pct + '%</td></tr>' +
-        '<tr><td>📈 Crecim.</td><td style="text-align:right;font-weight:700;color:' + color + ';">' + crecStr + '</td></tr>' +
-        '<tr><td>👤 Vendedor</td><td style="text-align:right;font-weight:700;">' + c.vendedores + '</td></tr>' +
-        '</table></div>'
-      );
-    });
-
-    // ── Tabla de ranking ──
     let html = '';
-    ciudades.forEach((c, i) => {
-      const pct   = totalMonto > 0 ? (c.monto / totalMonto * 100) : 0;
-      const color = c.crecimiento === null ? '#1565C0'
-        : c.crecimiento > 5  ? '#2E7D32'
-        : c.crecimiento < -5 ? '#C62828' : '#1565C0';
-      const crecBadge = c.crecimiento !== null
-        ? '<span style="background:' + (c.crecimiento > 5 ? '#E8F5E9' : c.crecimiento < -5 ? '#FFEBEE' : '#E3F2FD') +
-          ';color:' + color + ';border-radius:20px;padding:2px 8px;font-size:11px;font-weight:800;">' +
-          (c.crecimiento > 0 ? '▲ +' : '▼ ') + Math.abs(c.crecimiento).toFixed(1) + '%</span>'
-        : '';
 
-      html += '<div style="padding:10px 12px;border-bottom:1px solid #F0F4FF;display:flex;align-items:center;gap:10px;">';
-      html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:16px;font-weight:900;color:#9E9E9E;width:22px;text-align:center;">' + (i+1) + '</div>';
-      html += '<div style="flex:1;min-width:0;">';
-      html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:15px;font-weight:900;color:#1A0800;">' + c.ciudad + '</div>';
-      html += '<div style="margin-top:3px;"><div style="background:#E8EAF6;border-radius:4px;height:5px;overflow:hidden;"><div style="background:' + color + ';height:100%;width:' + pct.toFixed(1) + '%;border-radius:4px;"></div></div></div>';
-      html += '<div style="font-size:11px;color:var(--text3);margin-top:2px;">👥 ' + c.clientes + ' clientes · 🧾 ' + c.pedidos + ' pedidos · ' + pct.toFixed(1) + '%</div>';
+    // ── Resumen general ──
+    html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;">';
+    html += '<div style="background:#1A237E;border-radius:12px;padding:12px;text-align:center;"><div style="font-size:10px;color:rgba(255,255,255,.6);text-transform:uppercase;letter-spacing:.5px;">Facturado</div><div style="font-family:Barlow Condensed,sans-serif;font-size:20px;font-weight:900;color:#fff;">' + fmtK(totalMonto) + '</div></div>';
+    html += '<div style="background:#fff;border:1.5px solid #E8EAF6;border-radius:12px;padding:12px;text-align:center;"><div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;">Pedidos</div><div style="font-family:Barlow Condensed,sans-serif;font-size:20px;font-weight:900;color:#1A237E;">' + totalPed + '</div></div>';
+    html += '<div style="background:#fff;border:1.5px solid #E8EAF6;border-radius:12px;padding:12px;text-align:center;"><div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;">Ciudades</div><div style="font-family:Barlow Condensed,sans-serif;font-size:20px;font-weight:900;color:#1A237E;">' + ciudades.length + '</div></div>';
+    html += '</div>';
+
+    // ── Leyenda vendedores ──
+    html += '<div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;">';
+    ['Miguel','Juan','Lisandro'].forEach(v => {
+      const c = VENDEDOR_COLORES[v] || {bg:'#F5F5F5',txt:'#666',dot:'#999'};
+      html += '<div style="display:flex;align-items:center;gap:5px;background:'+c.bg+';border-radius:20px;padding:4px 10px;">';
+      html += '<div style="width:8px;height:8px;border-radius:50%;background:'+c.dot+';"></div>';
+      html += '<span style="font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;color:'+c.txt+';">'+v+'</span></div>';
+    });
+    html += '</div>';
+
+    // ── Tarjeta por ciudad ──
+    ciudades.forEach((c, i) => {
+      const pct = totalMonto > 0 ? (c.monto/totalMonto*100) : 0;
+      const crec = c.crecimiento;
+      const crecColor = crec === null ? '#9E9E9E' : crec > 5 ? '#2E7D32' : crec < -5 ? '#C62828' : '#F57C00';
+      const crecIcon  = crec === null ? '—' : crec > 5 ? '▲' : crec < -5 ? '▼' : '→';
+      const crecStr   = crec === null ? 'Sin comparativa' : crecIcon+' '+(crec > 0 ? '+':'')+crec.toFixed(1)+'%';
+
+      html += '<div style="background:#fff;border-radius:12px;border:1.5px solid #E8EAF6;margin-bottom:8px;overflow:hidden;">';
+
+      // Header ciudad
+      html += '<div style="padding:10px 14px;border-bottom:1px solid #F0F4FF;display:flex;align-items:center;gap:10px;">';
+      html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:11px;font-weight:900;color:#9E9E9E;width:20px;text-align:center;">'+(i+1)+'</div>';
+      html += '<div style="flex:1;">';
+      html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:17px;font-weight:900;color:#1A0800;">'+c.ciudad+'</div>';
+      // Barra de peso
+      html += '<div style="background:#E8EAF6;border-radius:4px;height:4px;margin-top:4px;overflow:hidden;"><div style="background:#1A237E;height:100%;width:'+pct.toFixed(1)+'%;border-radius:4px;"></div></div>';
       html += '</div>';
-      html += '<div style="text-align:right;flex-shrink:0;">';
-      html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:16px;font-weight:900;color:' + color + ';">' + fmt(c.monto) + '</div>';
-      html += '<div style="margin-top:3px;">' + crecBadge + '</div>';
+      html += '<div style="text-align:right;">';
+      html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:#1A237E;">'+fmt(c.monto)+'</div>';
+      html += '<div style="font-size:11px;color:'+crecColor+';font-weight:700;">'+crecStr+'</div>';
       html += '</div></div>';
+
+      // Stats: pedidos, clientes, peso
+      html += '<div style="padding:8px 14px;display:flex;gap:0;border-bottom:1px solid #F5F7FF;">';
+      html += '<div style="flex:1;text-align:center;"><div style="font-family:Barlow Condensed,sans-serif;font-size:16px;font-weight:900;color:#1A237E;">'+c.pedidos+'</div><div style="font-size:10px;color:var(--text3);">Pedidos</div></div>';
+      html += '<div style="flex:1;text-align:center;border-left:1px solid #F0F4FF;"><div style="font-family:Barlow Condensed,sans-serif;font-size:16px;font-weight:900;color:#1A237E;">'+c.clientes+'</div><div style="font-size:10px;color:var(--text3);">Clientes</div></div>';
+      html += '<div style="flex:1;text-align:center;border-left:1px solid #F0F4FF;"><div style="font-family:Barlow Condensed,sans-serif;font-size:16px;font-weight:900;color:#1A237E;">'+pct.toFixed(1)+'%</div><div style="font-size:10px;color:var(--text3);">Peso</div></div>';
+      html += '<div style="flex:1;text-align:center;border-left:1px solid #F0F4FF;"><div style="font-family:Barlow Condensed,sans-serif;font-size:16px;font-weight:900;color:#1A237E;">'+fmt(Math.round(c.monto/Math.max(c.pedidos,1)))+'</div><div style="font-size:10px;color:var(--text3);">Ticket prom.</div></div>';
+      html += '</div>';
+
+      // Desglose por vendedor
+      const vends = Object.entries(c.vendedores).sort((a,b) => b[1].monto - a[1].monto);
+      if (vends.length) {
+        html += '<div style="padding:8px 14px;display:flex;gap:6px;flex-wrap:wrap;">';
+        vends.forEach(([v, vd]) => {
+          const cv = VENDEDOR_COLORES[v] || {bg:'#F5F5F5',txt:'#666',dot:'#999'};
+          const vpct = c.monto > 0 ? (vd.monto/c.monto*100).toFixed(0) : 0;
+          html += '<div style="display:flex;align-items:center;gap:4px;background:'+cv.bg+';border-radius:20px;padding:3px 10px;">';
+          html += '<div style="width:7px;height:7px;border-radius:50%;background:'+cv.dot+';flex-shrink:0;"></div>';
+          html += '<span style="font-family:Barlow Condensed,sans-serif;font-size:12px;font-weight:800;color:'+cv.txt+';">'+v+' · '+vpct+'% · '+vd.pedidos+' ped.</span>';
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+
+      html += '</div>';
     });
 
-    tablaEl.innerHTML = html || '<div style="text-align:center;padding:20px;color:var(--text3);">Sin datos</div>';
+    el.innerHTML = html;
 
   } catch(e) {
-    tablaEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text3);">❌ Error al cargar datos.</div>';
+    el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);">❌ Error al cargar datos.</div>';
     console.error('coberturaRender:', e);
   }
 }
