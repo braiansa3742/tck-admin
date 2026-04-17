@@ -10528,21 +10528,114 @@ function renderLogisticaChofer(el, chofer) {
 // ══════════════════════════════════════════════════════════
 // Estado del filtro de chofer en Seguimiento
 var _segFiltroChofer = 'todos';
+// Estado del filtro de fecha (YYYY-MM-DD)
+var _segFiltroFecha = (function() {
+  var d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+})();
 
 function segSetFiltroChofer(chofer) {
   _segFiltroChofer = chofer;
   renderLogisticaSeguimiento(document.getElementById('logistica-contenido'));
 }
 
+function segSetFiltroFecha(fechaISO) {
+  _segFiltroFecha = fechaISO;
+  renderLogisticaSeguimiento(document.getElementById('logistica-contenido'));
+}
+
+// Helpers para "hoy" / "ayer" (fecha local, no UTC)
+function _segFechaHoyLocal() {
+  var d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function _segFechaAyerLocal() {
+  var d = new Date(); d.setDate(d.getDate() - 1);
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+
+// Formato humano para mostrar "15/04" desde "2026-04-15"
+function _segFormatoFechaCorta(fechaISO) {
+  var parts = fechaISO.split('-');
+  if (parts.length !== 3) return fechaISO;
+  return parts[2] + '/' + parts[1];
+}
+function _segFormatoFechaLarga(fechaISO) {
+  var parts = fechaISO.split('-');
+  if (parts.length !== 3) return fechaISO;
+  // Construcción segura sin parseo de Date que puede tener issues de zona horaria
+  var d = new Date(+parts[0], +parts[1]-1, +parts[2]);
+  var dias = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+  var meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  return dias[d.getDay()] + ' ' + d.getDate() + ' de ' + meses[d.getMonth()];
+}
+
+// Texto contextual: "Hoy" / "Ayer" / "15/04"
+function _segEtiquetaFecha(fechaISO) {
+  if (fechaISO === _segFechaHoyLocal()) return 'hoy';
+  if (fechaISO === _segFechaAyerLocal()) return 'ayer';
+  return 'el ' + _segFormatoFechaCorta(fechaISO);
+}
+
 async function renderLogisticaSeguimiento(el) {
   el.innerHTML = '<div class="planilla-empty"><div class="loading-spinner" style="margin:0 auto 12px;"></div>Cargando seguimiento...</div>';
   try {
-    const hoyStr = new Date().toISOString().split('T')[0];
-    const entregasRaw = await sbFetch('entregas?fecha_asignacion=gte.' + hoyStr + 'T00:00:00&select=*&order=chofer.asc') || [];
-    if (!entregasRaw.length) { el.innerHTML = '<div class="planilla-empty">📭 No hay entregas asignadas hoy.</div>'; return; }
+    // ── Query con rango de fecha específica ──
+    // Calculamos el día siguiente para hacer un rango [fecha 00:00, fecha+1 00:00)
+    const fechaIni = _segFiltroFecha;  // YYYY-MM-DD
+    const partesIni = fechaIni.split('-');
+    const dSig = new Date(+partesIni[0], +partesIni[1]-1, +partesIni[2]);
+    dSig.setDate(dSig.getDate() + 1);
+    const fechaFin = dSig.getFullYear() + '-' + String(dSig.getMonth()+1).padStart(2,'0') + '-' + String(dSig.getDate()).padStart(2,'0');
+
+    const entregasRaw = await sbFetch(
+      'entregas?fecha_asignacion=gte.' + fechaIni + 'T00:00:00'
+      + '&fecha_asignacion=lt.' + fechaFin + 'T00:00:00'
+      + '&select=*&order=chofer.asc'
+    ) || [];
 
     const parseMonto = m => { const n = parseFloat(m)||0; return n < 1000 && n > 0 ? n*1000 : n; };
     const fmt = n => '$' + Math.round(n).toLocaleString('es-AR');
+
+    // ── Armar UI de filtros (chips de fecha + chofer) SIEMPRE ──
+    // Aunque no haya entregas, el usuario tiene que poder cambiar la fecha
+    const esHoy  = (_segFiltroFecha === _segFechaHoyLocal());
+    const esAyer = (_segFiltroFecha === _segFechaAyerLocal());
+    const esCustom = !esHoy && !esAyer;
+
+    const mkFechaChip = (label, isSel, onclick) => {
+      const bg = isSel ? '#1A237E' : '#fff';
+      const fg = isSel ? '#fff'    : 'var(--text2)';
+      const bd = isSel ? '#1A237E' : 'var(--cream3)';
+      return '<button onclick="' + onclick + '" '
+        + 'style="flex:1;padding:9px 8px;background:' + bg + ';border:1.5px solid ' + bd + ';border-radius:10px;'
+        + 'font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;color:' + fg + ';'
+        + 'cursor:pointer;transition:all .18s;-webkit-tap-highlight-color:transparent;">'
+        + label + '</button>';
+    };
+
+    // Label del chip "Fecha específica" cambia si hay fecha custom seleccionada
+    const labelCustom = esCustom ? ('📆 ' + _segFormatoFechaCorta(_segFiltroFecha)) : '📆 Fecha';
+
+    let html = '';
+    html += '<div style="display:flex;gap:6px;margin-bottom:8px;">'
+      + mkFechaChip('📅 Hoy',  esHoy,  'segSetFiltroFecha(_segFechaHoyLocal())')
+      + mkFechaChip('Ayer',    esAyer, 'segSetFiltroFecha(_segFechaAyerLocal())')
+      + mkFechaChip(labelCustom, esCustom, 'document.getElementById(\'seg-fecha-picker\').showPicker ? document.getElementById(\'seg-fecha-picker\').showPicker() : document.getElementById(\'seg-fecha-picker\').click()')
+      + '</div>';
+
+    // Input date oculto (se abre al tocar el chip "Fecha")
+    html += '<input type="date" id="seg-fecha-picker" value="' + _segFiltroFecha + '" '
+      + 'onchange="if(this.value) segSetFiltroFecha(this.value)" '
+      + 'style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none;">';
+
+    // ── Si no hay entregas para esta fecha, mostrar empty state pero mantener chips ──
+    if (!entregasRaw.length) {
+      const etiq = _segEtiquetaFecha(_segFiltroFecha);
+      html += '<div class="planilla-empty" style="margin-top:8px;">📭 No hubo entregas asignadas ' + etiq + '.</div>';
+      el.innerHTML = html;
+      return;
+    }
 
     // ── Conteos por chofer (para los badges de los botones, SIEMPRE sobre todas las entregas) ──
     const conteoTotal = { todos: entregasRaw.length, Joan: 0, Luis: 0 };
@@ -10556,8 +10649,6 @@ async function renderLogisticaSeguimiento(el) {
     // Agrupar por chofer (para el render de cards)
     const porChofer = { Joan: [], Luis: [] };
     entregas.forEach(e => { if (porChofer[e.chofer]) porChofer[e.chofer].push(e); });
-
-    let html = '';
 
     // ═══════════════════════════════════════════════════════════
     // BOTONES DE FILTRO POR CHOFER
@@ -10599,10 +10690,18 @@ async function renderLogisticaSeguimiento(el) {
     });
     const totalDia = entregas.reduce((s,e) => s + parseMonto(e.monto), 0);
 
-    // Label contextual si hay filtro activo
-    const labelScope = (_segFiltroChofer === 'todos')
-      ? 'Total del día'
-      : 'Total · ' + _segFiltroChofer;
+    // Label contextual: combinación de fecha + chofer
+    // Ej: "Total del día" (todos, hoy), "Total · Joan" (Joan, hoy), "Total · 15/04" (todos, custom), "Joan · 15/04" (Joan, custom)
+    let labelScope;
+    if (_segFiltroChofer === 'todos') {
+      if (esHoy)       labelScope = 'Total del día';
+      else if (esAyer) labelScope = 'Total de ayer';
+      else             labelScope = 'Total · ' + _segFormatoFechaCorta(_segFiltroFecha);
+    } else {
+      if (esHoy)       labelScope = _segFiltroChofer + ' · hoy';
+      else if (esAyer) labelScope = _segFiltroChofer + ' · ayer';
+      else             labelScope = _segFiltroChofer + ' · ' + _segFormatoFechaCorta(_segFiltroFecha);
+    }
 
     html += '<div style="background:linear-gradient(135deg,#1A237E,#283593);border-radius:14px;padding:14px 16px;margin-bottom:14px;">';
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
@@ -10644,7 +10743,7 @@ async function renderLogisticaSeguimiento(el) {
 
     // Estado vacío si el filtro no tiene entregas
     if (!entregas.length) {
-      html += '<div class="planilla-empty" style="margin-top:0;">🔍 No hay entregas para ' + _segFiltroChofer + ' hoy.</div>';
+      html += '<div class="planilla-empty" style="margin-top:0;">🔍 No hay entregas para ' + _segFiltroChofer + ' ' + _segEtiquetaFecha(_segFiltroFecha) + '.</div>';
     }
 
     html += '<button onclick="renderLogisticaSeguimiento(document.getElementById(\'logistica-contenido\'))" style="width:100%;padding:11px;background:#F5F7FF;border:1.5px solid #E8EAF6;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:800;color:#1A237E;cursor:pointer;margin-top:4px;">🔄 Actualizar</button>';
