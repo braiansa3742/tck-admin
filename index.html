@@ -313,6 +313,284 @@ body {
 .objetivo-input:focus { outline: none; border-color: var(--red); }
 .objetivo-progreso-wrap { margin-top: 4px; }
 
+/* ══════════════════════════════════════════════════════════
+   MODAL DEVOLUCIONES (sub-tab Logística)
+   ══════════════════════════════════════════════════════════ */
+.dev-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 9999;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  animation: devOverlayIn .2s ease;
+}
+@keyframes devOverlayIn { from { opacity: 0; } to { opacity: 1; } }
+
+.dev-modal-card {
+  background: var(--cream);
+  width: 100%;
+  max-width: 560px;
+  max-height: 92vh;
+  border-radius: 18px 18px 0 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 -12px 40px rgba(0,0,0,0.25);
+  animation: devCardIn .28s cubic-bezier(.2,.8,.2,1);
+}
+@keyframes devCardIn { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+.dev-modal-hdr {
+  background: linear-gradient(135deg, #8B0000, #B71C1C);
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #fff;
+  flex-shrink: 0;
+}
+.dev-modal-titulo {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 19px;
+  font-weight: 900;
+  letter-spacing: 0.3px;
+}
+.dev-modal-sub {
+  font-size: 12px;
+  color: rgba(255,255,255,.75);
+  font-weight: 600;
+  margin-top: 2px;
+}
+.dev-modal-close {
+  background: rgba(255,255,255,0.2);
+  border: none;
+  color: #fff;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 16px;
+  font-weight: 900;
+  cursor: pointer;
+  flex-shrink: 0;
+  touch-action: manipulation;
+}
+.dev-modal-close:active { background: rgba(255,255,255,0.35); }
+
+.dev-modal-body {
+  padding: 14px 16px 16px;
+  overflow-y: auto;
+  flex: 1;
+  -webkit-overflow-scrolling: touch;
+}
+
+.dev-modal-sec {
+  background: #fff;
+  border: 1.5px solid var(--cream3);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+.dev-modal-sec-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  font-weight: 900;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 8px;
+}
+
+.dev-modal-cliente {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 18px;
+  font-weight: 900;
+  color: var(--text);
+  letter-spacing: 0.3px;
+  line-height: 1.15;
+}
+.dev-modal-cliente-sub {
+  font-size: 12px;
+  color: var(--text3);
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+.dev-modal-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dev-modal-item {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.dev-modal-cat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.dev-modal-cat-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1.5px solid;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: all .15s;
+  text-align: left;
+  line-height: 1.15;
+}
+.dev-modal-cat-btn:active { transform: scale(0.97); }
+.dev-modal-cat-emoji { font-size: 15px; flex-shrink: 0; }
+.dev-modal-cat-label { flex: 1; }
+
+.dev-modal-motivo-detalle {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: #FFF8E1;
+  border-left: 3px solid #FFB74D;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text);
+  font-style: italic;
+}
+
+.dev-modal-sec-montos {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.dev-modal-sec-montos > div {
+  flex: 1;
+  text-align: center;
+}
+.dev-modal-monto-label {
+  font-size: 10px;
+  color: var(--text3);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 3px;
+}
+.dev-modal-monto-val {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 17px;
+  font-weight: 900;
+  color: var(--text);
+}
+.dev-modal-monto-val.dev-perdido { color: #C62828; }
+
+.dev-modal-hint {
+  font-size: 11px;
+  color: #E65100;
+  background: #FFF3E0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+
+.dev-modal-select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1.5px solid var(--cream3);
+  border-radius: 10px;
+  background: #fff;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.dev-modal-select:focus { outline: none; border-color: #1A237E; }
+
+.dev-modal-rec-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.dev-modal-rec-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 8px;
+  border-radius: 10px;
+  border: 1.5px solid;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: all .15s;
+}
+.dev-modal-rec-btn:active { transform: scale(0.97); }
+
+.dev-modal-rec-rec {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #E8F5E9;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #2E7D32;
+  font-weight: 700;
+  text-align: center;
+}
+
+.dev-modal-nota {
+  width: 100%;
+  min-height: 70px;
+  padding: 10px 12px;
+  border: 1.5px solid var(--cream3);
+  border-radius: 10px;
+  font-family: 'Barlow', sans-serif;
+  font-size: 13px;
+  color: var(--text);
+  background: #fff;
+  resize: vertical;
+}
+.dev-modal-nota:focus { outline: none; border-color: #1A237E; }
+.dev-modal-nota-hint {
+  font-size: 10px;
+  color: var(--text3);
+  font-style: italic;
+  margin-top: 4px;
+  text-align: right;
+}
+
+.dev-modal-footer {
+  padding: 10px 0 4px;
+}
+.dev-modal-btn-pdf {
+  width: 100%;
+  padding: 12px;
+  background: #1A237E;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 15px;
+  font-weight: 900;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.dev-modal-btn-pdf:disabled {
+  background: #9FA8DA;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
 /* ── OBJETIVOS · Sistema nuevo (rediseño 2026-04) ── */
 .obj-card {
   background: #fff;
@@ -10929,6 +11207,9 @@ var _devFiltroPeriodo = 'hoy';   // 'hoy' | '7d' | '30d' | 'rango'
 var _devFechaDesde = null;       // para rango custom (YYYY-MM-DD)
 var _devFechaHasta = null;
 var _devFiltroChofer = 'todos';  // 'todos' | 'Joan' | 'Luis'
+var _devSoloPendientes = true;   // por defecto oculta resueltas/no_aplica
+// Cache local de devoluciones del período actual (para el modal)
+var _devCache = [];
 
 // Labels legibles para categorías (coinciden con los códigos que escribe el chofer)
 var DEV_CAT_LABELS = {
@@ -11005,6 +11286,18 @@ function devAplicarRangoCustom(desde, hasta) {
   renderLogisticaDevoluciones(document.getElementById('logistica-contenido'));
 }
 
+function devToggleSoloPendientes() {
+  _devSoloPendientes = !_devSoloPendientes;
+  renderLogisticaDevoluciones(document.getElementById('logistica-contenido'));
+}
+
+// Una devolución se considera "pendiente" si su estado de reclamo
+// NO es 'resuelto' ni 'no_aplica' (los que quedan en radar del admin).
+function _devEsPendiente(d) {
+  var e = d.reclamo_estado || 'por_evaluar';
+  return e !== 'resuelto' && e !== 'no_aplica';
+}
+
 async function renderLogisticaDevoluciones(el) {
   el.innerHTML = '<div class="planilla-empty"><div class="loading-spinner" style="margin:0 auto 12px;"></div>Cargando devoluciones...</div>';
   try {
@@ -11022,16 +11315,27 @@ async function renderLogisticaDevoluciones(el) {
     devsRaw = devsRaw || [];
     devsAnt = devsAnt || [];
 
-    // Contar devoluciones por chofer (para badges en botones)
+    // Cache completo del período (el modal busca aquí el detalle de la devolución clickeada)
+    _devCache = devsRaw;
+
+    // Contar devoluciones por chofer (sobre TODAS las del período, no filtradas)
     var conteoPorChofer = { todos: devsRaw.length, Joan: 0, Luis: 0 };
     devsRaw.forEach(function(d) {
       if (conteoPorChofer[d.chofer] !== undefined) conteoPorChofer[d.chofer]++;
     });
 
-    // Aplicar filtro chofer
+    // Contadores para el chip "Solo pendientes"
+    var pendientesCount = devsRaw.filter(_devEsPendiente).length;
+    var resueltasCount  = devsRaw.length - pendientesCount;
+
+    // Aplicar filtro chofer + filtro "solo pendientes"
     var devs = (_devFiltroChofer === 'todos')
       ? devsRaw
       : devsRaw.filter(function(d) { return d.chofer === _devFiltroChofer; });
+
+    if (_devSoloPendientes) {
+      devs = devs.filter(_devEsPendiente);
+    }
 
     var fmt = function(n) { return '$' + Math.round(n || 0).toLocaleString('es-AR'); };
 
@@ -11090,17 +11394,41 @@ async function renderLogisticaDevoluciones(el) {
         + '<span style="background:' + countBg + ';color:' + countFg + ';padding:1px 7px;border-radius:10px;font-size:11px;font-weight:900;min-width:20px;text-align:center;">' + count + '</span>'
         + '</button>';
     };
-    html += '<div style="display:flex;gap:6px;margin-bottom:14px;">'
+    html += '<div style="display:flex;gap:6px;margin-bottom:8px;">'
       + mkChoferChip('todos', '👥 Todos', conteoPorChofer.todos, '#1A237E', '#E8EAF6')
       + mkChoferChip('Joan',  '🚚 Joan',  conteoPorChofer.Joan,  '#2E7D32', '#E8F5E9')
       + mkChoferChip('Luis',  '🚚 Luis',  conteoPorChofer.Luis,  '#E65100', '#FFF3E0')
+      + '</div>';
+
+    // Chip toggle "Solo pendientes"
+    var togBg = _devSoloPendientes ? '#E65100' : '#fff';
+    var togFg = _devSoloPendientes ? '#fff' : 'var(--text2)';
+    var togBd = _devSoloPendientes ? '#E65100' : 'var(--cream3)';
+    var togIcon = _devSoloPendientes ? '✅' : '☐';
+    var togLabel = _devSoloPendientes
+      ? 'Solo pendientes (' + pendientesCount + ')'
+      : 'Ver todas · ocultando ' + resueltasCount + ' resueltas';
+    html += '<div style="margin-bottom:14px;">'
+      + '<button onclick="devToggleSoloPendientes()" '
+      + 'style="width:100%;padding:9px 12px;background:' + togBg + ';border:1.5px solid ' + togBd + ';border-radius:10px;'
+      + 'font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;color:' + togFg + ';'
+      + 'cursor:pointer;transition:all .18s;-webkit-tap-highlight-color:transparent;touch-action:manipulation;user-select:none;'
+      + 'display:flex;align-items:center;justify-content:center;gap:8px;">'
+      + '<span>' + togIcon + '</span><span>' + togLabel + '</span>'
+      + '</button>'
       + '</div>';
 
     // ═══════════════════════════════════════════════════════════
     // EMPTY STATE
     // ═══════════════════════════════════════════════════════════
     if (!devs.length) {
-      html += '<div class="planilla-empty" style="margin-top:0;">📭 No hay devoluciones ' + rango.label + (_devFiltroChofer !== 'todos' ? ' de ' + _devFiltroChofer : '') + '.</div>';
+      var msg;
+      if (_devSoloPendientes && devsRaw.length > 0) {
+        msg = '✅ No hay devoluciones pendientes ' + rango.label + '. <br><small style="color:var(--text3);">Tap en el botón de arriba para ver las resueltas.</small>';
+      } else {
+        msg = '📭 No hay devoluciones ' + rango.label + (_devFiltroChofer !== 'todos' ? ' de ' + _devFiltroChofer : '') + '.';
+      }
+      html += '<div class="planilla-empty" style="margin-top:0;">' + msg + '</div>';
       el.innerHTML = html;
       return;
     }
@@ -11253,11 +11581,291 @@ async function renderLogisticaDevoluciones(el) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// MODAL ACCIONABLE DE DEVOLUCIÓN (stub — se implementa en L-3.3)
+// MODAL ACCIONABLE DE DEVOLUCIÓN
 // ═══════════════════════════════════════════════════════════════
+
+// ID de la devolución actualmente abierta en el modal
+var _devModalId = null;
+
 function devAbrirModal(devolucionId) {
-  // Por ahora solo toast. En L-3.3 implementamos el modal completo.
-  toast('🔜 Modal accionable en próxima versión', 'ok');
+  var d = _devCache.find(function(x) { return x.id === devolucionId; });
+  if (!d) { toast('❌ No se encontró la devolución', 'err'); return; }
+
+  _devModalId = devolucionId;
+  var fmt = function(n) { return '$' + Math.round(n || 0).toLocaleString('es-AR'); };
+
+  // Info de fecha/hora
+  var fecha = new Date(d.fecha_devolucion);
+  var fechaStr = String(fecha.getDate()).padStart(2,'0') + '/' + String(fecha.getMonth()+1).padStart(2,'0') + '/' + fecha.getFullYear();
+  var horaStr  = String(fecha.getHours()).padStart(2,'0') + ':' + String(fecha.getMinutes()).padStart(2,'0');
+
+  // Info de categoría y reclamo
+  var catInfo = DEV_CAT_LABELS[d.motivo_categoria] || { label: d.motivo_categoria || '—', emoji: '❓', color: '#757575' };
+
+  // Detectar si el producto principal sugiere proveedor específico o ambiguo
+  // Uso el primer producto del campo items para inferir
+  var primerProd = (d.items || '').split(/,\s*/)[0] || '';
+  var provInfo = resolverProveedor(primerProd);
+
+  // Valor actual del proveedor (puede venir seteado de la DB o ser null)
+  var proveedorActual = d.proveedor || '';
+
+  // Si el producto sugiere opciones específicas (ambiguo), lo uso como sugerencia inicial
+  // Si está en DB, respetamos DB. Si no está y hay sugerencia unívoca, la ponemos como default.
+  if (!proveedorActual && !provInfo.ambiguo && provInfo.proveedor) {
+    proveedorActual = provInfo.proveedor;
+  }
+
+  // Opciones del dropdown: todas las disponibles (el admin siempre puede corregir)
+  var opcionesProv = PROVEEDORES_LIST.slice();
+
+  var html = '';
+  html += '<div class="dev-modal-overlay" onclick="if(event.target===this)devCerrarModal()">';
+  html += '<div class="dev-modal-card">';
+
+  // ── Header ──
+  html += '<div class="dev-modal-hdr">';
+  html += '<div><div class="dev-modal-titulo">↩️ Devolución</div>';
+  html += '<div class="dev-modal-sub">' + fechaStr + ' · ' + horaStr + 'hs</div></div>';
+  html += '<button class="dev-modal-close" onclick="devCerrarModal()">✕</button>';
+  html += '</div>';
+
+  // ── Cuerpo scrollable ──
+  html += '<div class="dev-modal-body">';
+
+  // Sección: Cliente y personal
+  html += '<div class="dev-modal-sec">';
+  html += '<div class="dev-modal-cliente">🏪 ' + (d.cliente || 'Sin nombre').toUpperCase() + '</div>';
+  var subCli = [];
+  if (d.ciudad)   subCli.push('📍 ' + d.ciudad);
+  if (d.comercio) subCli.push('🏪 ' + d.comercio);
+  if (d.chofer)   subCli.push('🚚 ' + d.chofer);
+  if (d.vendedor) subCli.push('👤 ' + d.vendedor);
+  if (subCli.length) html += '<div class="dev-modal-cliente-sub">' + subCli.join(' · ') + '</div>';
+  html += '</div>';
+
+  // Sección: Productos devueltos (read-only)
+  html += '<div class="dev-modal-sec">';
+  html += '<div class="dev-modal-sec-label">Productos devueltos</div>';
+  var items = (d.items || '—').split(/,\s*/);
+  html += '<div class="dev-modal-items">';
+  items.forEach(function(it) {
+    if (it.trim()) html += '<div class="dev-modal-item">• ' + it.trim() + '</div>';
+  });
+  html += '</div>';
+  html += '</div>';
+
+  // Sección: Motivo (categoría editable + detalle libre read-only)
+  html += '<div class="dev-modal-sec">';
+  html += '<div class="dev-modal-sec-label">Motivo</div>';
+  html += '<div class="dev-modal-cat-grid">';
+  Object.keys(DEV_CAT_LABELS).forEach(function(catKey) {
+    var c = DEV_CAT_LABELS[catKey];
+    var isSel = d.motivo_categoria === catKey;
+    var bg = isSel ? c.color : '#fff';
+    var fg = isSel ? '#fff' : c.color;
+    var bd = isSel ? c.color : 'var(--cream3)';
+    html += '<button class="dev-modal-cat-btn" onclick="devCambiarCategoria(\'' + catKey + '\')" '
+      + 'style="background:' + bg + ';border-color:' + bd + ';color:' + fg + ';">'
+      + '<span class="dev-modal-cat-emoji">' + c.emoji + '</span>'
+      + '<span class="dev-modal-cat-label">' + c.label + '</span>'
+      + '</button>';
+  });
+  html += '</div>';
+  // Detalle libre (lo que escribió el chofer en el textarea opcional)
+  if (d.motivo) {
+    html += '<div class="dev-modal-motivo-detalle">📝 ' + d.motivo + '</div>';
+  }
+  html += '</div>';
+
+  // Sección: Montos
+  html += '<div class="dev-modal-sec dev-modal-sec-montos">';
+  html += '<div><div class="dev-modal-monto-label">Devuelto</div><div class="dev-modal-monto-val dev-perdido">-' + fmt(d.monto_devuelto) + '</div></div>';
+  html += '<div><div class="dev-modal-monto-label">Original</div><div class="dev-modal-monto-val">' + fmt(d.monto_original) + '</div></div>';
+  html += '<div><div class="dev-modal-monto-label">Cobrado</div><div class="dev-modal-monto-val">' + fmt(d.monto_cobrado) + '</div></div>';
+  html += '</div>';
+
+  // Sección: Proveedor (dropdown editable)
+  html += '<div class="dev-modal-sec">';
+  html += '<div class="dev-modal-sec-label">🏭 Proveedor</div>';
+  // Si el producto es ambiguo y no hay proveedor asignado, mostrar hint
+  if (!proveedorActual && provInfo.ambiguo && provInfo.opciones.length) {
+    html += '<div class="dev-modal-hint">⚠️ Este producto puede ser de varios proveedores. Elegí cuál:</div>';
+  }
+  html += '<select class="dev-modal-select" id="dev-modal-prov" onchange="devCambiarProveedor(this.value)">';
+  html += '<option value="">— Sin asignar —</option>';
+  opcionesProv.forEach(function(p) {
+    var sel = (p === proveedorActual) ? ' selected' : '';
+    // Marcar con estrella las opciones sugeridas para el producto
+    var sugerida = provInfo.opciones.indexOf(p) >= 0 ? ' ⭐' : '';
+    html += '<option value="' + p + '"' + sel + '>' + p + sugerida + '</option>';
+  });
+  html += '</select>';
+  html += '</div>';
+
+  // Sección: Estado del reclamo
+  html += '<div class="dev-modal-sec">';
+  html += '<div class="dev-modal-sec-label">Estado del reclamo</div>';
+  html += '<div class="dev-modal-rec-grid">';
+  var estadosOrden = ['por_reclamar', 'reclamado', 'resuelto', 'no_aplica', 'por_evaluar'];
+  estadosOrden.forEach(function(estKey) {
+    var r = DEV_RECLAMO_LABELS[estKey];
+    if (!r) return;
+    var isSel = d.reclamo_estado === estKey;
+    var bg = isSel ? r.color : '#fff';
+    var fg = isSel ? '#fff' : r.color;
+    var bd = isSel ? r.color : 'var(--cream3)';
+    html += '<button class="dev-modal-rec-btn" onclick="devCambiarEstadoReclamo(\'' + estKey + '\')" '
+      + 'style="background:' + bg + ';border-color:' + bd + ';color:' + fg + ';">'
+      + '<span>' + r.emoji + '</span><span>' + r.label + '</span>'
+      + '</button>';
+  });
+  html += '</div>';
+  // Si ya hay monto recuperado, mostrarlo
+  if (d.reclamo_monto_rec && parseFloat(d.reclamo_monto_rec) > 0) {
+    html += '<div class="dev-modal-rec-rec">💰 Recuperado: <strong>' + fmt(d.reclamo_monto_rec) + '</strong></div>';
+  }
+  html += '</div>';
+
+  // Sección: Nota del admin (textarea con auto-save on blur)
+  html += '<div class="dev-modal-sec">';
+  html += '<div class="dev-modal-sec-label">📝 Nota del admin</div>';
+  html += '<textarea class="dev-modal-nota" id="dev-modal-nota" placeholder="Agregá notas sobre este reclamo..." '
+    + 'onblur="devGuardarNota(this.value)">'
+    + (d.reclamo_nota || d.nota_admin || '').replace(/</g,'&lt;')
+    + '</textarea>';
+  html += '<div class="dev-modal-nota-hint">Se guarda automáticamente al salir del campo</div>';
+  html += '</div>';
+
+  // ── Footer ──
+  html += '<div class="dev-modal-footer">';
+  html += '<button class="dev-modal-btn-pdf" disabled>📄 Generar PDF de reclamo (próximamente)</button>';
+  html += '</div>';
+
+  html += '</div>'; // dev-modal-body
+  html += '</div>'; // dev-modal-card
+  html += '</div>'; // dev-modal-overlay
+
+  // Inyectar modal al body (lo saco del flow normal)
+  var overlay = document.createElement('div');
+  overlay.id = 'dev-modal-wrap';
+  overlay.innerHTML = html;
+  document.body.appendChild(overlay);
+}
+
+function devCerrarModal() {
+  var el = document.getElementById('dev-modal-wrap');
+  if (el) el.remove();
+  _devModalId = null;
+}
+
+// ── Auto-save handlers ─────────────────────────────────────────
+
+async function devCambiarCategoria(cat) {
+  if (!_devModalId) return;
+  try {
+    await sbFetch('devoluciones?id=eq.' + _devModalId, {
+      method: 'PATCH',
+      headers: { 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ motivo_categoria: cat, updated_at: new Date().toISOString() })
+    });
+    // Actualizar cache local
+    var d = _devCache.find(function(x) { return x.id === _devModalId; });
+    if (d) d.motivo_categoria = cat;
+    toast('✅ Motivo actualizado', 'ok');
+    // Re-abrir modal para reflejar el cambio visualmente
+    var id = _devModalId;
+    devCerrarModal();
+    devAbrirModal(id);
+  } catch (err) {
+    toast('❌ No se pudo guardar', 'err');
+    console.error(err);
+  }
+}
+
+async function devCambiarProveedor(prov) {
+  if (!_devModalId) return;
+  try {
+    await sbFetch('devoluciones?id=eq.' + _devModalId, {
+      method: 'PATCH',
+      headers: { 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ proveedor: prov || null, updated_at: new Date().toISOString() })
+    });
+    var d = _devCache.find(function(x) { return x.id === _devModalId; });
+    if (d) d.proveedor = prov || null;
+    toast('✅ Proveedor actualizado', 'ok');
+  } catch (err) {
+    toast('❌ No se pudo guardar', 'err');
+    console.error(err);
+  }
+}
+
+async function devCambiarEstadoReclamo(nuevoEstado) {
+  if (!_devModalId) return;
+
+  // Si el nuevo estado es "resuelto", pedir monto recuperado primero
+  var montoRec = null;
+  if (nuevoEstado === 'resuelto') {
+    var input = prompt('¿Cuánto recuperaste del proveedor? (en pesos, dejar vacío si no aplica)', '');
+    if (input === null) return;  // canceló
+    if (input.trim() !== '') {
+      // Limpiar formato: quitar $, puntos, comas que no sean decimales
+      var n = parseFloat(input.replace(/[^\d,.-]/g,'').replace(/\./g,'').replace(',','.'));
+      if (!isNaN(n)) montoRec = n;
+    }
+  }
+
+  try {
+    var payload = {
+      reclamo_estado: nuevoEstado,
+      reclamo_fecha: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    if (montoRec !== null) payload.reclamo_monto_rec = montoRec;
+
+    await sbFetch('devoluciones?id=eq.' + _devModalId, {
+      method: 'PATCH',
+      headers: { 'Prefer': 'return=minimal' },
+      body: JSON.stringify(payload)
+    });
+    // Actualizar cache local
+    var d = _devCache.find(function(x) { return x.id === _devModalId; });
+    if (d) {
+      d.reclamo_estado = nuevoEstado;
+      d.reclamo_fecha = payload.reclamo_fecha;
+      if (montoRec !== null) d.reclamo_monto_rec = montoRec;
+    }
+    toast('✅ Estado actualizado', 'ok');
+    // Re-abrir modal para ver el nuevo estado + refrescar la lista atrás
+    var id = _devModalId;
+    devCerrarModal();
+    // Refrescar vista de fondo (para que al cerrar el modal, la lista muestre el nuevo estado)
+    renderLogisticaDevoluciones(document.getElementById('logistica-contenido'));
+    devAbrirModal(id);
+  } catch (err) {
+    toast('❌ No se pudo guardar', 'err');
+    console.error(err);
+  }
+}
+
+async function devGuardarNota(nota) {
+  if (!_devModalId) return;
+  nota = (nota || '').trim();
+  // No guardar si no cambió (evitar PATCH innecesario)
+  var d = _devCache.find(function(x) { return x.id === _devModalId; });
+  if (d && (d.reclamo_nota || '') === nota) return;
+  try {
+    await sbFetch('devoluciones?id=eq.' + _devModalId, {
+      method: 'PATCH',
+      headers: { 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ reclamo_nota: nota || null, updated_at: new Date().toISOString() })
+    });
+    if (d) d.reclamo_nota = nota;
+    toast('✅ Nota guardada', 'ok');
+  } catch (err) {
+    toast('❌ No se pudo guardar la nota', 'err');
+    console.error(err);
+  }
 }
 
 async function avanzarEstadoCheque(id, nuevoEstado) {
