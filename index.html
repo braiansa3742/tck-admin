@@ -4242,6 +4242,7 @@ input[type="date"] {
         <button class="planilla-chofer-tab" id="log-tab-luis"    onclick="logisticaSelTab('luis',this)">🚚 Luis</button>
         <button class="planilla-chofer-tab" id="log-tab-seguimiento" onclick="logisticaSelTab('seguimiento',this)">📊 Seguimiento</button>
         <button class="planilla-chofer-tab" id="log-tab-cheques" onclick="logisticaSelTab('cheques',this)">📋 Cheques</button>
+        <button class="planilla-chofer-tab" id="log-tab-devoluciones" onclick="logisticaSelTab('devoluciones',this)">↩️ Devoluciones</button>
       </div>
 
       <!-- Contenido dinámico -->
@@ -9572,6 +9573,112 @@ const RUTA_FIJA = [
   'Guaminí','30 de Agosto','Lincoln','Quemú Quemú'
 ];
 
+// ══════════════════════════════════════════════════════════════
+// PROVEEDORES Y MAPEO PRODUCTO → PROVEEDOR
+// Lista usada en los dropdowns del modal de Devoluciones.
+// El mapeo asigna automáticamente un proveedor cuando el chofer
+// registra una devolución. Si el producto es ambiguo (puede ser
+// de más de un proveedor), el admin lo define después en el modal.
+// ══════════════════════════════════════════════════════════════
+const PROVEEDORES_LIST = [
+  'Soychu', 'San Sebastián', 'Lujo Pampeano', 'Shaddai', 'GTA',
+  'McCain', 'Finca Balcarce', 'Solimeno', 'La Caseriana',
+  'Avi One', 'Otro Proveedor de Huevo', 'Otro'
+];
+
+// Mapeo por nombre EXACTO del producto (como aparece en el catálogo).
+// - valor string → proveedor fijo
+// - valor array  → producto ambiguo, Francisco elige en el modal
+const PROVEEDORES_MAP = {
+  // Pollos (todos ambiguos Soychu/San Sebastián)
+  'Pollo A':                        ['Soychu', 'San Sebastián'],
+  'Pollo B':                        ['Soychu', 'San Sebastián'],
+  'Suprema':                        ['Soychu', 'San Sebastián'],
+  'Suprema IQF':                    ['Soychu', 'San Sebastián'],
+  'Suprema B IQF':                  ['Soychu', 'San Sebastián'],
+  // Trozados
+  'Fino de Ave Cocida':             'GTA',
+  'Alita Congelada Granel':         ['Soychu', 'San Sebastián'],
+  'MDM - Carne Molida de Pollo':    ['Soychu', 'San Sebastián'],
+  'Cuarto Trasero IQF':             ['Soychu', 'San Sebastián'],
+  // Shaddai (rebozados — todos fijos)
+  'Medallon de Pollo Clasico':      'Shaddai',
+  'Medallon Pollo c/Cheddar':       'Shaddai',
+  'Medallon Pollo JyQ':             'Shaddai',
+  'Medallon Pollo y Espinaca':      'Shaddai',
+  'Formita Clasica':                'Shaddai',
+  'Formitas Pollo JyQ':             'Shaddai',
+  'Nuggets de Pollo Crocante':      'Shaddai',
+  'Bocadito de Papa y Jamon':       'Shaddai',
+  'Pechuguitas al Verdeo':          'Shaddai',
+  'Filet Merluza Finas Hierbas':    'Shaddai',
+  'Filet de Merluza Rebozado':      'Shaddai',
+  'Filet Merluza a Granel':         'Shaddai',
+  // Milanesas y Hamburguesas
+  'Milanesa de Nalga':              'Lujo Pampeano',
+  'Milanesa de Pollo':              'Lujo Pampeano',
+  'Hamburguesa 100% Carne':         'Lujo Pampeano',
+  // Papas
+  'Papa Baston Balcarce':           'Finca Balcarce',
+  'Pulpa de Palta':                 'McCain',
+  // Huevos (ambiguos)
+  'Maple N° 2':                     ['Avi One', 'Otro Proveedor de Huevo'],
+  'Maple N° 1':                     ['Avi One', 'Otro Proveedor de Huevo'],
+  'Cajita 1/2 Docena N° 2':         ['Avi One', 'Otro Proveedor de Huevo'],
+  // Verduras congeladas
+  'Arándanos Solimeno':             'Solimeno',
+  'Brocoli':                        'Solimeno',
+  'Espinacas':                      'Solimeno',
+  'Morron':                         'Solimeno',
+  'Primavera':                      'Solimeno',
+  'Frutos Rojos':                   'Solimeno',
+  'Cebolla':                        'Solimeno',
+  // Pastas (todas La Caseriana)
+  'Ravioles de Calabaza':           'La Caseriana',
+  'Raviolones Espinaca y Mozz':     'La Caseriana',
+  'Gnoquis de Papa':                'La Caseriana',
+  'Gnoquis de Espinaca':            'La Caseriana',
+  'Sorrentinos Jamon y Queso':      'La Caseriana',
+  'Sorrentinos Ricota 4 Quesos':    'La Caseriana',
+  // Veggie (todas La Caseriana)
+  'Hamburguesa de Garbanzos':       'La Caseriana',
+  'Hamburguesa de Lentejas':        'La Caseriana',
+  'Hamburguesa de Quinoa':          'La Caseriana',
+  'Hamburguesa de Arvejas':         'La Caseriana',
+  'Hamburguesa de Hongos':          'La Caseriana',
+  'Hamburguesa de Espinaca':        'La Caseriana',
+  'Hamburguesa Mexicana':           'La Caseriana',
+  'Hamburguesa 5 Vegetales':        'La Caseriana'
+};
+
+// Dado un nombre de producto (posiblemente con prefijo de cantidad: "2x Pollo B"),
+// devuelve: { proveedor: string|null, ambiguo: boolean, opciones: string[] }
+// - proveedor: string cuando es unívoco; null si ambiguo
+// - ambiguo: true si el producto tiene múltiples proveedores posibles
+// - opciones: siempre presente; si ambiguo, lista las opciones; si fijo, un array con el único
+function resolverProveedor(nombreProducto) {
+  if (!nombreProducto) return { proveedor: null, ambiguo: false, opciones: [] };
+  // Limpiar prefijos tipo "2x " o "2×"
+  var limpio = String(nombreProducto).replace(/^\s*\d+\s*[x×]\s*/i, '').trim();
+  // Match exacto primero
+  var mapped = PROVEEDORES_MAP[limpio];
+  // Si no matchea exacto, buscar por inclusión (tolerancia a variantes: "Pollo B x 20kg" → "Pollo B")
+  if (mapped === undefined) {
+    var keys = Object.keys(PROVEEDORES_MAP);
+    // Prioridad: match más largo primero (más específico)
+    keys.sort(function(a, b) { return b.length - a.length; });
+    for (var i = 0; i < keys.length; i++) {
+      if (limpio.toLowerCase().indexOf(keys[i].toLowerCase()) === 0) {
+        mapped = PROVEEDORES_MAP[keys[i]];
+        break;
+      }
+    }
+  }
+  if (mapped === undefined) return { proveedor: null, ambiguo: false, opciones: [] };
+  if (Array.isArray(mapped)) return { proveedor: null, ambiguo: true, opciones: mapped };
+  return { proveedor: mapped, ambiguo: false, opciones: [mapped] };
+}
+
 let _asignaciones    = {};
 let _planillaChofer  = 'Joan';
 
@@ -10274,6 +10381,7 @@ function renderLogistica() {
   if (_logTab === 'luis') { renderLogisticaChofer(el, 'Luis'); return; }
   if (_logTab === 'seguimiento') { renderLogisticaSeguimiento(el); return; }
   if (_logTab === 'cheques') { renderLogisticaCheques(el); return; }
+  if (_logTab === 'devoluciones') { renderLogisticaDevoluciones(el); return; }
   renderLogisticaAsignar(el);
 }
 
@@ -10812,13 +10920,352 @@ async function renderLogisticaCheques(el) {
   } catch(e) { el.innerHTML = '<div class="planilla-empty">❌ Error. ¿Existe la tabla cheques_recibidos?</div>'; console.error(e); }
 }
 
+// ══════════════════════════════════════════════════════════
+// PANEL DE DEVOLUCIONES
+// ══════════════════════════════════════════════════════════
+
+// Estado del filtro (período y chofer)
+var _devFiltroPeriodo = 'hoy';   // 'hoy' | '7d' | '30d' | 'rango'
+var _devFechaDesde = null;       // para rango custom (YYYY-MM-DD)
+var _devFechaHasta = null;
+var _devFiltroChofer = 'todos';  // 'todos' | 'Joan' | 'Luis'
+
+// Labels legibles para categorías (coinciden con los códigos que escribe el chofer)
+var DEV_CAT_LABELS = {
+  sin_stock:    { label: 'Sin stock',           emoji: '🚫', color: '#757575' },
+  mal_estado:   { label: 'Con olor / mal estado', emoji: '🤢', color: '#C62828' },
+  vencido:      { label: 'Vencido',             emoji: '📅', color: '#C62828' },
+  no_quiso:     { label: 'Cliente no quiso',    emoji: '🙅', color: '#F57C00' },
+  error_pedido: { label: 'Error en el pedido',  emoji: '❌', color: '#F57C00' },
+  otro:         { label: 'Otro motivo',         emoji: '❓', color: '#757575' }
+};
+
+// Labels legibles para estados de reclamo
+var DEV_RECLAMO_LABELS = {
+  por_reclamar: { label: 'Por reclamar', emoji: '🔴', color: '#C62828', bg: '#FFEBEE' },
+  reclamado:    { label: 'Reclamado',    emoji: '🟡', color: '#F57C00', bg: '#FFF3E0' },
+  resuelto:     { label: 'Resuelto',     emoji: '🟢', color: '#2E7D32', bg: '#E8F5E9' },
+  no_aplica:    { label: 'No aplica',    emoji: '⚪', color: '#757575', bg: '#F5F5F5' },
+  por_evaluar:  { label: 'Por evaluar',  emoji: '🟠', color: '#E65100', bg: '#FFF3E0' }
+};
+
+// Calcula el rango [desde, hasta] (ISO timestamps) según filtro activo
+function _devCalcularRango() {
+  var ahora = new Date();
+  var hoy = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
+  var mañana = new Date(hoy); mañana.setDate(mañana.getDate() + 1);
+  if (_devFiltroPeriodo === 'hoy') {
+    return { desde: hoy.toISOString(), hasta: mañana.toISOString(), label: 'hoy' };
+  }
+  if (_devFiltroPeriodo === '7d') {
+    var hace7 = new Date(hoy); hace7.setDate(hace7.getDate() - 7);
+    return { desde: hace7.toISOString(), hasta: mañana.toISOString(), label: 'últimos 7 días' };
+  }
+  if (_devFiltroPeriodo === '30d') {
+    var hace30 = new Date(hoy); hace30.setDate(hace30.getDate() - 30);
+    return { desde: hace30.toISOString(), hasta: mañana.toISOString(), label: 'últimos 30 días' };
+  }
+  if (_devFiltroPeriodo === 'rango' && _devFechaDesde && _devFechaHasta) {
+    var d = _devFechaDesde.split('-');
+    var h = _devFechaHasta.split('-');
+    var dIni = new Date(+d[0], +d[1]-1, +d[2]);
+    var dFin = new Date(+h[0], +h[1]-1, +h[2]); dFin.setDate(dFin.getDate() + 1);
+    return { desde: dIni.toISOString(), hasta: dFin.toISOString(), label: _devFechaDesde + ' al ' + _devFechaHasta };
+  }
+  // fallback: hoy
+  return { desde: hoy.toISOString(), hasta: mañana.toISOString(), label: 'hoy' };
+}
+
+// Calcula el rango "anterior" de igual duración (para comparativos)
+function _devCalcularRangoAnterior(rangoActual) {
+  var desdeA = new Date(rangoActual.desde);
+  var hastaA = new Date(rangoActual.hasta);
+  var duracion = hastaA - desdeA;
+  return {
+    desde: new Date(desdeA.getTime() - duracion).toISOString(),
+    hasta: desdeA.toISOString()
+  };
+}
+
+function devSetPeriodo(periodo) {
+  _devFiltroPeriodo = periodo;
+  renderLogisticaDevoluciones(document.getElementById('logistica-contenido'));
+}
+
+function devSetChofer(chofer) {
+  _devFiltroChofer = chofer;
+  renderLogisticaDevoluciones(document.getElementById('logistica-contenido'));
+}
+
+function devAplicarRangoCustom(desde, hasta) {
+  if (!desde || !hasta) return;
+  _devFiltroPeriodo = 'rango';
+  _devFechaDesde = desde;
+  _devFechaHasta = hasta;
+  renderLogisticaDevoluciones(document.getElementById('logistica-contenido'));
+}
+
+async function renderLogisticaDevoluciones(el) {
+  el.innerHTML = '<div class="planilla-empty"><div class="loading-spinner" style="margin:0 auto 12px;"></div>Cargando devoluciones...</div>';
+  try {
+    var rango = _devCalcularRango();
+    var rangoAnt = _devCalcularRangoAnterior(rango);
+
+    // Queries en paralelo: período actual + período anterior (para comparativo)
+    var qryAct = 'devoluciones?fecha_devolucion=gte.' + rango.desde + '&fecha_devolucion=lt.' + rango.hasta + '&select=*&order=fecha_devolucion.desc';
+    var qryAnt = 'devoluciones?fecha_devolucion=gte.' + rangoAnt.desde + '&fecha_devolucion=lt.' + rangoAnt.hasta + '&select=id,monto_devuelto';
+
+    var [devsRaw, devsAnt] = await Promise.all([
+      sbFetch(qryAct).catch(() => []),
+      sbFetch(qryAnt).catch(() => [])
+    ]);
+    devsRaw = devsRaw || [];
+    devsAnt = devsAnt || [];
+
+    // Contar devoluciones por chofer (para badges en botones)
+    var conteoPorChofer = { todos: devsRaw.length, Joan: 0, Luis: 0 };
+    devsRaw.forEach(function(d) {
+      if (conteoPorChofer[d.chofer] !== undefined) conteoPorChofer[d.chofer]++;
+    });
+
+    // Aplicar filtro chofer
+    var devs = (_devFiltroChofer === 'todos')
+      ? devsRaw
+      : devsRaw.filter(function(d) { return d.chofer === _devFiltroChofer; });
+
+    var fmt = function(n) { return '$' + Math.round(n || 0).toLocaleString('es-AR'); };
+
+    var html = '';
+
+    // ═══════════════════════════════════════════════════════════
+    // CHIPS DE PERÍODO
+    // ═══════════════════════════════════════════════════════════
+    var mkPeriodoChip = function(id, label, isSel) {
+      var bg = isSel ? '#1A237E' : '#fff';
+      var fg = isSel ? '#fff' : 'var(--text2)';
+      var bd = isSel ? '#1A237E' : 'var(--cream3)';
+      return '<button onclick="devSetPeriodo(\'' + id + '\')" '
+        + 'style="flex:1;padding:9px 8px;background:' + bg + ';border:1.5px solid ' + bd + ';border-radius:10px;'
+        + 'font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:900;color:' + fg + ';'
+        + 'cursor:pointer;transition:all .18s;-webkit-tap-highlight-color:transparent;touch-action:manipulation;user-select:none;">'
+        + label + '</button>';
+    };
+    html += '<div style="display:flex;gap:6px;margin-bottom:8px;">'
+      + mkPeriodoChip('hoy',   '📅 Hoy',    _devFiltroPeriodo === 'hoy')
+      + mkPeriodoChip('7d',    '7 días',    _devFiltroPeriodo === '7d')
+      + mkPeriodoChip('30d',   '30 días',   _devFiltroPeriodo === '30d')
+      + mkPeriodoChip('rango', '📆 Rango',  _devFiltroPeriodo === 'rango')
+      + '</div>';
+
+    // Si el período es "rango", mostrar inputs de fecha
+    if (_devFiltroPeriodo === 'rango') {
+      html += '<div style="display:flex;gap:6px;margin-bottom:8px;align-items:center;background:#F5F7FF;border-radius:10px;padding:8px 10px;">';
+      html += '<span style="font-size:11px;color:var(--text3);font-weight:700;">Desde</span>';
+      html += '<input type="date" id="dev-rango-desde" value="' + (_devFechaDesde || '') + '" '
+        + 'onchange="devAplicarRangoCustom(this.value, document.getElementById(\'dev-rango-hasta\').value)" '
+        + 'style="flex:1;padding:6px 8px;border:1.5px solid var(--cream3);border-radius:8px;font-size:13px;">';
+      html += '<span style="font-size:11px;color:var(--text3);font-weight:700;">Hasta</span>';
+      html += '<input type="date" id="dev-rango-hasta" value="' + (_devFechaHasta || '') + '" '
+        + 'onchange="devAplicarRangoCustom(document.getElementById(\'dev-rango-desde\').value, this.value)" '
+        + 'style="flex:1;padding:6px 8px;border:1.5px solid var(--cream3);border-radius:8px;font-size:13px;">';
+      html += '</div>';
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // CHIPS DE CHOFER
+    // ═══════════════════════════════════════════════════════════
+    var mkChoferChip = function(id, label, count, color, colorBg) {
+      var isSel = _devFiltroChofer === id;
+      var bg = isSel ? color : '#fff';
+      var fg = isSel ? '#fff' : 'var(--text2)';
+      var bd = isSel ? color : 'var(--cream3)';
+      var countBg = isSel ? 'rgba(255,255,255,.22)' : colorBg;
+      var countFg = isSel ? '#fff' : color;
+      return '<button onclick="devSetChofer(\'' + id + '\')" '
+        + 'style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:9px 8px;'
+        + 'background:' + bg + ';border:1.5px solid ' + bd + ';border-radius:10px;'
+        + 'font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;color:' + fg + ';'
+        + 'cursor:pointer;transition:all .18s;-webkit-tap-highlight-color:transparent;touch-action:manipulation;user-select:none;">'
+        + '<span>' + label + '</span>'
+        + '<span style="background:' + countBg + ';color:' + countFg + ';padding:1px 7px;border-radius:10px;font-size:11px;font-weight:900;min-width:20px;text-align:center;">' + count + '</span>'
+        + '</button>';
+    };
+    html += '<div style="display:flex;gap:6px;margin-bottom:14px;">'
+      + mkChoferChip('todos', '👥 Todos', conteoPorChofer.todos, '#1A237E', '#E8EAF6')
+      + mkChoferChip('Joan',  '🚚 Joan',  conteoPorChofer.Joan,  '#2E7D32', '#E8F5E9')
+      + mkChoferChip('Luis',  '🚚 Luis',  conteoPorChofer.Luis,  '#E65100', '#FFF3E0')
+      + '</div>';
+
+    // ═══════════════════════════════════════════════════════════
+    // EMPTY STATE
+    // ═══════════════════════════════════════════════════════════
+    if (!devs.length) {
+      html += '<div class="planilla-empty" style="margin-top:0;">📭 No hay devoluciones ' + rango.label + (_devFiltroChofer !== 'todos' ? ' de ' + _devFiltroChofer : '') + '.</div>';
+      el.innerHTML = html;
+      return;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // KPI PRINCIPAL: monto perdido + comparativo
+    // ═══════════════════════════════════════════════════════════
+    var totalDevuelto = devs.reduce(function(s, d) { return s + (parseFloat(d.monto_devuelto) || 0); }, 0);
+    var totalAnt = devsAnt.reduce(function(s, d) { return s + (parseFloat(d.monto_devuelto) || 0); }, 0);
+    var deltaPct = totalAnt > 0 ? Math.round(((totalDevuelto - totalAnt) / totalAnt) * 100) : null;
+    var cantidad = devs.length;
+    var cantidadAnt = devsAnt.length;
+
+    var compHtml = '';
+    if (deltaPct !== null && _devFiltroPeriodo !== 'rango') {
+      var flecha, colorComp;
+      if (deltaPct > 0)      { flecha = '↑'; colorComp = '#FFB74D'; }  // subió: malo (rojo/naranja claro)
+      else if (deltaPct < 0) { flecha = '↓'; colorComp = '#81C784'; }  // bajó: bueno (verde claro)
+      else                   { flecha = '→'; colorComp = 'rgba(255,255,255,.7)'; }
+      compHtml = '<span style="color:' + colorComp + ';font-weight:700;">' + flecha + ' ' + Math.abs(deltaPct) + '%</span>'
+               + '<span style="color:rgba(255,255,255,.5);"> vs período ant.</span>';
+    }
+
+    html += '<div style="background:linear-gradient(135deg,#8B0000,#B71C1C);border-radius:14px;padding:16px 18px;margin-bottom:14px;box-shadow:0 4px 12px rgba(139,0,0,.15);">';
+    html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;"><span style="font-size:22px;">💸</span><div style="font-size:11px;color:rgba(255,255,255,.7);text-transform:uppercase;letter-spacing:.8px;font-weight:700;">Perdido por devoluciones · ' + rango.label + '</div></div>';
+    html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:34px;font-weight:900;color:#fff;line-height:1;letter-spacing:-.5px;">' + fmt(totalDevuelto) + '</div>';
+    html += '<div style="font-size:12px;color:rgba(255,255,255,.6);margin-top:6px;">' + cantidad + ' ' + (cantidad===1?'devolución':'devoluciones') + ' · ' + compHtml + '</div>';
+    html += '</div>';
+
+    // ═══════════════════════════════════════════════════════════
+    // 3 COLUMNAS: Productos / Clientes / Motivos
+    // ═══════════════════════════════════════════════════════════
+    // Productos más devueltos (parseando items_json o items como fallback)
+    var prodMap = {};   // nombre → { qty, monto }
+    var cliMap  = {};   // cliente → { count, monto }
+    var motMap  = {};   // categoria → count
+
+    devs.forEach(function(d) {
+      // Por producto (parseo simple del campo items)
+      var items = d.items || '';
+      items.split(/,\s*/).forEach(function(it) {
+        var m = it.match(/^\s*(\d+)\s*[x×]\s*(.+?)\s*$/i);
+        if (m) {
+          var nombre = m[2].trim();
+          if (!prodMap[nombre]) prodMap[nombre] = { qty: 0, monto: 0, count: 0 };
+          prodMap[nombre].qty  += parseInt(m[1]) || 0;
+          prodMap[nombre].count++;
+          // Distribuir monto proporcionalmente (aproximado)
+          prodMap[nombre].monto += (parseFloat(d.monto_devuelto) || 0) / (items.split(',').length || 1);
+        }
+      });
+      // Por cliente
+      var cli = d.cliente || 'Sin nombre';
+      if (!cliMap[cli]) cliMap[cli] = { count: 0, monto: 0 };
+      cliMap[cli].count++;
+      cliMap[cli].monto += parseFloat(d.monto_devuelto) || 0;
+      // Por motivo
+      var mot = d.motivo_categoria || 'otro';
+      motMap[mot] = (motMap[mot] || 0) + 1;
+    });
+
+    var topProds = Object.keys(prodMap).map(function(n) { return Object.assign({ nombre: n }, prodMap[n]); })
+      .sort(function(a, b) { return b.qty - a.qty; }).slice(0, 5);
+    var topClis  = Object.keys(cliMap).map(function(c) { return Object.assign({ cliente: c }, cliMap[c]); })
+      .sort(function(a, b) { return b.count - a.count; }).slice(0, 5);
+    var topMots  = Object.keys(motMap).map(function(k) { return { cat: k, count: motMap[k] }; })
+      .sort(function(a, b) { return b.count - a.count; });
+
+    // Helper para card de columna
+    var mkColumnaCard = function(titulo, emoji, contenidoHtml) {
+      return '<div style="flex:1;background:#fff;border:1.5px solid var(--cream3);border-radius:12px;padding:12px 12px 10px;min-width:0;">'
+        + '<div style="font-family:Barlow Condensed,sans-serif;font-size:11px;font-weight:900;color:var(--text3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px;">' + emoji + ' ' + titulo + '</div>'
+        + contenidoHtml
+        + '</div>';
+    };
+
+    // Columna Productos
+    var prodHtml = topProds.length ? topProds.map(function(p) {
+      return '<div style="padding:4px 0;border-bottom:1px solid #F5F5F5;font-size:11.5px;">'
+        + '<div style="font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + p.nombre + '</div>'
+        + '<div style="color:#C62828;font-weight:700;font-size:11px;">×' + p.qty + ' · ' + fmt(p.monto) + '</div>'
+        + '</div>';
+    }).join('') : '<div style="font-size:11px;color:var(--text3);padding:4px 0;">Sin datos</div>';
+
+    // Columna Clientes
+    var cliHtml = topClis.length ? topClis.map(function(c) {
+      return '<div style="padding:4px 0;border-bottom:1px solid #F5F5F5;font-size:11.5px;">'
+        + '<div style="font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + c.cliente + '</div>'
+        + '<div style="color:var(--text3);font-size:11px;">' + c.count + (c.count===1?' vez':' veces') + ' · ' + fmt(c.monto) + '</div>'
+        + '</div>';
+    }).join('') : '<div style="font-size:11px;color:var(--text3);padding:4px 0;">Sin datos</div>';
+
+    // Columna Motivos
+    var motHtml = topMots.length ? topMots.map(function(m) {
+      var info = DEV_CAT_LABELS[m.cat] || { label: m.cat, emoji: '❓', color: '#757575' };
+      return '<div style="padding:4px 0;border-bottom:1px solid #F5F5F5;font-size:11.5px;display:flex;justify-content:space-between;align-items:center;gap:6px;">'
+        + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><span style="font-size:13px;">' + info.emoji + '</span> <span style="font-weight:700;color:' + info.color + ';">' + info.label + '</span></span>'
+        + '<span style="font-weight:900;color:var(--text3);">' + m.count + '</span>'
+        + '</div>';
+    }).join('') : '<div style="font-size:11px;color:var(--text3);padding:4px 0;">Sin datos</div>';
+
+    html += '<div style="display:flex;gap:8px;margin-bottom:14px;">'
+      + mkColumnaCard('Productos', '📦', prodHtml)
+      + mkColumnaCard('Clientes',  '👤', cliHtml)
+      + mkColumnaCard('Motivos',   '🤷', motHtml)
+      + '</div>';
+
+    // ═══════════════════════════════════════════════════════════
+    // DETALLE CRONOLÓGICO
+    // ═══════════════════════════════════════════════════════════
+    html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:900;color:var(--text3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px;padding:0 2px;">↩️ Detalle cronológico · ' + devs.length + '</div>';
+
+    devs.forEach(function(d) {
+      var fecha = new Date(d.fecha_devolucion);
+      var fechaStr = String(fecha.getDate()).padStart(2,'0') + '/' + String(fecha.getMonth()+1).padStart(2,'0')
+                   + ' ' + String(fecha.getHours()).padStart(2,'0') + ':' + String(fecha.getMinutes()).padStart(2,'0');
+      var catInfo = DEV_CAT_LABELS[d.motivo_categoria] || { label: d.motivo_categoria || '—', emoji: '❓', color: '#757575' };
+      var recInfo = DEV_RECLAMO_LABELS[d.reclamo_estado] || DEV_RECLAMO_LABELS.por_evaluar;
+      var choferColor = d.chofer === 'Joan' ? '#2E7D32' : (d.chofer === 'Luis' ? '#E65100' : '#757575');
+
+      html += '<div onclick="devAbrirModal(\'' + d.id + '\')" '
+        + 'style="background:#fff;border:1.5px solid var(--cream3);border-radius:12px;padding:12px 14px;margin-bottom:8px;cursor:pointer;transition:all .15s;-webkit-tap-highlight-color:transparent;touch-action:manipulation;">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px;">';
+      html += '<div style="flex:1;min-width:0;">';
+      html += '<div style="font-size:11px;color:var(--text3);font-weight:700;">' + fechaStr + ' · <span style="color:' + choferColor + ';">🚚 ' + (d.chofer || '—') + '</span></div>';
+      html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:900;color:var(--text);margin-top:2px;">' + (d.cliente || 'Sin nombre') + '</div>';
+      html += '<div style="font-size:11px;color:var(--text3);">📍 ' + (d.ciudad || '—') + (d.comercio ? ' · 🏪 ' + d.comercio : '') + '</div>';
+      html += '</div>';
+      html += '<div style="text-align:right;flex-shrink:0;">';
+      html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:17px;font-weight:900;color:#C62828;">-' + fmt(d.monto_devuelto) + '</div>';
+      html += '<div style="display:inline-block;background:' + recInfo.bg + ';color:' + recInfo.color + ';padding:2px 8px;border-radius:12px;font-size:10px;font-weight:800;margin-top:2px;">' + recInfo.emoji + ' ' + recInfo.label + '</div>';
+      html += '</div>';
+      html += '</div>';
+
+      // Línea de items + motivo
+      html += '<div style="font-size:12px;color:var(--text2);padding-top:6px;border-top:1px solid #F5F5F5;">';
+      html += '<span style="color:var(--text);font-weight:700;">' + (d.items || '—') + '</span>';
+      html += ' · <span style="color:' + catInfo.color + ';font-weight:700;">' + catInfo.emoji + ' ' + catInfo.label + '</span>';
+      if (d.proveedor) html += ' · <span style="color:var(--text3);">🏭 ' + d.proveedor + '</span>';
+      html += '</div>';
+
+      html += '</div>';
+    });
+
+    el.innerHTML = html;
+  } catch(err) {
+    console.error('renderLogisticaDevoluciones:', err);
+    el.innerHTML = '<div class="planilla-empty">❌ Error al cargar devoluciones. ¿Existe la tabla?</div>';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MODAL ACCIONABLE DE DEVOLUCIÓN (stub — se implementa en L-3.3)
+// ═══════════════════════════════════════════════════════════════
+function devAbrirModal(devolucionId) {
+  // Por ahora solo toast. En L-3.3 implementamos el modal completo.
+  toast('🔜 Modal accionable en próxima versión', 'ok');
+}
+
 async function avanzarEstadoCheque(id, nuevoEstado) {
   try {
     await sbFetch('cheques_recibidos?id=eq.'+id, { method:'PATCH', body:JSON.stringify({estado:nuevoEstado}) });
     renderLogistica(); toast('✅ Cheque actualizado','ok');
   } catch(e) { toast('❌ Error','err'); }
-}
-async function marcarChequeRechazado(id) {
+}async function marcarChequeRechazado(id) {
   if (!confirm('¿Marcar como RECHAZADO?')) return;
   await avanzarEstadoCheque(id,'rechazado');
 }
