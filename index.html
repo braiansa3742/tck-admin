@@ -4564,6 +4564,17 @@ document.addEventListener('gesturechange', function(e) { e.preventDefault(); });
 document.addEventListener('touchmove', function(e) {
   if (e.touches && e.touches.length > 1) e.preventDefault();
 }, { passive: false });
+
+// Bloquear zoom por double-tap en iOS (ignora user-scalable=no en tap doble)
+// Si dos taps ocurren a menos de 300ms, preventDefault el segundo
+var _lastTapTime = 0;
+document.addEventListener('touchend', function(e) {
+  var now = Date.now();
+  if (now - _lastTapTime < 300) {
+    e.preventDefault();
+  }
+  _lastTapTime = now;
+}, { passive: false });
 setInterval(actualizarFecha, 60000);
 
 // Detectar modo campo: tckcatalogo.com/pedidos.html?modo=campo
@@ -10544,6 +10555,25 @@ function segSetFiltroFecha(fechaISO) {
   renderLogisticaSeguimiento(document.getElementById('logistica-contenido'));
 }
 
+// Abre el calendario nativo con fallbacks para diferentes navegadores/plataformas.
+// iOS Safari a veces bloquea showPicker() — por eso hay fallback a .click() + .focus()
+function segAbrirCalendario(ev) {
+  if (ev) ev.preventDefault();
+  var input = document.getElementById('seg-fecha-picker');
+  if (!input) return;
+  try {
+    if (typeof input.showPicker === 'function') {
+      input.showPicker();
+      return;
+    }
+  } catch (err) {
+    // showPicker() puede tirar en algunos contextos (iOS), caemos al fallback
+  }
+  // Fallback universal: foco + click
+  try { input.focus(); } catch(e) {}
+  try { input.click(); } catch(e) {}
+}
+
 // Helpers para "hoy" / "ayer" (fecha local, no UTC)
 function _segFechaHoyLocal() {
   var d = new Date();
@@ -10610,7 +10640,8 @@ async function renderLogisticaSeguimiento(el) {
       return '<button onclick="' + onclick + '" '
         + 'style="flex:1;padding:9px 8px;background:' + bg + ';border:1.5px solid ' + bd + ';border-radius:10px;'
         + 'font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;color:' + fg + ';'
-        + 'cursor:pointer;transition:all .18s;-webkit-tap-highlight-color:transparent;">'
+        + 'cursor:pointer;transition:all .18s;-webkit-tap-highlight-color:transparent;'
+        + 'touch-action:manipulation;user-select:none;">'
         + label + '</button>';
     };
 
@@ -10621,13 +10652,15 @@ async function renderLogisticaSeguimiento(el) {
     html += '<div style="display:flex;gap:6px;margin-bottom:8px;">'
       + mkFechaChip('📅 Hoy',  esHoy,  'segSetFiltroFecha(_segFechaHoyLocal())')
       + mkFechaChip('Ayer',    esAyer, 'segSetFiltroFecha(_segFechaAyerLocal())')
-      + mkFechaChip(labelCustom, esCustom, 'document.getElementById(\'seg-fecha-picker\').showPicker ? document.getElementById(\'seg-fecha-picker\').showPicker() : document.getElementById(\'seg-fecha-picker\').click()')
+      + mkFechaChip(labelCustom, esCustom, 'segAbrirCalendario(event)')
       + '</div>';
 
     // Input date oculto (se abre al tocar el chip "Fecha")
+    // IMPORTANTE: NO usar pointer-events:none, porque impide que .click()/.showPicker() funcionen en varios navegadores.
+    // Lo ocultamos con width/height cero y opacity, pero sigue siendo funcional.
     html += '<input type="date" id="seg-fecha-picker" value="' + _segFiltroFecha + '" '
       + 'onchange="if(this.value) segSetFiltroFecha(this.value)" '
-      + 'style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none;">';
+      + 'style="position:absolute;left:-9999px;top:-9999px;width:0;height:0;opacity:0;border:0;padding:0;">';
 
     // ── Si no hay entregas para esta fecha, mostrar empty state pero mantener chips ──
     if (!entregasRaw.length) {
@@ -10664,7 +10697,8 @@ async function renderLogisticaSeguimiento(el) {
         + 'style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:9px 8px;'
         + 'background:' + bg + ';border:1.5px solid ' + bd + ';border-radius:10px;'
         + 'font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;color:' + fg + ';'
-        + 'cursor:pointer;transition:all .18s;-webkit-tap-highlight-color:transparent;">'
+        + 'cursor:pointer;transition:all .18s;-webkit-tap-highlight-color:transparent;'
+        + 'touch-action:manipulation;user-select:none;">'
         + '<span>' + label + '</span>'
         + '<span style="background:' + countBg + ';color:' + countFg + ';padding:1px 7px;border-radius:10px;font-size:11px;font-weight:900;min-width:20px;text-align:center;">' + count + '</span>'
         + '</button>';
