@@ -796,6 +796,8 @@ body {
 .btn-entregar { background: var(--blue2); color: var(--blue); border-color: var(--blue); }
 .btn-entregar:hover { background: var(--blue); color: #fff; }
 .btn-cancelar { background: #FFEBEE; color: #C62828; border-color: #C62828; }
+.dev-badge { display:inline-block;background:#FFF3E0;color:#E65100;border:1px solid #FFB74D;border-radius:20px;padding:2px 8px;font-size:11px;font-weight:800;margin-left:6px; }
+.dev-info { background:#FFF8E1;border:1.5px solid #FFE082;border-radius:8px;padding:8px 12px;margin-top:6px;font-size:12px;color:#E65100; }
 .btn-aprobar { background: #E8F5E9; color: #1B5E20; border-color: #2E7D32; }
 .btn-aprobar:hover { background: #2E7D32; color: #fff; }
 .btn-rechazar { background: #FFEBEE; color: #B71C1C; border-color: #C62828; }
@@ -10371,7 +10373,15 @@ async function renderLogisticaSeguimiento(el) {
       items.forEach(e => {
         const m = parseMonto(e.monto);
         const hora = e.fecha_entrega ? new Date(e.fecha_entrega).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}) : '—';
-        html += '<div class="seg-row"><div style="flex:1;min-width:0;"><div class="seg-row-nombre">' + (e.cliente||'—') + '</div><div class="seg-row-ciudad">📍 ' + (e.ciudad||'—') + (e.comercio?' · 🏪 '+e.comercio:'') + '</div>' + (e.estado==='entregado'?'<div style="font-size:11px;color:var(--text3);margin-top:1px;">🕐 '+hora+' · '+(e.forma_cobro||'—').replace('_',' ')+'</div>':'') + '</div><div style="text-align:right;flex-shrink:0;"><div class="seg-row-monto">' + fmt(m) + '</div><div>' + (e.estado==='entregado'?'<span class="seg-badge-entregado">✅ Entregado</span>':'<span class="seg-badge-pendiente">⏳ Pendiente</span>') + '</div></div></div>';
+        var devInfo = '';
+        if (e.devolucion) {
+          try {
+            var dev = JSON.parse(e.devolucion);
+            devInfo = '<div class="dev-info">↩️ <strong>Devolución:</strong> ' + dev.items + ' — ' + dev.motivo + '</div>';
+          } catch(err) {}
+        }
+        var montoCobrado = e.monto_cobrado ? fmt(e.monto_cobrado) : fmt(m);
+        html += '<div class="seg-row"><div style="flex:1;min-width:0;"><div class="seg-row-nombre">' + (e.cliente||'—') + (e.devolucion?'<span class="dev-badge">↩️ Dev.</span>':'') + '</div><div class="seg-row-ciudad">📍 ' + (e.ciudad||'—') + (e.comercio?' · 🏪 '+e.comercio:'') + '</div>' + (e.estado==='entregado'?'<div style="font-size:11px;color:var(--text3);margin-top:1px;">🕐 '+hora+' · '+(e.forma_cobro||'—').replace('_',' ')+'</div>':'') + devInfo + '</div><div style="text-align:right;flex-shrink:0;"><div class="seg-row-monto">' + montoCobrado + '</div>' + (e.devolucion&&e.monto_cobrado?'<div style="font-size:10px;color:#999;text-decoration:line-through;">'+fmt(m)+'</div>':'') + '<div>' + (e.estado==='entregado'?'<span class="seg-badge-entregado">✅ Entregado</span>':'<span class="seg-badge-pendiente">⏳ Pendiente</span>') + '</div></div></div>';
       });
       html += '</div>';
     });
