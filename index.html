@@ -10526,17 +10526,67 @@ function renderLogisticaChofer(el, chofer) {
 // ══════════════════════════════════════════════════════════
 // SEGUIMIENTO DEL REPARTO
 // ══════════════════════════════════════════════════════════
+// Estado del filtro de chofer en Seguimiento
+var _segFiltroChofer = 'todos';
+
+function segSetFiltroChofer(chofer) {
+  _segFiltroChofer = chofer;
+  renderLogisticaSeguimiento(document.getElementById('logistica-contenido'));
+}
+
 async function renderLogisticaSeguimiento(el) {
   el.innerHTML = '<div class="planilla-empty"><div class="loading-spinner" style="margin:0 auto 12px;"></div>Cargando seguimiento...</div>';
   try {
     const hoyStr = new Date().toISOString().split('T')[0];
-    const entregas = await sbFetch('entregas?fecha_asignacion=gte.' + hoyStr + 'T00:00:00&select=*&order=chofer.asc') || [];
-    if (!entregas.length) { el.innerHTML = '<div class="planilla-empty">📭 No hay entregas asignadas hoy.</div>'; return; }
+    const entregasRaw = await sbFetch('entregas?fecha_asignacion=gte.' + hoyStr + 'T00:00:00&select=*&order=chofer.asc') || [];
+    if (!entregasRaw.length) { el.innerHTML = '<div class="planilla-empty">📭 No hay entregas asignadas hoy.</div>'; return; }
+
     const parseMonto = m => { const n = parseFloat(m)||0; return n < 1000 && n > 0 ? n*1000 : n; };
     const fmt = n => '$' + Math.round(n).toLocaleString('es-AR');
+
+    // ── Conteos por chofer (para los badges de los botones, SIEMPRE sobre todas las entregas) ──
+    const conteoTotal = { todos: entregasRaw.length, Joan: 0, Luis: 0 };
+    entregasRaw.forEach(e => { if (conteoTotal[e.chofer] !== undefined) conteoTotal[e.chofer]++; });
+
+    // ── Aplicar filtro de chofer ──
+    const entregas = (_segFiltroChofer === 'todos')
+      ? entregasRaw
+      : entregasRaw.filter(e => e.chofer === _segFiltroChofer);
+
+    // Agrupar por chofer (para el render de cards)
     const porChofer = { Joan: [], Luis: [] };
     entregas.forEach(e => { if (porChofer[e.chofer]) porChofer[e.chofer].push(e); });
+
     let html = '';
+
+    // ═══════════════════════════════════════════════════════════
+    // BOTONES DE FILTRO POR CHOFER
+    // ═══════════════════════════════════════════════════════════
+    const mkBtn = (id, label, count, color, colorBg) => {
+      const sel = (_segFiltroChofer === id);
+      const bg = sel ? color : '#fff';
+      const fg = sel ? '#fff' : 'var(--text2)';
+      const bd = sel ? color : 'var(--cream3)';
+      const countBg = sel ? 'rgba(255,255,255,.22)' : colorBg;
+      const countFg = sel ? '#fff' : color;
+      return '<button onclick="segSetFiltroChofer(\'' + id + '\')" '
+        + 'style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:9px 8px;'
+        + 'background:' + bg + ';border:1.5px solid ' + bd + ';border-radius:10px;'
+        + 'font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;color:' + fg + ';'
+        + 'cursor:pointer;transition:all .18s;-webkit-tap-highlight-color:transparent;">'
+        + '<span>' + label + '</span>'
+        + '<span style="background:' + countBg + ';color:' + countFg + ';padding:1px 7px;border-radius:10px;font-size:11px;font-weight:900;min-width:20px;text-align:center;">' + count + '</span>'
+        + '</button>';
+    };
+    html += '<div style="display:flex;gap:6px;margin-bottom:14px;">'
+      + mkBtn('todos', '👥 Todos', conteoTotal.todos, '#1A237E', '#E8EAF6')
+      + mkBtn('Joan',  '🚚 Joan',  conteoTotal.Joan,  '#2E7D32', '#E8F5E9')
+      + mkBtn('Luis',  '🚚 Luis',  conteoTotal.Luis,  '#E65100', '#FFF3E0')
+      + '</div>';
+
+    // ═══════════════════════════════════════════════════════════
+    // HEADER AZUL CON TOTALES (ya filtrados)
+    // ═══════════════════════════════════════════════════════════
     const totalEntregas = entregas.length;
     const entregadas = entregas.filter(e => e.estado === 'entregado').length;
     const pendientes = totalEntregas - entregadas;
@@ -10548,13 +10598,23 @@ async function renderLogisticaSeguimiento(el) {
       if (cobros[e.forma_cobro] !== undefined) cobros[e.forma_cobro] += m;
     });
     const totalDia = entregas.reduce((s,e) => s + parseMonto(e.monto), 0);
+
+    // Label contextual si hay filtro activo
+    const labelScope = (_segFiltroChofer === 'todos')
+      ? 'Total del día'
+      : 'Total · ' + _segFiltroChofer;
+
     html += '<div style="background:linear-gradient(135deg,#1A237E,#283593);border-radius:14px;padding:14px 16px;margin-bottom:14px;">';
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
-    html += '<div><div style="font-size:11px;color:rgba(255,255,255,.6);text-transform:uppercase;letter-spacing:.8px;">Total del día</div><div style="font-family:Barlow Condensed,sans-serif;font-size:28px;font-weight:900;color:#fff;">' + fmt(totalDia) + '</div><div style="font-size:11px;color:rgba(255,255,255,.5);">Cobrado: ' + fmt(totalCobrado) + '</div></div>';
+    html += '<div><div style="font-size:11px;color:rgba(255,255,255,.6);text-transform:uppercase;letter-spacing:.8px;">' + labelScope + '</div><div style="font-family:Barlow Condensed,sans-serif;font-size:28px;font-weight:900;color:#fff;">' + fmt(totalDia) + '</div><div style="font-size:11px;color:rgba(255,255,255,.5);">Cobrado: ' + fmt(totalCobrado) + '</div></div>';
     html += '<div style="text-align:right"><div style="font-size:11px;color:rgba(255,255,255,.6);text-transform:uppercase;letter-spacing:.8px;">Entregas</div><div style="font-family:Barlow Condensed,sans-serif;font-size:28px;font-weight:900;color:#fff;">' + entregadas + '<span style="font-size:16px;opacity:.6;"> / ' + totalEntregas + '</span></div><div style="font-size:11px;color:rgba(255,255,255,.5);">' + pendientes + ' pendientes</div></div></div>';
     html += '<div class="seg-progress-wrap"><div class="seg-progress-bar" style="width:' + pct + '%;background:#FFD700;"></div></div>';
     html += '<div style="font-size:10px;color:rgba(255,255,255,.5);text-align:center;margin-bottom:10px;">' + pct + '% completado</div>';
     html += '<div class="seg-cobro-grid"><div class="seg-cobro-item"><div class="seg-cobro-label">💵 Efectivo</div><div class="seg-cobro-val">' + fmt(cobros.efectivo) + '</div></div><div class="seg-cobro-item"><div class="seg-cobro-label">📲 Transfer.</div><div class="seg-cobro-val">' + fmt(cobros.transferencia) + '</div></div><div class="seg-cobro-item"><div class="seg-cobro-label">📋 Cheque</div><div class="seg-cobro-val">' + fmt(cobros.cheque) + '</div></div><div class="seg-cobro-item"><div class="seg-cobro-label">📒 Cta.Cte.</div><div class="seg-cobro-val">' + fmt(cobros.cuenta_corriente) + '</div></div></div></div>';
+
+    // ═══════════════════════════════════════════════════════════
+    // CARDS POR CHOFER
+    // ═══════════════════════════════════════════════════════════
     ['Joan','Luis'].forEach(chofer => {
       const items = porChofer[chofer];
       if (!items.length) return;
@@ -10581,6 +10641,12 @@ async function renderLogisticaSeguimiento(el) {
       });
       html += '</div>';
     });
+
+    // Estado vacío si el filtro no tiene entregas
+    if (!entregas.length) {
+      html += '<div class="planilla-empty" style="margin-top:0;">🔍 No hay entregas para ' + _segFiltroChofer + ' hoy.</div>';
+    }
+
     html += '<button onclick="renderLogisticaSeguimiento(document.getElementById(\'logistica-contenido\'))" style="width:100%;padding:11px;background:#F5F7FF;border:1.5px solid #E8EAF6;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:800;color:#1A237E;cursor:pointer;margin-top:4px;">🔄 Actualizar</button>';
     el.innerHTML = html;
   } catch(e) { el.innerHTML = '<div class="planilla-empty">❌ Error al cargar.</div>'; console.error(e); }
