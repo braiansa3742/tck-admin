@@ -1902,7 +1902,7 @@ body {
   background: #fff;
   border-top: 1.5px solid var(--cream3);
   display: none;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(7, 1fr);
   box-shadow: 0 -4px 20px rgba(0,0,0,.08);
   padding-bottom: env(safe-area-inset-bottom);
 }
@@ -1912,8 +1912,8 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 9px 4px 8px;
-  gap: 3px;
+  padding: 7px 2px 6px;
+  gap: 2px;
   cursor: pointer;
   background: none;
   border: none;
@@ -1933,42 +1933,43 @@ body {
   border-radius: 0 0 3px 3px;
 }
 .tab-icon {
-  font-size: 20px;
+  font-size: 17px;
   line-height: 1;
   opacity: .5;
 }
 .tab-btn.active .tab-icon { opacity: 1; }
 .tab-label {
   font-family: 'Barlow Condensed', sans-serif;
-  font-size: 11px;
+  font-size: 9.5px;
   font-weight: 700;
   color: var(--text3);
-  letter-spacing: .3px;
+  letter-spacing: 0;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 .tab-badge {
   position: absolute;
-  top: 6px;
-  right: calc(50% - 20px);
+  top: 4px;
+  right: calc(50% - 18px);
   background: var(--red);
   color: #fff;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 900;
   font-family: 'Barlow Condensed', sans-serif;
-  min-width: 16px;
-  height: 16px;
-  border-radius: 8px;
+  min-width: 14px;
+  height: 14px;
+  border-radius: 7px;
   display: none;
   align-items: center;
   justify-content: center;
-  padding: 0 4px;
+  padding: 0 3px;
 }
 .tab-badge.on { display: flex; }
 
 /* ── VIEWS (secciones) ── */
 .view {
   display: none;
-  padding-bottom: calc(72px + env(safe-area-inset-bottom));
+  padding-bottom: calc(62px + env(safe-area-inset-bottom));
 }
 .view.active { display: block; }
 
@@ -4145,12 +4146,12 @@ input[type="date"] {
     <span class="tab-label">Clientes</span>
   </button>
   <button class="tab-btn" id="tab-btn-gps" onclick="cambiarTab('gps')">
-    <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
-    <span>Visitas</span>
+    <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+    <span class="tab-label">Visitas</span>
   </button>
   <button class="tab-btn" id="tab-btn-mapa" onclick="cambiarTab('mapa')">
-    <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/></svg>
-    <span>Mapa</span>
+    <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/></svg>
+    <span class="tab-label">Mapa</span>
   </button>
   <button class="tab-btn" id="tab-btn-logistica" onclick="cambiarTab('logistica')"><span class="tab-icon">🚚</span><span class="tab-label">Logística</span></button>
   <button class="tab-btn" id="tab-btn-reportes" onclick="cambiarTab('reportes')">
