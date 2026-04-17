@@ -56,6 +56,14 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Prevenir zoom por double-tap en elementos interactivos, pero PERMITIR taps rápidos consecutivos.
+   Esto resuelve el problema del zoom sin romper la interacción legítima (ej: sumar productos rápido). */
+button, a, input, select, textarea, label,
+[role="button"], [onclick], .tab-btn, .filtro-btn, .rep-periodo-btn, .cli-periodo-btn,
+.planilla-chofer-tab, .cobro-opt, .mapa-chip {
+  touch-action: manipulation;
+}
+
 body {
   font-family: 'Barlow', sans-serif;
   background: var(--cream);
@@ -4563,17 +4571,6 @@ document.addEventListener('gesturestart', function(e) { e.preventDefault(); });
 document.addEventListener('gesturechange', function(e) { e.preventDefault(); });
 document.addEventListener('touchmove', function(e) {
   if (e.touches && e.touches.length > 1) e.preventDefault();
-}, { passive: false });
-
-// Bloquear zoom por double-tap en iOS (ignora user-scalable=no en tap doble)
-// Si dos taps ocurren a menos de 300ms, preventDefault el segundo
-var _lastTapTime = 0;
-document.addEventListener('touchend', function(e) {
-  var now = Date.now();
-  if (now - _lastTapTime < 300) {
-    e.preventDefault();
-  }
-  _lastTapTime = now;
 }, { passive: false });
 setInterval(actualizarFecha, 60000);
 
