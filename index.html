@@ -10552,25 +10552,6 @@ function segSetFiltroFecha(fechaISO) {
   renderLogisticaSeguimiento(document.getElementById('logistica-contenido'));
 }
 
-// Abre el calendario nativo con fallbacks para diferentes navegadores/plataformas.
-// iOS Safari a veces bloquea showPicker() — por eso hay fallback a .click() + .focus()
-function segAbrirCalendario(ev) {
-  if (ev) ev.preventDefault();
-  var input = document.getElementById('seg-fecha-picker');
-  if (!input) return;
-  try {
-    if (typeof input.showPicker === 'function') {
-      input.showPicker();
-      return;
-    }
-  } catch (err) {
-    // showPicker() puede tirar en algunos contextos (iOS), caemos al fallback
-  }
-  // Fallback universal: foco + click
-  try { input.focus(); } catch(e) {}
-  try { input.click(); } catch(e) {}
-}
-
 // Helpers para "hoy" / "ayer" (fecha local, no UTC)
 function _segFechaHoyLocal() {
   var d = new Date();
@@ -10642,22 +10623,35 @@ async function renderLogisticaSeguimiento(el) {
         + label + '</button>';
     };
 
-    // Label del chip "Fecha específica" cambia si hay fecha custom seleccionada
+    // El chip de "Fecha" es especial: envuelve el botón visual con un input date invisible
+    // ENCIMA de él. Así cualquier tap sobre el chip dispara el picker nativo en el lugar correcto.
+    // Esta técnica es la más confiable cross-browser (iOS, Android, Chrome desktop, Safari).
+    const mkFechaCustomChip = (label, isSel) => {
+      const bg = isSel ? '#1A237E' : '#fff';
+      const fg = isSel ? '#fff'    : 'var(--text2)';
+      const bd = isSel ? '#1A237E' : 'var(--cream3)';
+      return '<div style="flex:1;position:relative;">'
+        + '<button type="button" '
+        + 'style="width:100%;padding:9px 8px;background:' + bg + ';border:1.5px solid ' + bd + ';border-radius:10px;'
+        + 'font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;color:' + fg + ';'
+        + 'cursor:pointer;transition:all .18s;-webkit-tap-highlight-color:transparent;'
+        + 'touch-action:manipulation;user-select:none;pointer-events:none;">'
+        + label + '</button>'
+        + '<input type="date" id="seg-fecha-picker" value="' + _segFiltroFecha + '" '
+        + 'onchange="if(this.value) segSetFiltroFecha(this.value)" '
+        + 'style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;border:0;padding:0;margin:0;background:transparent;">'
+        + '</div>';
+    };
+
+    // Label del chip "Fecha" cambia si hay fecha custom seleccionada
     const labelCustom = esCustom ? ('📆 ' + _segFormatoFechaCorta(_segFiltroFecha)) : '📆 Fecha';
 
     let html = '';
     html += '<div style="display:flex;gap:6px;margin-bottom:8px;">'
       + mkFechaChip('📅 Hoy',  esHoy,  'segSetFiltroFecha(_segFechaHoyLocal())')
       + mkFechaChip('Ayer',    esAyer, 'segSetFiltroFecha(_segFechaAyerLocal())')
-      + mkFechaChip(labelCustom, esCustom, 'segAbrirCalendario(event)')
+      + mkFechaCustomChip(labelCustom, esCustom)
       + '</div>';
-
-    // Input date oculto (se abre al tocar el chip "Fecha")
-    // IMPORTANTE: NO usar pointer-events:none, porque impide que .click()/.showPicker() funcionen en varios navegadores.
-    // Lo ocultamos con width/height cero y opacity, pero sigue siendo funcional.
-    html += '<input type="date" id="seg-fecha-picker" value="' + _segFiltroFecha + '" '
-      + 'onchange="if(this.value) segSetFiltroFecha(this.value)" '
-      + 'style="position:absolute;left:-9999px;top:-9999px;width:0;height:0;opacity:0;border:0;padding:0;">';
 
     // ── Si no hay entregas para esta fecha, mostrar empty state pero mantener chips ──
     if (!entregasRaw.length) {
