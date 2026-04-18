@@ -793,6 +793,63 @@ body {
   gap: 10px;
   margin-bottom: 12px;
 }
+
+/* ══ BANNER DE ALERTAS (item #7) ══ */
+#alertas-banner::-webkit-scrollbar { display: none; }
+.alerta-chip {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px 8px 10px;
+  border-radius: 20px;
+  border: 1.5px solid;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform .12s, box-shadow .12s;
+  text-decoration: none;
+  user-select: none;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.alerta-chip:active { transform: scale(0.96); }
+.alerta-chip .alerta-count {
+  min-width: 22px;
+  padding: 1px 7px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 900;
+  text-align: center;
+  line-height: 1.4;
+}
+.alerta-chip.rojo {
+  background: #FFEBEE;
+  border-color: #EF9A9A;
+  color: #C62828;
+}
+.alerta-chip.rojo .alerta-count { background: #C62828; color: #fff; }
+.alerta-chip.amarillo {
+  background: #FFF8E1;
+  border-color: #FFE082;
+  color: #F57C00;
+}
+.alerta-chip.amarillo .alerta-count { background: #F57C00; color: #fff; }
+.alerta-chip.naranja {
+  background: #FFF3E0;
+  border-color: #FFB74D;
+  color: #E65100;
+}
+.alerta-chip.naranja .alerta-count { background: #E65100; color: #fff; }
+.alerta-chip.azul {
+  background: #E3F2FD;
+  border-color: #90CAF9;
+  color: #1565C0;
+}
+.alerta-chip.azul .alerta-count { background: #1565C0; color: #fff; }
+
 .stat-card {
   background: #fff;
   border-radius: 14px;
@@ -4042,6 +4099,12 @@ input[type="date"] {
   <!-- ══ VIEW: PEDIDOS ══ -->
   <div class="view active" id="view-pedidos">
     <div style="padding:14px 16px 0;">
+
+      <!-- ══ BANNER DE ALERTAS (ítem #7, solo Admin) ══ -->
+      <div id="alertas-banner" style="display:none;margin-bottom:10px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;">
+        <div id="alertas-banner-inner" style="display:flex;gap:8px;padding-bottom:4px;white-space:nowrap;"></div>
+      </div>
+
       <div class="stats" style="grid-template-columns:repeat(2,1fr);margin-bottom:10px;">
         <div class="stat-card">
           <div class="stat-num" id="stat-total">—</div>
@@ -5319,6 +5382,211 @@ function actualizarStats() {
   document.getElementById('stat-pend').textContent = activos.filter(function(p){return p.estado==='Pendiente';}).length + (enRevision ? ' (+' + enRevision + ' rev.)' : '');
   document.getElementById('stat-conf').textContent = activos.filter(function(p){return p.estado==='Confirmado';}).length;
   document.getElementById('stat-entregado').textContent = activos.filter(function(p){return p.estado==='Entregado';}).length;
+  // Actualizar el banner de alertas cada vez que se refrescan stats
+  renderAlertasBanner();
+}
+
+// ══════════════════════════════════════════════════════════════
+// BANNER DE ALERTAS (ítem #7, solo Admin)
+// Calcula 5 alertas con criterios operativos y las muestra como
+// chips scrolleables arriba del tab Pedidos. Tap → navega al tab+filtro.
+// Las queries a Supabase se hacen en paralelo y son best-effort.
+// ══════════════════════════════════════════════════════════════
+
+var _alertasCache = {
+  duplicados: 0,
+  devolucionesPorReclamar: 0,
+  noEstaba: 0,
+  objetivoEnRiesgo: null,   // {pct, monto, objetivo} o null
+  inactivos: 0
+};
+
+async function renderAlertasBanner() {
+  var banner = document.getElementById('alertas-banner');
+  var inner = document.getElementById('alertas-banner-inner');
+  if (!banner || !inner) return;
+
+  // Solo para admin
+  if (vendedorActual !== 'ADMIN') {
+    banner.style.display = 'none';
+    return;
+  }
+
+  // 1) Duplicados del día (inmediato, desde todosLosPedidos)
+  var hoy = new Date(); hoy.setHours(0,0,0,0);
+  var duplicadosHoy = todosLosPedidos.filter(function(p) {
+    if (!p.esDuplicado) return false;
+    var f = fechaPedido(p); if (!f) return false;
+    f.setHours(0,0,0,0);
+    return f.getTime() === hoy.getTime();
+  });
+  _alertasCache.duplicados = duplicadosHoy.length;
+
+  // 2) Clientes inactivos >30 días (inmediato, desde todosLosPedidos)
+  var inactivosCount = 0;
+  try {
+    var ultimaCompra = {};
+    todosLosPedidos.forEach(function(p) {
+      if (p.estado === 'Cancelado') return;
+      var cli = (p.cliente||'').trim().toLowerCase();
+      if (!cli) return;
+      var f = fechaPedido(p);
+      if (!f) return;
+      if (!ultimaCompra[cli] || f > ultimaCompra[cli]) ultimaCompra[cli] = f;
+    });
+    var hace30 = new Date(); hace30.setDate(hace30.getDate() - 30); hace30.setHours(0,0,0,0);
+    inactivosCount = Object.values(ultimaCompra).filter(function(f) { return f < hace30; }).length;
+  } catch(e) { console.warn('Calculo inactivos:', e); }
+  _alertasCache.inactivos = inactivosCount;
+
+  // 3) Objetivo en riesgo (solo después de las 16hs)
+  _alertasCache.objetivoEnRiesgo = null;
+  try {
+    var ahora = new Date();
+    if (ahora.getHours() >= 16 && typeof _objetivos !== 'undefined' && _objetivos) {
+      var objMonto = 0;
+      Object.values(_objetivos).forEach(function(o) {
+        if (o && o.monto_dia) objMonto += Number(o.monto_dia) || 0;
+      });
+      if (objMonto > 0) {
+        var montoHoy = 0;
+        todosLosPedidos.forEach(function(p) {
+          if (p.estado === 'Cancelado') return;
+          var f = fechaPedido(p); if (!f) return;
+          f.setHours(0,0,0,0);
+          if (f.getTime() === hoy.getTime()) {
+            montoHoy += parseInt((p.total||'').replace(/[^\d]/g,'')) || 0;
+          }
+        });
+        var pct = Math.round((montoHoy / objMonto) * 100);
+        if (pct < 70) {
+          _alertasCache.objetivoEnRiesgo = { pct: pct, monto: montoHoy, objetivo: objMonto };
+        }
+      }
+    }
+  } catch(e) { console.warn('Calculo objetivo:', e); }
+
+  // Render inicial con lo que tengamos (rápido)
+  _renderChipsAlertas();
+
+  // 4-5) Supabase queries en paralelo (no bloquean)
+  try {
+    var hoyISO = hoy.toISOString();
+    var manana = new Date(hoy); manana.setDate(manana.getDate() + 1);
+    var mananaISO = manana.toISOString();
+
+    var [devsRes, entRes] = await Promise.all([
+      // Devoluciones pendientes de reclamar (cualquier fecha)
+      sbFetch('devoluciones?reclamo_estado=eq.por_reclamar&select=id').catch(function() { return []; }),
+      // Entregas "no estaba" del día
+      sbFetch('entregas?estado=eq.no_encontrado&fecha_no_encontrado=gte.' + hoyISO + '&fecha_no_encontrado=lt.' + mananaISO + '&select=id').catch(function() { return []; })
+    ]);
+
+    _alertasCache.devolucionesPorReclamar = (devsRes || []).length;
+    _alertasCache.noEstaba = (entRes || []).length;
+
+    // Re-render con la data completa
+    _renderChipsAlertas();
+  } catch(err) {
+    console.warn('Queries de alertas:', err);
+    // El render inicial ya se hizo, así que sigue funcionando
+  }
+}
+
+// Render puro (sin queries) — toma _alertasCache y dibuja los chips
+function _renderChipsAlertas() {
+  var banner = document.getElementById('alertas-banner');
+  var inner = document.getElementById('alertas-banner-inner');
+  if (!banner || !inner) return;
+
+  var chips = [];
+  // 🔴 Duplicados
+  if (_alertasCache.duplicados > 0) {
+    chips.push({
+      cls: 'rojo',
+      icon: '🔴',
+      label: 'Duplicados',
+      count: _alertasCache.duplicados,
+      onclick: "_alertaIrA('duplicados')"
+    });
+  }
+  // 🔴 Devoluciones por reclamar
+  if (_alertasCache.devolucionesPorReclamar > 0) {
+    chips.push({
+      cls: 'rojo',
+      icon: '📞',
+      label: 'Reclamar',
+      count: _alertasCache.devolucionesPorReclamar,
+      onclick: "_alertaIrA('devoluciones')"
+    });
+  }
+  // 🟡 No estaba
+  if (_alertasCache.noEstaba > 0) {
+    chips.push({
+      cls: 'amarillo',
+      icon: '🚪',
+      label: 'No estaba',
+      count: _alertasCache.noEstaba,
+      onclick: "_alertaIrA('noestaba')"
+    });
+  }
+  // 🟠 Objetivo en riesgo
+  if (_alertasCache.objetivoEnRiesgo) {
+    chips.push({
+      cls: 'naranja',
+      icon: '🎯',
+      label: 'Objetivo ' + _alertasCache.objetivoEnRiesgo.pct + '%',
+      count: null,  // sin contador numérico
+      onclick: "_alertaIrA('objetivo')"
+    });
+  }
+  // 🔵 Inactivos >30d
+  if (_alertasCache.inactivos > 0) {
+    chips.push({
+      cls: 'azul',
+      icon: '💤',
+      label: 'Inactivos',
+      count: _alertasCache.inactivos,
+      onclick: "_alertaIrA('inactivos')"
+    });
+  }
+
+  // Si no hay alertas, ocultar banner
+  if (!chips.length) {
+    banner.style.display = 'none';
+    return;
+  }
+
+  // Renderizar chips
+  banner.style.display = 'block';
+  inner.innerHTML = chips.map(function(c) {
+    var countHtml = (c.count !== null) ? '<span class="alerta-count">' + c.count + '</span>' : '';
+    return '<button class="alerta-chip ' + c.cls + '" onclick="' + c.onclick + '">'
+      + '<span>' + c.icon + '</span>'
+      + '<span>' + c.label + '</span>'
+      + countHtml
+      + '</button>';
+  }).join('');
+}
+
+// Navegación desde una alerta al lugar adecuado del sistema
+function _alertaIrA(destino) {
+  if (destino === 'duplicados') {
+    // Ya estamos en Pedidos, solo aplicar filtro
+    var btn = document.querySelector('#filtros-estado .filtro-btn[onclick*="duplicado"]');
+    if (btn) btn.click();
+  } else if (destino === 'devoluciones') {
+    cambiarTab('logistica');
+    setTimeout(function() { logisticaSelTab('devoluciones', document.getElementById('log-tab-devoluciones')); }, 100);
+  } else if (destino === 'noestaba') {
+    cambiarTab('logistica');
+    setTimeout(function() { logisticaSelTab('seguimiento', document.getElementById('log-tab-seguimiento')); }, 100);
+  } else if (destino === 'objetivo') {
+    cambiarTab('reportes');
+    setTimeout(function() { if (typeof repSelSubTab === 'function') repSelSubTab('hoy'); }, 100);
+  } else if (destino === 'inactivos') {
+    cambiarTab('clientes');
+  }
 }
 
 function pedidosVisibles() {
