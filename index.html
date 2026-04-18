@@ -10979,6 +10979,33 @@ function _segEtiquetaFecha(fechaISO) {
   return 'el ' + _segFormatoFechaCorta(fechaISO);
 }
 
+// ══════════════════════════════════════════════════════════
+// HELPER UBICACIÓN (L-4 Paso 2)
+// Renderiza un chip "📍 Ver en Maps" cuando una entrega/devolución
+// tiene coordenadas GPS. Incluye badge de precisión si aplica.
+// ══════════════════════════════════════════════════════════
+function _renderBotonUbicacion(lat, lng, precision) {
+  if (!lat || !lng) return '';
+  // Badge de precisión según accuracy (metros)
+  var badge = '';
+  var p = parseFloat(precision);
+  if (!isNaN(p) && p > 0) {
+    if (p < 50) {
+      badge = '<span style="background:#E8F5E9;color:#2E7D32;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:800;margin-left:4px;">🎯 ' + Math.round(p) + 'm</span>';
+    } else if (p < 500) {
+      badge = '<span style="background:#FFF3E0;color:#E65100;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:800;margin-left:4px;">📡 ' + Math.round(p) + 'm</span>';
+    } else {
+      badge = '<span style="background:#FFEBEE;color:#C62828;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:800;margin-left:4px;">⚠️ ~' + Math.round(p/1000) + 'km</span>';
+    }
+  }
+  var url = 'https://www.google.com/maps?q=' + lat + ',' + lng;
+  return '<a href="' + url + '" target="_blank" rel="noopener" '
+    + 'onclick="event.stopPropagation()" '
+    + 'style="display:inline-flex;align-items:center;gap:2px;background:#E3F2FD;color:#1565C0;'
+    + 'padding:3px 10px;border-radius:12px;font-size:11px;font-weight:800;text-decoration:none;'
+    + 'margin-top:4px;">📍 Ver en Maps' + badge + '</a>';
+}
+
 async function renderLogisticaSeguimiento(el) {
   el.innerHTML = '<div class="planilla-empty"><div class="loading-spinner" style="margin:0 auto 12px;"></div>Cargando seguimiento...</div>';
   try {
@@ -11155,7 +11182,7 @@ async function renderLogisticaSeguimiento(el) {
           } catch(err) {}
         }
         var montoCobrado = e.monto_cobrado ? fmt(e.monto_cobrado) : fmt(m);
-        html += '<div class="seg-row"><div style="flex:1;min-width:0;"><div class="seg-row-nombre">' + (e.cliente||'—') + (e.devolucion?'<span class="dev-badge">↩️ Dev.</span>':'') + '</div><div class="seg-row-ciudad">📍 ' + (e.ciudad||'—') + (e.comercio?' · 🏪 '+e.comercio:'') + '</div>' + (e.estado==='entregado'?'<div style="font-size:11px;color:var(--text3);margin-top:1px;">🕐 '+hora+' · '+(e.forma_cobro||'—').replace('_',' ')+'</div>':'') + devInfo + '</div><div style="text-align:right;flex-shrink:0;"><div class="seg-row-monto">' + montoCobrado + '</div>' + (e.devolucion&&e.monto_cobrado?'<div style="font-size:10px;color:#999;text-decoration:line-through;">'+fmt(m)+'</div>':'') + '<div>' + (e.estado==='entregado'?'<span class="seg-badge-entregado">✅ Entregado</span>':'<span class="seg-badge-pendiente">⏳ Pendiente</span>') + '</div></div></div>';
+        html += '<div class="seg-row"><div style="flex:1;min-width:0;"><div class="seg-row-nombre">' + (e.cliente||'—') + (e.devolucion?'<span class="dev-badge">↩️ Dev.</span>':'') + '</div><div class="seg-row-ciudad">📍 ' + (e.ciudad||'—') + (e.comercio?' · 🏪 '+e.comercio:'') + '</div>' + (e.estado==='entregado'?'<div style="font-size:11px;color:var(--text3);margin-top:1px;">🕐 '+hora+' · '+(e.forma_cobro||'—').replace('_',' ')+'</div>':'') + devInfo + (e.estado==='entregado' ? _renderBotonUbicacion(e.lat, e.lng, e.ubicacion_precision) : '') + '</div><div style="text-align:right;flex-shrink:0;"><div class="seg-row-monto">' + montoCobrado + '</div>' + (e.devolucion&&e.monto_cobrado?'<div style="font-size:10px;color:#999;text-decoration:line-through;">'+fmt(m)+'</div>':'') + '<div>' + (e.estado==='entregado'?'<span class="seg-badge-entregado">✅ Entregado</span>':'<span class="seg-badge-pendiente">⏳ Pendiente</span>') + '</div></div></div>';
       });
       html += '</div>';
     });
@@ -11692,6 +11719,15 @@ function devAbrirModal(devolucionId) {
   html += '<div><div class="dev-modal-monto-label">Original</div><div class="dev-modal-monto-val">' + fmt(d.monto_original) + '</div></div>';
   html += '<div><div class="dev-modal-monto-label">Cobrado</div><div class="dev-modal-monto-val">' + fmt(d.monto_cobrado) + '</div></div>';
   html += '</div>';
+
+  // Sección: Ubicación (solo si hay coordenadas GPS capturadas)
+  if (d.lat && d.lng) {
+    html += '<div class="dev-modal-sec">';
+    html += '<div class="dev-modal-sec-label">📍 Ubicación del reporte</div>';
+    html += '<div style="font-size:12px;color:var(--text3);margin-bottom:6px;">Coordenadas capturadas por el chofer al entregar.</div>';
+    html += _renderBotonUbicacion(d.lat, d.lng, null);
+    html += '</div>';
+  }
 
   // Sección: Proveedor (dropdown editable)
   html += '<div class="dev-modal-sec">';
