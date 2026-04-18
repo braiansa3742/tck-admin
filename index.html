@@ -1404,6 +1404,20 @@ body {
   transform: scale(0.98);
   background: linear-gradient(135deg, #FFE0B2, #FFCC80);
 }
+
+/* Info: vendedor no puede unir porque hay alguno confirmado */
+.info-no-unir {
+  margin-top: 10px;
+  padding: 10px 14px;
+  background: #FFF8E1;
+  border: 1.5px solid #FFE082;
+  border-left: 3px solid #FFB300;
+  border-radius: 8px;
+  font-family: 'Barlow', sans-serif;
+  font-size: 12.5px;
+  color: #5D4037;
+  line-height: 1.4;
+}
   background: linear-gradient(135deg, #E8F5E9, #F1F8E9);
   border: 1.5px solid #A5D6A7;
   border-radius: 12px;
@@ -6272,7 +6286,11 @@ function abrirModalDuplicados(pedidoId) {
   var p = todosLosPedidos.find(function(x){ return x.pedidoId === pedidoId; });
   if (!p) return;
 
+  var esAdmin = vendedorActual === 'ADMIN';
+  var miVendKey = vendedorActual.toLowerCase();
+
   // Buscar el grupo (todos los pedidos del mismo cliente y día, no cancelados)
+  // Si NO es admin: filtrar también por mismo vendedor (no puede ver/unir pedidos de otros)
   var mFecha = (p.pedidoId || '').match(/TCK-(\d{8})/);
   var fechaDia = mFecha ? mFecha[1] : (p.fechaHora || '').substring(0,10).replace(/-/g,'');
   var cliKey = (p.cliente || '').toLowerCase().replace(/\s+/g,' ').trim();
@@ -6281,7 +6299,12 @@ function abrirModalDuplicados(pedidoId) {
     var xf = (x.pedidoId || '').match(/TCK-(\d{8})/);
     var xfd = xf ? xf[1] : (x.fechaHora || '').substring(0,10).replace(/-/g,'');
     var xcli = (x.cliente || '').toLowerCase().replace(/\s+/g,' ').trim();
-    return xfd === fechaDia && xcli === cliKey;
+    if (xfd !== fechaDia || xcli !== cliKey) return false;
+    if (!esAdmin) {
+      var xvend = (x.vendedor || '').toLowerCase().trim();
+      if (xvend !== miVendKey) return false;
+    }
+    return true;
   }).sort(function(a,b){ return (a.fechaHora || '').localeCompare(b.fechaHora || ''); });
 
   if (grupo.length < 2) {
@@ -6289,14 +6312,29 @@ function abrirModalDuplicados(pedidoId) {
     return;
   }
 
-  // Calcular vendedor habitual
+  // Si no es admin, validar que TODOS estén en Pendiente (no se puede modificar Confirmado/Entregado)
+  if (!esAdmin) {
+    var hayNoPendiente = grupo.some(function(x){ return x.estado !== 'Pendiente'; });
+    if (hayNoPendiente) {
+      toast('No se puede unir: alguno ya fue remitido', 'err');
+      return;
+    }
+  }
+
+  // Calcular vendedor habitual (solo relevante para admin con multi-vendedor)
   var habitual = vendedorHabitualDeCliente(p.cliente);
 
   // Vendedor sugerido por default
   var vendedoresDelGrupo = Array.from(new Set(grupo.map(function(x){ return x.vendedor; }).filter(Boolean)));
-  var acreditar = habitual && vendedoresDelGrupo.indexOf(habitual.vendedor) >= 0
-    ? habitual.vendedor
-    : vendedoresDelGrupo[0] || '';
+  var acreditar;
+  if (!esAdmin) {
+    // Vendedor: siempre se acredita él mismo (es el único en el grupo)
+    acreditar = p.vendedor || vendedorActual;
+  } else {
+    acreditar = habitual && vendedoresDelGrupo.indexOf(habitual.vendedor) >= 0
+      ? habitual.vendedor
+      : vendedoresDelGrupo[0] || '';
+  }
 
   _dupModalState = {
     pedidoId: pedidoId,
@@ -6305,7 +6343,8 @@ function abrirModalDuplicados(pedidoId) {
     fechaDia: fechaDia,
     habitual: habitual,
     acreditarA: acreditar,
-    cancelados: new Set()
+    cancelados: new Set(),
+    esAdmin: esAdmin  // guardar para que el render sepa qué mostrar
   };
 
   _renderDupModal();
@@ -6339,8 +6378,8 @@ function _renderDupModal() {
   // Cuerpo
   var html = '';
 
-  // Banner vendedor habitual
-  if (s.habitual) {
+  // Banner vendedor habitual (solo para admin — el vendedor ya sabe que es suyo)
+  if (s.habitual && s.esAdmin) {
     html += '<div class="dup-habitual">'
       + '<div class="dup-habitual-icon">🎯</div>'
       + '<div class="dup-habitual-content">'
@@ -6979,25 +7018,52 @@ function renderCard(p) {
     }
   }
 
-  // Botón "Ver otros pedidos del cliente" — solo admin, solo si hay 2+ pedidos del mismo cliente hoy
-  // Funciona aunque el pedido NO esté marcado como duplicado. Útil para unir manualmente.
+  // Botón "Ver otros pedidos del cliente" — admin O vendedor (con reglas distintas)
+  // ADMIN: ve todos los pedidos del cliente del día (cualquier vendedor, cualquier estado activo)
+  // VENDEDOR: solo ve sus propios pedidos del cliente, y solo si TODOS están en Pendiente
+  //           (porque después de remitir en Xubio, modificar el pedido complica el remito)
   var verOtrosHtml = '';
-  if (esAdmin) {
-    var miMFecha = (p.pedidoId || '').match(/TCK-(\d{8})/);
-    var miFechaDia = miMFecha ? miMFecha[1] : (p.fechaHora || '').substring(0,10).replace(/-/g,'');
-    var miCliKey = (p.cliente || '').toLowerCase().replace(/\s+/g,' ').trim();
-    var cuantosDelCli = todosLosPedidos.filter(function(x) {
-      if (x.estado === 'Cancelado') return false;
-      var xf = (x.pedidoId || '').match(/TCK-(\d{8})/);
-      var xfd = xf ? xf[1] : (x.fechaHora || '').substring(0,10).replace(/-/g,'');
-      var xcli = (x.cliente || '').toLowerCase().replace(/\s+/g,' ').trim();
-      return xfd === miFechaDia && xcli === miCliKey;
-    }).length;
-    if (cuantosDelCli >= 2) {
+  var miMFecha = (p.pedidoId || '').match(/TCK-(\d{8})/);
+  var miFechaDia = miMFecha ? miMFecha[1] : (p.fechaHora || '').substring(0,10).replace(/-/g,'');
+  var miCliKey = (p.cliente || '').toLowerCase().replace(/\s+/g,' ').trim();
+  var miVendKey = (p.vendedor || '').toLowerCase().trim();
+
+  var pedidosDelCli = todosLosPedidos.filter(function(x) {
+    if (x.estado === 'Cancelado') return false;
+    var xf = (x.pedidoId || '').match(/TCK-(\d{8})/);
+    var xfd = xf ? xf[1] : (x.fechaHora || '').substring(0,10).replace(/-/g,'');
+    var xcli = (x.cliente || '').toLowerCase().replace(/\s+/g,' ').trim();
+    if (xfd !== miFechaDia || xcli !== miCliKey) return false;
+    // Si NO es admin, restringir a SUS pedidos
+    if (!esAdmin) {
+      var xvend = (x.vendedor || '').toLowerCase().trim();
+      if (xvend !== miVendKey) return false;
+    }
+    return true;
+  });
+  var cuantosDelCli = pedidosDelCli.length;
+
+  if (cuantosDelCli >= 2) {
+    if (esAdmin) {
+      // Admin: botón siempre disponible
       verOtrosHtml = '<div style="margin-top:10px;">' +
         '<button class="btn-ver-otros-pedidos" onclick="event.stopPropagation();abrirModalDuplicados(\'' + p.pedidoId + '\')">' +
         '🔗 Ver los ' + cuantosDelCli + ' pedidos de este cliente hoy</button>' +
         '</div>';
+    } else {
+      // Vendedor: chequear que TODOS estén en Pendiente
+      var todosPendientes = pedidosDelCli.every(function(x){ return x.estado === 'Pendiente'; });
+      if (todosPendientes) {
+        verOtrosHtml = '<div style="margin-top:10px;">' +
+          '<button class="btn-ver-otros-pedidos" onclick="event.stopPropagation();abrirModalDuplicados(\'' + p.pedidoId + '\')">' +
+          '🔗 Tenés ' + cuantosDelCli + ' pedidos de este cliente · Unir antes de remitir</button>' +
+          '</div>';
+      } else {
+        // Hay alguno ya confirmado/entregado: explicar al vendedor por qué no puede unir
+        verOtrosHtml = '<div class="info-no-unir">' +
+          '⚠️ Tenés ' + cuantosDelCli + ' pedidos de este cliente, pero no se pueden unir porque alguno ya fue remitido en Xubio. Pedile al admin que los junte.' +
+          '</div>';
+      }
     }
   }
 
