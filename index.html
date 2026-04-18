@@ -3687,6 +3687,8 @@ input[type="date"] {
 .seg-row-monto { font-family: 'Barlow Condensed',sans-serif; font-size: 15px; font-weight: 900; color: #1A237E; }
 .seg-badge-entregado { background: #E8F5E9; color: #2E7D32; border-radius: 20px; padding: 2px 9px; font-size: 11px; font-weight: 800; }
 .seg-badge-pendiente { background: #FFF3E0; color: #E65100; border-radius: 20px; padding: 2px 9px; font-size: 11px; font-weight: 800; }
+.seg-badge-encamino  { background: #E3F2FD; color: #1565C0; border-radius: 20px; padding: 2px 9px; font-size: 11px; font-weight: 800; }
+.seg-badge-noestaba  { background: #FFEBEE; color: #C62828; border-radius: 20px; padding: 2px 9px; font-size: 11px; font-weight: 800; }
 .seg-cobro-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; margin-top: 10px; }
 .seg-cobro-item { background: rgba(255,255,255,.1); border-radius: 8px; padding: 6px; text-align: center; }
 .seg-cobro-label { font-size: 9px; color: rgba(255,255,255,.55); text-transform: uppercase; letter-spacing: .3px; }
@@ -11126,7 +11128,9 @@ async function renderLogisticaSeguimiento(el) {
     // ═══════════════════════════════════════════════════════════
     const totalEntregas = entregas.length;
     const entregadas = entregas.filter(e => e.estado === 'entregado').length;
-    const pendientes = totalEntregas - entregadas;
+    const enCamino   = entregas.filter(e => e.estado === 'en_camino').length;
+    const noEstaban  = entregas.filter(e => e.estado === 'no_encontrado').length;
+    const pendientes = entregas.filter(e => e.estado === 'pendiente').length;
     const pct = totalEntregas ? Math.round(entregadas/totalEntregas*100) : 0;
     const cobros = { efectivo: 0, transferencia: 0, cheque: 0, cuenta_corriente: 0 };
     let totalCobrado = 0;
@@ -11135,6 +11139,13 @@ async function renderLogisticaSeguimiento(el) {
       if (cobros[e.forma_cobro] !== undefined) cobros[e.forma_cobro] += m;
     });
     const totalDia = entregas.reduce((s,e) => s + parseMonto(e.monto), 0);
+
+    // Armar string dinámico del sub-total del header ("3 pend · 2 en camino · 1 no estaba")
+    var subEstados = [];
+    if (pendientes > 0) subEstados.push(pendientes + ' pend.');
+    if (enCamino > 0)   subEstados.push(enCamino + ' en camino');
+    if (noEstaban > 0)  subEstados.push('<span style="color:#FFAB91;font-weight:700;">' + noEstaban + ' no estaban</span>');
+    var subEstadosStr = subEstados.length ? subEstados.join(' · ') : '✅ Todas completas';
 
     // Label contextual: combinación de fecha + chofer
     // Ej: "Total del día" (todos, hoy), "Total · Joan" (Joan, hoy), "Total · 15/04" (todos, custom), "Joan · 15/04" (Joan, custom)
@@ -11152,7 +11163,7 @@ async function renderLogisticaSeguimiento(el) {
     html += '<div style="background:linear-gradient(135deg,#1A237E,#283593);border-radius:14px;padding:14px 16px;margin-bottom:14px;">';
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
     html += '<div><div style="font-size:11px;color:rgba(255,255,255,.6);text-transform:uppercase;letter-spacing:.8px;">' + labelScope + '</div><div style="font-family:Barlow Condensed,sans-serif;font-size:28px;font-weight:900;color:#fff;">' + fmt(totalDia) + '</div><div style="font-size:11px;color:rgba(255,255,255,.5);">Cobrado: ' + fmt(totalCobrado) + '</div></div>';
-    html += '<div style="text-align:right"><div style="font-size:11px;color:rgba(255,255,255,.6);text-transform:uppercase;letter-spacing:.8px;">Entregas</div><div style="font-family:Barlow Condensed,sans-serif;font-size:28px;font-weight:900;color:#fff;">' + entregadas + '<span style="font-size:16px;opacity:.6;"> / ' + totalEntregas + '</span></div><div style="font-size:11px;color:rgba(255,255,255,.5);">' + pendientes + ' pendientes</div></div></div>';
+    html += '<div style="text-align:right"><div style="font-size:11px;color:rgba(255,255,255,.6);text-transform:uppercase;letter-spacing:.8px;">Entregas</div><div style="font-family:Barlow Condensed,sans-serif;font-size:28px;font-weight:900;color:#fff;">' + entregadas + '<span style="font-size:16px;opacity:.6;"> / ' + totalEntregas + '</span></div><div style="font-size:11px;color:rgba(255,255,255,.55);">' + subEstadosStr + '</div></div></div>';
     html += '<div class="seg-progress-wrap"><div class="seg-progress-bar" style="width:' + pct + '%;background:#FFD700;"></div></div>';
     html += '<div style="font-size:10px;color:rgba(255,255,255,.5);text-align:center;margin-bottom:10px;">' + pct + '% completado</div>';
     html += '<div class="seg-cobro-grid"><div class="seg-cobro-item"><div class="seg-cobro-label">💵 Efectivo</div><div class="seg-cobro-val">' + fmt(cobros.efectivo) + '</div></div><div class="seg-cobro-item"><div class="seg-cobro-label">📲 Transfer.</div><div class="seg-cobro-val">' + fmt(cobros.transferencia) + '</div></div><div class="seg-cobro-item"><div class="seg-cobro-label">📋 Cheque</div><div class="seg-cobro-val">' + fmt(cobros.cheque) + '</div></div><div class="seg-cobro-item"><div class="seg-cobro-label">📒 Cta.Cte.</div><div class="seg-cobro-val">' + fmt(cobros.cuenta_corriente) + '</div></div></div></div>';
@@ -11182,7 +11193,35 @@ async function renderLogisticaSeguimiento(el) {
           } catch(err) {}
         }
         var montoCobrado = e.monto_cobrado ? fmt(e.monto_cobrado) : fmt(m);
-        html += '<div class="seg-row"><div style="flex:1;min-width:0;"><div class="seg-row-nombre">' + (e.cliente||'—') + (e.devolucion?'<span class="dev-badge">↩️ Dev.</span>':'') + '</div><div class="seg-row-ciudad">📍 ' + (e.ciudad||'—') + (e.comercio?' · 🏪 '+e.comercio:'') + '</div>' + (e.estado==='entregado'?'<div style="font-size:11px;color:var(--text3);margin-top:1px;">🕐 '+hora+' · '+(e.forma_cobro||'—').replace('_',' ')+'</div>':'') + devInfo + (e.estado==='entregado' ? _renderBotonUbicacion(e.lat, e.lng, e.ubicacion_precision) : '') + '</div><div style="text-align:right;flex-shrink:0;"><div class="seg-row-monto">' + montoCobrado + '</div>' + (e.devolucion&&e.monto_cobrado?'<div style="font-size:10px;color:#999;text-decoration:line-through;">'+fmt(m)+'</div>':'') + '<div>' + (e.estado==='entregado'?'<span class="seg-badge-entregado">✅ Entregado</span>':'<span class="seg-badge-pendiente">⏳ Pendiente</span>') + '</div></div></div>';
+
+        // Determinar badge según estado
+        var badgeHtml, subInfoHtml = '';
+        if (e.estado === 'entregado') {
+          badgeHtml = '<span class="seg-badge-entregado">✅ Entregado</span>';
+          subInfoHtml = '<div style="font-size:11px;color:var(--text3);margin-top:1px;">🕐 ' + hora + ' · ' + (e.forma_cobro||'—').replace('_',' ') + '</div>';
+        } else if (e.estado === 'en_camino') {
+          var horaEC = e.fecha_en_camino ? new Date(e.fecha_en_camino).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}) : '';
+          badgeHtml = '<span class="seg-badge-encamino">🚛 En camino' + (horaEC ? ' · ' + horaEC : '') + '</span>';
+        } else if (e.estado === 'no_encontrado') {
+          var horaNE = e.fecha_no_encontrado ? new Date(e.fecha_no_encontrado).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}) : '';
+          badgeHtml = '<span class="seg-badge-noestaba">🚪 No estaba' + (horaNE ? ' · ' + horaNE : '') + '</span>';
+        } else {
+          badgeHtml = '<span class="seg-badge-pendiente">⏳ Pendiente</span>';
+        }
+
+        // Botón "Ver en Maps" si hay GPS (sirve para todos los estados que tengan coords)
+        var mapsBtn = (e.lat && e.lng) ? _renderBotonUbicacion(e.lat, e.lng, e.ubicacion_precision) : '';
+
+        html += '<div class="seg-row"><div style="flex:1;min-width:0;"><div class="seg-row-nombre">'
+          + (e.cliente||'—')
+          + (e.devolucion?'<span class="dev-badge">↩️ Dev.</span>':'')
+          + '</div><div class="seg-row-ciudad">📍 ' + (e.ciudad||'—') + (e.comercio?' · 🏪 '+e.comercio:'') + '</div>'
+          + subInfoHtml
+          + devInfo
+          + mapsBtn
+          + '</div><div style="text-align:right;flex-shrink:0;"><div class="seg-row-monto">' + montoCobrado + '</div>'
+          + (e.devolucion&&e.monto_cobrado?'<div style="font-size:10px;color:#999;text-decoration:line-through;">'+fmt(m)+'</div>':'')
+          + '<div>' + badgeHtml + '</div></div></div>';
       });
       html += '</div>';
     });
