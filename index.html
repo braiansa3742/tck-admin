@@ -575,7 +575,7 @@ body {
 .dev-modal-btn-pdf {
   width: 100%;
   padding: 12px;
-  background: #1A237E;
+  background: linear-gradient(135deg, #1A237E, #283593);
   color: #fff;
   border: none;
   border-radius: 10px;
@@ -584,11 +584,19 @@ body {
   font-weight: 900;
   cursor: pointer;
   touch-action: manipulation;
+  transition: all .15s;
+  box-shadow: 0 2px 8px rgba(26, 35, 126, 0.25);
 }
+.dev-modal-btn-pdf:hover:not(:disabled) {
+  background: linear-gradient(135deg, #283593, #303F9F);
+  box-shadow: 0 4px 12px rgba(26, 35, 126, 0.35);
+}
+.dev-modal-btn-pdf:active:not(:disabled) { transform: scale(0.98); }
 .dev-modal-btn-pdf:disabled {
   background: #9FA8DA;
   cursor: not-allowed;
   opacity: 0.7;
+  box-shadow: none;
 }
 
 /* ── OBJETIVOS · Sistema nuevo (rediseño 2026-04) ── */
@@ -11739,7 +11747,7 @@ function devAbrirModal(devolucionId) {
 
   // ── Footer ──
   html += '<div class="dev-modal-footer">';
-  html += '<button class="dev-modal-btn-pdf" disabled>📄 Generar PDF de reclamo (próximamente)</button>';
+  html += '<button class="dev-modal-btn-pdf" onclick="devGenerarPDF(\'' + d.id + '\')">📄 Generar PDF de reclamo</button>';
   html += '</div>';
 
   html += '</div>'; // dev-modal-body
@@ -11865,6 +11873,327 @@ async function devGuardarNota(nota) {
   } catch (err) {
     toast('❌ No se pudo guardar la nota', 'err');
     console.error(err);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// GENERACIÓN DE PDF DE RECLAMO (L-3.4)
+// Usa jsPDF en lazy load (solo carga cuando Francisco toca el botón)
+// ══════════════════════════════════════════════════════════════
+
+// Config de la empresa (pie y encabezado del PDF)
+var TCK_EMPRESA = {
+  nombre: 'TCK The Chicken Kings S.R.L.',
+  cuit: '33-71741695-9',
+  direccion: 'San Lorenzo 460 · Trenque Lauquen · Buenos Aires',
+  email: 'gerenciathechickenkings@gmail.com',
+  telefono: '2392-404745'
+};
+
+// Carga jsPDF una sola vez (cacheo el Promise para llamadas subsiguientes)
+var _jsPDFPromise = null;
+function _cargarJsPDF() {
+  if (_jsPDFPromise) return _jsPDFPromise;
+  _jsPDFPromise = new Promise(function(resolve, reject) {
+    if (window.jspdf && window.jspdf.jsPDF) return resolve(window.jspdf.jsPDF);
+    var script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+    script.onload = function() {
+      if (window.jspdf && window.jspdf.jsPDF) resolve(window.jspdf.jsPDF);
+      else reject(new Error('jsPDF no disponible tras carga'));
+    };
+    script.onerror = function() { reject(new Error('No se pudo cargar jsPDF')); };
+    document.head.appendChild(script);
+  });
+  return _jsPDFPromise;
+}
+
+// Carga el logo TCK como base64 (para meterlo en el PDF)
+var _logoBase64 = null;
+function _cargarLogoBase64() {
+  if (_logoBase64) return Promise.resolve(_logoBase64);
+  return new Promise(function(resolve) {
+    var img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = function() {
+      try {
+        var canvas = document.createElement('canvas');
+        canvas.width = img.width; canvas.height = img.height;
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        _logoBase64 = canvas.toDataURL('image/png');
+        resolve(_logoBase64);
+      } catch (e) {
+        // Si falla (por CORS), seguimos sin logo
+        console.warn('No se pudo convertir logo a base64:', e);
+        resolve(null);
+      }
+    };
+    img.onerror = function() { resolve(null); };
+    img.src = 'https://tckcatalogo.com/img/logo.png';
+  });
+}
+
+async function devGenerarPDF(devolucionId) {
+  var d = _devCache.find(function(x) { return x.id === devolucionId; });
+  if (!d) { toast('❌ No se encontró la devolución', 'err'); return; }
+
+  toast('⏳ Generando PDF...', 'ok');
+
+  try {
+    // Cargar jsPDF + logo en paralelo
+    var [jsPDF, logoB64] = await Promise.all([
+      _cargarJsPDF(),
+      _cargarLogoBase64()
+    ]);
+
+    var doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    var W = 210, H = 297;          // dimensiones A4 en mm
+    var M = 18;                     // margen izq/der
+    var y = 15;                     // cursor vertical
+
+    var fmt = function(n) { return '$ ' + Math.round(n || 0).toLocaleString('es-AR'); };
+    var pad = function(s, n) { s = String(s || ''); while (s.length < n) s = '0' + s; return s; };
+
+    // Número de reclamo: YYYYMMDD-ultimos5delID
+    var hoy = new Date();
+    var numReclamo = hoy.getFullYear() + pad(hoy.getMonth()+1, 2) + pad(hoy.getDate(), 2)
+                   + '-' + String(d.id).slice(-5).toUpperCase();
+
+    // ── ENCABEZADO: Logo (izq) + Título (der) ──
+    if (logoB64) {
+      try { doc.addImage(logoB64, 'PNG', M, y, 28, 28); } catch(e) {}
+    }
+    // Título derecha
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(18);
+    doc.setTextColor(139, 0, 0);  // rojo TCK
+    doc.text('RECLAMO A PROVEEDOR', W - M, y + 8, { align: 'right' });
+    doc.setFontSize(10);
+    doc.setTextColor(100, 100, 100);
+    doc.setFont('helvetica', 'normal');
+    doc.text('N° ' + numReclamo, W - M, y + 14, { align: 'right' });
+    doc.text('Fecha: ' + hoy.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' }), W - M, y + 19, { align: 'right' });
+
+    y += 32;
+
+    // ── Datos de la empresa ──
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(40, 40, 40);
+    doc.text(TCK_EMPRESA.nombre, M, y); y += 5;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(100, 100, 100);
+    doc.text('CUIT: ' + TCK_EMPRESA.cuit, M, y); y += 4;
+    doc.text(TCK_EMPRESA.direccion, M, y); y += 4;
+    doc.text(TCK_EMPRESA.email + ' · Tel: ' + TCK_EMPRESA.telefono, M, y); y += 8;
+
+    // Línea separadora
+    doc.setDrawColor(200, 200, 200); doc.setLineWidth(0.4);
+    doc.line(M, y, W - M, y); y += 8;
+
+    // ── PROVEEDOR ──
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(80, 80, 80);
+    doc.text('PROVEEDOR', M, y); y += 6;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.setTextColor(139, 0, 0);
+    doc.text(d.proveedor || 'Sin asignar', M, y);
+    y += 10;
+
+    // ── DETALLE DE LA DEVOLUCIÓN ──
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(80, 80, 80);
+    doc.text('DETALLE DE LA DEVOLUCIÓN', M, y); y += 7;
+
+    var fecha = new Date(d.fecha_devolucion);
+    var fechaStr = pad(fecha.getDate(),2) + '/' + pad(fecha.getMonth()+1,2) + '/' + fecha.getFullYear()
+                 + ' ' + pad(fecha.getHours(),2) + ':' + pad(fecha.getMinutes(),2) + ' hs';
+
+    // Función helper para key-value
+    var campo = function(label, value) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(110, 110, 110);
+      doc.text(label + ':', M, y);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(30, 30, 30);
+      doc.text(String(value || '—'), M + 48, y);
+      y += 5.5;
+    };
+
+    campo('Fecha de devolución', fechaStr);
+    campo('Cliente afectado', d.cliente || '—');
+    if (d.comercio) campo('Comercio', d.comercio);
+    campo('Ubicación', d.ciudad || '—');
+    campo('Chofer que reportó', d.chofer || '—');
+    if (d.vendedor) campo('Vendedor asignado', d.vendedor);
+    y += 2;
+
+    // ── PRODUCTOS DEVUELTOS ──
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(80, 80, 80);
+    doc.text('Productos devueltos:', M, y); y += 5;
+
+    var items = (d.items || '').split(/,\s*/).filter(function(x) { return x.trim(); });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(30, 30, 30);
+    if (items.length === 0) {
+      doc.text('— Sin detalle —', M + 4, y); y += 5;
+    } else {
+      items.forEach(function(it) {
+        doc.text('• ' + it.trim(), M + 4, y); y += 5;
+      });
+    }
+    y += 3;
+
+    // ── MOTIVO ──
+    var DEV_CAT_TEXTOS = {
+      sin_stock:    'Sin stock',
+      mal_estado:   'Producto con olor / mal estado',
+      vencido:      'Producto vencido',
+      no_quiso:     'El cliente no quiso recibir el producto',
+      error_pedido: 'Error en el pedido',
+      otro:         'Otro motivo'
+    };
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(80, 80, 80);
+    doc.text('Motivo del reclamo:', M, y); y += 5;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(198, 40, 40);
+    doc.text(DEV_CAT_TEXTOS[d.motivo_categoria] || (d.motivo_categoria || '—'), M + 4, y);
+    y += 7;
+
+    if (d.motivo) {
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(9);
+      doc.setTextColor(100, 100, 100);
+      doc.text('Detalle del chofer:', M, y); y += 4;
+      var detalleLines = doc.splitTextToSize('"' + d.motivo + '"', W - 2*M - 4);
+      doc.text(detalleLines, M + 4, y); y += detalleLines.length * 4.2 + 2;
+    }
+
+    // Línea separadora
+    doc.setDrawColor(200, 200, 200);
+    doc.line(M, y, W - M, y); y += 7;
+
+    // ── VALORES ──
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(80, 80, 80);
+    doc.text('VALORES DE REFERENCIA', M, y); y += 6;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(110, 110, 110);
+    doc.text('Monto del pedido original:', M, y);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(30, 30, 30);
+    doc.text(fmt(d.monto_original), W - M, y, { align: 'right' });
+    y += 5.5;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(110, 110, 110);
+    doc.text('Monto representado por la devolución:', M, y);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(198, 40, 40);
+    doc.text(fmt(d.monto_devuelto), W - M, y, { align: 'right' });
+    y += 10;
+
+    // ── SOLICITUD DE REEMPLAZO (caja destacada) ──
+    doc.setFillColor(255, 243, 224);  // naranja suave
+    doc.setDrawColor(255, 152, 0);
+    doc.setLineWidth(0.5);
+    doc.roundedRect(M, y, W - 2*M, 22, 2, 2, 'FD');
+    y += 7;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(198, 81, 0);
+    doc.text('SOLICITUD DE REEMPLAZO', M + 4, y); y += 6;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(40, 40, 40);
+    var solicitudLines = doc.splitTextToSize(
+      'Solicitamos el reemplazo de la mercadería detallada en el próximo envío, por tratarse de producto en condiciones no aptas para su comercialización.',
+      W - 2*M - 8
+    );
+    doc.text(solicitudLines, M + 4, y);
+    y += solicitudLines.length * 4.5 + 8;
+
+    // ── Notas adicionales (si existen) ──
+    if (d.reclamo_nota || d.nota_admin) {
+      var notaTexto = (d.reclamo_nota || d.nota_admin || '').trim();
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(80, 80, 80);
+      doc.text('Notas adicionales:', M, y); y += 5;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(60, 60, 60);
+      var notaLines = doc.splitTextToSize(notaTexto, W - 2*M);
+      doc.text(notaLines, M, y);
+      y += notaLines.length * 4.2 + 6;
+    }
+
+    // ── Cierre ──
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(60, 60, 60);
+    doc.text('Quedamos a disposición para coordinar el reemplazo.', M, y); y += 5;
+    doc.text('Saludos cordiales,', M, y); y += 7;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(30, 30, 30);
+    doc.text(TCK_EMPRESA.nombre, M, y);
+
+    // ── PIE DE PÁGINA ──
+    doc.setDrawColor(220, 220, 220);
+    doc.line(M, H - 22, W - M, H - 22);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(140, 140, 140);
+    doc.text(TCK_EMPRESA.email + '  ·  Tel: ' + TCK_EMPRESA.telefono, W/2, H - 16, { align: 'center' });
+    doc.text(TCK_EMPRESA.direccion, W/2, H - 12, { align: 'center' });
+    doc.text('Documento generado automáticamente por el sistema TCK el ' + hoy.toLocaleString('es-AR'), W/2, H - 8, { align: 'center' });
+
+    // ── Abrir en nueva pestaña (preview) ──
+    var blob = doc.output('blob');
+    var url = URL.createObjectURL(blob);
+    var nombreArchivo = 'reclamo_' + (d.proveedor || 'sin-proveedor').replace(/[^a-zA-Z0-9]/g,'_') + '_' + numReclamo + '.pdf';
+
+    // Intentamos abrir en nueva pestaña. Si el navegador lo bloquea, caemos a descarga directa.
+    var nuevaVentana = window.open(url, '_blank');
+    if (!nuevaVentana || nuevaVentana.closed) {
+      // Fallback: descarga directa
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = nombreArchivo;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      toast('✅ PDF descargado (el navegador bloqueó la nueva pestaña)', 'ok');
+    } else {
+      toast('✅ PDF abierto en nueva pestaña', 'ok');
+    }
+
+    // Limpiar la URL blob después de un rato (liberar memoria)
+    setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
+
+  } catch(err) {
+    console.error('devGenerarPDF:', err);
+    toast('❌ Error generando PDF: ' + (err.message || 'desconocido'), 'err');
   }
 }
 
