@@ -1279,6 +1279,33 @@ body {
   color: #E65100;
 }
 
+/* Botón "Ver otros pedidos del cliente" — aparece en el detalle del pedido */
+.btn-ver-otros-pedidos {
+  width: 100%;
+  padding: 11px 14px;
+  background: linear-gradient(135deg, #FFF3E0, #FFE0B2);
+  border: 1.5px solid #FFB74D;
+  color: #E65100;
+  border-radius: 10px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 900;
+  cursor: pointer;
+  touch-action: manipulation;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  transition: all .15s;
+  -webkit-tap-highlight-color: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.btn-ver-otros-pedidos:active {
+  transform: scale(0.98);
+  background: linear-gradient(135deg, #FFE0B2, #FFCC80);
+}
+
 /* Mensaje de "solo queda 1 activo" */
 .dup-mensaje-unico {
   background: linear-gradient(135deg, #E8F5E9, #F1F8E9);
@@ -5778,33 +5805,33 @@ async function cargarPedidos(silencioso) {
         return;
       }
 
-      // REGLA: comparar productos con los otros del grupo
+      // REGLA: si hay 2+ pedidos del mismo cliente mismo día → marcar SIEMPRE.
+      // El modal permite distinguir si son duplicados reales o pedidos separados.
+      // Diferenciamos por tipo:
+      //   - 'exacto'    → mismo cliente, mismo día, algún producto en común
+      //   - 'parcial'   → mismo cliente, mismo día, productos distintos (posible pedido separado legítimo)
       var misProds = _setProds(p);
-      var otrosConProdComun = grupo.filter(function(x) {
-        if (x.pedidoId === p.pedidoId) return false;
+      var otros = grupo.filter(function(x){ return x.pedidoId !== p.pedidoId; });
+      var otrosConProdComun = otros.filter(function(x) {
         var sus = _setProds(x);
         for (var n of misProds) { if (sus.has(n)) return true; }
         return false;
       });
 
-      if (otrosConProdComun.length > 0) {
-        // Hay al menos un producto en común → es duplicado real
-        var totalDistinto = otrosConProdComun.some(function(x) { return x.total !== p.total; });
-        p.esDuplicado = true;
-        p.tipoDuplicado = totalDistinto ? 'parcial' : 'exacto';
-        p.duplicadoCon = otrosConProdComun.map(function(x){return x.vendedor||'otro vendedor';})
-          .filter(function(v,i,a){return a.indexOf(v)===i;}).join(', ');
-        // Si el grupo fue marcado como "revisado" en localStorage, lo marcamos pero para que la alerta lo ignore
-        p.grupoRevisado = !!_revisados[kCliente];
-        _dupDebug.push({ id: p.pedidoId, cliente: p.cliente, misProds: Array.from(misProds), otros: otrosConProdComun.map(function(o){return o.pedidoId;}), tipo: p.tipoDuplicado, revisado: p.grupoRevisado });
-      } else {
-        // Productos totalmente distintos → son pedidos separados legítimos
-        p.esDuplicado = false; p.tipoDuplicado = null; p.duplicadoCon = '';
-        // Debug: si están en el mismo grupo pero sin productos en común, logearlo también
-        if (grupo.length > 1) {
-          _dupDebug.push({ id: p.pedidoId, cliente: p.cliente, misProds: Array.from(misProds), otros: grupo.filter(function(x){return x.pedidoId!==p.pedidoId;}).map(function(o){return { id: o.pedidoId, prods: Array.from(_setProds(o)) };}), tipo: 'NO_DUPLICADO (productos distintos)' });
-        }
-      }
+      p.esDuplicado = true;
+      p.tipoDuplicado = otrosConProdComun.length > 0 ? 'exacto' : 'parcial';
+      p.duplicadoCon = otros.map(function(x){return x.vendedor||'otro vendedor';})
+        .filter(function(v,i,a){return a.indexOf(v)===i;}).join(', ');
+      p.grupoRevisado = !!_revisados[kCliente];
+      _dupDebug.push({
+        id: p.pedidoId,
+        cliente: p.cliente,
+        misProds: Array.from(misProds),
+        otros: otros.map(function(o){return { id: o.pedidoId, prods: Array.from(_setProds(o)) };}),
+        tipo: p.tipoDuplicado,
+        prodsEnComun: otrosConProdComun.length,
+        revisado: p.grupoRevisado
+      });
     });
 
     if (_dupDebug.length > 0) {
@@ -6778,6 +6805,28 @@ function renderCard(p) {
     }
   }
 
+  // Botón "Ver otros pedidos del cliente" — solo admin, solo si hay 2+ pedidos del mismo cliente hoy
+  // Funciona aunque el pedido NO esté marcado como duplicado. Útil para unir manualmente.
+  var verOtrosHtml = '';
+  if (esAdmin) {
+    var miMFecha = (p.pedidoId || '').match(/TCK-(\d{8})/);
+    var miFechaDia = miMFecha ? miMFecha[1] : (p.fechaHora || '').substring(0,10).replace(/-/g,'');
+    var miCliKey = (p.cliente || '').toLowerCase().replace(/\s+/g,' ').trim();
+    var cuantosDelCli = todosLosPedidos.filter(function(x) {
+      if (x.estado === 'Cancelado') return false;
+      var xf = (x.pedidoId || '').match(/TCK-(\d{8})/);
+      var xfd = xf ? xf[1] : (x.fechaHora || '').substring(0,10).replace(/-/g,'');
+      var xcli = (x.cliente || '').toLowerCase().replace(/\s+/g,' ').trim();
+      return xfd === miFechaDia && xcli === miCliKey;
+    }).length;
+    if (cuantosDelCli >= 2) {
+      verOtrosHtml = '<div style="margin-top:10px;">' +
+        '<button class="btn-ver-otros-pedidos" onclick="event.stopPropagation();abrirModalDuplicados(\'' + p.pedidoId + '\')">' +
+        '🔗 Ver los ' + cuantosDelCli + ' pedidos de este cliente hoy</button>' +
+        '</div>';
+    }
+  }
+
   var vendedorRow = esAdmin ? '<div class="pedido-detalle-row"><span class="pdr-label">Vendedor</span><span class="pdr-val">' + p.vendedor + '</span></div>' : '';
   var detalle = p.detalle ? p.detalle.replace(/\|/g,'\n').replace(/ · /g,' — ') : (p.resumen || '');
   var hora = (p.fechaHora||'').split(' ')[1] || (p.fechaHora||'').split('T')[1] || '';
@@ -6808,6 +6857,7 @@ function renderCard(p) {
       dupAlert +
       '<div class="pedido-acciones">' + btns + '</div>' +
       asignarHtml +
+      verOtrosHtml +
       buildXubioPanel(p, id) +
       '<div class="nota-wrap">' +
         '<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;">' +
