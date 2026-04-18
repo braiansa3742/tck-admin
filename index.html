@@ -1153,46 +1153,46 @@ body {
   cursor: default;
 }
 
-/* Panel de acciones — el CTA principal */
+/* Panel de acciones — el CTA principal (rediseño v3: fondo oscuro para contrastar) */
 .dup-acciones {
-  background: #fff;
-  border: 2px solid var(--red);
+  background: linear-gradient(135deg, #1A1A1A 0%, #2A1810 100%);
+  border: none;
   border-radius: 16px;
-  padding: 18px 16px 16px;
-  margin-top: 16px;
+  padding: 22px 18px 18px;
+  margin-top: 14px;
   position: relative;
-  box-shadow: 0 6px 20px rgba(139, 0, 0, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
 }
 .dup-acciones::before {
   content: '⚡ DECISIÓN';
   position: absolute;
   top: -11px;
   left: 16px;
-  background: var(--red);
-  color: var(--gold, #FFD700);
-  padding: 3px 10px;
+  background: var(--gold, #D4A574);
+  color: #1A1A1A;
+  padding: 3px 12px;
   border-radius: 8px;
   font-family: 'Barlow Condensed', sans-serif;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 1.5px;
 }
 
 .dup-acredita-wrap {
-  background: var(--cream2);
+  background: rgba(255, 255, 255, 0.08);
   border-radius: 12px;
   padding: 12px 14px;
   margin-bottom: 14px;
-  border: 1.5px solid var(--cream3);
+  border: 1.5px solid rgba(255, 255, 255, 0.12);
 }
 .dup-acredita-label {
   font-family: 'Barlow Condensed', sans-serif;
   font-size: 12px;
   font-weight: 900;
-  color: var(--text2);
+  color: rgba(255, 255, 255, 0.85);
   text-transform: uppercase;
   letter-spacing: 0.6px;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 .dup-acredita-opts {
   display: flex;
@@ -1200,9 +1200,9 @@ body {
   gap: 7px;
 }
 .dup-acredita-opt {
-  padding: 7px 14px;
-  background: #fff;
-  border: 1.5px solid var(--cream3);
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1.5px solid transparent;
   border-radius: 20px;
   font-family: 'Barlow Condensed', sans-serif;
   font-size: 13px;
@@ -1215,68 +1215,167 @@ body {
 }
 .dup-acredita-opt:active { transform: scale(0.96); }
 .dup-acredita-opt.sel {
-  background: linear-gradient(135deg, var(--red), #A61818);
-  border-color: var(--red);
-  color: #fff;
-  box-shadow: 0 2px 6px rgba(139, 0, 0, 0.25);
+  background: linear-gradient(135deg, var(--gold, #D4A574), #B8860B);
+  border-color: var(--gold, #D4A574);
+  color: #1A1A1A;
+  box-shadow: 0 2px 8px rgba(212, 165, 116, 0.4);
 }
 
-/* Botón principal: UNIR */
+/* Botón principal: UNIR — verde brillante sobre fondo oscuro */
 .dup-btn-unir {
   width: 100%;
-  padding: 14px 16px;
-  background: linear-gradient(135deg, #1B5E20 0%, #2E7D32 100%);
-  border: none;
+  padding: 16px 18px;
+  background: linear-gradient(135deg, #43A047 0%, #2E7D32 100%);
+  border: 2px solid #66BB6A;
   color: #fff;
-  border-radius: 12px;
+  border-radius: 14px;
   font-family: 'Barlow Condensed', sans-serif;
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 900;
   cursor: pointer;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
-  margin-bottom: 10px;
-  box-shadow: 0 4px 14px rgba(46, 125, 50, 0.3);
+  margin-bottom: 12px;
+  box-shadow: 0 6px 20px rgba(67, 160, 71, 0.45), 0 0 0 1px rgba(102, 187, 106, 0.3) inset;
   text-transform: uppercase;
-  letter-spacing: 0.8px;
+  letter-spacing: 0.6px;
   position: relative;
   overflow: hidden;
   transition: all .15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
 }
-.dup-btn-unir:active { transform: translateY(1px); }
+.dup-btn-unir-icon { font-size: 22px; }
+.dup-btn-unir-text { line-height: 1; }
+.dup-btn-unir:active { transform: translateY(1px) scale(0.99); box-shadow: 0 3px 10px rgba(67, 160, 71, 0.5); }
 .dup-btn-unir:disabled { opacity: 0.5; cursor: not-allowed; }
 .dup-btn-unir::after {
   content: '';
   position: absolute;
   top: 0; left: -100%;
   width: 100%; height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
   transition: left .8s;
 }
 .dup-btn-unir:hover::after { left: 100%; }
 
-/* Botón secundario */
-.dup-btn-son-separados {
-  width: 100%;
-  padding: 11px 12px;
-  background: #fff;
-  border: 1.5px solid var(--cream3);
-  color: var(--text2);
-  border-radius: 10px;
+.dup-acciones-tip {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.65);
+  line-height: 1.5;
+  text-align: center;
+  padding: 0 4px;
+}
+.dup-acciones-tip strong { color: #FFB74D; font-weight: 800; }
+
+/* PREVIEW: qué va a quedar */
+.dup-preview {
+  background: linear-gradient(135deg, #E8F5E9 0%, #F1F8E9 100%);
+  border: 2px dashed #66BB6A;
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-top: 14px;
+  position: relative;
+}
+.dup-preview-titulo {
   font-family: 'Barlow Condensed', sans-serif;
   font-size: 13px;
-  font-weight: 800;
-  cursor: pointer;
-  touch-action: manipulation;
+  font-weight: 900;
+  color: #1B5E20;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 10px;
+  text-align: center;
+}
+.dup-preview-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.dup-preview-stat {
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 10px;
+  padding: 8px 6px;
+  text-align: center;
+  border: 1px solid rgba(46, 125, 50, 0.2);
+}
+.dup-preview-stat-num {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 18px;
+  font-weight: 900;
+  color: #1B5E20;
+  line-height: 1.1;
+  word-break: break-word;
+}
+.dup-preview-stat-lbl {
+  font-size: 10px;
+  color: #558B2F;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  transition: all .15s;
+  font-weight: 700;
+  margin-top: 2px;
 }
-.dup-btn-son-separados:active { transform: scale(0.98); background: var(--cream2); }
-.dup-btn-son-separados.reactivar {
-  background: #FFF8E1;
-  border-color: #FFE082;
-  color: #E65100;
+.dup-preview-prods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.dup-preview-prod-chip {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(46, 125, 50, 0.3);
+  color: #1B5E20;
+  padding: 4px 9px;
+  border-radius: 14px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+}
+.dup-preview-prod-chip.mas {
+  background: rgba(46, 125, 50, 0.15);
+  font-style: italic;
+}
+
+/* Productos: cantidad destacada */
+.dup-prod-qty {
+  display: inline-block;
+  background: var(--red);
+  color: #fff;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  font-weight: 900;
+  min-width: 22px;
+  text-align: center;
+  margin-right: 2px;
+}
+.dup-pedido-prod-linea.comun .dup-prod-qty {
+  background: #F5B100;
+}
+.dup-pedido-sin-prods {
+  color: #C62828;
+  font-style: italic;
+  padding: 8px 10px;
+  background: #FFEBEE;
+  border-radius: 8px;
+  border-left: 3px solid #EF9A9A;
+  font-size: 12.5px;
+}
+
+/* Mensaje de "solo queda 1 activo" — sin cambios */
+.dup-mensaje-unico {
+  background: linear-gradient(135deg, #E8F5E9, #F1F8E9);
+  border: 1.5px solid #A5D6A7;
+  border-radius: 12px;
+  padding: 14px;
+  text-align: center;
+  color: #1B5E20;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 14px;
 }
 
 /* Botón "Ver otros pedidos del cliente" — aparece en el detalle del pedido */
@@ -1305,9 +1404,6 @@ body {
   transform: scale(0.98);
   background: linear-gradient(135deg, #FFE0B2, #FFCC80);
 }
-
-/* Mensaje de "solo queda 1 activo" */
-.dup-mensaje-unico {
   background: linear-gradient(135deg, #E8F5E9, #F1F8E9);
   border: 1.5px solid #A5D6A7;
   border-radius: 12px;
@@ -6234,8 +6330,8 @@ function _renderDupModal() {
   var s = _dupModalState;
   if (!s) return;
 
-  // Título y subtítulo (inyectados por HTML del modal)
-  document.getElementById('dup-modal-title').innerHTML = '<span style="color:var(--gold,#FFD700);margin-right:8px;">🔁</span> ' + (s.cliente || 'Cliente').toUpperCase();
+  // Título y subtítulo
+  document.getElementById('dup-modal-title').innerHTML = '<span style="margin-right:8px;">🔁</span>' + (s.cliente || 'Cliente').toUpperCase();
   var fechaStr = s.fechaDia.substring(6,8) + '/' + s.fechaDia.substring(4,6) + '/' + s.fechaDia.substring(0,4);
   var activos = s.grupo.filter(function(x){ return !s.cancelados.has(x.pedidoId); });
   document.getElementById('dup-modal-sub').textContent = fechaStr + ' · ' + activos.length + ' pedido' + (activos.length !== 1 ? 's' : '') + ' del mismo cliente';
@@ -6254,7 +6350,7 @@ function _renderDupModal() {
       + '</div>';
   }
 
-  // Calcular productos en común entre pedidos activos (normalizando igual que la detección)
+  // Helper local para normalizar nombre
   var _normProd = function(nombre) {
     return (nombre || '').toLowerCase()
       .replace(/[°º]/g, '')
@@ -6263,11 +6359,12 @@ function _renderDupModal() {
       .replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g,' ').trim();
   };
 
+  // Calcular productos en común entre activos (usando helper extractor)
   var prodsEnComun = new Set();
   if (activos.length >= 2) {
     var allSets = activos.map(function(x) {
       var set = new Set();
-      parseProds(x.detalle || '').forEach(function(pr) {
+      _dupExtraerProds(x).forEach(function(pr) {
         var n = _normProd(pr.name);
         if (n) set.add(n);
       });
@@ -6284,20 +6381,16 @@ function _renderDupModal() {
   // Cards de cada pedido
   s.grupo.forEach(function(p) {
     var esCancelado = s.cancelados.has(p.pedidoId);
-    var hora = '';
-    try {
-      var d = new Date((p.fechaHora || '').replace(' ', 'T'));
-      hora = d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
-    } catch(e) {}
+    var hora = _dupExtraerHora(p);
     var esHabitual = s.habitual && s.habitual.vendedor === p.vendedor;
 
-    var prods = parseProds(p.detalle || '');
+    var prods = _dupExtraerProds(p);
     var prodsHtml = '';
     if (prods.length) {
       prods.forEach(function(pr) {
         var nombre = _normProd(pr.name);
         var esComun = prodsEnComun.has(nombre);
-        var qtyPrefix = pr.qty > 1 ? pr.qty + '× ' : '';
+        var qtyPrefix = pr.qty > 1 ? '<span class="dup-prod-qty">' + pr.qty + '×</span> ' : '';
         var emojiPrefix = pr.emoji ? pr.emoji + ' ' : '';
         prodsHtml += '<div class="dup-pedido-prod-linea' + (esComun ? ' comun' : '') + '">'
           + (esComun ? '<span class="warning-dot">⚡</span>' : '')
@@ -6305,13 +6398,13 @@ function _renderDupModal() {
           + '</div>';
       });
     } else {
-      prodsHtml = '<div style="color:var(--text3);font-style:italic;padding:4px 0;">(sin productos cargados)</div>';
+      prodsHtml = '<div class="dup-pedido-sin-prods">📭 (sin productos cargados)</div>';
     }
 
     html += '<div class="dup-pedido-card' + (esCancelado ? ' cancelado' : '') + '">';
     html += '<div class="dup-pedido-hdr-band">';
     html += '<div class="dup-pedido-hdr-izq">';
-    html += '<span class="dup-pedido-hora-chip">' + (hora || '—') + '</span>';
+    html += '<span class="dup-pedido-hora-chip">🕐 ' + hora + '</span>';
     html += '<span class="dup-pedido-vendedor' + (esHabitual ? ' dup-pedido-vendedor-habitual' : '') + '">'
       + (p.vendedor || '—') + (esHabitual ? ' ⭐' : '') + '</span>';
     if (esCancelado) html += '<span class="dup-pedido-cancelado-badge">✕ Cancelado</span>';
@@ -6331,23 +6424,63 @@ function _renderDupModal() {
   });
 
   // ═══ PANEL DE ACCIONES ═══
-  html += '<div class="dup-acciones">';
-
   var activosCount = activos.length;
 
   if (activosCount >= 2) {
-    // Hay 2+ activos: mostrar selector de vendedor + botón unir
-    var vendedoresActivos = vendedoresDelGrupoActivos();
+    // Calcular previsualización: qué quedaría si se unen
+    var prodsCombinados = {};
+    var ordenInsercion = [];
+    activos.forEach(function(p) {
+      _dupExtraerProds(p).forEach(function(pr) {
+        var key = _normProd(pr.name);
+        if (!key) return;
+        if (prodsCombinados[key]) {
+          prodsCombinados[key].qty += pr.qty;
+        } else {
+          prodsCombinados[key] = { emoji: pr.emoji, name: pr.name, qty: pr.qty };
+          ordenInsercion.push(key);
+        }
+      });
+    });
+    var totalUnido = activos.reduce(function(acc, p) {
+      var n = parseInt((p.total || '').replace(/[^\d]/g,'')) || 0;
+      return acc + n;
+    }, 0);
+    var totalUnidoFmt = '$' + totalUnido.toLocaleString('es-AR');
 
-    // Asegurar que acreditarA sea válido
+    var vendedoresActivos = vendedoresDelGrupoActivos();
     if (vendedoresActivos.indexOf(s.acreditarA) === -1 && vendedoresActivos.length > 0) {
       s.acreditarA = vendedoresActivos[0];
     }
 
-    // Mostrar selector solo si hay distintos vendedores
+    // PREVIEW: qué quedaría si se une
+    html += '<div class="dup-preview">';
+    html += '<div class="dup-preview-titulo">👀 Si unís, va a quedar 1 solo pedido con:</div>';
+    html += '<div class="dup-preview-stats">';
+    html += '<div class="dup-preview-stat"><div class="dup-preview-stat-num">' + totalUnidoFmt + '</div><div class="dup-preview-stat-lbl">Total</div></div>';
+    html += '<div class="dup-preview-stat"><div class="dup-preview-stat-num">' + ordenInsercion.length + '</div><div class="dup-preview-stat-lbl">Productos</div></div>';
+    html += '<div class="dup-preview-stat"><div class="dup-preview-stat-num">' + s.acreditarA + '</div><div class="dup-preview-stat-lbl">Vendedor</div></div>';
+    html += '</div>';
+    if (ordenInsercion.length > 0) {
+      html += '<div class="dup-preview-prods">';
+      ordenInsercion.slice(0, 6).forEach(function(key) {
+        var pr = prodsCombinados[key];
+        html += '<div class="dup-preview-prod-chip">' + (pr.emoji ? pr.emoji + ' ' : '') + pr.qty + '× ' + pr.name + '</div>';
+      });
+      if (ordenInsercion.length > 6) {
+        html += '<div class="dup-preview-prod-chip mas">+ ' + (ordenInsercion.length - 6) + ' más</div>';
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+
+    // PANEL DE DECISIÓN
+    html += '<div class="dup-acciones">';
+
+    // Selector de vendedor (solo si hay distintos)
     if (vendedoresActivos.length > 1) {
       html += '<div class="dup-acredita-wrap">';
-      html += '<div class="dup-acredita-label">🎯 Acreditar pedido unido a</div>';
+      html += '<div class="dup-acredita-label">🎯 ¿A quién acreditarle el pedido?</div>';
       html += '<div class="dup-acredita-opts">';
       vendedoresActivos.forEach(function(v) {
         var sel = v === s.acreditarA ? ' sel' : '';
@@ -6359,36 +6492,77 @@ function _renderDupModal() {
       html += '</div>';
     }
 
-    html += '<button class="dup-btn-unir" onclick="dupUnirPedidos()">🔗 Unir en 1 solo pedido</button>';
+    html += '<button class="dup-btn-unir" onclick="dupUnirPedidos()">'
+      + '<span class="dup-btn-unir-icon">🔗</span>'
+      + '<span class="dup-btn-unir-text">Unir en 1 pedido de ' + totalUnidoFmt + '</span>'
+      + '</button>';
+
+    html += '<div class="dup-acciones-tip">💡 Si en realidad son duplicados (mismo pedido cargado 2 veces), tocá <strong>"✕ Cancelar este pedido"</strong> arriba para borrar el sobrante en lugar de unir.</div>';
+    html += '</div>';
   } else if (activosCount === 1) {
-    // Solo queda 1 activo, no se puede unir
+    html += '<div class="dup-acciones">';
     html += '<div class="dup-mensaje-unico">'
       + '✓ Solo queda 1 pedido activo · No hay nada que unir'
       + '</div>';
+    html += '</div>';
   } else {
-    // Todos cancelados
+    html += '<div class="dup-acciones">';
     html += '<div class="dup-mensaje-unico" style="background:linear-gradient(135deg,#FFEBEE,#FCE4EC);border-color:#EF9A9A;color:#C62828;">'
       + '❌ Todos los pedidos están cancelados'
       + '</div>';
+    html += '</div>';
   }
-
-  // Botón secundario: marcar como separados / reactivar alerta
-  var cliKey = (s.fechaDia + s.cliente).toLowerCase().replace(/\s/g,'');
-  var estaRevisado = false;
-  try {
-    var revis = JSON.parse(localStorage.getItem('tck_dup_revisados') || '{}');
-    estaRevisado = !!revis[cliKey];
-  } catch(e) {}
-
-  if (estaRevisado) {
-    html += '<button class="dup-btn-son-separados reactivar" onclick="dupReactivarAlerta()">🔔 Reactivar alerta (ya revisado)</button>';
-  } else if (activosCount >= 2) {
-    html += '<button class="dup-btn-son-separados" onclick="dupMarcarSeparados()">✓ Son separados, dejar como están</button>';
-  }
-
-  html += '</div>';
 
   document.getElementById('dup-modal-body').innerHTML = html;
+}
+
+// Helper: extraer productos de un pedido con fallbacks (detalle → resumen)
+// Si detalle está vacío, intenta parsear el resumen (que es texto plano tipo "1× Suprema, 2× Pollo A...")
+function _dupExtraerProds(p) {
+  // 1) Intentar parsear detalle (formato TCK con asteriscos)
+  if (p.detalle) {
+    var prods = parseProds(p.detalle);
+    if (prods.length > 0) return prods;
+  }
+  // 2) Fallback: parsear resumen (formato "1× Suprema (x 5 Kg) → $33.000" o similar)
+  if (p.resumen) {
+    var prodsRes = [];
+    // Separar por coma o pipe
+    var partes = p.resumen.split(/\s*[,|]\s*/);
+    partes.forEach(function(parte) {
+      parte = parte.trim();
+      if (!parte) return;
+      // Patrón: "Nx Nombre" o "N× Nombre" — separar cantidad del nombre
+      var m = parte.match(/^(\d+)\s*[x×]\s*(.+?)(?:\s*[\(→]|$)/i);
+      if (m) {
+        prodsRes.push({ emoji: '', name: m[2].trim().replace(/\s*[—\-]\s*\$.*/, ''), qty: parseInt(m[1]) || 1 });
+      } else {
+        // Sin cantidad: tomar todo como nombre con qty=1
+        var nombre = parte.replace(/\s*[—\-]\s*\$.*/, '').replace(/\(.*?\)/g, '').trim();
+        if (nombre) prodsRes.push({ emoji: '', name: nombre, qty: 1 });
+      }
+    });
+    return prodsRes;
+  }
+  return [];
+}
+
+// Helper: extraer hora de un pedido con fallbacks
+// Intenta fechaHora, después usa el pedidoId (tiene formato TCK-YYYYMMDD-HHMM-...)
+function _dupExtraerHora(p) {
+  // 1) De fechaHora
+  if (p.fechaHora) {
+    try {
+      var d = new Date(p.fechaHora.replace(' ', 'T'));
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+      }
+    } catch(e) {}
+  }
+  // 2) Del pedidoId (formato TCK-20260417-1714-JUA-XXXX → 17:14)
+  var m = (p.pedidoId || '').match(/TCK-\d{8}-(\d{2})(\d{2})-/);
+  if (m) return m[1] + ':' + m[2];
+  return '—';
 }
 
 // Helper: vendedores del grupo que NO están cancelados
