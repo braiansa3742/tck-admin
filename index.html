@@ -4066,14 +4066,6 @@ input[type="date"] {
     <div id="lista-pedidos"></div>
   </div>
 
-  <!-- ══ VIEW: MI DÍA ══ -->
-  <div class="view" id="view-midia">
-    <div class="midia-view-inner" id="mi-dia-body-outer">
-      <!-- Renderizado por renderMiDia() en tarjetas separadas -->
-      <div id="mi-dia-body" style="padding-top:4px;"></div>
-    </div>
-  </div>
-
   <!-- ══ VIEW: CLIENTES ══ -->
   <div class="view" id="view-clientes">
     <div class="clientes-view-inner">
@@ -4375,6 +4367,23 @@ input[type="date"] {
         </div>
       </div>
 
+      <!-- Productos del día -->
+      <div class="rep-card" id="rep-hoy-prods-card" style="display:none;">
+        <div class="rep-card-hdr">
+          <div class="rep-card-titulo">🏆 Productos del día</div>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;color:var(--text3);" id="rep-hoy-prods-total"></div>
+        </div>
+        <div class="rep-card-body" id="rep-hoy-prods-body"></div>
+      </div>
+
+      <!-- Localidades del día -->
+      <div class="rep-card" id="rep-hoy-locs-card" style="display:none;">
+        <div class="rep-card-hdr">
+          <div class="rep-card-titulo">📍 Localidades del día</div>
+        </div>
+        <div class="rep-card-body" id="rep-hoy-locs-body"></div>
+      </div>
+
       <!-- ════ SECCIÓN 2: PERÍODO ════ -->
       <div style="padding:14px 14px 4px;font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:900;color:#9C7050;text-transform:uppercase;letter-spacing:1px;">📈 Período</div>
 
@@ -4592,10 +4601,6 @@ input[type="date"] {
     <span class="tab-icon">📋</span>
     <span class="tab-label">Pedidos</span>
     <span class="tab-badge" id="tab-badge-pend"></span>
-  </button>
-  <button class="tab-btn" id="tab-btn-midia" onclick="cambiarTab('midia')">
-    <span class="tab-icon">📊</span>
-    <span class="tab-label">Mi día</span>
   </button>
   <button class="tab-btn" id="tab-btn-clientes" onclick="cambiarTab('clientes')">
     <span class="tab-icon">⭐</span>
@@ -5864,202 +5869,8 @@ function buildProdsPreview(p) {
   return '<div class="pedido-prods-preview">' + chips + '</div>';
 }
 
-// ── MI DÍA ────────────────────────────────────────────────────────
-var _miDiaOpen = false;  // kept for compatibility, use _tabActual === "midia" for tab check
-
-function toggleMiDia() {
-  // No-op: Mi Día is now always visible in its own tab
-}
-
-function renderMiDia() {
-  var body = document.getElementById('mi-dia-body');
-  if (!body) return;
-
-  // Mi Día siempre muestra solo los pedidos de HOY
-  var hoy = new Date(); hoy.setHours(0,0,0,0);
-  var mis = pedidosVisibles().filter(function(p) {
-    var f = fechaPedido(p); f.setHours(0,0,0,0);
-    return f.getTime() === hoy.getTime();
-  });
-  var activos = mis.filter(function(p){ return p.estado !== 'Cancelado'; });
-
-  if (!activos.length) {
-    body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text3);font-size:13px;">Aún no hay pedidos del día</div>';
-    return;
-  }
-
-  var totalMonto = activos.reduce(function(acc,p){ return acc+(parseInt((p.total||'').replace(/[^\d]/g,''))||0); }, 0);
-  var pend = activos.filter(function(p){ return p.estado==='Pendiente'; }).length;
-  var conf = activos.filter(function(p){ return p.estado==='Confirmado'; }).length;
-  var entr = activos.filter(function(p){ return p.estado==='Entregado'; }).length;
-  var ticket = activos.length ? Math.round(totalMonto / activos.length) : 0;
-
-  var prodMap = {};
-  activos.forEach(function(p) {
-    var prods = parseProds(p.detalle);
-    prods.forEach(function(pr) {
-      var key = pr.name.replace(/…$/, '').trim();
-      if (!prodMap[key]) prodMap[key] = { emoji: pr.emoji, name: pr.name, total: 0, pedidos: 0 };
-      prodMap[key].total += pr.qty;
-      prodMap[key].pedidos += 1;
-    });
-  });
-  var ranking = Object.values(prodMap).sort(function(a,b){ return b.total - a.total; });
-  var maxQty = ranking.length ? ranking[0].total : 1;
-
-  var locMap = {};
-  activos.forEach(function(p) {
-    var loc = (p.localidad||'?').trim();
-    if (!locMap[loc]) locMap[loc] = { monto: 0, pedidos: 0 };
-    locMap[loc].pedidos += 1;
-    locMap[loc].monto += parseInt((p.total||'').replace(/[^\d]/g,''))||0;
-  });
-  var locs = Object.entries(locMap).sort(function(a,b){ return b[1].pedidos - a[1].pedidos; }).slice(0, 5);
-  var maxLoc = locs.length ? locs[0][1].pedidos : 1;
-
-  var html = '';
-
-  // ── Monto + Ticket como mini cards ──────────────────────────────
-  html += '<div class="mi-dia-mini-stats">';
-  html += '<div class="mi-dia-mini-card"><div class="mi-dia-mini-label">💰 Facturado</div><div class="mi-dia-mini-val">$' + totalMonto.toLocaleString('es-AR') + '</div></div>';
-  html += '<div class="mi-dia-mini-card"><div class="mi-dia-mini-label">🎯 Ticket prom.</div><div class="mi-dia-mini-val naranja">$' + ticket.toLocaleString('es-AR') + '</div></div>';
-  html += '</div>';
-
-  // ── Estado chips ─────────────────────────────────────────────────
-  html += '<div class="mi-dia-seccion">';
-  html += '<div class="mi-dia-seccion-title">Estado de los ' + activos.length + ' pedidos</div>';
-  html += '<div class="mi-dia-estado-chips">';
-  html += '<div class="mi-dia-chip chip-pend"><div class="mi-dia-chip-num">' + pend + '</div><div class="mi-dia-chip-lbl">⏳ Pendientes</div></div>';
-  html += '<div class="mi-dia-chip chip-conf"><div class="mi-dia-chip-num">' + conf + '</div><div class="mi-dia-chip-lbl">✅ Confirmados</div></div>';
-  html += '<div class="mi-dia-chip chip-entr"><div class="mi-dia-chip-num">' + entr + '</div><div class="mi-dia-chip-lbl">📦 Entregados</div></div>';
-  html += '</div>';
-  html += '</div>';
-
-  // ── Ranking de productos ─────────────────────────────────────────
-  if (ranking.length) {
-    html += '<div class="mi-dia-seccion">';
-    html += '<div class="mi-dia-seccion-title">🏆 Productos pedidos hoy</div>';
-    ranking.slice(0, 8).forEach(function(pr, i) {
-      var pct = Math.round((pr.total / maxQty) * 100);
-      var medalPos = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i+1) + '.';
-      // Label: "×7 en 7 pedidos" or "×1 en 1 pedido"
-      var pedLabel = pr.pedidos === 1 ? '1 pedido' : pr.pedidos + ' pedidos';
-      var cantLabel = '×' + pr.total + ' en ' + pedLabel;
-      html += '<div class="ranking-item">';
-      html += '<div class="ranking-pos">' + medalPos + '</div>';
-      html += '<div class="ranking-nombre">' + (pr.emoji ? pr.emoji + ' ' : '') + pr.name + '</div>';
-      html += '<div class="ranking-right">';
-      html += '<div class="ranking-bar-wrap"><div class="ranking-bar" style="width:' + pct + '%"></div></div>';
-      html += '<div class="ranking-cantidad">' + cantLabel + '</div>';
-      html += '</div>';
-      html += '</div>';
-    });
-    html += '</div>';
-  }
-
-  // ── Localidades ──────────────────────────────────────────────────
-  if (locs.length) {
-    html += '<div class="mi-dia-seccion">';
-    html += '<div class="mi-dia-seccion-title">📍 Localidades</div>';
-    locs.forEach(function(entry) {
-      var loc = entry[0], data = entry[1];
-      var pct = Math.round((data.pedidos / maxLoc) * 100);
-      var pedLabel = data.pedidos === 1 ? '1 pedido' : data.pedidos + ' pedidos';
-      html += '<div class="ranking-item">';
-      html += '<div class="ranking-pos"></div>';
-      html += '<div class="ranking-nombre">' + loc + '</div>';
-      html += '<div class="ranking-right">';
-      html += '<div class="ranking-bar-wrap"><div class="ranking-bar" style="width:' + pct + '%"></div></div>';
-      html += '<div class="ranking-cantidad">' + pedLabel + ' · $' + data.monto.toLocaleString('es-AR') + '</div>';
-      html += '</div>';
-      html += '</div>';
-    });
-    html += '</div>';
-  }
-
-  // ── Nuevas secciones: mejores clientes e inactivos ─────────────
-  // ── Mejores clientes del período visible ─────────────────────────
-  var clienteMap = {};
-  var todosPeriodo = filtroFecha === 'hoy' ? activos : pedidosVisibles().filter(function(p){ return p.estado !== 'Cancelado'; });
-  todosPeriodo.forEach(function(p) {
-    var key = (p.cliente||'').trim().toLowerCase();
-    if (!key) return;
-    if (!clienteMap[key]) clienteMap[key] = { nombre: p.cliente, comercio: p.comercio, localidad: p.localidad, monto: 0, pedidos: 0, ultimaFecha: '' };
-    clienteMap[key].monto   += parseInt((p.total||'').replace(/[^\d]/g,''))||0;
-    clienteMap[key].pedidos += 1;
-    var fecha = p.pedidoId.match(/TCK-(\d{8})/);
-    if (fecha && fecha[1] > clienteMap[key].ultimaFecha) clienteMap[key].ultimaFecha = fecha[1];
-  });
-  var topClientes = Object.values(clienteMap).sort(function(a,b){ return b.monto - a.monto; }).slice(0, 6);
-  var maxClienteMonto = topClientes.length ? topClientes[0].monto : 1;
-
-  if (topClientes.length) {
-    html += '<div class="mi-dia-seccion">';
-    html += '<div class="mi-dia-seccion-title">⭐ Mejores clientes ' + (filtroFecha === 'hoy' ? 'de hoy' : 'del período') + '</div>';
-    topClientes.forEach(function(c, i) {
-      var pct = Math.round((c.monto / maxClienteMonto) * 100);
-      var medalPos = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i+1) + '.';
-      var pedLabel = c.pedidos === 1 ? '1 pedido' : c.pedidos + ' pedidos';
-      html += '<div class="ranking-item">';
-      html += '<div class="ranking-pos">' + medalPos + '</div>';
-      html += '<div style="flex:1;min-width:0;">';
-      html += '<div class="ranking-nombre">' + c.nombre + '</div>';
-      if (c.comercio || c.localidad) {
-        html += '<div style="font-size:11px;color:var(--text3);margin-top:1px;">' + (c.comercio ? c.comercio + ' · ' : '') + (c.localidad||'') + '</div>';
-      }
-      html += '</div>';
-      html += '<div class="ranking-right">';
-      html += '<div class="ranking-bar-wrap"><div class="ranking-bar" style="width:' + pct + '%"></div></div>';
-      html += '<div class="ranking-cantidad">$' + c.monto.toLocaleString('es-AR') + ' · ' + pedLabel + '</div>';
-      html += '</div>';
-      html += '</div>';
-    });
-    html += '</div>';
-  }
-
-  // ── Clientes que compraron antes pero no hoy ──────────────────────
-  if (filtroFecha !== 'hoy' && filtroFecha !== 'todos') {
-    // Solo tiene sentido si hay período > 1 día
-    var clientesHoy = new Set(activos.filter(function(p){
-      var m = p.pedidoId.match(/TCK-(\d{8})/);
-      if (!m) return false;
-      var hoyStr = new Date().toLocaleDateString('sv').replace(/-/g,'');
-      return m[1] === hoyStr;
-    }).map(function(p){ return (p.cliente||'').trim().toLowerCase(); }));
-
-    var inactivos = Object.values(clienteMap)
-      .filter(function(c){ return !clientesHoy.has(c.nombre.trim().toLowerCase()); })
-      .sort(function(a,b){ return b.monto - a.monto; })
-      .slice(0, 5);
-
-    if (inactivos.length) {
-      html += '<div class="mi-dia-seccion">';
-      html += '<div class="mi-dia-seccion-title" style="color:var(--orange);">💤 Compraron antes, no hoy</div>';
-      inactivos.forEach(function(c) {
-        html += '<div class="ranking-item">';
-        html += '<div class="ranking-pos" style="color:var(--orange);">—</div>';
-        html += '<div style="flex:1;min-width:0;">';
-        html += '<div class="ranking-nombre">' + c.nombre + '</div>';
-        if (c.comercio || c.localidad) {
-          html += '<div style="font-size:11px;color:var(--text3);margin-top:1px;">' + (c.comercio ? c.comercio + ' · ' : '') + (c.localidad||'') + '</div>';
-        }
-        html += '</div>';
-        html += '<div class="ranking-right">';
-        html += '<div class="ranking-cantidad" style="color:var(--text3);">$' + c.monto.toLocaleString('es-AR') + ' hist.</div>';
-        html += '</div>';
-        html += '</div>';
-      });
-      html += '</div>';
-    }
-  }
-
-
-  body.innerHTML = html;
-}
-
-// Actualizar Mi Día cuando está abierto después de recargar pedidos
+// Refresca los tabs que dependen de los datos de pedidos (llamado tras recargar)
 function actualizarMiDiaSiAbierto() {
-  if (_tabActual === 'midia') renderMiDia();
   if (_tabActual === 'clientes') renderClientes();
   if (_tabActual === 'reportes') renderReportes();
   actualizarBadgePendientes();
@@ -6073,7 +5884,7 @@ function cambiarTab(tab) {
   _tabActual = tab;
 
   // Views — incluye logistica
-  ['pedidos','midia','clientes','gps','mapa','reportes','logistica'].forEach(function(t) {
+  ['pedidos','clientes','gps','mapa','reportes','logistica'].forEach(function(t) {
     var v = document.getElementById('view-' + t);
     var b = document.getElementById('tab-btn-' + t);
     if (v) v.classList.toggle('active', t === tab);
@@ -6086,7 +5897,6 @@ function cambiarTab(tab) {
     setTimeout(renderLogistica, 50);
   }
 
-  // Cuando se abre Mi Día, renderizar
   if (tab === 'clientes') {
     renderClientes();
     var v = document.getElementById('view-clientes'); if (v) v.scrollTop = 0;
@@ -6112,12 +5922,6 @@ function cambiarTab(tab) {
   if (tab === 'reportes') {
     renderReportes();
     var v = document.getElementById('view-reportes'); if (v) v.scrollTop = 0;
-  }
-  if (tab === 'midia') {
-    renderMiDia();
-    // Scroll to top
-    var v = document.getElementById('view-midia');
-    if (v) v.scrollTop = 0;
   }
 
   // Scroll pedidos view to top when switching back
@@ -6366,6 +6170,10 @@ function renderReportes() {
   if (compCard) compCard.style.display = esAdmin ? 'block' : 'none';
   if (esAdmin) renderPreciosCompetencia(pedidosHoy);
 
+  // Productos y localidades del día (para todos los usuarios, con su vista filtrada)
+  renderProductosHoy(pedidosHoy);
+  renderLocalidadesHoy(pedidosHoy);
+
   // ── Objetivos (solo Admin) ────────────────────────────────────
   var objSection = document.getElementById('objetivos-section');
   if (objSection) {
@@ -6584,6 +6392,88 @@ function renderPreciosCompetencia(pedidosHoy) {
       + '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:16px;font-weight:900;color:#C62828;white-space:nowrap;">$' + Math.round(r.precio).toLocaleString('es-AR') + '</div>'
       + '</div>';
   }).join('');
+}
+
+// ── PRODUCTOS DEL DÍA (reemplaza al ranking de Mi Día) ──────────
+function renderProductosHoy(pedidosHoy) {
+  var card = document.getElementById('rep-hoy-prods-card');
+  var body = document.getElementById('rep-hoy-prods-body');
+  var totalEl = document.getElementById('rep-hoy-prods-total');
+  if (!card || !body) return;
+  if (!pedidosHoy.length) { card.style.display = 'none'; return; }
+
+  var prodMap = {};
+  pedidosHoy.forEach(function(p) {
+    var prods = parseProds(p.detalle);
+    prods.forEach(function(pr) {
+      var key = pr.name.replace(/…$/, '').trim();
+      if (!prodMap[key]) prodMap[key] = { emoji: pr.emoji, name: pr.name, total: 0, pedidos: 0 };
+      prodMap[key].total += pr.qty;
+      prodMap[key].pedidos += 1;
+    });
+  });
+
+  var ranking = Object.values(prodMap).sort(function(a,b){ return b.total - a.total; });
+  if (!ranking.length) { card.style.display = 'none'; return; }
+
+  card.style.display = 'block';
+  var maxQty = ranking[0].total;
+  if (totalEl) totalEl.textContent = ranking.length + ' productos';
+
+  var html = '';
+  ranking.slice(0, 8).forEach(function(pr, i) {
+    var pct = Math.round((pr.total / maxQty) * 100);
+    var medalPos = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i+1) + '.';
+    var pedLabel = pr.pedidos === 1 ? '1 pedido' : pr.pedidos + ' pedidos';
+    var cantLabel = '×' + pr.total + ' en ' + pedLabel;
+    html += '<div class="ranking-item">';
+    html += '<div class="ranking-pos">' + medalPos + '</div>';
+    html += '<div class="ranking-nombre">' + (pr.emoji ? pr.emoji + ' ' : '') + pr.name + '</div>';
+    html += '<div class="ranking-right">';
+    html += '<div class="ranking-bar-wrap"><div class="ranking-bar" style="width:' + pct + '%"></div></div>';
+    html += '<div class="ranking-cantidad">' + cantLabel + '</div>';
+    html += '</div>';
+    html += '</div>';
+  });
+  body.innerHTML = html;
+}
+
+// ── LOCALIDADES DEL DÍA (reemplaza al ranking de Mi Día) ──────────
+function renderLocalidadesHoy(pedidosHoy) {
+  var card = document.getElementById('rep-hoy-locs-card');
+  var body = document.getElementById('rep-hoy-locs-body');
+  if (!card || !body) return;
+  if (!pedidosHoy.length) { card.style.display = 'none'; return; }
+
+  var locMap = {};
+  pedidosHoy.forEach(function(p) {
+    var loc = (p.localidad||'?').trim();
+    if (!locMap[loc]) locMap[loc] = { monto: 0, pedidos: 0 };
+    locMap[loc].pedidos += 1;
+    locMap[loc].monto += parseInt((p.total||'').replace(/[^\d]/g,''))||0;
+  });
+
+  var locs = Object.entries(locMap).sort(function(a,b){ return b[1].pedidos - a[1].pedidos; }).slice(0, 6);
+  if (!locs.length) { card.style.display = 'none'; return; }
+
+  card.style.display = 'block';
+  var maxLoc = locs[0][1].pedidos;
+
+  var html = '';
+  locs.forEach(function(entry) {
+    var loc = entry[0], data = entry[1];
+    var pct = Math.round((data.pedidos / maxLoc) * 100);
+    var pedLabel = data.pedidos === 1 ? '1 pedido' : data.pedidos + ' pedidos';
+    html += '<div class="ranking-item">';
+    html += '<div class="ranking-pos"></div>';
+    html += '<div class="ranking-nombre">' + loc + '</div>';
+    html += '<div class="ranking-right">';
+    html += '<div class="ranking-bar-wrap"><div class="ranking-bar" style="width:' + pct + '%"></div></div>';
+    html += '<div class="ranking-cantidad">' + pedLabel + ' · $' + data.monto.toLocaleString('es-AR') + '</div>';
+    html += '</div>';
+    html += '</div>';
+  });
+  body.innerHTML = html;
 }
 
 // ── COMPARATIVO VENDEDORES (Admin) ───────────────────────────────
