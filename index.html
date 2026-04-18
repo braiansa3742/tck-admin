@@ -7939,13 +7939,10 @@ function mostrarTabs() {
   var esAdmin = vendedorActual === 'ADMIN';
   var esCampo = vendedorActual === 'Juan' || vendedorActual === 'Lisandro';
 
-  // Tab Visitas — Juan, Lisandro Y Admin (admin ve panel de visitas)
+  // Tab Visitas — ya NO se muestra en el nav, está dentro del menú "Más"
   var tabGps = document.getElementById('tab-btn-gps');
   if (tabGps) {
-    tabGps.style.display = (esCampo || esAdmin) ? '' : 'none';
-    // Cambiar label según rol
-    var lbl = tabGps.querySelector('span:last-child');
-    if (lbl) lbl.textContent = esAdmin ? 'Visitas' : 'Visitas';
+    tabGps.style.display = 'none';
   }
 
   // Tab Mapa — solo Admin
