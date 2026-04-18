@@ -5607,13 +5607,13 @@ input[type="date"] {
 
 <!-- TAB NAV PRO — 5 tabs + Más (Pedidos al centro) -->
 <nav class="tab-nav" id="tab-nav">
-  <button class="tab-btn" id="tab-btn-clientes" onclick="cambiarTab('clientes')">
-    <span class="tab-icon">⭐</span>
-    <span class="tab-label">Clientes</span>
-  </button>
   <button class="tab-btn" id="tab-btn-logistica" onclick="cambiarTab('logistica')">
     <span class="tab-icon">🚚</span>
     <span class="tab-label">Logíst.</span>
+  </button>
+  <button class="tab-btn" id="tab-btn-reportes" onclick="cambiarTab('reportes')">
+    <span class="tab-icon">📈</span>
+    <span class="tab-label">Reportes</span>
   </button>
   <button class="tab-btn center active" id="tab-btn-pedidos" onclick="cambiarTab('pedidos')">
     <span class="tab-badge" id="tab-badge-pend"></span>
@@ -5628,38 +5628,30 @@ input[type="date"] {
     <span class="tab-icon">⋯</span>
     <span class="tab-label">Más</span>
   </button>
-  <!-- Tabs ocultos accesibles vía menú "Más" -->
-  <button class="tab-btn" id="tab-btn-reportes" onclick="cambiarTab('reportes')" style="display:none;">
-    <span class="tab-icon">📈</span>
-    <span class="tab-label">Reportes</span>
+  <!-- Tabs ocultos accesibles vía menú "Más" — display:none real para que NO aparezcan -->
+  <button class="tab-btn" id="tab-btn-clientes" onclick="cambiarTab('clientes')" style="display:none !important;">
+    <span class="tab-icon">⭐</span>
+    <span class="tab-label">Clientes</span>
   </button>
-  <button class="tab-btn" id="tab-btn-gps" onclick="cambiarTab('gps')" style="display:none;">
+  <button class="tab-btn" id="tab-btn-gps" onclick="cambiarTab('gps')" style="display:none !important;">
     <span class="tab-icon"><svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg></span>
     <span class="tab-label">Visitas</span>
   </button>
 </nav>
 
-<!-- MENÚ "MÁS" (sheet inferior) -->
+<!-- MENÚ "MÁS" (sheet inferior) — solo Clientes + Visitas -->
 <div class="menu-mas-backdrop" id="menu-mas-backdrop" onclick="cerrarMenuMasFondo(event)">
   <div class="menu-mas-sheet" onclick="event.stopPropagation()">
     <div class="menu-mas-pill"></div>
     <div class="menu-mas-titulo">Más opciones</div>
     <div class="menu-mas-grid">
+      <button class="menu-mas-item" onclick="cambiarTab('clientes');cerrarMenuMas()">
+        <div class="menu-mas-icon">⭐</div>
+        <div class="menu-mas-lbl">Clientes</div>
+      </button>
       <button class="menu-mas-item" id="menu-mas-visitas" onclick="cambiarTab('gps');cerrarMenuMas()">
         <div class="menu-mas-icon">📍</div>
         <div class="menu-mas-lbl">Visitas</div>
-      </button>
-      <button class="menu-mas-item" onclick="cambiarTab('reportes');cerrarMenuMas()">
-        <div class="menu-mas-icon">📈</div>
-        <div class="menu-mas-lbl">Reportes</div>
-      </button>
-      <button class="menu-mas-item" onclick="abrirManual();cerrarMenuMas()">
-        <div class="menu-mas-icon">📖</div>
-        <div class="menu-mas-lbl">Cómo usar</div>
-      </button>
-      <button class="menu-mas-item" onclick="cargarPedidos();cerrarMenuMas()">
-        <div class="menu-mas-icon">🔄</div>
-        <div class="menu-mas-lbl">Refrescar</div>
       </button>
     </div>
     <button class="menu-mas-cerrar" onclick="cerrarMenuMas()">Cerrar</button>
@@ -7899,7 +7891,7 @@ function cambiarTab(tab) {
 
   // El botón "Más" se marca activo si estás en un tab oculto (gps/visitas o reportes)
   var btnMas = document.getElementById('tab-btn-mas');
-  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'reportes');
+  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes');
 
   // Logística — renderizar DESPUÉS de activar el view
   if (tab === 'logistica') {
