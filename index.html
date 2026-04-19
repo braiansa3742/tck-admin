@@ -8616,6 +8616,10 @@ function renderReportes() {
 }
 
 // ── GRÁFICO DE BARRAS SVG ────────────────────────────────────────
+// v8: labels Do/Lu/Ma/Mi/Ju/Vi/Sá, nice ticks en eje Y, tooltip nativo en
+// hover/tap (<title>), y fecha numérica bajo día de semana en períodos
+// largos. Cambios reportados por Francisco (iniciales confusas) y mejoras
+// generales de legibilidad/escala.
 function renderGrafico(datos) {
   var wrap = document.getElementById('rep-chart-wrap');
   if (!wrap) return;
@@ -8666,16 +8670,36 @@ function renderGrafico(datos) {
   var padL    = 44;
   var padR    = 8;
   var padT    = 10;
-  var padB    = 28;
+  // Período largo (>15 días) necesita más espacio abajo para mostrar
+  // fecha numérica ("Ma 8") debajo del día de semana.
+  var padB    = dias > 15 ? 40 : 28;
   var chartH  = 110;
   var totalW  = padL + labels.length * (barW + gap) - gap + padR;
   var svgH    = chartH + padT + padB;
 
   var maxMonto = Math.max.apply(null, labels.map(function(l) { return l.data.monto; })) || 1;
 
-  // Y axis labels
+  // "Nice ticks" para el eje Y: en vez de 100% exacto del máximo (que da
+  // números feos como $487k), redondeamos al 1/2/2.5/5 × 10^n más cercano
+  // hacia arriba. Resultado: ticks legibles como $500k, $375k, $250k…
+  function niceCeil(v) {
+    if (v <= 0) return 1;
+    var exp = Math.floor(Math.log10(v));
+    var pow = Math.pow(10, exp);
+    var frac = v / pow;
+    var niceFrac;
+    if      (frac <= 1)   niceFrac = 1;
+    else if (frac <= 2)   niceFrac = 2;
+    else if (frac <= 2.5) niceFrac = 2.5;
+    else if (frac <= 5)   niceFrac = 5;
+    else                  niceFrac = 10;
+    return niceFrac * pow;
+  }
+  var niceMax = niceCeil(maxMonto);
+
+  // Y axis: 4 intervalos (5 ticks) en base al niceMax
   var ySteps = [0, 0.25, 0.5, 0.75, 1].map(function(r) {
-    return { y: padT + chartH - r * chartH, val: Math.round(maxMonto * r) };
+    return { y: padT + chartH - r * chartH, val: Math.round(niceMax * r) };
   });
 
   var fmt = function(n) {
@@ -8683,6 +8707,12 @@ function renderGrafico(datos) {
     if (n >= 1000)    return '$' + Math.round(n/1000) + 'k';
     return '$' + n;
   };
+
+  // Formato de monto completo para tooltip ($123.456)
+  var fmtFull = function(n) { return '$' + Math.round(n).toLocaleString('es-AR'); };
+
+  // Nombres completos de días para tooltip
+  var diasSemanaFull = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
 
   var svgParts = ['<svg width="' + totalW + '" height="' + svgH + '" xmlns="http://www.w3.org/2000/svg">'];
 
@@ -8692,31 +8722,52 @@ function renderGrafico(datos) {
     svgParts.push('<text x="' + (padL - 4) + '" y="' + (s.y + 4) + '" text-anchor="end" font-size="9" fill="#9C7050" font-family="Barlow Condensed,sans-serif">' + fmt(s.val) + '</text>');
   });
 
-  // Bars
-  var diasSemana = ['D','L','M','X','J','V','S'];
+  // Bars — labels de días con 2 letras para evitar ambigüedad M/X y M/martes
+  // (bug reportado por Francisco: "hay una X que no sé qué significa").
+  var diasSemana = ['Do','Lu','Ma','Mi','Ju','Vi','Sá'];
   labels.forEach(function(l, i) {
     var x   = padL + i * (barW + gap);
-    var pct = l.data.monto / maxMonto;
+    // Usamos niceMax (no maxMonto) para que la escala visual coincida con los ticks del eje Y.
+    var pct = l.data.monto / niceMax;
     var bH  = Math.max(pct * chartH, l.data.monto > 0 ? 3 : 0);
     var y   = padT + chartH - bH;
     var esHoy = l.key === labels[labels.length-1].key;
 
+    // Tooltip nativo SVG: se muestra al hover en desktop y al tap largo en mobile.
+    // Envolvemos la barra en <g> con <title> hijo. Cero JS, cero dependencias.
+    var diaFull = diasSemanaFull[l.fecha.getDay()];
+    var fechaCorta = String(l.fecha.getDate()).padStart(2,'0') + '/' + String(l.fecha.getMonth()+1).padStart(2,'0');
+    var tooltipTxt = diaFull + ' ' + fechaCorta + ' · ' + fmtFull(l.data.monto) + ' · ' + l.data.pedidos + ' pedido' + (l.data.pedidos === 1 ? '' : 's');
+    // Escapamos entidades XML para que el <title> no se rompa ante caracteres especiales.
+    tooltipTxt = tooltipTxt.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
     // Bar
     var color = esHoy ? '#B71C1C' : (l.data.monto > 0 ? '#D32F2F' : '#F5EDE0');
+    svgParts.push('<g><title>' + tooltipTxt + '</title>');
     svgParts.push('<rect x="' + x + '" y="' + y + '" width="' + barW + '" height="' + bH + '" rx="3" fill="' + color + '" opacity="' + (esHoy ? '1' : '.7') + '"/>');
+    // Hitbox invisible: cubre todo el alto del gráfico para que el tooltip
+    // se active aunque la barra sea muy chica o tenga monto = 0.
+    svgParts.push('<rect x="' + x + '" y="' + padT + '" width="' + barW + '" height="' + chartH + '" fill="transparent"/>');
+    svgParts.push('</g>');
 
-    // X label (day of week). Si son pocas barras se muestran todas; si son muchas, cada 2.
+    // X label: día de semana. Si son pocas barras se muestran todas; si son muchas, cada 2.
     var showLabel = labels.length <= 15 || i % 2 === 0;
     if (showLabel) {
       var labelY = padT + chartH + 16;
       var labelX = x + barW / 2;
       var diaN = diasSemana[l.fecha.getDay()];
       svgParts.push('<text x="' + labelX + '" y="' + labelY + '" text-anchor="middle" font-size="9" fill="' + (esHoy ? '#8B0000' : '#9C7050') + '" font-family="Barlow Condensed,sans-serif" font-weight="' + (esHoy ? '900' : '600') + '">' + diaN + '</text>');
+
+      // Fecha numérica debajo del día, solo en períodos largos (>15 días)
+      // para ayudar a orientarse sin depender solo del día de semana.
+      if (dias > 15) {
+        svgParts.push('<text x="' + labelX + '" y="' + (labelY + 11) + '" text-anchor="middle" font-size="8" fill="' + (esHoy ? '#8B0000' : '#B89070') + '" font-family="Barlow Condensed,sans-serif" font-weight="' + (esHoy ? '700' : '500') + '">' + l.fecha.getDate() + '</text>');
+      }
     }
 
     // Value on top for bars with data (only if bar is wide enough)
     if (l.data.pedidos > 0 && barW >= 18) {
-      svgParts.push('<text x="' + (x + barW/2) + '" y="' + (y - 3) + '" text-anchor="middle" font-size="8" fill="#8B0000" font-family="Barlow Condensed,sans-serif" font-weight="700">' + l.data.pedidos + '</text>');
+      svgParts.push('<text x="' + (x + barW/2) + '" y="' + (y - 3) + '" text-anchor="middle" font-size="8" fill="#8B0000" font-family="Barlow Condensed,sans-serif" font-weight="700" pointer-events="none">' + l.data.pedidos + '</text>');
     }
   });
 
