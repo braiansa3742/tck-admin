@@ -5163,6 +5163,588 @@ input[type="date"] {
   cursor: pointer;
 }
 
+/* ════════════════════════════════════════════════════════════════
+   ADMIN MI RONDA — Vista equipo
+   ════════════════════════════════════════════════════════════════ */
+
+/* Header con título + filtros */
+.amr-section-hdr {
+  background: linear-gradient(135deg, #4A0000 0%, #8B0000 60%, #B71C1C 100%);
+  border-radius: 14px;
+  padding: 14px 18px;
+  color: #fff;
+  margin-bottom: 14px;
+  box-shadow: 0 4px 14px rgba(139,0,0,.18);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.amr-hdr-info { flex: 1; min-width: 200px; }
+.amr-hdr-titulo {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 19px;
+  font-weight: 800;
+  color: #FFD700;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  margin: 0;
+}
+.amr-hdr-sub {
+  font-size: 12px;
+  color: rgba(255,255,255,.85);
+  margin-top: 4px;
+  letter-spacing: .3px;
+}
+.amr-hdr-sub strong { color: #FFE082; font-weight: 700; }
+
+.amr-filtros {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.amr-filtro-grupo {
+  display: flex;
+  background: rgba(255,255,255,.12);
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.amr-filtro-btn {
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  color: rgba(255,255,255,.75);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all .15s;
+}
+.amr-filtro-btn:hover { color: #fff; background: rgba(255,255,255,.08); }
+.amr-filtro-btn.on { background: #FFD700; color: #4A0000; }
+
+/* KPIs strip */
+.amr-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.amr-kpi {
+  background: #fff;
+  border-radius: 10px;
+  padding: 11px 12px;
+  border: 1px solid #E0D2B8;
+  border-left: 3px solid #8B0000;
+  box-shadow: 0 1px 3px rgba(0,0,0,.04);
+}
+.amr-kpi.green { border-left-color: #2E7D32; }
+.amr-kpi.orange { border-left-color: #EF6C00; }
+.amr-kpi.gold { border-left-color: #D4A574; }
+.amr-kpi-num {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 26px;
+  font-weight: 900;
+  line-height: 1;
+  color: #1A0800;
+}
+.amr-kpi-num small {
+  font-size: 14px;
+  color: #8B6F50;
+  font-weight: 600;
+}
+.amr-kpi-lbl {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  color: #5C3A1E;
+  letter-spacing: .8px;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+.amr-kpi-trend {
+  font-size: 10px;
+  font-weight: 700;
+  margin-top: 3px;
+  color: #8B6F50;
+}
+.amr-kpi-trend.up { color: #2E7D32; }
+.amr-kpi-trend.down { color: #C62828; }
+.amr-kpi-loading {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 20px;
+  color: #8B6F50;
+  font-size: 13px;
+}
+
+/* Cards de vendedor */
+.amr-vendor-card {
+  background: #fff;
+  border-radius: 12px;
+  margin-bottom: 12px;
+  border: 1px solid #E0D2B8;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,.05);
+}
+.amr-vendor-hdr {
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #FFF8F0, #FAF4EC);
+  border-bottom: 1px solid #E0D2B8;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background .15s;
+}
+.amr-vendor-hdr:hover { background: linear-gradient(135deg, #FFF5EA, #F5EDD8); }
+.amr-vendor-foto {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #8B0000, #6B0000);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 900;
+  font-size: 17px;
+  border: 2px solid #FFD700;
+  flex-shrink: 0;
+}
+.amr-vendor-info { flex: 1; min-width: 0; }
+.amr-vendor-nombre {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 17px;
+  font-weight: 800;
+  color: #1A0800;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+}
+.amr-vendor-stats {
+  font-size: 12px;
+  color: #5C3A1E;
+  margin-top: 2px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.amr-vendor-stat-vendido { color: #2E7D32; font-weight: 700; }
+.amr-vendor-stat-gestionado { color: #EF6C00; font-weight: 700; }
+.amr-vendor-stat-pendiente { color: #8B6F50; font-weight: 600; }
+.amr-vendor-stat-conv { color: #8B6F50; }
+
+.amr-vendor-progress-tri {
+  display: flex;
+  height: 6px;
+  background: rgba(139,0,0,.1);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+.amr-vendor-progress-tri-ok { background: #2E7D32; }
+.amr-vendor-progress-tri-gest { background: #EF6C00; }
+
+.amr-vendor-toggle {
+  font-size: 13px;
+  color: #8B6F50;
+  transition: transform .25s;
+  margin-left: 4px;
+}
+.amr-vendor-card.collapsed .amr-vendor-toggle { transform: rotate(-90deg); }
+.amr-vendor-body {
+  max-height: 4000px;
+  overflow: hidden;
+  transition: max-height .35s ease;
+}
+.amr-vendor-card.collapsed .amr-vendor-body { max-height: 0; }
+
+/* Mini-cards de ruta */
+.amr-ruta-mini {
+  padding: 11px 16px;
+  border-bottom: 1px solid #E0D2B8;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  transition: background .15s;
+  -webkit-tap-highlight-color: transparent;
+  border-left: 3px solid #B0B0B0;
+}
+.amr-ruta-mini:hover { background: #FFF9F5; }
+.amr-ruta-mini:last-child { border-bottom: none; }
+.amr-ruta-mini.urgent { border-left-color: #C62828; }
+.amr-ruta-mini.alert { border-left-color: #EF6C00; }
+.amr-ruta-mini.warning { border-left-color: #F9A825; }
+.amr-ruta-mini.info { border-left-color: #1565C0; }
+.amr-ruta-mini.done { border-left-color: #2E7D32; }
+.amr-ruta-mini.neutral { border-left-color: #B0B0B0; }
+
+.amr-ruta-mini-info { flex: 1; min-width: 0; }
+.amr-ruta-mini-titulo {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  color: #1A0800;
+  letter-spacing: .3px;
+  text-transform: uppercase;
+}
+.amr-ruta-mini-sub {
+  font-size: 11px;
+  color: #8B6F50;
+  margin-top: 2px;
+}
+.amr-ruta-mini-bar {
+  width: 80px;
+  height: 5px;
+  background: rgba(139,0,0,.1);
+  border-radius: 3px;
+  overflow: hidden;
+  display: flex;
+  flex-shrink: 0;
+}
+.amr-ruta-mini-bar-ok { background: #2E7D32; }
+.amr-ruta-mini-bar-gest { background: #EF6C00; }
+.amr-ruta-mini-num {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  color: #1A0800;
+  flex-shrink: 0;
+  min-width: 56px;
+  text-align: right;
+}
+.amr-ruta-mini-arrow {
+  color: #8B6F50;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.amr-ruta-mini-badge {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 8px;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.amr-ruta-mini-badge.urgent { background: rgba(198,40,40,.12); color: #C62828; }
+.amr-ruta-mini-badge.alert { background: rgba(239,108,0,.12); color: #EF6C00; }
+.amr-ruta-mini-badge.warning { background: rgba(249,168,37,.18); color: #B07700; }
+.amr-ruta-mini-badge.info { background: rgba(21,101,192,.12); color: #1565C0; }
+.amr-ruta-mini-badge.done { background: rgba(46,125,50,.12); color: #2E7D32; }
+
+/* Métricas (Top motivos + Comparativa) */
+.amr-metricas-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 18px;
+}
+.amr-metrica-card {
+  background: #fff;
+  border-radius: 10px;
+  padding: 14px;
+  border: 1px solid #E0D2B8;
+  box-shadow: 0 1px 3px rgba(0,0,0,.04);
+}
+.amr-metrica-titulo {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  color: #5C3A1E;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #E0D2B8;
+}
+.amr-motivo-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 13px;
+}
+.amr-motivo-icono { width: 22px; text-align: center; font-size: 16px; }
+.amr-motivo-nombre { flex: 1; color: #1A0800; }
+.amr-motivo-num {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 800;
+  color: #8B0000;
+  background: rgba(139,0,0,.08);
+  padding: 2px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+.amr-motivo-row.alerta { color: #C62828; }
+.amr-motivo-row.alerta .amr-motivo-num { background: rgba(198,40,40,.1); color: #C62828; }
+.amr-motivo-empty { padding: 20px; text-align: center; color: #8B6F50; font-size: 12px; }
+
+.amr-comp-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #E0D2B8;
+}
+.amr-comp-row:last-child { border-bottom: none; }
+.amr-comp-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  color: #5C3A1E;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+.amr-comp-val {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 18px;
+  font-weight: 900;
+  color: #1A0800;
+  text-align: right;
+}
+.amr-comp-flecha {
+  font-size: 12px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-family: 'Barlow Condensed', sans-serif;
+  letter-spacing: .3px;
+}
+.amr-comp-flecha.up { background: rgba(46,125,50,.12); color: #2E7D32; }
+.amr-comp-flecha.down { background: rgba(198,40,40,.1); color: #C62828; }
+.amr-comp-flecha.eq { background: rgba(0,0,0,.06); color: #5C3A1E; }
+
+/* Loading */
+.amr-loading {
+  background: #fff;
+  border-radius: 12px;
+  padding: 40px 20px;
+  text-align: center;
+  color: #8B6F50;
+  font-size: 14px;
+  border: 1px solid #E0D2B8;
+}
+.amr-loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(139,0,0,.15);
+  border-top-color: #8B0000;
+  border-radius: 50%;
+  margin: 0 auto 12px;
+  animation: amrSpin .8s linear infinite;
+}
+@keyframes amrSpin { to { transform: rotate(360deg); } }
+.amr-empty {
+  background: #fff;
+  border-radius: 12px;
+  padding: 30px 20px;
+  text-align: center;
+  border: 1px solid #E0D2B8;
+}
+.amr-empty-icon { font-size: 32px; margin-bottom: 8px; }
+.amr-empty-txt {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 16px;
+  font-weight: 800;
+  color: #1A0800;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+.amr-empty-sub {
+  font-size: 12px;
+  color: #8B6F50;
+}
+
+/* MODAL */
+.amr-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(26,8,0,.55);
+  z-index: 10001;
+  display: none;
+  align-items: flex-end;
+  justify-content: center;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+.amr-modal-backdrop.on { display: flex; }
+.amr-modal-sheet {
+  background: #FAF4EC;
+  width: 100%;
+  max-width: 700px;
+  height: 90vh;
+  border-radius: 18px 18px 0 0;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 -16px 48px rgba(0,0,0,.4);
+  animation: amrModalUp .28s cubic-bezier(.2,.8,.2,1);
+  border-top: 3px solid #FFD700;
+}
+@keyframes amrModalUp {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+.amr-modal-pill {
+  width: 40px;
+  height: 4px;
+  background: #8B0000;
+  opacity: .35;
+  border-radius: 2px;
+  margin: 10px auto 6px;
+}
+.amr-modal-hdr {
+  padding: 4px 18px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  border-bottom: 1px solid rgba(139,0,0,.1);
+}
+.amr-modal-titulo {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 18px;
+  font-weight: 900;
+  color: #6B0000;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+}
+.amr-modal-sub {
+  font-size: 12px;
+  color: #5C3A1E;
+  margin-top: 2px;
+}
+.amr-modal-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(139,0,0,.08);
+  border: none;
+  font-size: 16px;
+  color: #6B0000;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.amr-modal-close:hover { background: rgba(139,0,0,.15); }
+.amr-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 18px calc(20px + env(safe-area-inset-bottom));
+}
+
+/* Cards de cliente en el modal admin (solo lectura) */
+.amr-cli-card {
+  background: #fff;
+  border-radius: 10px;
+  padding: 11px 13px;
+  margin-bottom: 7px;
+  border: 1px solid #E0D2B8;
+  border-left: 3px solid #B0B0B0;
+}
+.amr-cli-card.vendida { background: #F4FAF5; border-color: #C8E6C9; border-left-color: #2E7D32; }
+.amr-cli-card.gestionada { background: #FFFBF0; border-color: #FFE082; border-left-color: #EF6C00; }
+.amr-cli-nombre {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 800;
+  color: #1A0800;
+  letter-spacing: .3px;
+  text-transform: uppercase;
+}
+.amr-cli-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #5C3A1E;
+}
+.amr-cli-extra {
+  margin-top: 6px;
+  font-size: 11.5px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  letter-spacing: .3px;
+}
+.amr-cli-extra.ok { color: #1B5E20; text-transform: uppercase; }
+.amr-cli-extra.gest { color: #C2410C; }
+.amr-cli-extra.gest strong { text-transform: uppercase; }
+
+/* Headers de sección dentro del modal */
+.amr-section-collapse {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  color: #5C3A1E;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 14px 4px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(139,0,0,.08);
+  margin-bottom: 8px;
+}
+.amr-section-collapse:first-child { padding-top: 4px; }
+.amr-section-collapse-badge {
+  background: #5C3A1E;
+  color: #FAF4EC;
+  padding: 2px 9px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .5px;
+}
+.amr-section-collapse.vendidos { color: #1B5E20; }
+.amr-section-collapse.vendidos .amr-section-collapse-badge { background: #2E7D32; color: #fff; }
+.amr-section-collapse.gestionados { color: #C2410C; }
+.amr-section-collapse.gestionados .amr-section-collapse-badge { background: #EF6C00; color: #fff; }
+
+/* Toast feedback */
+.amr-feedback {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: linear-gradient(135deg, #1A0800 0%, #4A0000 100%);
+  color: #FAF4EC;
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 6px 20px rgba(0,0,0,.4);
+  z-index: 10003;
+  opacity: 0;
+  transition: opacity .25s, transform .25s;
+  pointer-events: none;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  border-left: 3px solid #FFD700;
+  max-width: 90vw;
+}
+.amr-feedback.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.amr-feedback.warn { border-left-color: #EF6C00; }
+.amr-feedback.error { border-left-color: #C62828; }
+
+@media (max-width: 600px) {
+  .amr-kpis { grid-template-columns: repeat(2, 1fr); }
+  .amr-metricas-grid { grid-template-columns: 1fr; }
+}
+
 </style>
 </head>
 <body>
@@ -5565,6 +6147,7 @@ input[type="date"] {
         <button class="rep-subtab-btn sel" id="rep-subtab-hoy" onclick="repSelSubTab('hoy')">📅 Hoy</button>
         <button class="rep-subtab-btn"     id="rep-subtab-periodo" onclick="repSelSubTab('periodo')">📈 Período</button>
         <button class="rep-subtab-btn"     id="rep-subtab-inteligencia" onclick="repSelSubTab('inteligencia')">🧠 Inteligencia</button>
+        <button class="rep-subtab-btn"     id="rep-subtab-mironda" onclick="repSelSubTab('mironda')">🎯 Mi Ronda</button>
       </div>
 
       <!-- ════ SUB-TAB: HOY ════ -->
@@ -5791,6 +6374,56 @@ input[type="date"] {
       </div>
 
       </div><!-- /rep-subtab-content-inteligencia -->
+
+      <!-- ════ SUB-TAB: MI RONDA (admin) ════ -->
+      <div class="rep-subtab-content" id="rep-subtab-content-mironda">
+
+        <!-- Header con stats consolidadas + filtros -->
+        <div class="amr-section-hdr">
+          <div class="amr-hdr-info">
+            <h3 class="amr-hdr-titulo">🎯 Mi Ronda — Vista equipo</h3>
+            <div class="amr-hdr-sub" id="amr-hdr-sub">Cargando datos del equipo...</div>
+          </div>
+          <div class="amr-filtros">
+            <div class="amr-filtro-grupo" id="amr-filtro-periodo">
+              <button class="amr-filtro-btn on" data-periodo="semana" onclick="adminMiRondaSetPeriodo('semana', this)">Semana</button>
+              <button class="amr-filtro-btn" data-periodo="mes" onclick="adminMiRondaSetPeriodo('mes', this)">Mes</button>
+            </div>
+            <div class="amr-filtro-grupo" id="amr-filtro-vendedor">
+              <button class="amr-filtro-btn on" data-vendedor="" onclick="adminMiRondaSetVendedor('', this)">Todos</button>
+              <button class="amr-filtro-btn" data-vendedor="MIGUEL" onclick="adminMiRondaSetVendedor('MIGUEL', this)">Miguel</button>
+              <button class="amr-filtro-btn" data-vendedor="JUAN" onclick="adminMiRondaSetVendedor('JUAN', this)">Juan</button>
+              <button class="amr-filtro-btn" data-vendedor="LISANDRO" onclick="adminMiRondaSetVendedor('LISANDRO', this)">Lisandro</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- KPIs strip -->
+        <div class="amr-kpis" id="amr-kpis">
+          <div class="amr-kpi-loading">Cargando KPIs...</div>
+        </div>
+
+        <!-- Cards por vendedor -->
+        <div class="amr-vendors" id="amr-vendors">
+          <div class="amr-loading">
+            <div class="amr-loading-spinner"></div>
+            <div>Cargando datos del equipo...</div>
+          </div>
+        </div>
+
+        <!-- Sección métricas (Top motivos + Comparativa) -->
+        <div class="amr-metricas-grid" id="amr-metricas" style="display:none;">
+          <div class="amr-metrica-card">
+            <div class="amr-metrica-titulo">Top motivos «Sin venta»</div>
+            <div id="amr-top-motivos">—</div>
+          </div>
+          <div class="amr-metrica-card">
+            <div class="amr-metrica-titulo">Esta semana vs anterior</div>
+            <div id="amr-comparativa">—</div>
+          </div>
+        </div>
+
+      </div><!-- /rep-subtab-content-mironda -->
 
     </div>
   </div>
@@ -8309,7 +8942,7 @@ function repSelSubTab(tab) {
   if (_repSubTab === tab) return;
   _repSubTab = tab;
   // Activar botón correspondiente
-  ['hoy','periodo','inteligencia'].forEach(function(t) {
+  ['hoy','periodo','inteligencia','mironda'].forEach(function(t) {
     var btn = document.getElementById('rep-subtab-' + t);
     var content = document.getElementById('rep-subtab-content-' + t);
     if (btn)     btn.classList.toggle('sel', t === tab);
@@ -8318,6 +8951,10 @@ function repSelSubTab(tab) {
   // Scroll al top del contenido del sub-tab
   var view = document.getElementById('view-reportes');
   if (view) view.scrollTop = 0;
+  // Cargar Mi Ronda al entrar
+  if (tab === 'mironda' && typeof adminMiRondaCargar === 'function') {
+    adminMiRondaCargar();
+  }
 }
 
 // Estado: _repPeriodo guarda el período activo. Puede ser uno de:
@@ -15128,6 +15765,627 @@ async function mapaLimpiarAlerta(nombreCliente) {
     toast('✅ Alerta revisada', 'ok');
   } catch(e) { toast('Error', 'err'); }
 }
+
+// ════════════════════════════════════════════════════════════════
+// ADMIN MI RONDA — Vista equipo (solo lectura)
+// Lee de clientes_activos + mironda_gestiones (mismas tablas que vendedor)
+// ════════════════════════════════════════════════════════════════
+
+// Estado
+var _amrPeriodo  = 'semana';
+var _amrVendedor = ''; // '' = todos
+var _amrClientes = []; // todos los clientes_activos
+var _amrGestiones = []; // todas las gestiones del período (TODOS los vendedores)
+var _amrPedidos = [];  // pedidos del Sheet (para detectar ventas)
+var _amrCargando = false;
+var _amrData = null;   // {byVendedor: {MIGUEL: {clientes, byRuta:{...}, total, vend, gest, pend}, JUAN:..., LISANDRO:...}, kpis}
+var _amrModalCtx = null; // {vendedor, rutaKey} — qué se está mostrando en el modal
+
+// Config de rutas (idéntico al de tck-ventas, replicado para evitar dependencias)
+var AMR_RUTAS_CONFIG = {
+  'RUTA_LUNES_MARTES':   { nombre:'Lunes-Martes',     descCorta:'Bolívar y zona', diaSalida:1, tipo:'viaje' },
+  'RUTA_MARTES':         { nombre:'Martes América',   descCorta:'Rivadavia, América, Fortín', diaSalida:2, tipo:'viaje' },
+  'RUTA_JUEVES_VIERNES': { nombre:'Jueves-Viernes',   descCorta:'Pellegrini y zona', diaSalida:4, tipo:'viaje' },
+  'TRENQUE':             { nombre:'Trenque Lauquen',  descCorta:'Semana corriente', diaSalida:null, tipo:'local' },
+  'MOSTRADOR':           { nombre:'Mostrador',        descCorta:'Venta en sede', diaSalida:null, tipo:'mostrador' },
+  'SIN_RUTA':            { nombre:'Sin ruta asignada', descCorta:'Clientes sin zona', diaSalida:null, tipo:'otros' }
+};
+
+var AMR_VENDEDORES = ['MIGUEL','JUAN','LISANDRO'];
+
+var AMR_MOTIVO_LABELS = {
+  'tiene_mercaderia': { txt: 'Tiene mercadería', icono: '📦' },
+  'ya_compro':        { txt: 'Ya compró',        icono: '🏪' },
+  'mas_barato':       { txt: 'Consigue más barato', icono: '💰' },
+  'cerro':            { txt: 'Cerró definitivamente', icono: '❌' },
+  'mas_adelante':     { txt: 'Pide pasar después', icono: '🕐' },
+  'no_atiende':       { txt: 'No atiende', icono: '📞' },
+  'otro':             { txt: 'Otro motivo', icono: '✏️' }
+};
+
+// ── Filtros ──────────────────────────────────────────────────────
+function adminMiRondaSetPeriodo(periodo, btn) {
+  _amrPeriodo = periodo;
+  document.querySelectorAll('#amr-filtro-periodo .amr-filtro-btn').forEach(function(b){ b.classList.remove('on'); });
+  if (btn) btn.classList.add('on');
+  adminMiRondaCargar();
+}
+
+function adminMiRondaSetVendedor(vendedor, btn) {
+  _amrVendedor = vendedor;
+  document.querySelectorAll('#amr-filtro-vendedor .amr-filtro-btn').forEach(function(b){ b.classList.remove('on'); });
+  if (btn) btn.classList.add('on');
+  adminMiRondaRender();
+}
+
+// ── Cargar datos: clientes_activos + mironda_gestiones ───────────
+async function adminMiRondaCargar() {
+  if (_amrCargando) return;
+  _amrCargando = true;
+  try {
+    // 1. Cargar TODOS los clientes activos (de los 3 vendedores)
+    var paths = [
+      'clientes_activos?activo_en_ronda=eq.true&select=cliente_id,nombre,telefono,localidad,vendedor,ruta_viaje,ritmo,ultimo_pedido,dias_desde_ult_pedido,frec_dias_prom,notas&limit=2000',
+      'mironda_gestiones?fecha_ronda=gte.' + amrFechaDesde() + '&select=*&order=fecha_ronda.desc&limit=5000'
+    ];
+    var results = await Promise.all(paths.map(function(p){ return sbFetch(p); }));
+    _amrClientes = Array.isArray(results[0]) ? results[0] : [];
+    _amrGestiones = Array.isArray(results[1]) ? results[1] : [];
+
+    // Para detectar ventas reales, también necesitamos los pedidos del Sheet
+    // (el panel admin debe tener acceso a ellos via _todosLosPedidos o similar)
+    if (typeof todosLosPedidos !== 'undefined' && Array.isArray(todosLosPedidos)) {
+      _amrPedidos = todosLosPedidos;
+    } else {
+      _amrPedidos = [];
+    }
+
+    adminMiRondaRender();
+  } catch(e) {
+    console.error('Admin Mi Ronda — error cargando:', e);
+    var cont = document.getElementById('amr-vendors');
+    if (cont) cont.innerHTML = '<div class="amr-empty"><div class="amr-empty-icon">⚠️</div><div class="amr-empty-txt">No se pudo cargar</div><div class="amr-empty-sub">Revisá tu conexión y volvé a entrar a este tab.</div></div>';
+    amrFeedback('No se pudo cargar Mi Ronda', true);
+  } finally {
+    _amrCargando = false;
+  }
+}
+
+// ── Helpers de fecha ─────────────────────────────────────────────
+function amrFechaDesde() {
+  // Devuelve fecha ISO desde la cual se traen gestiones
+  // Para período semana: 14 días atrás (cubre semana actual + anterior para comparativa)
+  // Para período mes: 60 días atrás (mes actual + mes pasado)
+  var d = new Date();
+  var dias = _amrPeriodo === 'mes' ? 60 : 14;
+  d.setDate(d.getDate() - dias);
+  return amrFmtFechaISO(d);
+}
+
+function amrFmtFechaISO(d) {
+  var y = d.getFullYear();
+  var m = String(d.getMonth() + 1).padStart(2, '0');
+  var dd = String(d.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + dd;
+}
+
+// Fecha de la ronda actual de una ruta (mismo cálculo que tck-ventas)
+function amrFechaRonda(rutaKey) {
+  var cfg = AMR_RUTAS_CONFIG[rutaKey];
+  var hoy = new Date(); hoy.setHours(0,0,0,0);
+  if (cfg && cfg.tipo === 'viaje' && cfg.diaSalida !== null) {
+    var dif = (cfg.diaSalida - hoy.getDay() + 7) % 7;
+    var f = new Date(hoy); f.setDate(hoy.getDate() + dif);
+    return amrFmtFechaISO(f);
+  }
+  // Trenque/otros: lunes de esta semana
+  var diaHoy = hoy.getDay();
+  var dif2 = diaHoy === 0 ? -6 : (1 - diaHoy);
+  var lunes = new Date(hoy); lunes.setDate(hoy.getDate() + dif2);
+  return amrFmtFechaISO(lunes);
+}
+
+// Inicio de la semana anterior (para comparativa)
+function amrFechaSemanaAnterior() {
+  var hoy = new Date(); hoy.setHours(0,0,0,0);
+  var diaHoy = hoy.getDay();
+  var dif = diaHoy === 0 ? -6 : (1 - diaHoy);
+  var lunes = new Date(hoy); lunes.setDate(hoy.getDate() + dif);
+  // Lunes pasado = lunes de esta semana - 7
+  var lunesPasado = new Date(lunes); lunesPasado.setDate(lunes.getDate() - 7);
+  // Domingo pasado = lunes - 1 día
+  var dominioPasado = new Date(lunes); dominioPasado.setDate(lunes.getDate() - 1);
+  return { inicio: lunesPasado, fin: dominioPasado };
+}
+
+// Normalizar nombre para matching con pedidos
+function amrNormNombre(n) {
+  return (n || '').toString().trim().toLowerCase()
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// ── Calcular data agregada por vendedor y ruta ────────────────────
+function adminMiRondaCalcular() {
+  var byVendedor = {};
+
+  AMR_VENDEDORES.forEach(function(vend) {
+    // Clientes de este vendedor
+    var clis = _amrClientes.filter(function(c){ return (c.vendedor || '').toUpperCase() === vend; });
+
+    // Gestiones de este vendedor en la ronda actual de cada ruta
+    var gestPorClienteRonda = {}; // key: cliente_id+'|'+ruta+'|'+fecha → gestion
+    _amrGestiones.forEach(function(g){
+      if ((g.vendedor || '').toUpperCase() !== vend) return;
+      // Solo gestiones de la ronda ACTUAL de su ruta
+      var fechaRondaActual = amrFechaRonda(g.ruta_key);
+      if (g.fecha_ronda === fechaRondaActual) {
+        gestPorClienteRonda[g.cliente_id + '|' + g.ruta_key] = g;
+      }
+    });
+
+    // Set de clientes con venta detectada (cruce con pedidos)
+    var clientesConVenta = new Set();
+    _amrPedidos.forEach(function(p){
+      var pvend = (p.vendedor || '').toUpperCase();
+      if (pvend !== vend) return;
+      // Pedido en últimos 7 días (aprox cobertura ronda)
+      var fp = (typeof fechaPedido === 'function') ? fechaPedido(p) : null;
+      if (!fp || isNaN(fp)) return;
+      var hace7 = new Date(); hace7.setDate(hace7.getDate() - 7);
+      if (fp < hace7) return;
+      var nom = amrNormNombre(p.cliente);
+      if (nom) clientesConVenta.add(nom);
+    });
+
+    // Por ruta
+    var byRuta = {};
+    var totalVend = 0, totalGest = 0, totalPend = 0;
+
+    clis.forEach(function(c) {
+      var ruta = c.ruta_viaje || 'SIN_RUTA';
+      if (!byRuta[ruta]) byRuta[ruta] = { clientes: [], vendidos: 0, gestionados: 0, pendientes: 0 };
+      // Detectar estado del cliente
+      var nomNorm = amrNormNombre(c.nombre);
+      var pidio = clientesConVenta.has(nomNorm);
+      var gest = gestPorClienteRonda[c.cliente_id + '|' + ruta];
+      if (pidio || (gest && gest.estado === 'venta')) {
+        c._amr_estado = 'vendida';
+        byRuta[ruta].vendidos++;
+        totalVend++;
+      } else if (gest && gest.estado === 'sin_venta') {
+        c._amr_estado = 'gestionada';
+        c._amr_motivo = gest.motivo;
+        c._amr_motivo_texto = gest.motivo_texto;
+        byRuta[ruta].gestionados++;
+        totalGest++;
+      } else {
+        c._amr_estado = 'pendiente';
+        byRuta[ruta].pendientes++;
+        totalPend++;
+      }
+      byRuta[ruta].clientes.push(c);
+    });
+
+    byVendedor[vend] = {
+      clientes: clis,
+      byRuta: byRuta,
+      total: clis.length,
+      vendidos: totalVend,
+      gestionados: totalGest,
+      pendientes: totalPend
+    };
+  });
+
+  // KPIs globales
+  var kpis = { totalClientes: 0, totalVendidos: 0, totalGestionados: 0, totalPendientes: 0 };
+  Object.keys(byVendedor).forEach(function(v){
+    kpis.totalClientes += byVendedor[v].total;
+    kpis.totalVendidos += byVendedor[v].vendidos;
+    kpis.totalGestionados += byVendedor[v].gestionados;
+    kpis.totalPendientes += byVendedor[v].pendientes;
+  });
+  kpis.conv = kpis.totalClientes > 0 ? Math.round(kpis.totalVendidos * 100 / kpis.totalClientes) : 0;
+
+  // Comparativa vs semana anterior
+  var sa = amrFechaSemanaAnterior();
+  var saInicio = amrFmtFechaISO(sa.inicio);
+  var saFin = amrFmtFechaISO(sa.fin);
+  var ventasAnt = 0, gestAnt = 0, cerradosAnt = 0;
+  _amrGestiones.forEach(function(g){
+    if (g.fecha_ronda >= saInicio && g.fecha_ronda <= saFin) {
+      if (g.estado === 'venta') ventasAnt++;
+      else if (g.estado === 'sin_venta') {
+        gestAnt++;
+        if (g.motivo === 'cerro') cerradosAnt++;
+      }
+    }
+  });
+  kpis.comparativa = {
+    vendidosAnt: ventasAnt,
+    gestionadosAnt: gestAnt,
+    cerradosAnt: cerradosAnt,
+    deltaVendidos: kpis.totalVendidos - ventasAnt,
+    deltaGestionados: kpis.totalGestionados - gestAnt
+  };
+
+  // Top motivos del período
+  var motivos = {};
+  _amrGestiones.forEach(function(g){
+    if (g.estado === 'sin_venta' && g.motivo) {
+      // Filtrar por vendedor si hay filtro
+      if (_amrVendedor && (g.vendedor || '').toUpperCase() !== _amrVendedor) return;
+      motivos[g.motivo] = (motivos[g.motivo] || 0) + 1;
+    }
+  });
+  var topMotivos = Object.keys(motivos)
+    .map(function(k){ return { motivo: k, count: motivos[k] }; })
+    .sort(function(a,b){ return b.count - a.count; });
+  kpis.topMotivos = topMotivos;
+
+  return { byVendedor: byVendedor, kpis: kpis };
+}
+
+// ── Estado visual de una ruta (igual que tck-ventas) ──────────────
+function amrEstadoVisual(rutaKey, total, vendidos, gestionados) {
+  if (total === 0) return 'neutral';
+  var cfg = AMR_RUTAS_CONFIG[rutaKey];
+  if (!cfg || cfg.tipo === 'mostrador' || cfg.tipo === 'otros') {
+    var pct0 = (vendidos + gestionados) / total;
+    if (pct0 >= 0.9) return 'done';
+    if (pct0 >= 0.5) return 'info';
+    return 'neutral';
+  }
+  if (cfg.tipo !== 'viaje') {
+    var pct = (vendidos + gestionados) / total;
+    if (pct >= 0.9) return 'done';
+    if (pct >= 0.7) return 'info';
+    if (pct >= 0.5) return 'warning';
+    return 'alert';
+  }
+  // viaje: según días hasta el próximo
+  var hoy = new Date(); hoy.setHours(0,0,0,0);
+  var diaSalida = cfg.diaSalida;
+  var diasHasta = (diaSalida - hoy.getDay() + 7) % 7;
+  if (vendidos + gestionados >= total) return 'done';
+  if (diasHasta > 4) return 'info';
+  if (diasHasta >= 3) return 'warning';
+  if (diasHasta >= 2) return 'alert';
+  return 'urgent';
+}
+
+function amrBadgeTxt(estado, rutaKey) {
+  var cfg = AMR_RUTAS_CONFIG[rutaKey];
+  if (estado === 'done') return 'Completa';
+  if (cfg && (cfg.tipo === 'mostrador' || cfg.tipo === 'otros')) return '';
+  if (estado === 'urgent') return 'Urgente';
+  if (estado === 'alert') return 'Apurate';
+  if (estado === 'warning') return 'Activa';
+  if (estado === 'info') return 'A tiempo';
+  return '';
+}
+
+function amrTituloRuta(rutaKey) {
+  var cfg = AMR_RUTAS_CONFIG[rutaKey] || { nombre: rutaKey, descCorta: '', tipo: 'otros' };
+  if (cfg.tipo === 'viaje') {
+    var hoy = new Date(); hoy.setHours(0,0,0,0);
+    var dif = (cfg.diaSalida - hoy.getDay() + 7) % 7;
+    var f = new Date(hoy); f.setDate(hoy.getDate() + dif);
+    var dias = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+    return 'Próximo ' + dias[f.getDay()] + ' ' + f.getDate() + '/' + (f.getMonth()+1);
+  }
+  return cfg.descCorta || cfg.nombre;
+}
+
+// ── Render principal ─────────────────────────────────────────────
+function adminMiRondaRender() {
+  if (!_amrClientes.length && !_amrGestiones.length) {
+    document.getElementById('amr-vendors').innerHTML = '<div class="amr-empty"><div class="amr-empty-icon">📋</div><div class="amr-empty-txt">Sin datos</div><div class="amr-empty-sub">Todavía no hay clientes activos cargados.</div></div>';
+    return;
+  }
+  _amrData = adminMiRondaCalcular();
+  amrRenderHdrSub();
+  amrRenderKpis();
+  amrRenderVendors();
+  amrRenderMetricas();
+}
+
+function amrRenderHdrSub() {
+  var subEl = document.getElementById('amr-hdr-sub');
+  if (!subEl) return;
+  var d = new Date();
+  var dias = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+  var meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  var fechaTxt = dias[d.getDay()] + ' ' + d.getDate() + ' ' + meses[d.getMonth()];
+  var k = _amrData.kpis;
+  subEl.innerHTML = fechaTxt + '  ·  <strong>' + k.totalVendidos + ' / ' + k.totalClientes + ' vendidos (' + k.conv + '%)</strong> · ' + k.totalGestionados + ' gestionados · ' + k.totalPendientes + ' pendientes';
+}
+
+function amrRenderKpis() {
+  var cont = document.getElementById('amr-kpis');
+  if (!cont) return;
+  var k = _amrData.kpis;
+  var deltaConv = '';
+  if (k.comparativa.vendidosAnt > 0) {
+    var convAnt = k.totalClientes > 0 ? Math.round(k.comparativa.vendidosAnt * 100 / k.totalClientes) : 0;
+    var diffConv = k.conv - convAnt;
+    deltaConv = (diffConv > 0 ? '↑ +' : (diffConv < 0 ? '↓ ' : '= ')) + Math.abs(diffConv) + '% vs anterior';
+  } else {
+    deltaConv = 'sin datos previos';
+  }
+  var deltaGest = k.comparativa.deltaGestionados;
+  var deltaGestTxt = (deltaGest > 0 ? '↑ +' : (deltaGest < 0 ? '↓ ' : '= ')) + Math.abs(deltaGest) + ' vs anterior';
+
+  cont.innerHTML =
+    '<div class="amr-kpi green">' +
+      '<div class="amr-kpi-num">' + k.conv + '<small>%</small></div>' +
+      '<div class="amr-kpi-lbl">Conversión total</div>' +
+      '<div class="amr-kpi-trend ' + (k.conv > 30 ? 'up' : '') + '">' + deltaConv + '</div>' +
+    '</div>' +
+    '<div class="amr-kpi gold">' +
+      '<div class="amr-kpi-num">' + k.totalClientes + '</div>' +
+      '<div class="amr-kpi-lbl">Clientes en ronda</div>' +
+      '<div class="amr-kpi-trend">' + (k.comparativa.cerradosAnt || 0) + ' archivados (sem ant)</div>' +
+    '</div>' +
+    '<div class="amr-kpi orange">' +
+      '<div class="amr-kpi-num">' + k.totalGestionados + '</div>' +
+      '<div class="amr-kpi-lbl">Gestionados sin venta</div>' +
+      '<div class="amr-kpi-trend ' + (deltaGest < 0 ? 'up' : (deltaGest > 0 ? 'down' : '')) + '">' + deltaGestTxt + '</div>' +
+    '</div>' +
+    '<div class="amr-kpi">' +
+      '<div class="amr-kpi-num">' + k.totalPendientes + '</div>' +
+      '<div class="amr-kpi-lbl">Pendientes hoy</div>' +
+      '<div class="amr-kpi-trend">de ' + k.totalClientes + ' totales</div>' +
+    '</div>';
+}
+
+function amrRenderVendors() {
+  var cont = document.getElementById('amr-vendors');
+  if (!cont) return;
+  var byV = _amrData.byVendedor;
+  var vendores = _amrVendedor ? [_amrVendedor] : AMR_VENDEDORES;
+  var html = '';
+  vendores.forEach(function(vend){
+    var d = byV[vend];
+    if (!d || d.total === 0) return;
+    var inicial = vend.charAt(0);
+    var conv = d.total > 0 ? Math.round(d.vendidos * 100 / d.total) : 0;
+    var pctOk = d.total > 0 ? (d.vendidos * 100 / d.total) : 0;
+    var pctGest = d.total > 0 ? (d.gestionados * 100 / d.total) : 0;
+    html += '<div class="amr-vendor-card">' +
+      '<div class="amr-vendor-hdr" onclick="amrToggleVendor(this.parentElement)">' +
+        '<div class="amr-vendor-foto">' + inicial + '</div>' +
+        '<div class="amr-vendor-info">' +
+          '<div class="amr-vendor-nombre">' + vend + '</div>' +
+          '<div class="amr-vendor-stats">' +
+            '<span class="amr-vendor-stat-vendido">✓ ' + d.vendidos + ' vendidos</span>' +
+            '<span class="amr-vendor-stat-gestionado">⚠ ' + d.gestionados + ' gestionados</span>' +
+            '<span class="amr-vendor-stat-pendiente">⚪ ' + d.pendientes + ' pendientes</span>' +
+            '<span class="amr-vendor-stat-conv">— ' + conv + '% conv.</span>' +
+          '</div>' +
+          '<div class="amr-vendor-progress-tri">' +
+            '<div class="amr-vendor-progress-tri-ok" style="width:' + pctOk + '%"></div>' +
+            '<div class="amr-vendor-progress-tri-gest" style="width:' + pctGest + '%"></div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="amr-vendor-toggle">▾</div>' +
+      '</div>' +
+      '<div class="amr-vendor-body">' +
+        amrRenderRutas(vend, d.byRuta) +
+      '</div>' +
+    '</div>';
+  });
+  if (!html) html = '<div class="amr-empty"><div class="amr-empty-icon">📋</div><div class="amr-empty-txt">Sin clientes</div><div class="amr-empty-sub">No hay clientes activos para este vendedor.</div></div>';
+  cont.innerHTML = html;
+}
+
+function amrRenderRutas(vend, byRuta) {
+  // Orden de prioridad
+  var tipoOrden = { viaje:1, local:2, mostrador:3, otros:4 };
+  var estadoOrden = { urgent:1, alert:2, warning:3, info:4, neutral:5, done:6 };
+  var rutas = Object.keys(byRuta).sort(function(a,b){
+    var ca = AMR_RUTAS_CONFIG[a] || { tipo:'otros' };
+    var cb = AMR_RUTAS_CONFIG[b] || { tipo:'otros' };
+    var ta = tipoOrden[ca.tipo] || 5;
+    var tb = tipoOrden[cb.tipo] || 5;
+    if (ta !== tb) return ta - tb;
+    var ea = estadoOrden[amrEstadoVisual(a, byRuta[a].clientes.length, byRuta[a].vendidos, byRuta[a].gestionados)] || 99;
+    var eb = estadoOrden[amrEstadoVisual(b, byRuta[b].clientes.length, byRuta[b].vendidos, byRuta[b].gestionados)] || 99;
+    return ea - eb;
+  });
+  var html = '';
+  rutas.forEach(function(rk){
+    var d = byRuta[rk];
+    var cfg = AMR_RUTAS_CONFIG[rk] || { nombre: rk };
+    var estado = amrEstadoVisual(rk, d.clientes.length, d.vendidos, d.gestionados);
+    var badge = amrBadgeTxt(estado, rk);
+    var pctOk = d.clientes.length > 0 ? (d.vendidos * 100 / d.clientes.length) : 0;
+    var pctGest = d.clientes.length > 0 ? (d.gestionados * 100 / d.clientes.length) : 0;
+    var numTxt = d.gestionados > 0
+      ? d.vendidos + '+' + d.gestionados + '/' + d.clientes.length
+      : d.vendidos + '/' + d.clientes.length;
+    html += '<div class="amr-ruta-mini ' + estado + '" onclick="adminMiRondaAbrirModal(\'' + vend + '\',\'' + rk + '\')">' +
+      '<div class="amr-ruta-mini-info">' +
+        '<div class="amr-ruta-mini-titulo">' + escapeHtml(cfg.nombre) + '</div>' +
+        '<div class="amr-ruta-mini-sub">' + escapeHtml(amrTituloRuta(rk)) + '</div>' +
+      '</div>' +
+      (badge ? '<span class="amr-ruta-mini-badge ' + estado + '">' + badge + '</span>' : '') +
+      '<div class="amr-ruta-mini-bar">' +
+        '<div class="amr-ruta-mini-bar-ok" style="width:' + pctOk + '%"></div>' +
+        '<div class="amr-ruta-mini-bar-gest" style="width:' + pctGest + '%"></div>' +
+      '</div>' +
+      '<div class="amr-ruta-mini-num">' + numTxt + '</div>' +
+      '<div class="amr-ruta-mini-arrow">›</div>' +
+    '</div>';
+  });
+  return html;
+}
+
+function amrToggleVendor(cardEl) {
+  if (cardEl) cardEl.classList.toggle('collapsed');
+}
+
+function amrRenderMetricas() {
+  var metricasEl = document.getElementById('amr-metricas');
+  if (!metricasEl) return;
+  metricasEl.style.display = 'grid';
+
+  // Top motivos
+  var topEl = document.getElementById('amr-top-motivos');
+  var k = _amrData.kpis;
+  if (k.topMotivos && k.topMotivos.length > 0) {
+    var motivosHtml = '';
+    k.topMotivos.forEach(function(m){
+      var lbl = AMR_MOTIVO_LABELS[m.motivo] || { txt: m.motivo, icono: '•' };
+      var alerta = (m.motivo === 'mas_barato' || m.motivo === 'cerro') ? ' alerta' : '';
+      motivosHtml += '<div class="amr-motivo-row' + alerta + '">' +
+        '<span class="amr-motivo-icono">' + lbl.icono + '</span>' +
+        '<span class="amr-motivo-nombre">' + escapeHtml(lbl.txt) + '</span>' +
+        '<span class="amr-motivo-num">' + m.count + '</span>' +
+      '</div>';
+    });
+    topEl.innerHTML = motivosHtml;
+  } else {
+    topEl.innerHTML = '<div class="amr-motivo-empty">Sin gestiones registradas todavía</div>';
+  }
+
+  // Comparativa
+  var compEl = document.getElementById('amr-comparativa');
+  var c = k.comparativa;
+  function flecha(delta) {
+    if (delta > 0) return '<div class="amr-comp-flecha up">↑ +' + delta + '</div>';
+    if (delta < 0) return '<div class="amr-comp-flecha down">↓ ' + delta + '</div>';
+    return '<div class="amr-comp-flecha eq">= 0</div>';
+  }
+  if (c.vendidosAnt > 0 || c.gestionadosAnt > 0) {
+    compEl.innerHTML =
+      '<div class="amr-comp-row">' +
+        '<div class="amr-comp-label">Vendidos</div>' +
+        flecha(c.deltaVendidos) +
+        '<div class="amr-comp-val">' + k.totalVendidos + '</div>' +
+      '</div>' +
+      '<div class="amr-comp-row">' +
+        '<div class="amr-comp-label">Gestionados</div>' +
+        flecha(c.deltaGestionados) +
+        '<div class="amr-comp-val">' + k.totalGestionados + '</div>' +
+      '</div>' +
+      '<div class="amr-comp-row">' +
+        '<div class="amr-comp-label">Cerrados</div>' +
+        '<div class="amr-comp-flecha eq">= ' + c.cerradosAnt + '</div>' +
+        '<div class="amr-comp-val">' + (k.topMotivos.find(function(m){return m.motivo==='cerro';})||{count:0}).count + '</div>' +
+      '</div>';
+  } else {
+    compEl.innerHTML = '<div class="amr-motivo-empty">Sin datos de la semana anterior todavía<br><small>Disponible cuando haya gestiones de hace +7 días</small></div>';
+  }
+}
+
+// ── Modal de detalle de ruta (solo lectura) ──────────────────────
+function adminMiRondaAbrirModal(vendedor, rutaKey) {
+  if (!_amrData || !_amrData.byVendedor[vendedor]) return;
+  var byRuta = _amrData.byVendedor[vendedor].byRuta;
+  if (!byRuta[rutaKey]) return;
+  _amrModalCtx = { vendedor: vendedor, rutaKey: rutaKey };
+  var d = byRuta[rutaKey];
+  var cfg = AMR_RUTAS_CONFIG[rutaKey] || { nombre: rutaKey };
+
+  document.getElementById('amr-modal-titulo').textContent = vendedor + ' · ' + cfg.nombre;
+  document.getElementById('amr-modal-sub').textContent = d.clientes.length + ' clientes · ' + d.vendidos + ' vendidos · ' + d.gestionados + ' gestionados · ' + d.pendientes + ' pendientes';
+
+  // Render del body con 3 secciones
+  var pendientes = d.clientes.filter(function(c){ return c._amr_estado === 'pendiente'; });
+  var vendidos = d.clientes.filter(function(c){ return c._amr_estado === 'vendida'; });
+  var gestionados = d.clientes.filter(function(c){ return c._amr_estado === 'gestionada'; });
+
+  // Ordenar cada uno por localidad + nombre
+  function ord(arr){
+    arr.sort(function(a,b){
+      var la = (a.localidad || 'zzz').toUpperCase();
+      var lb = (b.localidad || 'zzz').toUpperCase();
+      if (la !== lb) return la < lb ? -1 : 1;
+      return (a.nombre || '').localeCompare(b.nombre || '');
+    });
+    return arr;
+  }
+  pendientes = ord(pendientes);
+  vendidos = ord(vendidos);
+  gestionados = ord(gestionados);
+
+  var html = '';
+  if (pendientes.length > 0) {
+    html += '<div class="amr-section-collapse"><span>Pendientes <span class="amr-section-collapse-badge">' + pendientes.length + '</span></span></div>';
+    pendientes.forEach(function(c){ html += amrRenderClienteCard(c, 'pendiente'); });
+  }
+  if (vendidos.length > 0) {
+    html += '<div class="amr-section-collapse vendidos"><span>Vendidos en esta ronda <span class="amr-section-collapse-badge">' + vendidos.length + '</span></span></div>';
+    vendidos.forEach(function(c){ html += amrRenderClienteCard(c, 'vendida'); });
+  }
+  if (gestionados.length > 0) {
+    html += '<div class="amr-section-collapse gestionados"><span>Ya gestionados <span class="amr-section-collapse-badge">' + gestionados.length + '</span></span></div>';
+    gestionados.forEach(function(c){ html += amrRenderClienteCard(c, 'gestionada'); });
+  }
+  if (!html) {
+    html = '<div class="amr-empty"><div class="amr-empty-icon">📋</div><div class="amr-empty-txt">Sin clientes</div></div>';
+  }
+  document.getElementById('amr-modal-body').innerHTML = html;
+  document.getElementById('amr-modal-backdrop').classList.add('on');
+}
+
+function amrRenderClienteCard(c, tipo) {
+  var nombre = escapeHtml(c.nombre || '—');
+  var loc = escapeHtml(c.localidad || 'Sin ciudad');
+  var dias = c.dias_desde_ult_pedido;
+  var ultTxt = c.ultimo_pedido
+    ? 'Últ. hace ' + (dias != null ? dias : '?') + 'd'
+    : 'Sin pedidos recientes';
+  var ritmo = c.ritmo && c.ritmo !== 'sin_compras_recientes' ? ' · 🔄 ' + escapeHtml(c.ritmo) : '';
+  var extra = '';
+  if (tipo === 'vendida') {
+    extra = '<div class="amr-cli-extra ok">✓ Vendido en esta ronda</div>';
+  } else if (tipo === 'gestionada') {
+    var lbl = AMR_MOTIVO_LABELS[c._amr_motivo] || { txt: c._amr_motivo || '?', icono: '⚠' };
+    var motivoTxt = c._amr_motivo === 'otro' && c._amr_motivo_texto ? c._amr_motivo_texto : lbl.txt;
+    extra = '<div class="amr-cli-extra gest">⚠ <strong>' + escapeHtml(motivoTxt) + '</strong></div>';
+  }
+  var clase = 'amr-cli-card' + (tipo === 'vendida' ? ' vendida' : (tipo === 'gestionada' ? ' gestionada' : ''));
+  return '<div class="' + clase + '">' +
+    '<div class="amr-cli-nombre">' + nombre + '</div>' +
+    '<div class="amr-cli-meta">' +
+      '<span>📍 ' + loc + '</span>' +
+      '<span>⏱️ ' + escapeHtml(ultTxt) + '</span>' +
+      ritmo +
+    '</div>' +
+    extra +
+  '</div>';
+}
+
+function adminMiRondaModalCerrar() {
+  document.getElementById('amr-modal-backdrop').classList.remove('on');
+  _amrModalCtx = null;
+}
+
+function adminMiRondaModalCerrarFondo(e) {
+  if (e.target && e.target.id === 'amr-modal-backdrop') adminMiRondaModalCerrar();
+}
+
+// Toast
+function amrFeedback(msg, esError) {
+  var el = document.getElementById('amr-feedback');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.toggle('error', !!esError);
+  el.classList.add('show');
+  clearTimeout(el._tid);
+  el._tid = setTimeout(function(){ el.classList.remove('show'); }, 2500);
+}
+
+// Helper escape (por si no existe)
+if (typeof escapeHtml !== 'function') {
+  window.escapeHtml = function(s) {
+    return (s || '').toString()
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  };
+}
 </script>
 
 <!-- ══ SHEET: MÁS PERÍODOS (Reportes) ══════════════════════════ -->
@@ -15162,6 +16420,24 @@ async function mapaLimpiarAlerta(nombreCliente) {
     </button>
   </div>
 </div>
+
+<!-- ═══ MODAL ADMIN MI RONDA — Detalle de ruta (solo lectura) ═══ -->
+<div class="amr-modal-backdrop" id="amr-modal-backdrop" onclick="adminMiRondaModalCerrarFondo(event)">
+  <div class="amr-modal-sheet">
+    <div class="amr-modal-pill"></div>
+    <div class="amr-modal-hdr">
+      <div>
+        <div class="amr-modal-titulo" id="amr-modal-titulo">Detalle</div>
+        <div class="amr-modal-sub" id="amr-modal-sub">—</div>
+      </div>
+      <button class="amr-modal-close" onclick="adminMiRondaModalCerrar()">✕</button>
+    </div>
+    <div class="amr-modal-body" id="amr-modal-body"></div>
+  </div>
+</div>
+
+<!-- Toast feedback admin -->
+<div class="amr-feedback" id="amr-feedback">—</div>
 
 </body>
 </html>
