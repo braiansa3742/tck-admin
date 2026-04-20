@@ -5745,6 +5745,114 @@ input[type="date"] {
   .amr-metricas-grid { grid-template-columns: 1fr; }
 }
 
+/* ════════════════════════════════════════════════════════════════
+   OPCIÓN C ADMIN — Cards solo lectura del modal de ruta
+   Mismo lenguaje visual que tck-ventas v3.6.1 pero sin botones
+   ════════════════════════════════════════════════════════════════ */
+.amr-opC-card-admin {
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid #E0D2B8;
+  border-left: 3px solid #B0B0B0;
+  padding: 11px 13px;
+  margin-bottom: 7px;
+  transition: border-color .2s, box-shadow .2s;
+  position: relative;
+}
+.amr-opC-card-admin:hover {
+  border-left-color: #D4A574;
+  box-shadow: 0 2px 8px rgba(139,0,0,.06);
+}
+
+.amr-opC-card-admin .amr-opC-row-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.amr-opC-card-admin .amr-opC-info { flex: 1; min-width: 0; }
+.amr-opC-card-admin .amr-opC-nombre {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 800;
+  color: #1A0800;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.amr-opC-card-admin .amr-opC-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 3px;
+  font-size: 11px;
+  color: #5C3A1E;
+}
+.amr-opC-card-admin .amr-opC-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* Estado: vendido — sello verde rotado */
+.amr-opC-card-admin.vendida {
+  background: #F4FAF5;
+  border-left-color: #2E7D32;
+  border-color: #C8E6C9;
+}
+.amr-opC-stamp-vendido {
+  background: rgba(46,125,50,.08);
+  border: 1.5px solid #2E7D32;
+  border-radius: 6px;
+  padding: 6px 10px;
+  text-align: center;
+  color: #1B5E20;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  transform: rotate(-1deg);
+}
+
+/* Estado: gestionado — sello dashed naranja */
+.amr-opC-card-admin.gestionada {
+  background: #FFFBF0;
+  border-left-color: #EF6C00;
+  border-color: #FFE082;
+}
+.amr-opC-stamp-gest {
+  background: rgba(239,108,0,.08);
+  border: 1.5px dashed #EF6C00;
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #C2410C;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: .4px;
+  text-transform: uppercase;
+  text-align: center;
+}
+.amr-opC-stamp-gest strong { font-weight: 900; }
+
+/* Estado: pendiente — badge sutil (admin solo observa) */
+.amr-opC-pending-badge {
+  background: rgba(139,111,80,.06);
+  border: 1px dashed #D4A574;
+  border-radius: 6px;
+  padding: 5px 10px;
+  text-align: center;
+  color: #8B6F50;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .8px;
+  text-transform: uppercase;
+}
+
 </style>
 </head>
 <body>
@@ -16337,24 +16445,34 @@ function amrRenderClienteCard(c, tipo) {
   var ultTxt = c.ultimo_pedido
     ? 'Últ. hace ' + (dias != null ? dias : '?') + 'd'
     : 'Sin pedidos recientes';
-  var ritmo = c.ritmo && c.ritmo !== 'sin_compras_recientes' ? ' · 🔄 ' + escapeHtml(c.ritmo) : '';
-  var extra = '';
+  var ritmoTxt = c.ritmo && c.ritmo !== 'sin_compras_recientes' ? c.ritmo : '';
+
+  // Bloque de estado según tipo (admin = solo lectura, sin botones de acción)
+  var bloqueEstado = '';
   if (tipo === 'vendida') {
-    extra = '<div class="amr-cli-extra ok">✓ Vendido en esta ronda</div>';
+    bloqueEstado = '<div class="amr-opC-stamp-vendido">★ Vendido en esta ronda ★</div>';
   } else if (tipo === 'gestionada') {
     var lbl = AMR_MOTIVO_LABELS[c._amr_motivo] || { txt: c._amr_motivo || '?', icono: '⚠' };
     var motivoTxt = c._amr_motivo === 'otro' && c._amr_motivo_texto ? c._amr_motivo_texto : lbl.txt;
-    extra = '<div class="amr-cli-extra gest">⚠ <strong>' + escapeHtml(motivoTxt) + '</strong></div>';
+    bloqueEstado = '<div class="amr-opC-stamp-gest">✕ No compró · <strong>' + escapeHtml(motivoTxt) + '</strong></div>';
+  } else {
+    // Pendiente: badge sutil sin acciones (admin no gestiona)
+    bloqueEstado = '<div class="amr-opC-pending-badge">○ Pendiente de gestión</div>';
   }
-  var clase = 'amr-cli-card' + (tipo === 'vendida' ? ' vendida' : (tipo === 'gestionada' ? ' gestionada' : ''));
+
+  var clase = 'amr-opC-card-admin' + (tipo === 'vendida' ? ' vendida' : (tipo === 'gestionada' ? ' gestionada' : ''));
   return '<div class="' + clase + '">' +
-    '<div class="amr-cli-nombre">' + nombre + '</div>' +
-    '<div class="amr-cli-meta">' +
-      '<span>📍 ' + loc + '</span>' +
-      '<span>⏱️ ' + escapeHtml(ultTxt) + '</span>' +
-      ritmo +
+    '<div class="amr-opC-row-info">' +
+      '<div class="amr-opC-info">' +
+        '<div class="amr-opC-nombre">' + nombre + '</div>' +
+        '<div class="amr-opC-meta">' +
+          '<span>📍 ' + loc + '</span>' +
+          '<span>⏱️ ' + escapeHtml(ultTxt) + '</span>' +
+          (ritmoTxt ? '<span>🔄 ' + escapeHtml(ritmoTxt) + '</span>' : '') +
+        '</div>' +
+      '</div>' +
     '</div>' +
-    extra +
+    bloqueEstado +
   '</div>';
 }
 
