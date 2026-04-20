@@ -5461,6 +5461,20 @@ input[type="date"] {
 .amr-ruta-mini-badge.info { background: rgba(21,101,192,.12); color: #1565C0; }
 .amr-ruta-mini-badge.done { background: rgba(46,125,50,.12); color: #2E7D32; }
 
+/* v8.1 admin — Badge "Zona errónea" + estilo de ruta que no corresponde al vendedor */
+.amr-ruta-mini-badge.amr-badge-erronea {
+  background: #FFEBEE;
+  color: #B71C1C;
+  border: 1px solid #EF9A9A;
+  font-weight: 900;
+  white-space: nowrap;
+}
+.amr-ruta-mini.amr-ruta-erronea {
+  background: linear-gradient(90deg, #FFF5F5 0%, #FFFFFF 40%);
+  border-left: 4px solid #C62828;
+}
+.amr-ruta-mini.amr-ruta-erronea:hover { background: #FFEBEE; }
+
 /* Métricas (Top motivos + Comparativa) */
 .amr-metricas-grid {
   display: grid;
@@ -7221,6 +7235,8 @@ async function cargarPedidos(silencioso) {
         estado:         limpiar(cols[10]) || 'Pendiente',
         fechaEntrega:   esFechaEntregaValida(limpiar(cols[11])) ? limpiar(cols[11]) : '',
         turnoEntrega:   limpiar(cols[12]) || '',
+        origen:         limpiar(cols[13]) || '',   // v8.1 admin: leer origen del Sheet
+        telefono:       limpiar(cols[14]) || '',   // v8.1 admin: leer telefono/nota
         fila:           i + 1
       });
     }
@@ -16230,10 +16246,57 @@ function amrEstadoVisual(rutaKey, total, vendidos, gestionados) {
   var diaSalida = cfg.diaSalida;
   var diasHasta = (diaSalida - hoy.getDay() + 7) % 7;
   if (vendidos + gestionados >= total) return 'done';
+  // v8.1 admin: si hoy es el día de salida → camión ya salió, estado cerrado
+  if (diasHasta === 0) return 'done';
   if (diasHasta > 4) return 'info';
   if (diasHasta >= 3) return 'warning';
   if (diasHasta >= 2) return 'alert';
   return 'urgent';
+}
+
+// v8.1 admin — Estado horario de una ruta (similar a ventas v8.2).
+// Usado SOLO para ordenar, no para color. Valores:
+//   'resultado' → el camión ya salió hoy (diaSalida === hoy.getDay()) → al final
+//   'proxima'   → la ruta de viaje con menor diasHasta (la más cercana, > 0) → primera
+//   'activa'    → otras rutas de viaje futuras
+//   'especial'  → TRENQUE / MOSTRADOR (semana corriente, sin viaje)
+//   'sin_ruta'  → SIN_RUTA (clientes huérfanos, al final antes de resultado)
+function amrEstadoHorario(rutaKey, byRutaRef) {
+  var cfg = AMR_RUTAS_CONFIG[rutaKey];
+  if (!cfg) return 'especial';
+  if (cfg.tipo === 'otros' || rutaKey === 'SIN_RUTA') return 'sin_ruta';
+  if (cfg.tipo === 'mostrador' || cfg.tipo === 'local') return 'especial';
+  if (cfg.tipo === 'viaje' && cfg.diaSalida !== null) {
+    var hoy = new Date(); hoy.setHours(0,0,0,0);
+    var diasHasta = (cfg.diaSalida - hoy.getDay() + 7) % 7;
+    if (diasHasta === 0) return 'resultado';
+    // Calcular si es la ruta "próxima" mirando las otras rutas de viaje
+    if (byRutaRef) {
+      var minDias = Infinity;
+      Object.keys(byRutaRef).forEach(function(rk){
+        var c2 = AMR_RUTAS_CONFIG[rk];
+        if (!c2 || c2.tipo !== 'viaje' || c2.diaSalida === null) return;
+        var d2 = (c2.diaSalida - hoy.getDay() + 7) % 7;
+        if (d2 > 0 && d2 < minDias) minDias = d2;
+      });
+      if (diasHasta === minDias) return 'proxima';
+    }
+    return 'activa';
+  }
+  return 'especial';
+}
+
+// v8.1 admin — ¿La ruta corresponde al vendedor según reglas de negocio?
+// Regla principal: Juan SOLO trabaja en Trenque Lauquen.
+// Devuelve true si la ruta NO corresponde al vendedor (data sucia / derivación mal hecha).
+function amrRutaErronea(vendedor, rutaKey) {
+  var v = (vendedor || '').toString().toUpperCase();
+  if (v === 'JUAN') {
+    // Juan solo: TRENQUE, MOSTRADOR, SIN_RUTA (este último es ok: cliente sin zona todavía)
+    return (rutaKey !== 'TRENQUE' && rutaKey !== 'MOSTRADOR' && rutaKey !== 'SIN_RUTA');
+  }
+  // Miguel y Lisandro pueden tener todas las rutas
+  return false;
 }
 
 function amrBadgeTxt(estado, rutaKey) {
@@ -16362,18 +16425,20 @@ function amrRenderVendors() {
 }
 
 function amrRenderRutas(vend, byRuta) {
-  // Orden de prioridad
-  var tipoOrden = { viaje:1, local:2, mostrador:3, otros:4 };
-  var estadoOrden = { urgent:1, alert:2, warning:3, info:4, neutral:5, done:6 };
+  // v8.1 admin: orden por estado horario (como ventas v8.2).
+  // Prioridad: proxima → activa → especial → sin_ruta → resultado (al final).
+  // Las rutas con "Resultado" (camión ya salió) van abajo.
+  var horarioOrden = { proxima:1, activa:2, especial:3, sin_ruta:4, resultado:5 };
   var rutas = Object.keys(byRuta).sort(function(a,b){
-    var ca = AMR_RUTAS_CONFIG[a] || { tipo:'otros' };
-    var cb = AMR_RUTAS_CONFIG[b] || { tipo:'otros' };
-    var ta = tipoOrden[ca.tipo] || 5;
-    var tb = tipoOrden[cb.tipo] || 5;
-    if (ta !== tb) return ta - tb;
-    var ea = estadoOrden[amrEstadoVisual(a, byRuta[a].clientes.length, byRuta[a].vendidos, byRuta[a].gestionados)] || 99;
-    var eb = estadoOrden[amrEstadoVisual(b, byRuta[b].clientes.length, byRuta[b].vendidos, byRuta[b].gestionados)] || 99;
-    return ea - eb;
+    var ha = amrEstadoHorario(a, byRuta);
+    var hb = amrEstadoHorario(b, byRuta);
+    var wa = horarioOrden[ha] || 9;
+    var wb = horarioOrden[hb] || 9;
+    if (wa !== wb) return wa - wb;
+    // Dentro del mismo estado horario, las que tienen más pendientes primero
+    var pa = (byRuta[a].pendientes || 0);
+    var pb = (byRuta[b].pendientes || 0);
+    return pb - pa;
   });
   var html = '';
   rutas.forEach(function(rk){
@@ -16381,17 +16446,23 @@ function amrRenderRutas(vend, byRuta) {
     var cfg = AMR_RUTAS_CONFIG[rk] || { nombre: rk };
     var estado = amrEstadoVisual(rk, d.clientes.length, d.vendidos, d.gestionados);
     var badge = amrBadgeTxt(estado, rk);
+    var erronea = amrRutaErronea(vend, rk);  // v8.1 admin
     var pctOk = d.clientes.length > 0 ? (d.vendidos * 100 / d.clientes.length) : 0;
     var pctGest = d.clientes.length > 0 ? (d.gestionados * 100 / d.clientes.length) : 0;
     var numTxt = d.gestionados > 0
       ? d.vendidos + '+' + d.gestionados + '/' + d.clientes.length
       : d.vendidos + '/' + d.clientes.length;
-    html += '<div class="amr-ruta-mini ' + estado + '" onclick="adminMiRondaAbrirModal(\'' + vend + '\',\'' + rk + '\')">' +
+    var erroneaCls = erronea ? ' amr-ruta-erronea' : '';
+    var erroneaBadge = erronea
+      ? '<span class="amr-ruta-mini-badge amr-badge-erronea" title="Esta ruta no corresponde al vendedor. Revisar asignación.">⚠️ Zona errónea</span>'
+      : '';
+    html += '<div class="amr-ruta-mini ' + estado + erroneaCls + '" onclick="adminMiRondaAbrirModal(\'' + vend + '\',\'' + rk + '\')">' +
       '<div class="amr-ruta-mini-info">' +
         '<div class="amr-ruta-mini-titulo">' + escapeHtml(cfg.nombre) + '</div>' +
         '<div class="amr-ruta-mini-sub">' + escapeHtml(amrTituloRuta(rk)) + '</div>' +
       '</div>' +
-      (badge ? '<span class="amr-ruta-mini-badge ' + estado + '">' + badge + '</span>' : '') +
+      erroneaBadge +
+      (badge && !erronea ? '<span class="amr-ruta-mini-badge ' + estado + '">' + badge + '</span>' : '') +
       '<div class="amr-ruta-mini-bar">' +
         '<div class="amr-ruta-mini-bar-ok" style="width:' + pctOk + '%"></div>' +
         '<div class="amr-ruta-mini-bar-gest" style="width:' + pctGest + '%"></div>' +
