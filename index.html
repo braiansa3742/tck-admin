@@ -6931,6 +6931,59 @@ async function sbFetch(path, options = {}) {
   return text ? JSON.parse(text) : null;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// v8.2 admin — MAPA pedidoId → sucursal (para card + detector duplicados)
+// Replicado de ventas v8.7. Admin solo LEE el mapa; los vendedores son
+// quienes gestionan sucursales desde ventas.
+// ═══════════════════════════════════════════════════════════════
+
+var _pedidoSucursalesMap = {};
+
+async function pedidoSucursalesMapCargar() {
+  try {
+    var path = 'pedido_sucursales?select=pedido_id,sucursal_id,cliente_sucursales(id,nombre_suc,direccion,localidad,cliente_norm)&limit=5000';
+    var data = await sbFetch(path);
+    if (!Array.isArray(data)) return;
+    var m = {};
+    data.forEach(function(row) {
+      var suc = row.cliente_sucursales || null;
+      if (!suc) return;
+      m[row.pedido_id] = {
+        sucursal_id:  row.sucursal_id,
+        nombre_suc:   suc.nombre_suc,
+        direccion:    suc.direccion,
+        localidad:    suc.localidad,
+        cliente_norm: suc.cliente_norm
+      };
+    });
+    _pedidoSucursalesMap = m;
+    console.log('[v8.2 admin] Mapa pedido→sucursal cargado:', Object.keys(m).length, 'vínculos');
+  } catch (e) {
+    console.error('[v8.2 admin] error cargando mapa pedido-sucursal:', e);
+  }
+}
+
+function pedidoSucursalDeMapa(pedidoId) {
+  if (!pedidoId) return null;
+  return _pedidoSucursalesMap[pedidoId] || null;
+}
+
+function gruposVaSucursalesDistintas(grupoPedidos) {
+  if (!grupoPedidos || grupoPedidos.length < 2) return false;
+  var sucIds = [];
+  for (var i = 0; i < grupoPedidos.length; i++) {
+    var info = pedidoSucursalDeMapa(grupoPedidos[i].pedidoId);
+    if (!info || !info.sucursal_id) return false;
+    sucIds.push(info.sucursal_id);
+  }
+  var unicas = {};
+  sucIds.forEach(function(id){ unicas[id] = true; });
+  return Object.keys(unicas).length === sucIds.length;
+}
+// ═══════════════════════════════════════════════════════════════
+// Fin v8.2 admin — MAPA
+// ═══════════════════════════════════════════════════════════════
+
 // GPS state
 var _gpsVendedorId  = null;
 var _gpsCheckinActivo = null;
@@ -7252,6 +7305,9 @@ async function cargarPedidos(silencioso) {
       ahoraEl.style.color = 'var(--green2)';
     }
 
+    // v8.2 admin: cargar mapa de vínculos pedido→sucursal
+    await pedidoSucursalesMapCargar();
+
     // Detectar duplicados — solo dentro del MISMO DÍA
     // MEJORA (fase A): solo marcar como duplicado si comparten algún producto.
     // Pedidos del mismo cliente con productos 100% distintos NO son duplicados,
@@ -7311,6 +7367,15 @@ async function cargarPedidos(silencioso) {
       var grupo = mapTotal[kCliente];
       if (!grupo || grupo.length <= 1) {
         p.esDuplicado = false; p.tipoDuplicado = null; p.duplicadoCon = '';
+        return;
+      }
+
+      // v8.2 admin: si TODOS los pedidos del grupo van a sucursales distintas,
+      // NO marcar como duplicado — son pedidos legítimos del mismo cliente a direcciones distintas.
+      if (gruposVaSucursalesDistintas(grupo)) {
+        p.esDuplicado = false;
+        p.tipoDuplicado = null;
+        p.duplicadoCon = '';
         return;
       }
 
@@ -8533,7 +8598,13 @@ function renderCard(p) {
         '<div class="pedido-id">' + p.pedidoId + '</div>' +
         '<div class="pedido-cliente">' + origenIconHtml(p) + (p.cliente||'(sin nombre)') + '</div>' +
         (p.fechaEntrega ? '<div style="display:inline-flex;align-items:center;gap:4px;background:' + (p.turnoEntrega==='Mañana'?'#E3F2FD':'#FFF3E0') + ';color:' + (p.turnoEntrega==='Mañana'?'#1565C0':'#E65100') + ';border-radius:20px;padding:2px 8px;font-family:Barlow Condensed,sans-serif;font-size:11px;font-weight:800;margin-top:3px;">' + (p.turnoEntrega==='Mañana'?'🌅':'🌆') + ' ' + p.fechaEntrega + ' · ' + (p.turnoEntrega||'') + '</div>' : '') +
-        '<div class="pedido-comercio">' + (p.comercio ? '🏪 '+p.comercio+' · ' : '') + '📍 ' + p.localidad + '</div>' +
+        '<div class="pedido-comercio">' + (p.comercio ? '🏪 '+p.comercio+' · ' : '') + (function(){
+          // v8.2 admin: si el pedido tiene sucursal vinculada, mostrarla
+          var suc = pedidoSucursalDeMapa(p.pedidoId);
+          if (!suc || !suc.nombre_suc) return '';
+          var n = (suc.nombre_suc||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          return '🏢 ' + n + ' · ';
+        })() + '📍 ' + p.localidad + '</div>' +
         buildProdsPreview(p) +
       '</div>' +
       '<div class="pedido-head-right">' +
@@ -8544,6 +8615,16 @@ function renderCard(p) {
     '</div>' +
     '<div class="pedido-body" id="body-' + id + '">' +
       vendedorRow +
+      (function(){
+        // v8.2 admin: fila "Sucursal" en el detalle expandido si está vinculada
+        var suc = pedidoSucursalDeMapa(p.pedidoId);
+        if (!suc || !suc.nombre_suc) return '';
+        var esc = function(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+        var dirLoc = [suc.direccion, suc.localidad].filter(Boolean).map(esc).join(' · ');
+        return '<div class="pedido-detalle-row"><span class="pdr-label">🏢 Sucursal</span><span class="pdr-val">' +
+          esc(suc.nombre_suc) + (dirLoc ? ' <span style="color:#8B6F50;font-size:12px;">· ' + dirLoc + '</span>' : '') +
+          '</span></div>';
+      })() +
       '<div class="pedido-detalle-row"><span class="pdr-label">Localidad</span><span class="pdr-val">' + p.localidad + '</span></div>' +
       '<div class="pedido-detalle-row"><span class="pdr-label">Productos</span><span class="pdr-val">' + p.items + ' unidades</span></div>' +
       '<div class="pedido-detalle-row"><span class="pdr-label">Total</span><span class="pdr-val" style="color:var(--red);font-family:\'Barlow Condensed\',sans-serif;font-size:18px;font-weight:900;">' + fmtTotal(p.total) + '</span></div>' +
