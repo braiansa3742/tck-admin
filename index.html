@@ -3517,6 +3517,96 @@ body {
 .adm-rend-modal-btn:disabled { opacity: .4; cursor: not-allowed; }
 /* ═══════════════════════════════════════════════════════════════ */
 
+/* ═══════════════════════════════════════════════════════════════
+   v9.0 admin — TAB ACCIONES DE DUPLICADOS (auditoría)
+   ═══════════════════════════════════════════════════════════════ */
+.acc-dup-periodo-btn {
+  flex: 1;
+  padding: 9px 6px;
+  background: #fff;
+  color: var(--text2);
+  border: 1.5px solid var(--cream3);
+  border-radius: 8px;
+  font-family: 'Barlow', sans-serif;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+}
+.acc-dup-periodo-btn.sel {
+  background: linear-gradient(135deg, #1A237E, #283593);
+  color: #fff;
+  border-color: #1A237E;
+}
+.acc-dup-stat-card {
+  background: var(--cream2);
+  border-radius: 8px;
+  padding: 8px;
+  text-align: center;
+}
+.acc-dup-stat-card .lbl { font-size: 10px; color: var(--text3); text-transform: uppercase; font-weight: 700; }
+.acc-dup-stat-card .num {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 900; font-size: 18px; margin-top: 2px;
+}
+.acc-dup-stat-card.unif .num { color: #1B5E20; }
+.acc-dup-stat-card.canc .num { color: #C62828; }
+.acc-dup-stat-card.dist .num { color: #1565C0; }
+.acc-dup-stat-card.tot  .num { color: #1A237E; }
+
+.acc-dup-card {
+  background: #fff;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border-left: 3px solid #ccc;
+}
+.acc-dup-card.unif { border-left-color: #1B5E20; }
+.acc-dup-card.canc { border-left-color: #C62828; }
+.acc-dup-card.dist { border-left-color: #1565C0; }
+
+.acc-dup-card-hdr {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin-bottom: 6px;
+}
+.acc-dup-card-tipo {
+  font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px;
+}
+.acc-dup-card.unif .acc-dup-card-tipo { color: #1B5E20; }
+.acc-dup-card.canc .acc-dup-card-tipo { color: #C62828; }
+.acc-dup-card.dist .acc-dup-card-tipo { color: #1565C0; }
+.acc-dup-card-fecha { font-size: 10px; color: var(--text3); }
+.acc-dup-card-titulo { font-size: 13px; color: var(--text); margin-bottom: 3px; }
+.acc-dup-card-titulo b { font-weight: 700; }
+.acc-dup-card-meta {
+  font-size: 11px; color: var(--text3); line-height: 1.5;
+}
+.acc-dup-card-pids {
+  font-size: 10px;
+  color: var(--text3);
+  margin-top: 4px;
+  font-family: monospace;
+}
+.acc-dup-card-motivo {
+  background: #FFF8DC;
+  border-left: 2px solid #F9A825;
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #5C3A1E;
+  margin-top: 6px;
+  font-style: italic;
+}
+.acc-dup-vacio {
+  text-align: center;
+  padding: 24px 12px;
+  color: var(--text3);
+  font-size: 12px;
+  font-style: italic;
+  background: #fff;
+  border-radius: 8px;
+}
+/* ═══════════════════════════════════════════════════════════════ */
+
 .rep-card {
   background: #fff;
   border-radius: 14px;
@@ -6971,9 +7061,39 @@ input[type="date"] {
     </div>
   </div>
 
-</div>
+  <!-- ═══ v9.0 admin: TAB ACCIONES DE DUPLICADOS ═══ -->
+  <div class="view" id="view-acc-dup">
+    <div style="padding:12px 14px;padding-bottom:80px;">
 
-<!-- TAB NAV PRO — 5 tabs + Más (Pedidos al centro) -->
+      <div style="background:linear-gradient(135deg,#1A237E,#283593);border-radius:12px;padding:14px 16px;margin-bottom:14px;color:#fff;display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:22px;line-height:1;">📋 Resoluciones de duplicados</div>
+          <div style="font-size:11px;color:rgba(255,255,255,.75);margin-top:3px;">Auditoría de acciones del equipo</div>
+        </div>
+        <button onclick="accDupCargar()" style="background:rgba(255,255,255,.2);border:none;border-radius:50%;width:34px;height:34px;color:#fff;cursor:pointer;font-size:16px;">🔄</button>
+      </div>
+
+      <!-- Chips de período -->
+      <div style="display:flex;gap:6px;margin-bottom:12px;">
+        <button class="acc-dup-periodo-btn sel" data-periodo="hoy" onclick="accDupSelPeriodo('hoy')">📅 Hoy</button>
+        <button class="acc-dup-periodo-btn" data-periodo="ayer" onclick="accDupSelPeriodo('ayer')">↩️ Ayer</button>
+        <button class="acc-dup-periodo-btn" data-periodo="7d" onclick="accDupSelPeriodo('7d')">📆 7 días</button>
+      </div>
+
+      <!-- Mini-stats por tipo -->
+      <div id="acc-dup-stats" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:14px;">
+        <!-- pintado por accDupRender -->
+      </div>
+
+      <!-- Lista cronológica -->
+      <div id="acc-dup-lista">
+        <div style="text-align:center;padding:24px;color:var(--text3);font-size:12px;font-style:italic;">Cargando...</div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
 <nav class="tab-nav" id="tab-nav">
   <button class="tab-btn" id="tab-btn-logistica" onclick="cambiarTab('logistica')">
     <span class="tab-icon">🚚</span>
@@ -7009,6 +7129,10 @@ input[type="date"] {
     <span class="tab-icon">💰</span>
     <span class="tab-label">Rendir</span>
   </button>
+  <button class="tab-btn" id="tab-btn-acc-dup" onclick="cambiarTab('acc-dup')" style="display:none !important;">
+    <span class="tab-icon">📋</span>
+    <span class="tab-label">Duplicados</span>
+  </button>
 </nav>
 
 <!-- MENÚ "MÁS" (sheet inferior) — solo Clientes + Visitas -->
@@ -7029,6 +7153,10 @@ input[type="date"] {
         <div class="menu-mas-icon">💰</div>
         <div class="menu-mas-lbl">Rendiciones</div>
         <div class="menu-mas-badge" id="menu-mas-rend-badge" style="display:none;background:#EF6C00;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;margin-top:3px;">0</div>
+      </button>
+      <button class="menu-mas-item" id="menu-mas-acc-dup" onclick="cambiarTab('acc-dup');cerrarMenuMas()">
+        <div class="menu-mas-icon">📋</div>
+        <div class="menu-mas-lbl">Duplicados</div>
       </button>
     </div>
     <button class="menu-mas-cerrar" onclick="cerrarMenuMas()">Cerrar</button>
@@ -8018,6 +8146,208 @@ async function admRendChequearCierre() {
 }
 // ═══════════════════════════════════════════════════════════════
 // Fin v8.3 admin — TAB RENDICIONES
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
+// v9.0 admin — TAB ACCIONES DE DUPLICADOS
+// Auditoría de las resoluciones que hace el equipo (Juan/Miguel/etc.)
+// sobre pedidos marcados como duplicados.
+//
+// Lee de la tabla `pedido_acciones` en Supabase. Solo lectura — Francisco
+// audita; si quiere "deshacer" entra al pedido y lo edita manualmente.
+// ═══════════════════════════════════════════════════════════════
+
+var _accDupPeriodo = 'hoy'; // 'hoy' | 'ayer' | '7d'
+var _accDupAcciones = [];   // [acciones cargadas]
+
+function accDupSelPeriodo(p) {
+  _accDupPeriodo = p;
+  // Toggle visual de chips
+  document.querySelectorAll('.acc-dup-periodo-btn').forEach(function(b) {
+    b.classList.toggle('sel', b.getAttribute('data-periodo') === p);
+  });
+  accDupCargar();
+}
+
+function _accDupRangoFechas() {
+  // Devuelve { desde, hasta } como Date para filtrar
+  var ahora = new Date();
+  var desde, hasta;
+  if (_accDupPeriodo === 'hoy') {
+    desde = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate(), 0, 0, 0);
+    hasta = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() + 1, 0, 0, 0);
+  } else if (_accDupPeriodo === 'ayer') {
+    desde = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() - 1, 0, 0, 0);
+    hasta = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate(), 0, 0, 0);
+  } else {
+    // 7d: desde 7 días atrás hasta ahora
+    desde = new Date(ahora.getTime() - 7 * 24 * 60 * 60 * 1000);
+    hasta = new Date(ahora.getTime() + 60 * 1000); // un margen
+  }
+  return { desde: desde, hasta: hasta };
+}
+
+async function accDupCargar() {
+  var lista = document.getElementById('acc-dup-lista');
+  var stats = document.getElementById('acc-dup-stats');
+  if (lista) lista.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text3);font-size:12px;font-style:italic;">Cargando...</div>';
+  if (stats) stats.innerHTML = '';
+
+  try {
+    var rango = _accDupRangoFechas();
+    var desdeISO = rango.desde.toISOString();
+    var hastaISO = rango.hasta.toISOString();
+
+    var rows = await sbFetch(
+      'pedido_acciones?fecha_hora=gte.' + encodeURIComponent(desdeISO) +
+      '&fecha_hora=lt.' + encodeURIComponent(hastaISO) +
+      '&order=fecha_hora.desc&select=*'
+    );
+    _accDupAcciones = rows || [];
+    accDupRender();
+  } catch(e) {
+    console.error('[v9.0 admin] error cargando acciones:', e);
+    if (lista) lista.innerHTML = '<div class="acc-dup-vacio">❌ Error al cargar. Tocá 🔄 para reintentar.</div>';
+  }
+}
+
+function accDupRender() {
+  var lista = document.getElementById('acc-dup-lista');
+  var stats = document.getElementById('acc-dup-stats');
+  if (!lista || !stats) return;
+
+  // ── Stats por tipo ──
+  var conteo = { unificado: 0, cancelado_otro: 0, cancelado_propio: 0, marcado_distinto: 0 };
+  _accDupAcciones.forEach(function(a) {
+    if (conteo[a.accion] !== undefined) conteo[a.accion]++;
+  });
+  var totalCanc = conteo.cancelado_otro + conteo.cancelado_propio;
+
+  stats.innerHTML =
+    '<div class="acc-dup-stat-card unif"><div class="lbl">🔀 Unificados</div><div class="num">' + conteo.unificado + '</div></div>' +
+    '<div class="acc-dup-stat-card canc"><div class="lbl">🚫 Cancelados</div><div class="num">' + totalCanc + '</div></div>' +
+    '<div class="acc-dup-stat-card dist"><div class="lbl">✅ Distintos</div><div class="num">' + conteo.marcado_distinto + '</div></div>' +
+    '<div class="acc-dup-stat-card tot"><div class="lbl">📊 Total</div><div class="num">' + _accDupAcciones.length + '</div></div>';
+
+  // ── Lista cronológica ──
+  if (!_accDupAcciones.length) {
+    var msg = _accDupPeriodo === 'hoy'
+      ? 'Sin acciones hoy ✨'
+      : _accDupPeriodo === 'ayer'
+        ? 'Sin acciones ayer'
+        : 'Sin acciones en los últimos 7 días';
+    lista.innerHTML = '<div class="acc-dup-vacio">' + msg + '</div>';
+    return;
+  }
+
+  var html = '';
+  _accDupAcciones.forEach(function(a) {
+    html += _accDupCardHtml(a);
+  });
+  lista.innerHTML = html;
+}
+
+function _accDupCardHtml(a) {
+  var f = new Date(a.fecha_hora);
+  var fechaStr = String(f.getDate()).padStart(2,'0') + '/' + String(f.getMonth()+1).padStart(2,'0') +
+    ' ' + String(f.getHours()).padStart(2,'0') + ':' + String(f.getMinutes()).padStart(2,'0');
+
+  // Helper escape
+  var esc = function(s) {
+    return (s == null ? '' : String(s))
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  };
+
+  // Acortar pedido_id para visual (toma el último bloque después del último '-')
+  var shortPid = function(pid) {
+    if (!pid) return '';
+    var parts = pid.split('-');
+    return '...' + parts.slice(-2).join('-');
+  };
+
+  var tipoCls, tipoIco, tipoLbl, titulo, meta;
+  switch (a.accion) {
+    case 'unificado':
+      tipoCls = 'unif';
+      tipoIco = '🔀';
+      tipoLbl = 'UNIFICÓ';
+      titulo = '<b>' + esc(a.vendedor_que_actuo) + '</b> unificó pedidos';
+      var partes = [];
+      if (a.vendedor_origen && a.vendedor_destino && a.vendedor_origen !== a.vendedor_destino) {
+        partes.push('Antes: ' + esc(a.vendedor_origen) + ' → Ahora: ' + esc(a.vendedor_destino));
+      } else if (a.vendedor_destino) {
+        partes.push('Acreditado a: ' + esc(a.vendedor_destino));
+      }
+      if (a.monto_resultante) {
+        partes.push('Total: $' + Math.round(a.monto_resultante).toLocaleString('es-AR'));
+      }
+      if (a.productos_unificados) {
+        partes.push('Productos: ' + esc(a.productos_unificados));
+      }
+      meta = partes.join(' · ');
+      break;
+    case 'cancelado_otro':
+      tipoCls = 'canc';
+      tipoIco = '🚫';
+      tipoLbl = 'CANCELÓ EL OTRO';
+      titulo = '<b>' + esc(a.vendedor_que_actuo) + '</b> canceló pedido' +
+        (a.vendedor_origen ? ' de <b>' + esc(a.vendedor_origen) + '</b>' : '');
+      meta = 'Pedido cancelado';
+      break;
+    case 'cancelado_propio':
+      tipoCls = 'canc';
+      tipoIco = '🚫';
+      tipoLbl = 'CANCELÓ EL PROPIO';
+      titulo = '<b>' + esc(a.vendedor_que_actuo) + '</b> canceló su propio pedido';
+      meta = 'Mantuvo el otro pedido del cliente';
+      break;
+    case 'marcado_distinto':
+      tipoCls = 'dist';
+      tipoIco = '✅';
+      tipoLbl = 'MARCÓ COMO DISTINTOS';
+      titulo = '<b>' + esc(a.vendedor_que_actuo) + '</b> marcó como pedidos distintos';
+      meta = 'Cliente con varias sucursales o cosas diferentes';
+      break;
+    default:
+      tipoCls = '';
+      tipoIco = '?';
+      tipoLbl = esc(a.accion);
+      titulo = esc(a.vendedor_que_actuo) + ' hizo una acción';
+      meta = '';
+  }
+
+  var html = '<div class="acc-dup-card ' + tipoCls + '">' +
+    '<div class="acc-dup-card-hdr">' +
+      '<span class="acc-dup-card-tipo">' + tipoIco + ' ' + tipoLbl + '</span>' +
+      '<span class="acc-dup-card-fecha">' + fechaStr + '</span>' +
+    '</div>' +
+    '<div class="acc-dup-card-titulo">' + titulo + '</div>';
+
+  if (meta) {
+    html += '<div class="acc-dup-card-meta">' + meta + '</div>';
+  }
+
+  // IDs de pedidos involucrados
+  var pids = [];
+  if (a.pedido_id) pids.push(shortPid(a.pedido_id));
+  if (a.pedido_id_relacionado) {
+    a.pedido_id_relacionado.split(/\s*,\s*/).forEach(function(pid) {
+      if (pid) pids.push(shortPid(pid));
+    });
+  }
+  if (pids.length) {
+    html += '<div class="acc-dup-card-pids">📎 ' + pids.join(' + ') + '</div>';
+  }
+
+  if (a.motivo) {
+    html += '<div class="acc-dup-card-motivo">"' + esc(a.motivo) + '"</div>';
+  }
+
+  html += '</div>';
+  return html;
+}
+// ═══════════════════════════════════════════════════════════════
+// Fin v9.0 admin — TAB ACCIONES DE DUPLICADOS
 // ═══════════════════════════════════════════════════════════════
 
 // GPS state
@@ -10096,16 +10426,16 @@ function cambiarTab(tab) {
   _tabActual = tab;
 
   // Views — incluye logistica
-  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones'].forEach(function(t) {
+  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup'].forEach(function(t) {
     var v = document.getElementById('view-' + t);
     var b = document.getElementById('tab-btn-' + t);
     if (v) v.classList.toggle('active', t === tab);
     if (b) b.classList.toggle('active', t === tab);
   });
 
-  // El botón "Más" se marca activo si estás en un tab oculto (gps/visitas, clientes o rendiciones)
+  // El botón "Más" se marca activo si estás en un tab oculto (gps/visitas, clientes, rendiciones, acc-dup)
   var btnMas = document.getElementById('tab-btn-mas');
-  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes' || tab === 'rendiciones');
+  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes' || tab === 'rendiciones' || tab === 'acc-dup');
 
   // Logística — renderizar DESPUÉS de activar el view
   if (tab === 'logistica') {
@@ -10150,6 +10480,12 @@ function cambiarTab(tab) {
   if (tab === 'rendiciones') {
     if (typeof admRendCargar === 'function') admRendCargar();
     var v = document.getElementById('view-rendiciones'); if (v) v.scrollTop = 0;
+  }
+
+  // v9.0 admin: tab Acciones de duplicados — cargar al abrir
+  if (tab === 'acc-dup') {
+    if (typeof accDupCargar === 'function') accDupCargar();
+    var v = document.getElementById('view-acc-dup'); if (v) v.scrollTop = 0;
   }
 }
 
