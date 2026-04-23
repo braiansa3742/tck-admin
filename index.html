@@ -18597,16 +18597,18 @@ function buildXubioPanel(p, id) {
 
   // Modo habilitado — buscador completo para crear PRESUPUESTO
   var clienteSel = _xubioSeleccion[p.pedidoId];
-  var clienteSelHtml = clienteSel
+  // FIX: el guardado usa clienteNombre/clienteCuit (ver xubioSeleccionarCliente),
+  // leer los mismos campos acá. Antes se leía clienteSel.nombre y devolvía undefined.
+  var clienteSelHtml = (clienteSel && clienteSel.clienteId)
     ? '<div class="xubio-cliente-sel on" id="xubio-sel-' + id + '">'
-    +   '<div><div class="xubio-cliente-sel-nombre">' + clienteSel.nombre + '</div>'
-    +   '<div class="xubio-cliente-sel-meta">' + (clienteSel.cuit ? 'CUIT: ' + clienteSel.cuit : '') + '</div></div>'
+    +   '<div><div class="xubio-cliente-sel-nombre">' + (clienteSel.clienteNombre || '(sin nombre)') + '</div>'
+    +   '<div class="xubio-cliente-sel-meta">' + (clienteSel.clienteCuit ? 'CUIT: ' + clienteSel.clienteCuit : ('ID: ' + clienteSel.clienteId)) + '</div></div>'
     +   '<button class="xubio-cliente-clear" onclick="xubioLimpiarCliente(\'' + p.pedidoId + '\',\'' + id + '\')">✕</button>'
     + '</div>'
     : '<div class="xubio-cliente-sel" id="xubio-sel-' + id + '"></div>';
 
-  // Botón habilitado solo si hay cliente seleccionado
-  var btnDisabled = clienteSel ? '' : 'disabled';
+  // Botón habilitado solo si hay cliente seleccionado (con clienteId real)
+  var btnDisabled = (clienteSel && clienteSel.clienteId) ? '' : 'disabled';
 
   // v11 admin: detectar si es admin para mostrar banner
   var esAdminCreando = (typeof vendedorActual !== 'undefined' && vendedorActual === 'ADMIN');
@@ -18638,7 +18640,7 @@ function buildXubioPanel(p, id) {
     + clienteSelHtml
 
     // Buscador de cliente
-    + '<div class="xubio-search-wrap" id="xubio-search-wrap-' + id + '" style="' + (clienteSel ? 'display:none;' : '') + '">'
+    + '<div class="xubio-search-wrap" id="xubio-search-wrap-' + id + '" style="' + ((clienteSel && clienteSel.clienteId) ? 'display:none;' : '') + '">'
     +   '<input class="xubio-search-input" id="xubio-search-' + id + '"'
     +     ' placeholder="Buscar cliente en Xubio..." autocomplete="off"'
     +     ' oninput="xubioBuscarCliente(this,\'' + p.pedidoId + '\',\'' + id + '\')"'
