@@ -1,71 +1,74 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v10 — 22/04/2026 noche
+     TCK ADMIN — v11 — 22/04/2026 noche
      ──────────────────────────────────────────────────────────────────────
-     Cambios v10 (sobre v9.0) — DUPLICADOS CROSS-DEVICE + UX:
+     Cambios v11 (sobre v10) — ADMIN PUEDE CREAR PRESUPUESTOS XUBIO
 
-     Caso detonante: portar features del tck-ventas v13.2 a admin para que
-     Francisco (admin) tenga la misma UX y persistencia cross-device para
-     la gestión de duplicados.
+     Caso detonante: portar el panel Xubio del tck-ventas v13.3 al admin
+     para que Francisco pueda crear presupuestos para cualquier pedido
+     Pendiente, respetando el vendedor original y dejando traza
+     "(creado por ADMIN Francisco)" en las observaciones del presupuesto.
 
      CAMBIOS:
-     1. Sistema cross-device de "no duplicado":
-        - window._dupNoDupSet (cache local)
-        - dupCargarNoDuplicados() carga pares desde Supabase al iniciar
-        - dupEstaMarcadoComoDistinto(a,b) helper para filtros
-        - Hook al inicio de cargarPedidos() para tener el set listo
-        - Filtro en detección: si TODOS los otros del grupo están marcados
-          como legítimos respecto a este pedido, NO marcar como duplicado.
+     1. Bloque Xubio LEGACY removido (estaba con XUBIO_HABILITADO=false
+        y llamaba a xubioRemitir, función que no existe en backend v23).
 
-     2. Bloqueo "Cancelar" en modal si NO Pendiente:
-        - Si pedido está Confirmado/Entregado, en lugar del botón
-          "✕ Cancelar este pedido" se muestra indicador
-          "🔒 ✅ Confirmado · No se puede cancelar desde acá"
-        - Previene inconsistencia con presupuesto Xubio y stock.
+     2. Bloque Xubio v13.3 portado completo:
+        - CSS: panel, dropdown, sync-bar, calibre, faltantes, fecha, etc.
+          (~527 líneas)
+        - JS: buildXubioPanel, xubioBuscarCliente (Supabase), modal calibre,
+          modal fecha, modal faltantes, sync manual, etc. (~852 líneas)
 
-     3. Bloqueo "Unir" si algún activo no es Pendiente:
-        - Banner rojo "⚠️ No se pueden unir porque alguno ya está
-          confirmado o entregado" + botón Unir deshabilitado.
-        - Botón "✅ Son pedidos legítimos" siempre disponible como
-          alternativa.
+     3. Banner amarillo "⚠️ Creando como ADMIN":
+        - Aparece ARRIBA del panel Xubio cuando vendedorActual === 'ADMIN'
+        - Texto: "El presupuesto saldrá a nombre de {vendedor original}"
+        - Subtexto: "En las observaciones de Xubio quedará registrado que
+          lo creaste vos."
+        - Estilo amarillo (#FFF8E1 / #FFB300) — no es error ni éxito,
+          es advertencia informativa.
 
-     4. Banner accionable en card cuando hay duplicado:
-        - 2 botones directos en el banner (sin abrir modal):
-          • Azul: "✅ Son legítimos" → dupMarcarDistintosDirecto()
-          • Blanco: "👁️ Ver detalle" → abre modal como siempre
-        - Si hay Confirmado en el grupo, el banner usa texto especial
-          ("🟠 PEDIDO DOBLE · Alguno ya fue confirmado") con tip de
-          marcar como legítimos.
+     4. POST a Apps Script con flag admin:
+        - xubioEjecutarCrearPresupuesto agrega creadoPorAdmin=true y
+          adminNombre=Francisco solo cuando vendedorActual === 'ADMIN'.
+        - Apps Script v23 lo recibe y agrega sufijo a la descripción.
+        - El vendedor del payload NO cambia: queda el del pedido original.
 
-     5. Badge "PEDIDO DOBLE" agrandado:
-        - 12px con padding 5×12, borde, sombra, flecha "›" como
-          affordance de tap.
+     5. Render condicional del panel:
+        - Si pedido es Cancelado/Entregado/En revisión sin presupuesto: no
+          se muestra el panel.
+        - Si pedido es Pendiente: muestra buscador completo.
+        - Si pedido ya tiene presupuesto Xubio: muestra card de estado +
+          link a Xubio.
 
-     6. dupCancelarPedido reescrito:
-        - Reemplazado confirm() nativo por dupConfirmModal() custom
-        - Validación: si NO Pendiente, muestra modal soloInfo
-          ("No se puede cancelar")
-        - Cuerpo del modal incluye hora, vendedor, total, ID del pedido
+     6. Inicialización campos Xubio al parsear CSV:
+        - cols 15, 16, 17 del Sheet (xubioNroPresupuesto, xubioTransaccionid,
+          xubioEstado) se leen y se mapean al objeto pedido.
 
-     7. Modal dupConfirmModal portado de v13.2 ventas:
-        - Mismo estilo TCK (fondo crema, header rojo+dorado, botones)
-        - Promise<boolean> para await ergonómico
-        - opts.soloInfo para modales informativos
-
-     8. _dupLogAccion (insert en pedido_acciones para auditoría):
-        - Cada acción de duplicados queda registrada
-        - vendedor_que_actuo = "ADMIN" (por estar en admin)
+     7. Hooks en login y render:
+        - Login admin: xubioCargarUltimaSync() + iniciar refresh visual 60s.
+        - Render principal: xubioActualizarBarrasSync() después de innerHTML
+          para que las barras recién creadas se actualicen sin esperar refresh.
 
      PRESERVADO INTACTO:
-       - localStorage tck_dup_revisados (atajo visual local complementario)
-       - dupMarcarSeparados() / dupReactivarAlerta() (legacy, siguen vivos)
-       - Toda la lógica de detección por cliente+día+productos
+       - Todo el sistema de duplicados v10 (cross-device, banner accionable,
+         dupConfirmModal, dupCancelarPedido sin confirm nativo, etc.)
+       - TAB Rendiciones, TAB Acciones Duplicados
+       - Toda la lógica de logística, mapa, reportes, clientes
+
+     DEPENDENCIAS:
+       - Apps Script v23 deployado (acepta creadoPorAdmin/adminNombre)
+       - Tabla Supabase clientes_xubio + sync horaria (ya configurado en N17)
 
      DEPLOY:
-       1. Apps Script v22 ya debe estar deployado (v21 no tiene los
-          endpoints marcarNoDuplicados/listarNoDuplicados, son v21 mínimo)
+       1. Apps Script v23 ya debe estar deployado
        2. Subir este archivo al repo tck-admin como index.html
-       3. Hard refresh en el navegador (Cmd+Shift+R / Ctrl+Shift+R)
+       3. Hard refresh en el navegador de Francisco (Ctrl+Shift+R)
+       4. Login → tocar un pedido Pendiente → debería verse el banner
+          amarillo + barra de sync + buscador
+
+     ──────────────────────────────────────────────────────────────────────
+     Cambios v10 (sobre v9.0) — DUPLICADOS CROSS-DEVICE + UX:
+     [se mantienen, ver header del v10 si necesitás referencia]
 ====================================================================== -->
 <html lang="es">
 <head>
@@ -6413,6 +6416,534 @@ input[type="date"] {
   text-transform: uppercase;
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   v11 admin — XUBIO PANEL CSS (portado de tck-ventas v13.3)
+   ═══════════════════════════════════════════════════════════════ */
+.xubio-panel {
+  margin-top: 14px;
+  border-top: 1.5px solid var(--cream2);
+  padding-top: 12px;
+}
+.xubio-panel-titulo {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.xubio-coming-soon {
+  background: var(--cream2);
+  border: 1.5px dashed var(--cream3);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  opacity: .7;
+}
+.xubio-coming-soon-icon { font-size: 20px; flex-shrink: 0; }
+.xubio-coming-soon-txt { font-size: 12px; color: var(--text3); line-height: 1.4; }
+.xubio-coming-soon-badge {
+  margin-left: auto;
+  background: var(--cream3);
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text3);
+  flex-shrink: 0;
+  letter-spacing: .3px;
+}
+
+/* Buscador de cliente Xubio */
+.xubio-search-wrap {
+  position: relative;
+  margin-bottom: 8px;
+}
+.xubio-search-input {
+  width: 100%;
+  height: 42px;
+  border: 1.5px solid var(--cream3);
+  border-radius: 10px;
+  padding: 0 36px 0 12px;
+  font-family: 'Barlow', sans-serif;
+  font-size: 14px;
+  color: var(--text);
+  background: #fff;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color .15s;
+}
+.xubio-search-input:focus { border-color: var(--red2); }
+.xubio-search-icon {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  color: var(--text3);
+  pointer-events: none;
+}
+.xubio-search-spinner {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--cream3);
+  border-top-color: var(--red);
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+  display: none;
+}
+.xubio-search-spinner.on { display: block; }
+
+/* Dropdown resultados */
+.xubio-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0; right: 0;
+  background: #fff;
+  border: 1.5px solid var(--cream3);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.12);
+  z-index: 50;
+  max-height: 220px;
+  overflow-y: auto;
+  display: none;
+}
+.xubio-dropdown.on { display: block; }
+.xubio-dropdown-item {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--cream2);
+  cursor: pointer;
+  transition: background .1s;
+  -webkit-tap-highlight-color: transparent;
+}
+.xubio-dropdown-item:last-child { border-bottom: none; }
+.xubio-dropdown-item:active { background: var(--cream2); }
+.xubio-dropdown-nombre {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1.1;
+}
+.xubio-dropdown-meta {
+  font-size: 11px;
+  color: var(--text3);
+  margin-top: 2px;
+}
+.xubio-dropdown-empty {
+  padding: 14px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text3);
+}
+
+/* Cliente seleccionado */
+.xubio-cliente-sel {
+  display: none;
+  background: var(--green3);
+  border: 1.5px solid var(--green2);
+  border-radius: 10px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  align-items: center;
+  gap: 8px;
+}
+.xubio-cliente-sel.on { display: flex; }
+.xubio-cliente-sel-nombre {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--green);
+  flex: 1;
+  min-width: 0;
+}
+.xubio-cliente-sel-meta { font-size: 11px; color: var(--green2); margin-top: 1px; }
+.xubio-cliente-clear {
+  background: none;
+  border: none;
+  color: var(--green2);
+  font-size: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0 2px;
+  touch-action: manipulation;
+}
+
+/* Selector de variantes (calibres) */
+.xubio-variantes {
+  margin-bottom: 10px;
+}
+.xubio-variantes-titulo {
+  font-size: 11px;
+  color: var(--text3);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: 6px;
+  font-family: 'Barlow Condensed', sans-serif;
+}
+.xubio-variantes-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.xubio-variante-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1.5px solid var(--cream3);
+  border-radius: 9px;
+  cursor: pointer;
+  background: #fff;
+  transition: border-color .12s, background .12s;
+  -webkit-tap-highlight-color: transparent;
+}
+.xubio-variante-item.sel {
+  border-color: var(--red);
+  background: #FFF5F5;
+}
+.xubio-variante-radio {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--cream3);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color .12s;
+}
+.xubio-variante-item.sel .xubio-variante-radio {
+  border-color: var(--red);
+  background: var(--red);
+}
+.xubio-variante-item.sel .xubio-variante-radio::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  background: #fff;
+  border-radius: 50%;
+}
+.xubio-variante-nombre {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  flex: 1;
+}
+.xubio-variante-stock {
+  font-size: 11px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 20px;
+  flex-shrink: 0;
+}
+.stock-ok   { background: var(--green3); color: var(--green2); }
+.stock-bajo { background: var(--orange2); color: var(--orange); }
+.stock-null { background: var(--cream2); color: var(--text3); }
+
+/* Botón Remitir */
+.btn-remitir {
+  width: 100%;
+  background: linear-gradient(135deg, var(--red2), var(--red));
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  padding: 13px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 17px;
+  font-weight: 900;
+  letter-spacing: .5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity .15s;
+}
+.btn-remitir:disabled { opacity: .45; cursor: not-allowed; }
+.btn-remitir:active:not(:disabled) { opacity: .88; }
+
+.xubio-panel-done { border-color: #2E7D32; background: #F1F8E9; }
+.xubio-panel-done .xubio-panel-titulo { color: #1B5E20; }
+.xubio-done-card {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 14px; background: #fff; border-radius: 12px;
+  border: 1.5px solid #AED581; margin-top: 8px;
+}
+.xubio-done-info { flex: 1; min-width: 0; }
+.xubio-done-num {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 19px; font-weight: 900; color: #1B5E20;
+}
+.xubio-done-meta {
+  font-size: 12px; color: #558B2F; margin-top: 3px;
+}
+.xubio-done-link {
+  background: #2E7D32; color: #fff; text-decoration: none;
+  padding: 10px 14px; border-radius: 10px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px; font-weight: 800;
+  white-space: nowrap; flex-shrink: 0;
+}
+.xubio-done-link:active { opacity: 0.85; }
+.xubio-done-warning {
+  margin-top: 10px; padding: 9px 12px;
+  background: #FFF8E1; border-left: 3px solid #F57F17;
+  border-radius: 6px;
+  font-size: 11.5px; color: #6D4C00; line-height: 1.45;
+}
+
+/* Intro arriba del panel */
+.xubio-panel-intro {
+  font-size: 12px; color: #8B6F50; line-height: 1.5;
+  margin: 0 0 10px 0;
+}
+
+/* v13.3: Barra de sync clientes Xubio */
+.xubio-sync-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  margin: 0 0 10px 0;
+  background: #F5F0E8;
+  border: 1px solid #E0D6C5;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #6D5A3F;
+}
+.xubio-sync-bar-error {
+  background: #FFEBEE;
+  border-color: #C62828;
+  color: #B71C1C;
+}
+.xubio-sync-info {
+  flex: 1; min-width: 0;
+  line-height: 1.3;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.xubio-sync-btn {
+  flex-shrink: 0;
+  padding: 5px 10px;
+  background: #fff;
+  border: 1px solid #BFAE8E;
+  border-radius: 5px;
+  color: #6D4C00;
+  font-size: 11px; font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all .15s;
+}
+.xubio-sync-btn:hover:not(:disabled) {
+  background: #FFF8E1;
+  border-color: #8B6F50;
+}
+.xubio-sync-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.xubio-sync-bar-error .xubio-sync-btn {
+  background: #fff;
+  border-color: #C62828;
+  color: #B71C1C;
+}
+
+/* v13.3: Info debajo del "No se encontraron clientes" */
+.xubio-dropdown-empty-info {
+  padding: 8px 12px;
+  font-size: 11px;
+  color: #6D5A3F;
+  background: #FAF6EC;
+  border-top: 1px solid #E8DDC8;
+  line-height: 1.45;
+}
+
+/* v13.3: Overlay bloqueante mientras sincroniza */
+.xubio-sync-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.65);
+  z-index: 99999;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  backdrop-filter: blur(3px);
+}
+.xubio-sync-overlay-box {
+  background: #fff;
+  border-radius: 12px;
+  padding: 24px 28px;
+  text-align: center;
+  max-width: 320px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+}
+.xubio-sync-overlay-spinner {
+  width: 44px; height: 44px;
+  margin: 0 auto 16px;
+  border: 4px solid #E8DDC8;
+  border-top-color: #8B0000;
+  border-radius: 50%;
+  animation: xubio-spin 0.8s linear infinite;
+}
+@keyframes xubio-spin {
+  to { transform: rotate(360deg); }
+}
+.xubio-sync-overlay-titulo {
+  font-size: 15px; font-weight: 700;
+  color: #3A2E1F;
+  margin-bottom: 6px;
+}
+.xubio-sync-overlay-sub {
+  font-size: 12.5px;
+
+.xubio-calibre-intro {
+  font-size: 13px; color: #666; line-height: 1.5;
+  margin-bottom: 14px;
+  padding: 10px 12px; background: #FFF8E1; border-radius: 8px;
+}
+.xubio-calibre-grupo {
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px dashed #E5D5B8;
+}
+.xubio-calibre-grupo:last-child {
+  border-bottom: none; margin-bottom: 0; padding-bottom: 0;
+}
+.xubio-calibre-label {
+  font-size: 13px; color: #333; margin-bottom: 10px;
+}
+.xubio-calibre-label strong { color: #8B0000; }
+.xubio-calibre-opciones {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+}
+.xubio-calibre-opt {
+  background: #fff; border: 2px solid #E0E0E0;
+  border-radius: 10px; padding: 10px 8px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px; font-weight: 700; color: #555;
+  cursor: pointer; touch-action: manipulation;
+  transition: all 0.12s ease;
+  text-align: center;
+}
+.xubio-calibre-opt:active { transform: scale(0.97); }
+.xubio-calibre-opt.on {
+  background: #8B0000; color: #fff; border-color: #8B0000;
+  box-shadow: 0 2px 8px rgba(139,0,0,0.3);
+}
+
+/* Modal de fecha del presupuesto (v11) */
+.xubio-fecha-intro {
+  font-size: 13px; color: #555; line-height: 1.5;
+  margin-bottom: 14px;
+}
+.xubio-fecha-btn {
+  width: 100%;
+  background: #fff;
+  border: 2.5px solid #8B0000;
+  border-radius: 14px;
+  padding: 18px 16px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 20px;
+  font-weight: 900;
+  color: #8B0000;
+  cursor: pointer;
+  touch-action: manipulation;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 64px;
+  transition: all 0.15s ease;
+  letter-spacing: 0.3px;
+  position: relative;
+}
+.xubio-fecha-btn:active { transform: scale(0.98); }
+.xubio-fecha-btn .xfb-icono { font-size: 22px; }
+.xubio-fecha-btn.on-elegida {
+  background: linear-gradient(135deg, #FFF8E1, #FFECB3);
+  border-color: #D4A574;
+  color: #6B4423;
+}
+.xubio-fecha-btn .xfb-cambiar {
+  font-size: 11px;
+  font-weight: 700;
+  color: #8B0000;
+  opacity: 0.7;
+  letter-spacing: 0.5px;
+  margin-left: auto;
+}
+.xubio-fecha-input-hidden {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  border: none;
+  font-size: 16px;
+}
+
+/* Modal de productos faltantes */
+.xubio-faltantes-intro {
+  font-size: 13px; color: #D84315; line-height: 1.5;
+  margin-bottom: 12px;
+  padding: 10px 12px; background: #FFEBEE; border-left: 3px solid #C62828; border-radius: 6px;
+}
+.xubio-faltantes-lista {
+  margin: 0 0 14px 0; padding-left: 22px;
+}
+.xubio-faltantes-lista li {
+  font-size: 14px; font-weight: 600; color: #333;
+  padding: 4px 0;
+}
+.xubio-faltantes-info {
+  font-size: 12px; color: #8B6F50; line-height: 1.5;
+  padding: 10px 12px; background: #FFF8E1; border-radius: 6px;
+}
+
+/* v11 admin: banner amarillo "Creando como ADMIN" */
+.xubio-admin-banner {
+  background: linear-gradient(135deg, #FFF8E1, #FFECB3);
+  border: 1.5px solid #FFB300;
+  border-left: 4px solid #FF8F00;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0 0 10px 0;
+}
+.xubio-admin-banner-titulo {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 800;
+  font-size: 14px;
+  color: #6D4C00;
+  letter-spacing: 0.3px;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+.xubio-admin-banner-body {
+  font-size: 12px;
+  color: #6D4C00;
+  line-height: 1.45;
+}
+.xubio-admin-banner-body strong {
+  color: #5D3F00;
+  font-weight: 700;
+}
+
 </style>
 </head>
 <body>
@@ -8728,6 +9259,12 @@ function login(nombre) {
   filtroVendedor = 'todos';
   guardarSesion(nombre);
   vendedorActual = nombre;
+  // v11 admin: cargar info de última sync de clientes Xubio + iniciar refresh visual
+  // (solo necesario si admin va a usar el panel, pero es barato y no molesta)
+  if (typeof xubioCargarUltimaSync === 'function') {
+    xubioCargarUltimaSync().catch(function(e){ console.error('[xubio sync] cargar:', e); });
+    if (typeof _xubioIniciarRefreshSync === 'function') _xubioIniciarRefreshSync();
+  }
   document.getElementById('login-wrap').style.display = 'none';
   document.getElementById('panel').classList.add('on');
   document.getElementById('paso1').style.display = 'block';
@@ -8832,6 +9369,10 @@ async function cargarPedidos(silencioso) {
         turnoEntrega:   limpiar(cols[12]) || '',
         origen:         limpiar(cols[13]) || '',   // v8.1 admin: leer origen del Sheet
         telefono:       limpiar(cols[14]) || '',   // v8.1 admin: leer telefono/nota
+        // v11 admin: campos Xubio (cols 16, 17, 18 del Sheet — agregados en Apps Script v15+)
+        xubioNroPresupuesto: limpiar(cols[15]) || '',
+        xubioTransaccionid:  limpiar(cols[16]) || '',
+        xubioEstado:         limpiar(cols[17]) || '',
         fila:           i + 1
       });
     }
@@ -10069,6 +10610,8 @@ function renderPedidos() {
     return;
   }
   cont.innerHTML = lista.map(function(p){ return renderCard(p); }).join('');
+  // v11 admin: actualizar barras de sync Xubio recién insertadas en el DOM
+  if (typeof xubioActualizarBarrasSync === 'function') xubioActualizarBarrasSync();
 }
 
 function fmtTotal(t) {
@@ -12215,385 +12758,11 @@ function renderInactivos_rep() {
 }
 
 
-// ── XUBIO INTEGRATION ─────────────────────────────────────────────
-// Cambiar a true cuando estén las credenciales configuradas en Apps Script
-var XUBIO_HABILITADO = false;
-var _xubioActivo   = false;  // pausa el auto-refresh cuando Xubio está en uso
-
-// Estado por pedido: { clienteId, clienteNombre, productoId, productoNombre }
-var _xubioSeleccion = {};
-
-// ── buildXubioPanel: genera el HTML del panel dentro de cada card ──
-function buildXubioPanel(p, id) {
-  if (!XUBIO_HABILITADO) {
-    // Modo "próximamente" — muestra el campo de remito manual como siempre
-    return '<div class="xubio-panel">'
-      + '<div class="xubio-panel-titulo">🔗 Remito Xubio</div>'
-      + '<div class="xubio-coming-soon">'
-      +   '<div class="xubio-coming-soon-icon">🔗</div>'
-      +   '<div class="xubio-coming-soon-txt"><strong>Remito automático en Xubio</strong><br>Disponible pronto. Por ahora anotá el número manualmente.</div>'
-      +   '<div class="xubio-coming-soon-badge">Pronto</div>'
-      + '</div>'
-      + '<div style="margin-top:8px;">'
-      +   '<input class="nota-input" style="height:40px;font-size:14px;" id="remito-' + id + '" type="text" inputmode="numeric" placeholder="N° remito Xubio (opcional)" value="' + (p.remito||'') + '" onblur="guardarRemito(\'' + p.pedidoId + '\')">'
-      + '</div>'
-      + '</div>';
-  }
-
-  // Modo habilitado — buscador completo
-  var clienteSel = _xubioSeleccion[p.pedidoId];
-  var clienteSelHtml = clienteSel
-    ? '<div class="xubio-cliente-sel on" id="xubio-sel-' + id + '">'
-    +   '<div><div class="xubio-cliente-sel-nombre">' + clienteSel.nombre + '</div>'
-    +   '<div class="xubio-cliente-sel-meta">' + (clienteSel.cuit ? 'CUIT: ' + clienteSel.cuit : '') + '</div></div>'
-    +   '<button class="xubio-cliente-clear" onclick="xubioLimpiarCliente(\'' + p.pedidoId + '\',\'' + id + '\')">✕</button>'
-    + '</div>'
-    : '<div class="xubio-cliente-sel" id="xubio-sel-' + id + '"></div>';
-
-  return '<div class="xubio-panel">'
-    + '<div class="xubio-panel-titulo">🔗 Remitir en Xubio</div>'
-
-    // Cliente vinculado (si existe)
-    + clienteSelHtml
-
-    // Buscador de cliente
-    + '<div class="xubio-search-wrap" id="xubio-search-wrap-' + id + '" style="' + (clienteSel ? 'display:none;' : '') + '">'
-    +   '<input class="xubio-search-input" id="xubio-search-' + id + '"'
-    +     ' placeholder="Buscar cliente en Xubio..." autocomplete="off"'
-    +     ' oninput="xubioBuscarCliente(this,\'' + p.pedidoId + '\',\'' + id + '\')"'
-    +     ' onfocus="_xubioActivo=true; xubioAbrirDropdown(\'' + id + '\')"' + ' onblur="setTimeout(function(){_xubioActivo=false;},2000)">'
-    +   '<span class="xubio-search-icon" id="xubio-icon-' + id + '">🔍</span>'
-    +   '<div class="xubio-search-spinner" id="xubio-spin-' + id + '"></div>'
-    +   '<div class="xubio-dropdown" id="xubio-drop-' + id + '"></div>'
-    + '</div>'
-
-    // Selector de variantes (visible después de elegir cliente, si el producto tiene calibres)
-    + '<div class="xubio-variantes" id="xubio-vars-' + id + '" style="display:none;">'
-    +   '<div class="xubio-variantes-titulo">Seleccioná el calibre / presentación:</div>'
-    +   '<div class="xubio-variantes-lista" id="xubio-vars-lista-' + id + '"></div>'
-    + '</div>'
-
-    // Botón remitir
-    + '<button class="btn-remitir" id="xubio-btn-' + id + '" disabled'
-    +   ' onclick="xubioRemitir(\'' + p.pedidoId + '\',' + p.fila + ',\'' + id + '\')">'
-    +   '🚚 Remitir en Xubio'
-    + '</button>'
-    + '</div>';
-}
-
-// ── Buscar cliente con debounce ───────────────────────────────────
-var _xubioTimers = {};
-function xubioBuscarCliente(input, pedidoId, id) {
-  clearTimeout(_xubioTimers[id]);
-  var q = input.value.trim();
-  var drop = document.getElementById('xubio-drop-' + id);
-  if (!drop) return;
-
-  if (q.length < 2) { drop.classList.remove('on'); drop.innerHTML = ''; return; }
-
-  // Spinner
-  var spin = document.getElementById('xubio-spin-' + id);
-  var icon = document.getElementById('xubio-icon-' + id);
-  if (spin) spin.classList.add('on');
-  if (icon) icon.style.display = 'none';
-
-  _xubioTimers[id] = setTimeout(function() {
-    fetch(APPS_SCRIPT_URL + '?accion=buscarClienteXubio&q=' + encodeURIComponent(q))
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        if (spin) spin.classList.remove('on');
-        if (icon) icon.style.display = '';
-        if (data.status !== 'ok') { drop.innerHTML = '<div class="xubio-dropdown-empty">Error al buscar</div>'; drop.classList.add('on'); return; }
-        xubioRenderDropdown(data.clientes || [], id, pedidoId);
-      })
-      .catch(function() {
-        if (spin) spin.classList.remove('on');
-        if (icon) icon.style.display = '';
-        drop.innerHTML = '<div class="xubio-dropdown-empty">Sin conexión</div>';
-        drop.classList.add('on');
-      });
-  }, 350);
-}
-
-function xubioRenderDropdown(clientes, id, pedidoId) {
-  var drop = document.getElementById('xubio-drop-' + id);
-  if (!drop) return;
-  if (!clientes.length) {
-    drop.innerHTML = '<div class="xubio-dropdown-empty">No se encontraron clientes</div>';
-    drop.classList.add('on');
-    return;
-  }
-
-  if (!window._xubioDropData) window._xubioDropData = {};
-  window._xubioDropData[id] = { pedidoId: pedidoId, clientes: clientes };
-
-  var html = '';
-  for (var i = 0; i < clientes.length; i++) {
-    var c    = clientes[i];
-    var meta = c.cuit ? ('CUIT: ' + c.cuit) : ('ID Xubio: ' + c.id);
-    if (c.localidad) meta += ' · ' + c.localidad;
-    html += '<div class="xubio-dropdown-item" data-id="' + id + '" data-idx="' + i + '" data-pid="' + pedidoId + '">'
-          + '<div class="xubio-dropdown-nombre">' + c.nombre + '</div>'
-          + '<div class="xubio-dropdown-meta">' + meta + '</div>'
-          + '</div>';
-  }
-  drop.innerHTML = html;
-
-  // Usar event delegation para evitar problemas con onclick inline
-  drop.querySelectorAll('.xubio-dropdown-item').forEach(function(el) {
-    el.addEventListener('mousedown', function(e) {
-      e.preventDefault();
-      var pid = el.getAttribute('data-pid');
-      var did = el.getAttribute('data-id');
-      var idx = parseInt(el.getAttribute('data-idx'));
-      var entry = window._xubioDropData[did];
-      if (entry && entry.clientes[idx]) {
-        xubioSeleccionarCliente(pid, did, entry.clientes[idx]);
-      }
-    });
-  });
-
-  drop.classList.add('on');
-}
-
-
-function xubioAbrirDropdown(id) {
-  // Cerrar otros dropdowns abiertos
-  document.querySelectorAll('.xubio-dropdown.on').forEach(function(d) {
-    if (d.id !== 'xubio-drop-' + id) d.classList.remove('on');
-  });
-}
-
-// ── Seleccionar cliente ───────────────────────────────────────────
-function xubioSeleccionarCliente(pedidoId, id, cliente) {
-  _xubioActivo = true; // mantener pausado mientras se seleccionan variantes
-  // Guardar selección
-  if (!_xubioSeleccion[pedidoId]) _xubioSeleccion[pedidoId] = {};
-  _xubioSeleccion[pedidoId].clienteId     = cliente.id;
-  _xubioSeleccion[pedidoId].clienteNombre = cliente.nombre;
-  _xubioSeleccion[pedidoId].clienteCuit   = cliente.cuit;
-
-  // Cerrar dropdown, ocultar buscador
-  var drop = document.getElementById('xubio-drop-' + id);
-  var wrap = document.getElementById('xubio-search-wrap-' + id);
-  if (drop) drop.classList.remove('on');
-  if (wrap) wrap.style.display = 'none';
-
-  // Mostrar cliente seleccionado
-  var sel = document.getElementById('xubio-sel-' + id);
-  if (sel) {
-    var nomDisplay  = cliente.nombre || cliente.razonSocial || '(sin nombre)';
-    var metaDisplay = cliente.cuit ? ('CUIT: ' + cliente.cuit) : ('ID: ' + (cliente.id || cliente.cliente_id || '?'));
-    sel.innerHTML = '<div><div class="xubio-cliente-sel-nombre">' + nomDisplay + '</div>'
-      + '<div class="xubio-cliente-sel-meta">' + metaDisplay + '</div></div>'
-      + '<button class="xubio-cliente-clear" onclick="xubioLimpiarCliente(\'' + pedidoId + '\',\'' + id + '\')">✕</button>';
-    sel.classList.add('on');
-  }
-
-  // Cargar variantes del primer producto del pedido
-  var pedido = todosLosPedidos.find(function(x) { return x.pedidoId === pedidoId; });
-  if (pedido) xubioCargarVariantes(pedido, id);
-}
-
-// ── Limpiar cliente ───────────────────────────────────────────────
-function xubioLimpiarCliente(pedidoId, id) {
-  delete _xubioSeleccion[pedidoId];
-  var sel  = document.getElementById('xubio-sel-' + id);
-  var wrap = document.getElementById('xubio-search-wrap-' + id);
-  var inp  = document.getElementById('xubio-search-' + id);
-  var vars = document.getElementById('xubio-vars-' + id);
-  var btn  = document.getElementById('xubio-btn-' + id);
-  if (sel)  { sel.classList.remove('on'); sel.innerHTML = ''; }
-  if (wrap) { wrap.style.display = ''; }
-  if (inp)  { inp.value = ''; }
-  if (vars) { vars.style.display = 'none'; }
-  if (btn)  { btn.disabled = true; }
-}
-
-// ── Cargar variantes del producto ─────────────────────────────────
-function xubioCargarVariantes(pedido, id) {
-  // Tomar el primer producto del pedido para buscar variantes
-  var prods = parseProds(pedido.detalle);
-  if (!prods.length) {
-    // Sin variantes detectables — habilitar botón directamente
-    var btn = document.getElementById('xubio-btn-' + id);
-    if (btn) btn.disabled = false;
-    return;
-  }
-
-  var primerProd = prods[0].name;
-  fetch(APPS_SCRIPT_URL + '?accion=buscarProductoXubio&nombre_catalogo=' + encodeURIComponent(primerProd))
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (data.status !== 'ok' || !data.productos || !data.productos.length) {
-        // Sin variantes — habilitar botón
-        var btn = document.getElementById('xubio-btn-' + id);
-        if (btn) btn.disabled = false;
-        return;
-      }
-
-      if (data.tipo === '1a1' && data.productos.length === 1) {
-        // Producto único — seleccionar automáticamente y habilitar
-        var pr = data.productos[0];
-        if (!_xubioSeleccion[pedido.pedidoId]) _xubioSeleccion[pedido.pedidoId] = {};
-        _xubioSeleccion[pedido.pedidoId].productoId     = pr.id;
-        _xubioSeleccion[pedido.pedidoId].productoNombre = pr.nombre;
-        var btn = document.getElementById('xubio-btn-' + id);
-        if (btn) btn.disabled = false;
-      } else {
-        // Múltiples variantes — mostrar selector
-        xubioRenderVariantes(data.productos, pedido.pedidoId, id);
-      }
-    })
-    .catch(function() {
-      var btn = document.getElementById('xubio-btn-' + id);
-      if (btn) btn.disabled = false;
-    });
-}
-
-function xubioRenderVariantes(productos, pedidoId, id) {
-  var varsDiv  = document.getElementById('xubio-vars-' + id);
-  var listaDiv = document.getElementById('xubio-vars-lista-' + id);
-  if (!varsDiv || !listaDiv) return;
-
-  listaDiv.innerHTML = productos.map(function(pr, i) {
-    var stockLabel, stockClass;
-    if (pr.stock === null || pr.stock === undefined) {
-      stockLabel = 'Stock N/D'; stockClass = 'stock-null';
-    } else if (pr.stock > 5) {
-      stockLabel = pr.stock + ' en stock'; stockClass = 'stock-ok';
-    } else if (pr.stock > 0) {
-      stockLabel = '⚠️ Solo ' + pr.stock; stockClass = 'stock-bajo';
-    } else {
-      stockLabel = 'Sin stock'; stockClass = 'stock-null';
-    }
-
-    // Pre-seleccionar el primero
-    var sel = i === 0 ? ' sel' : '';
-    if (i === 0) {
-      if (!_xubioSeleccion[pedidoId]) _xubioSeleccion[pedidoId] = {};
-      _xubioSeleccion[pedidoId].productoId     = pr.id;
-      _xubioSeleccion[pedidoId].productoNombre = pr.nombre;
-    }
-
-    return '<div class="xubio-variante-item' + sel + '" id="xvar-' + id + '-' + i + '"'
-      + ' data-pedidoid="' + pedidoId + '" data-id="' + id + '" data-idx="' + i + '">'
-      + '<div class="xubio-variante-radio"></div>'
-      + '<div class="xubio-variante-nombre">' + pr.nombre + '</div>'
-      + '<div class="xubio-variante-stock ' + stockClass + '">' + stockLabel + '</div>'
-      + '</div>';
-  }).join('');
-
-  // Guardar lista de variantes en global para acceso por índice
-  if (!window._xubioVarsData) window._xubioVarsData = {};
-  window._xubioVarsData[id] = { pedidoId: pedidoId, productos: productos };
-
-  // Agregar event listeners a las variantes
-  setTimeout(function() {
-    var lista = document.getElementById('xubio-vars-lista-' + id);
-    if (!lista) return;
-    lista.querySelectorAll('.xubio-variante-item').forEach(function(el) {
-      el.addEventListener('click', function() {
-        var pid  = el.getAttribute('data-pedidoid');
-        var did  = el.getAttribute('data-id');
-        var idx  = parseInt(el.getAttribute('data-idx'));
-        var data = window._xubioVarsData[did];
-        if (data && data.productos[idx]) {
-          var pr = data.productos[idx];
-          xubioSeleccionarVariante(pid, did, idx, pr.id, pr.nombre);
-        }
-      });
-    });
-  }, 50);
-
-  varsDiv.style.display = 'block';
-
-  // Habilitar botón (ya hay una pre-seleccionada)
-  var btn = document.getElementById('xubio-btn-' + id);
-  if (btn) btn.disabled = false;
-}
-
-function xubioSeleccionarVariante(pedidoId, id, idx, prodId, prodNombre) {
-  if (!_xubioSeleccion[pedidoId]) _xubioSeleccion[pedidoId] = {};
-  _xubioSeleccion[pedidoId].productoId     = prodId;
-  _xubioSeleccion[pedidoId].productoNombre = prodNombre;
-
-  // Visual
-  var lista = document.getElementById('xubio-vars-lista-' + id);
-  if (lista) lista.querySelectorAll('.xubio-variante-item').forEach(function(el, i) {
-    el.classList.toggle('sel', i === idx);
-  });
-}
-
-// ── Ejecutar remito ───────────────────────────────────────────────
-function xubioRemitir(pedidoId, fila, id) {
-  var sel = _xubioSeleccion[pedidoId];
-  if (!sel || !sel.clienteId) { toast('Seleccioná un cliente primero', 'err'); return; }
-
-  var btn = document.getElementById('xubio-btn-' + id);
-  if (btn) { btn.disabled = true; btn.textContent = 'Remitiendo...'; }
-
-  // Armar items desde el detalle del pedido
-  var pedido = todosLosPedidos.find(function(x) { return x.pedidoId === pedidoId; });
-  var prods  = pedido ? parseProds(pedido.detalle) : [];
-
-  // Para el primer producto usamos el seleccionado (con variante si aplica)
-  var items = prods.map(function(pr, i) {
-    return {
-      xubioProductoId:     i === 0 && sel.productoId ? sel.productoId : '',
-      xubioProductoNombre: i === 0 && sel.productoNombre ? sel.productoNombre : pr.name,
-      cantidad:            pr.qty,
-      precio:              0  // Xubio lo toma de su lista de precios
-    };
-  });
-
-  var vendedor = pedido ? (pedido.vendedor || vendedorActual) : vendedorActual;
-
-  var params = new URLSearchParams({
-    accion:            'remitirPedido',
-    pedidoId:          pedidoId,
-    fila:              fila,
-    xubioClienteId:    sel.clienteId,
-    xubioClienteNombre:sel.clienteNombre || '',
-    clienteCatalogo:   pedido ? (pedido.cliente || '') : '',
-    vendedor:          vendedor,
-    items:             JSON.stringify(items)
-  });
-
-  fetch(APPS_SCRIPT_URL + '?' + params.toString())
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (data.status === 'ok') {
-        toast('✅ Remito ' + data.numeroRemito + ' creado en Xubio', 'ok');
-        _xubioActivo = false; // liberar refresh tras éxito
-        if (pedido) pedido.estado = 'Confirmado';
-        renderPedidos();
-        actualizarMiDiaSiAbierto();
-      } else {
-        toast('Error: ' + (data.message || 'No se pudo crear el remito'), 'err');
-        _xubioActivo = false; // liberar refresh tras error
-        if (btn) { btn.disabled = false; btn.textContent = '🚚 Remitir en Xubio'; }
-      }
-    })
-    .catch(function() {
-      toast('Error de conexión', 'err');
-      _xubioActivo = false; // liberar refresh tras error de red
-      if (btn) { btn.disabled = false; btn.textContent = '🚚 Remitir en Xubio'; }
-    });
-}
-
-// Cerrar dropdowns al tocar fuera
-document.addEventListener('click', function(e) {
-  if (!e.target.closest('.xubio-search-wrap') && !e.target.closest('.xubio-panel')) {
-    document.querySelectorAll('.xubio-dropdown.on').forEach(function(d) {
-      d.classList.remove('on');
-    });
-    // Si se hizo click fuera del panel Xubio completamente, liberar refresh
-    if (!e.target.closest('.xubio-panel')) {
-      setTimeout(function() { _xubioActivo = false; }, 500);
-    }
-  }
-});
+// ═══════════════════════════════════════════════════════════════
+// v11 admin: bloque Xubio LEGACY removido (estaba con XUBIO_HABILITADO=false
+//            y llamaba a xubioRemitir que no existe en v23 backend).
+//            El nuevo bloque Xubio v13.3 está más abajo.
+// ═══════════════════════════════════════════════════════════════
 
 
 // ── SECCIÓN CLIENTES ─────────────────────────────────────────────
@@ -18371,6 +18540,894 @@ if (typeof escapeHtml !== 'function') {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// v11 admin — XUBIO PANEL (portado de tck-ventas v13.3)
+// Permite que ADMIN cree presupuestos Xubio para cualquier pedido
+// Pendiente respetando vendedor original. Sufijo en obs identifica
+// quién lo creó (vía Apps Script v23 con creadoPorAdmin=true).
+// ═══════════════════════════════════════════════════════════════
+
+// ── XUBIO INTEGRATION ─────────────────────────────────────────────
+// Cambiar a true cuando estén las credenciales configuradas en Apps Script
+var XUBIO_HABILITADO = true;  // v10: Presupuestos activos
+var _xubioActivo   = false;  // pausa el auto-refresh cuando Xubio está en uso
+
+// Estado por pedido: { clienteId, clienteNombre, productoId, productoNombre }
+var _xubioSeleccion = {};
+
+// ── buildXubioPanel: genera el HTML del panel dentro de cada card ──
+// v10: Creación de PRESUPUESTOS en Xubio (antes: remitos)
+function buildXubioPanel(p, id) {
+  // v11 admin: render condicional
+  // - Si ya tiene presupuesto: mostrar card de estado (cualquier estado)
+  // - Si no tiene presupuesto: mostrar buscador SOLO en Pendiente
+  // - Resto (Cancelado / Entregado / En revisión sin presup): no mostrar nada
+  if (!p.xubioNroPresupuesto && p.estado !== 'Pendiente') {
+    return '';
+  }
+
+  // Si el pedido ya tiene presupuesto Xubio creado, mostrar card de estado
+  if (p.xubioNroPresupuesto) {
+    return '<div class="xubio-panel xubio-panel-done">'
+      + '<div class="xubio-panel-titulo">✅ Presupuesto creado en Xubio</div>'
+      + '<div class="xubio-done-card">'
+      +   '<div class="xubio-done-info">'
+      +     '<div class="xubio-done-num">Presupuesto N° ' + p.xubioNroPresupuesto + '</div>'
+      +     '<div class="xubio-done-meta">El admin lo convertirá en remito desde Xubio.</div>'
+      +   '</div>'
+      +   '<a href="https://xubio.com/NXV/ventas/presupuestos" target="_blank" class="xubio-done-link">Ver en Xubio →</a>'
+      + '</div>'
+      + '<div class="xubio-done-warning">⚠️ Este pedido ya no se puede editar ni cancelar. Si hace falta algún cambio, avisale al admin.</div>'
+      + '</div>';
+  }
+
+  if (!XUBIO_HABILITADO) {
+    // Modo "próximamente" — muestra el campo de remito manual como siempre
+    return '<div class="xubio-panel">'
+      + '<div class="xubio-panel-titulo">🔗 Remito Xubio</div>'
+      + '<div class="xubio-coming-soon">'
+      +   '<div class="xubio-coming-soon-icon">🔗</div>'
+      +   '<div class="xubio-coming-soon-txt"><strong>Remito automático en Xubio</strong><br>Disponible pronto. Por ahora anotá el número manualmente.</div>'
+      +   '<div class="xubio-coming-soon-badge">Pronto</div>'
+      + '</div>'
+      + '<div style="margin-top:8px;">'
+      +   '<input class="nota-input" style="height:40px;font-size:14px;" id="remito-' + id + '" type="text" inputmode="numeric" placeholder="N° remito Xubio (opcional)" value="' + (p.remito||'') + '" onblur="guardarRemito(\'' + p.pedidoId + '\')">'
+      + '</div>'
+      + '</div>';
+  }
+
+  // Modo habilitado — buscador completo para crear PRESUPUESTO
+  var clienteSel = _xubioSeleccion[p.pedidoId];
+  var clienteSelHtml = clienteSel
+    ? '<div class="xubio-cliente-sel on" id="xubio-sel-' + id + '">'
+    +   '<div><div class="xubio-cliente-sel-nombre">' + clienteSel.nombre + '</div>'
+    +   '<div class="xubio-cliente-sel-meta">' + (clienteSel.cuit ? 'CUIT: ' + clienteSel.cuit : '') + '</div></div>'
+    +   '<button class="xubio-cliente-clear" onclick="xubioLimpiarCliente(\'' + p.pedidoId + '\',\'' + id + '\')">✕</button>'
+    + '</div>'
+    : '<div class="xubio-cliente-sel" id="xubio-sel-' + id + '"></div>';
+
+  // Botón habilitado solo si hay cliente seleccionado
+  var btnDisabled = clienteSel ? '' : 'disabled';
+
+  // v11 admin: detectar si es admin para mostrar banner
+  var esAdminCreando = (typeof vendedorActual !== 'undefined' && vendedorActual === 'ADMIN');
+  var bannerAdminHtml = '';
+  if (esAdminCreando) {
+    var vendOriginal = (p.vendedor || '').trim();
+    bannerAdminHtml = '<div class="xubio-admin-banner">'
+      + '<div class="xubio-admin-banner-titulo">⚠️ Creando como ADMIN</div>'
+      + '<div class="xubio-admin-banner-body">'
+      +   'El presupuesto saldrá a nombre de <strong>' + (vendOriginal || '(sin vendedor)') + '</strong> (vendedor original).<br>'
+      +   'En las observaciones de Xubio quedará registrado que lo creaste vos.'
+      + '</div>'
+      + '</div>';
+  }
+
+  return '<div class="xubio-panel">'
+    + '<div class="xubio-panel-titulo">📄 Crear presupuesto en Xubio</div>'
+    + '<div class="xubio-panel-intro">Una vez creado el presupuesto, el pedido queda <strong>confirmado</strong>' + (esAdminCreando ? '.' : ' y el admin lo remitirá en Xubio.') + '</div>'
+
+    + bannerAdminHtml
+
+    // v13.3: barra de sync de clientes (snapshot Supabase)
+    + '<div class="xubio-sync-bar" id="xubio-sync-bar-' + id + '">'
+    +   '<span class="xubio-sync-info" id="xubio-sync-info-' + id + '">Cargando estado de sincronización...</span>'
+    +   '<button type="button" class="xubio-sync-btn" id="xubio-sync-btn-' + id + '" onclick="xubioSyncManual(\'' + id + '\')">🔄 Sincronizar</button>'
+    + '</div>'
+
+    // Cliente vinculado (si existe)
+    + clienteSelHtml
+
+    // Buscador de cliente
+    + '<div class="xubio-search-wrap" id="xubio-search-wrap-' + id + '" style="' + (clienteSel ? 'display:none;' : '') + '">'
+    +   '<input class="xubio-search-input" id="xubio-search-' + id + '"'
+    +     ' placeholder="Buscar cliente en Xubio..." autocomplete="off"'
+    +     ' oninput="xubioBuscarCliente(this,\'' + p.pedidoId + '\',\'' + id + '\')"'
+    +     ' onfocus="_xubioActivo=true; xubioAbrirDropdown(\'' + id + '\')"' + ' onblur="setTimeout(function(){_xubioActivo=false;},2000)">'
+    +   '<span class="xubio-search-icon" id="xubio-icon-' + id + '">🔍</span>'
+    +   '<div class="xubio-search-spinner" id="xubio-spin-' + id + '"></div>'
+    +   '<div class="xubio-dropdown" id="xubio-drop-' + id + '"></div>'
+    + '</div>'
+
+    // Botón crear presupuesto
+    + '<button class="btn-remitir" id="xubio-btn-' + id + '" ' + btnDisabled
+    +   ' onclick="xubioCrearPresupuesto(\'' + p.pedidoId + '\',' + p.fila + ',\'' + id + '\')">'
+    +   '📄 Crear presupuesto'
+    + '</button>'
+    + '</div>';
+}
+
+// ── Buscar cliente con debounce ───────────────────────────────────
+// v13.3: pega DIRECTO a Supabase (clientes_xubio) con ilike.
+// El Apps Script ya no se llama para el buscador (más rápido + sin caches).
+// Si el cliente no aparece, el dropdown muestra info de "última sync" + tip de sincronizar.
+var _xubioTimers = {};
+function xubioBuscarCliente(input, pedidoId, id) {
+  clearTimeout(_xubioTimers[id]);
+  var q = input.value.trim();
+  var drop = document.getElementById('xubio-drop-' + id);
+  if (!drop) return;
+
+  if (q.length < 2) { drop.classList.remove('on'); drop.innerHTML = ''; return; }
+
+  // Spinner
+  var spin = document.getElementById('xubio-spin-' + id);
+  var icon = document.getElementById('xubio-icon-' + id);
+  if (spin) spin.classList.add('on');
+  if (icon) icon.style.display = 'none';
+
+  _xubioTimers[id] = setTimeout(function() {
+    // Detectar si q es CUIT (todos dígitos, ≥7) → búsqueda por columna cuit
+    var qLimpio = q.replace(/[-\s]/g, '');
+    var esCuit  = /^\d{7,}$/.test(qLimpio);
+
+    // Normalizar para nombre_norm
+    var qNorm = q.toLowerCase()
+      .replace(/[áàä]/g, 'a').replace(/[éèë]/g, 'e')
+      .replace(/[íìï]/g, 'i').replace(/[óòö]/g, 'o')
+      .replace(/[úùü]/g, 'u').replace(/ñ/g, 'n')
+      .replace(/\s+/g, ' ').trim();
+
+    var path;
+    if (esCuit) {
+      path = 'clientes_xubio?select=id,nombre,cuit,localidad'
+           + '&cuit=ilike.*' + encodeURIComponent(qLimpio) + '*'
+           + '&limit=12';
+    } else {
+      path = 'clientes_xubio?select=id,nombre,cuit,localidad'
+           + '&nombre_norm=ilike.' + encodeURIComponent('*' + qNorm + '*')
+           + '&order=nombre.asc'
+           + '&limit=12';
+    }
+
+    sbFetch(path, { method: 'GET' })
+      .then(function(filas) {
+        if (spin) spin.classList.remove('on');
+        if (icon) icon.style.display = '';
+        var clientes = (filas || []).map(function(c) {
+          return {
+            id:        String(c.id || ''),
+            nombre:    c.nombre || '',
+            cuit:      c.cuit || '',
+            localidad: c.localidad || ''
+          };
+        });
+        xubioRenderDropdown(clientes, id, pedidoId);
+      })
+      .catch(function(err) {
+        console.error('[xubio] buscar Supabase:', err);
+        if (spin) spin.classList.remove('on');
+        if (icon) icon.style.display = '';
+        drop.innerHTML = '<div class="xubio-dropdown-empty">⚠️ Error de conexión con la base. Intentá de nuevo.</div>';
+        drop.classList.add('on');
+      });
+  }, 350);
+}
+
+function xubioRenderDropdown(clientes, id, pedidoId) {
+  var drop = document.getElementById('xubio-drop-' + id);
+  if (!drop) return;
+  if (!clientes.length) {
+    // v13.3: mostrar info de última sync + tip de sincronizar
+    var syncInfo = window._xubioUltimaSync;
+    var infoHtml = '';
+    if (syncInfo && syncInfo.relativo) {
+      infoHtml = '<div class="xubio-dropdown-empty-info">'
+               + 'Última sincronización ' + syncInfo.relativo + ' · '
+               + (syncInfo.cantidad || '?') + ' clientes en base. '
+               + 'Si el cliente es nuevo en Xubio, tocá <strong>🔄</strong> arriba para sincronizar.'
+               + '</div>';
+    } else {
+      infoHtml = '<div class="xubio-dropdown-empty-info">Si el cliente es nuevo en Xubio, tocá <strong>🔄</strong> arriba para sincronizar.</div>';
+    }
+    drop.innerHTML = '<div class="xubio-dropdown-empty">No se encontraron clientes</div>' + infoHtml;
+    drop.classList.add('on');
+    return;
+  }
+
+  if (!window._xubioDropData) window._xubioDropData = {};
+  window._xubioDropData[id] = { pedidoId: pedidoId, clientes: clientes };
+
+  var html = '';
+  for (var i = 0; i < clientes.length; i++) {
+    var c    = clientes[i];
+    var meta = c.cuit ? ('CUIT: ' + c.cuit) : ('ID Xubio: ' + c.id);
+    if (c.localidad) meta += ' · ' + c.localidad;
+    html += '<div class="xubio-dropdown-item" data-id="' + id + '" data-idx="' + i + '" data-pid="' + pedidoId + '">'
+          + '<div class="xubio-dropdown-nombre">' + c.nombre + '</div>'
+          + '<div class="xubio-dropdown-meta">' + meta + '</div>'
+          + '</div>';
+  }
+  drop.innerHTML = html;
+
+  // Usar event delegation para evitar problemas con onclick inline
+  drop.querySelectorAll('.xubio-dropdown-item').forEach(function(el) {
+    el.addEventListener('mousedown', function(e) {
+      e.preventDefault();
+      var pid = el.getAttribute('data-pid');
+      var did = el.getAttribute('data-id');
+      var idx = parseInt(el.getAttribute('data-idx'));
+      var entry = window._xubioDropData[did];
+      if (entry && entry.clientes[idx]) {
+        xubioSeleccionarCliente(pid, did, entry.clientes[idx]);
+      }
+    });
+  });
+
+  drop.classList.add('on');
+}
+
+
+function xubioAbrirDropdown(id) {
+  // Cerrar otros dropdowns abiertos
+  document.querySelectorAll('.xubio-dropdown.on').forEach(function(d) {
+    if (d.id !== 'xubio-drop-' + id) d.classList.remove('on');
+  });
+}
+
+// ── Seleccionar cliente ───────────────────────────────────────────
+function xubioSeleccionarCliente(pedidoId, id, cliente) {
+  _xubioActivo = true; // mantener pausado mientras se seleccionan variantes
+  // Guardar selección
+  if (!_xubioSeleccion[pedidoId]) _xubioSeleccion[pedidoId] = {};
+  _xubioSeleccion[pedidoId].clienteId     = cliente.id;
+  _xubioSeleccion[pedidoId].clienteNombre = cliente.nombre;
+  _xubioSeleccion[pedidoId].clienteCuit   = cliente.cuit;
+
+  // Cerrar dropdown, ocultar buscador
+  var drop = document.getElementById('xubio-drop-' + id);
+  var wrap = document.getElementById('xubio-search-wrap-' + id);
+  if (drop) drop.classList.remove('on');
+  if (wrap) wrap.style.display = 'none';
+
+  // Mostrar cliente seleccionado
+  var sel = document.getElementById('xubio-sel-' + id);
+  if (sel) {
+    var nomDisplay  = cliente.nombre || cliente.razonSocial || '(sin nombre)';
+    var metaDisplay = cliente.cuit ? ('CUIT: ' + cliente.cuit) : ('ID: ' + (cliente.id || cliente.cliente_id || '?'));
+    sel.innerHTML = '<div><div class="xubio-cliente-sel-nombre">' + nomDisplay + '</div>'
+      + '<div class="xubio-cliente-sel-meta">' + metaDisplay + '</div></div>'
+      + '<button class="xubio-cliente-clear" onclick="xubioLimpiarCliente(\'' + pedidoId + '\',\'' + id + '\')">✕</button>';
+    sel.classList.add('on');
+  }
+
+  // v10: habilitar botón "Crear presupuesto" directamente. Los calibres se piden en modal al tocar el botón.
+  var btn = document.getElementById('xubio-btn-' + id);
+  if (btn) btn.disabled = false;
+}
+
+// ── Limpiar cliente ───────────────────────────────────────────────
+// ── v13.3: SYNC CLIENTES XUBIO ────────────────────────────────────
+// Estado global de la última sync (compartido entre todos los paneles)
+window._xubioUltimaSync = null;
+var _xubioSyncRefreshTimer = null;
+
+// Cargar info de la última sync desde el Apps Script
+function xubioCargarUltimaSync() {
+  return fetch(APPS_SCRIPT_URL + '?accion=ultimaSyncClientes')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status !== 'ok') {
+        console.warn('[xubio sync] Error al cargar ultimaSync:', data.message);
+        window._xubioUltimaSync = null;
+        xubioActualizarBarrasSync();
+        return null;
+      }
+      var ultima = data.ultima_ok || null;
+      var ultimaCualquiera = data.ultima || null;
+      var fallida = false;
+      if (ultimaCualquiera && ultimaCualquiera.status === 'error') {
+        fallida = true;
+      }
+      window._xubioUltimaSync = {
+        finalizado_at:  ultima ? ultima.finalizado_at : null,
+        cantidad:       ultima ? ultima.cantidad : (data.cantidad_actual || null),
+        relativo:       ultima ? _xubioFormatearRelativo(ultima.finalizado_at) : 'nunca',
+        ultima_fallida: fallida,
+        cantidad_actual: data.cantidad_actual
+      };
+      xubioActualizarBarrasSync();
+      return window._xubioUltimaSync;
+    })
+    .catch(function(err) {
+      console.error('[xubio sync] Excepción ultimaSync:', err);
+      window._xubioUltimaSync = null;
+      xubioActualizarBarrasSync();
+      return null;
+    });
+}
+
+// Convierte una fecha ISO a "hace Xm" / "hace Xh"
+function _xubioFormatearRelativo(iso) {
+  if (!iso) return 'nunca';
+  try {
+    var d  = new Date(iso);
+    var ms = Date.now() - d.getTime();
+    if (isNaN(ms) || ms < 0) return 'recién';
+    var min = Math.floor(ms / 60000);
+    if (min < 1) return 'hace menos de 1 min';
+    if (min < 60) return 'hace ' + min + ' min';
+    var h = Math.floor(min / 60);
+    if (h < 24) return 'hace ' + h + ' h';
+    var dias = Math.floor(h / 24);
+    return 'hace ' + dias + ' día' + (dias > 1 ? 's' : '');
+  } catch(e) { return 'desconocido'; }
+}
+
+// Actualiza el texto y estilo de TODAS las barras de sync visibles
+function xubioActualizarBarrasSync() {
+  var info = window._xubioUltimaSync;
+  document.querySelectorAll('.xubio-sync-bar').forEach(function(bar) {
+    var infoEl = bar.querySelector('.xubio-sync-info');
+    if (!infoEl) return;
+    bar.classList.remove('xubio-sync-bar-error');
+    if (!info) {
+      infoEl.textContent = 'Estado de sincronización: desconocido';
+      return;
+    }
+    if (info.ultima_fallida) {
+      bar.classList.add('xubio-sync-bar-error');
+      infoEl.innerHTML = '⚠️ Última sync FALLÓ · ' + (info.cantidad || '?') + ' clientes en base';
+    } else {
+      infoEl.innerHTML = '✓ Sincronizado ' + info.relativo + ' · ' + (info.cantidad || '?') + ' clientes';
+    }
+  });
+}
+
+// Sync manual disparada por el botón
+function xubioSyncManual(panelId) {
+  var btn = document.getElementById('xubio-sync-btn-' + panelId);
+  if (btn && btn.disabled) return;
+
+  // Mostrar overlay bloqueante
+  _xubioMostrarOverlaySync();
+
+  // Deshabilitar todos los botones de sync (puede haber varios paneles abiertos)
+  document.querySelectorAll('.xubio-sync-btn').forEach(function(b) { b.disabled = true; });
+
+  fetch(APPS_SCRIPT_URL + '?accion=syncClientesXubio&porQuien=' + encodeURIComponent(vendedorActual || 'sistema'))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      _xubioOcultarOverlaySync();
+      document.querySelectorAll('.xubio-sync-btn').forEach(function(b) { b.disabled = false; });
+
+      if (data.status === 'ok') {
+        toast('✓ Sincronizado: ' + data.cantidad + ' clientes en ' + Math.round((data.duracion_ms || 0) / 1000) + 's');
+        xubioCargarUltimaSync();
+      } else if (data.status === 'cancelado') {
+        alert('⚠️ Sincronización cancelada\n\n' + (data.message || 'Xubio devolvió pocos clientes. Tu base anterior está intacta.'));
+        xubioCargarUltimaSync();
+      } else {
+        alert('❌ Error al sincronizar:\n\n' + (data.message || 'desconocido'));
+        xubioCargarUltimaSync();
+      }
+    })
+    .catch(function(err) {
+      _xubioOcultarOverlaySync();
+      document.querySelectorAll('.xubio-sync-btn').forEach(function(b) { b.disabled = false; });
+      alert('❌ Error de conexión al sincronizar:\n\n' + err.message);
+    });
+}
+
+// Overlay bloqueante mientras sincroniza (~5-30s)
+function _xubioMostrarOverlaySync() {
+  var existing = document.getElementById('xubio-sync-overlay');
+  if (existing) return;
+  var ov = document.createElement('div');
+  ov.id = 'xubio-sync-overlay';
+  ov.className = 'xubio-sync-overlay';
+  ov.innerHTML = '<div class="xubio-sync-overlay-box">'
+              +   '<div class="xubio-sync-overlay-spinner"></div>'
+              +   '<div class="xubio-sync-overlay-titulo">Sincronizando clientes desde Xubio...</div>'
+              +   '<div class="xubio-sync-overlay-sub">Esto puede tardar entre 5 y 30 segundos.<br>No cierres esta ventana.</div>'
+              + '</div>';
+  document.body.appendChild(ov);
+}
+
+function _xubioOcultarOverlaySync() {
+  var ov = document.getElementById('xubio-sync-overlay');
+  if (ov) ov.parentNode.removeChild(ov);
+}
+
+// Refresh automático cada 60s (solo si hay paneles Xubio visibles)
+function _xubioIniciarRefreshSync() {
+  if (_xubioSyncRefreshTimer) return;
+  _xubioSyncRefreshTimer = setInterval(function() {
+    // Solo refrescar si hay barras visibles en el DOM
+    if (document.querySelectorAll('.xubio-sync-bar').length > 0) {
+      xubioActualizarBarrasSync();  // recalcular "hace Xm" sin pegarle a la red
+    }
+  }, 60000);
+}
+
+function xubioLimpiarCliente(pedidoId, id) {
+  delete _xubioSeleccion[pedidoId];
+  var sel  = document.getElementById('xubio-sel-' + id);
+  var wrap = document.getElementById('xubio-search-wrap-' + id);
+  var inp  = document.getElementById('xubio-search-' + id);
+  var vars = document.getElementById('xubio-vars-' + id);
+  var btn  = document.getElementById('xubio-btn-' + id);
+  if (sel)  { sel.classList.remove('on'); sel.innerHTML = ''; }
+  if (wrap) { wrap.style.display = ''; }
+  if (inp)  { inp.value = ''; }
+  if (vars) { vars.style.display = 'none'; }
+  if (btn)  { btn.disabled = true; }
+}
+
+// ── Cargar variantes del producto ─────────────────────────────────
+function xubioCargarVariantes(pedido, id) {
+  // Tomar el primer producto del pedido para buscar variantes
+  var prods = parseProds(pedido.detalle);
+  if (!prods.length) {
+    // Sin variantes detectables — habilitar botón directamente
+    var btn = document.getElementById('xubio-btn-' + id);
+    if (btn) btn.disabled = false;
+    return;
+  }
+
+  var primerProd = prods[0].name;
+  fetch(APPS_SCRIPT_URL + '?accion=buscarProductoXubio&nombre_catalogo=' + encodeURIComponent(primerProd))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status !== 'ok' || !data.productos || !data.productos.length) {
+        // Sin variantes — habilitar botón
+        var btn = document.getElementById('xubio-btn-' + id);
+        if (btn) btn.disabled = false;
+        return;
+      }
+
+      if (data.tipo === '1a1' && data.productos.length === 1) {
+        // Producto único — seleccionar automáticamente y habilitar
+        var pr = data.productos[0];
+        if (!_xubioSeleccion[pedido.pedidoId]) _xubioSeleccion[pedido.pedidoId] = {};
+        _xubioSeleccion[pedido.pedidoId].productoId     = pr.id;
+        _xubioSeleccion[pedido.pedidoId].productoNombre = pr.nombre;
+        var btn = document.getElementById('xubio-btn-' + id);
+        if (btn) btn.disabled = false;
+      } else {
+        // Múltiples variantes — mostrar selector
+        xubioRenderVariantes(data.productos, pedido.pedidoId, id);
+      }
+    })
+    .catch(function() {
+      var btn = document.getElementById('xubio-btn-' + id);
+      if (btn) btn.disabled = false;
+    });
+}
+
+function xubioRenderVariantes(productos, pedidoId, id) {
+  var varsDiv  = document.getElementById('xubio-vars-' + id);
+  var listaDiv = document.getElementById('xubio-vars-lista-' + id);
+  if (!varsDiv || !listaDiv) return;
+
+  listaDiv.innerHTML = productos.map(function(pr, i) {
+    var stockLabel, stockClass;
+    if (pr.stock === null || pr.stock === undefined) {
+      stockLabel = 'Stock N/D'; stockClass = 'stock-null';
+    } else if (pr.stock > 5) {
+      stockLabel = pr.stock + ' en stock'; stockClass = 'stock-ok';
+    } else if (pr.stock > 0) {
+      stockLabel = '⚠️ Solo ' + pr.stock; stockClass = 'stock-bajo';
+    } else {
+      stockLabel = 'Sin stock'; stockClass = 'stock-null';
+    }
+
+    // Pre-seleccionar el primero
+    var sel = i === 0 ? ' sel' : '';
+    if (i === 0) {
+      if (!_xubioSeleccion[pedidoId]) _xubioSeleccion[pedidoId] = {};
+      _xubioSeleccion[pedidoId].productoId     = pr.id;
+      _xubioSeleccion[pedidoId].productoNombre = pr.nombre;
+    }
+
+    return '<div class="xubio-variante-item' + sel + '" id="xvar-' + id + '-' + i + '"'
+      + ' data-pedidoid="' + pedidoId + '" data-id="' + id + '" data-idx="' + i + '">'
+      + '<div class="xubio-variante-radio"></div>'
+      + '<div class="xubio-variante-nombre">' + pr.nombre + '</div>'
+      + '<div class="xubio-variante-stock ' + stockClass + '">' + stockLabel + '</div>'
+      + '</div>';
+  }).join('');
+
+  // Guardar lista de variantes en global para acceso por índice
+  if (!window._xubioVarsData) window._xubioVarsData = {};
+  window._xubioVarsData[id] = { pedidoId: pedidoId, productos: productos };
+
+  // Agregar event listeners a las variantes
+  setTimeout(function() {
+    var lista = document.getElementById('xubio-vars-lista-' + id);
+    if (!lista) return;
+    lista.querySelectorAll('.xubio-variante-item').forEach(function(el) {
+      el.addEventListener('click', function() {
+        var pid  = el.getAttribute('data-pedidoid');
+        var did  = el.getAttribute('data-id');
+        var idx  = parseInt(el.getAttribute('data-idx'));
+        var data = window._xubioVarsData[did];
+        if (data && data.productos[idx]) {
+          var pr = data.productos[idx];
+          xubioSeleccionarVariante(pid, did, idx, pr.id, pr.nombre);
+        }
+      });
+    });
+  }, 50);
+
+  varsDiv.style.display = 'block';
+
+  // Habilitar botón (ya hay una pre-seleccionada)
+  var btn = document.getElementById('xubio-btn-' + id);
+  if (btn) btn.disabled = false;
+}
+
+function xubioSeleccionarVariante(pedidoId, id, idx, prodId, prodNombre) {
+  if (!_xubioSeleccion[pedidoId]) _xubioSeleccion[pedidoId] = {};
+  _xubioSeleccion[pedidoId].productoId     = prodId;
+  _xubioSeleccion[pedidoId].productoNombre = prodNombre;
+
+  // Visual
+  var lista = document.getElementById('xubio-vars-lista-' + id);
+  if (lista) lista.querySelectorAll('.xubio-variante-item').forEach(function(el, i) {
+    el.classList.toggle('sel', i === idx);
+  });
+}
+
+// ── Ejecutar remito ───────────────────────────────────────────────
+// ── Crear presupuesto en Xubio (v10) ──────────────────────────────
+// Antes de crear, chequea si el pedido tiene Pollo A/B genéricos
+// que requieren selección de calibre → abre modal.
+function xubioCrearPresupuesto(pedidoId, fila, id) {
+  var sel = _xubioSeleccion[pedidoId];
+  if (!sel || !sel.clienteId) { toast('Seleccioná un cliente primero', 'err'); return; }
+
+  var btn = document.getElementById('xubio-btn-' + id);
+  if (btn) { btn.disabled = true; btn.textContent = 'Verificando...'; }
+
+  // Paso 1: detectar si el pedido tiene Pollo A/B genérico que requiere calibre
+  fetch(APPS_SCRIPT_URL + '?accion=detectarCalibres&pedidoId=' + encodeURIComponent(pedidoId))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status !== 'ok') {
+        toast('Error: ' + (data.message || 'No se pudo verificar el pedido'), 'err');
+        if (btn) { btn.disabled = false; btn.textContent = '📄 Crear presupuesto'; }
+        return;
+      }
+
+      if (data.necesitaModal && data.genericos && data.genericos.length) {
+        // Abrir modal de selección de calibres
+        xubioAbrirModalCalibre(pedidoId, fila, id, data.genericos);
+        if (btn) { btn.disabled = false; btn.textContent = '📄 Crear presupuesto'; }
+      } else {
+        // Sin genéricos → ir directo al modal de fecha
+        xubioAbrirModalFecha(pedidoId, fila, id, null);
+        if (btn) { btn.disabled = false; btn.textContent = '📄 Crear presupuesto'; }
+      }
+    })
+    .catch(function() {
+      toast('Error de conexión', 'err');
+      if (btn) { btn.disabled = false; btn.textContent = '📄 Crear presupuesto'; }
+    });
+}
+
+// ── Modal de selección de calibre ─────────────────────────────────
+var _xubioCalibresElegidos = {};
+
+function xubioAbrirModalCalibre(pedidoId, fila, id, genericos) {
+  _xubioCalibresElegidos = {};
+
+  var body = '';
+  genericos.forEach(function(g) {
+    body += '<div class="xubio-calibre-grupo">';
+    body +=   '<div class="xubio-calibre-label">Seleccioná el calibre para <strong>' + g.nombre + '</strong>:</div>';
+    body +=   '<div class="xubio-calibre-opciones" data-generico="' + g.nombre + '">';
+    g.opciones.forEach(function(op) {
+      body += '<button class="xubio-calibre-opt" data-id="' + op.id + '" data-generico="' + g.nombre + '" onclick="xubioSeleccionarCalibre(this)">' + op.label + '</button>';
+    });
+    body +=   '</div>';
+    body += '</div>';
+  });
+
+  var modal = document.getElementById('modal-xubio-calibre');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-xubio-calibre';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = '<div class="modal-box xubio-calibre-box">'
+    + '<div class="modal-hdr">'
+    +   '<div class="modal-title">📏 Seleccioná el calibre</div>'
+    +   '<button class="modal-close" onclick="xubioCerrarModalCalibre()">✕</button>'
+    + '</div>'
+    + '<div class="modal-body">'
+    +   '<div class="xubio-calibre-intro">Antes de crear el presupuesto necesitamos saber qué calibre lleva cada pollo genérico del pedido.</div>'
+    +   body
+    + '</div>'
+    + '<div class="modal-footer">'
+    +   '<button class="btn-secondary" onclick="xubioCerrarModalCalibre()">Cancelar</button>'
+    +   '<button class="btn-primary" id="btn-xubio-calibre-ok" disabled onclick="xubioConfirmarCalibres(\'' + pedidoId + '\',' + fila + ',\'' + id + '\')">Continuar</button>'
+    + '</div>'
+    + '</div>';
+  modal.classList.add('on');
+}
+
+function xubioSeleccionarCalibre(btnEl) {
+  var generico = btnEl.getAttribute('data-generico');
+  var productoId = btnEl.getAttribute('data-id');
+
+  // Marcar visualmente solo este como elegido dentro del grupo
+  var contenedor = btnEl.parentElement;
+  contenedor.querySelectorAll('.xubio-calibre-opt').forEach(function(b) {
+    b.classList.remove('on');
+  });
+  btnEl.classList.add('on');
+
+  _xubioCalibresElegidos[generico] = parseInt(productoId);
+
+  // Habilitar botón continuar si todos los grupos tienen elección
+  var modal = document.getElementById('modal-xubio-calibre');
+  var gruposTotales = modal.querySelectorAll('.xubio-calibre-opciones').length;
+  var gruposElegidos = Object.keys(_xubioCalibresElegidos).length;
+  var btnOk = document.getElementById('btn-xubio-calibre-ok');
+  if (btnOk) btnOk.disabled = (gruposElegidos < gruposTotales);
+}
+
+function xubioCerrarModalCalibre() {
+  var modal = document.getElementById('modal-xubio-calibre');
+  if (modal) modal.classList.remove('on');
+  _xubioCalibresElegidos = {};
+}
+
+function xubioConfirmarCalibres(pedidoId, fila, id) {
+  var calibres = _xubioCalibresElegidos;
+  xubioCerrarModalCalibre();
+  // v11: Después de los calibres, pasar al modal de fecha
+  xubioAbrirModalFecha(pedidoId, fila, id, calibres);
+}
+
+// ── Ejecutar la creación real del presupuesto ─────────────────────
+function xubioEjecutarCrearPresupuesto(pedidoId, fila, id, calibres, fechaPresupuesto) {
+  var sel = _xubioSeleccion[pedidoId];
+  if (!sel || !sel.clienteId) { toast('Seleccioná un cliente primero', 'err'); return; }
+
+  var btn = document.getElementById('xubio-btn-' + id);
+  if (btn) { btn.disabled = true; btn.textContent = 'Creando presupuesto...'; }
+
+  var params = new URLSearchParams({
+    accion:         'crearPresupuestoXubio',
+    pedidoId:       pedidoId,
+    xubioClienteId: sel.clienteId
+  });
+  if (calibres && Object.keys(calibres).length) {
+    params.set('calibres', JSON.stringify(calibres));
+  }
+  // v11: fecha del presupuesto (opcional). Si no viene, Apps Script usa hoy.
+  if (fechaPresupuesto) {
+    params.set('fechaPresupuesto', fechaPresupuesto);
+  }
+  // v11 admin: si lo crea el admin, agregar flag para que el Apps Script
+  // sume sufijo "(creado por ADMIN Francisco)" en la descripción del presupuesto.
+  // El vendedor del payload NO cambia (sigue siendo el del pedido original).
+  if (typeof vendedorActual !== 'undefined' && vendedorActual === 'ADMIN') {
+    params.set('creadoPorAdmin', 'true');
+    params.set('adminNombre', 'Francisco');
+  }
+
+  fetch(APPS_SCRIPT_URL + '?' + params.toString())
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status === 'ok') {
+        toast('✅ Presupuesto N° ' + data.nroPresupuesto + ' creado', 'ok');
+        _xubioActivo = false;
+        // Actualizar el pedido en memoria
+        var pedido = todosLosPedidos.find(function(x) { return x.pedidoId === pedidoId; });
+        if (pedido) {
+          pedido.estado = 'Confirmado';
+          pedido.xubioNroPresupuesto = data.nroPresupuesto;
+          pedido.xubioTransaccionid = data.transaccionid || '';
+          pedido.xubioEstado = 'creado';
+        }
+        renderPedidos();
+        actualizarMiDiaSiAbierto && actualizarMiDiaSiAbierto();
+      } else {
+        // Manejo de errores específicos
+        if (data.code === 'PRODUCTOS_SIN_MAPEAR' && data.faltantes) {
+          xubioMostrarErrorFaltantes(data.faltantes);
+        } else if (data.code === 'YA_TIENE_PRESUPUESTO') {
+          toast('Este pedido ya tiene presupuesto #' + data.nroPresupuesto, 'err');
+          // Recargar pedidos para reflejar estado real
+          cargarPedidos(true);
+        } else {
+          toast('Error: ' + (data.message || 'No se pudo crear el presupuesto'), 'err');
+        }
+        _xubioActivo = false;
+        if (btn) { btn.disabled = false; btn.textContent = '📄 Crear presupuesto'; }
+      }
+    })
+    .catch(function() {
+      toast('Error de conexión', 'err');
+      _xubioActivo = false;
+      if (btn) { btn.disabled = false; btn.textContent = '📄 Crear presupuesto'; }
+    });
+}
+
+// ── Modal de fecha del presupuesto (v11) ──────────────────────────
+// Un solo botón que por default dice "📅 Hoy (DD/MM/YYYY)".
+// Si el vendedor lo toca, abre el date picker nativo del navegador.
+// Rango permitido: [hoy, hoy+7]. Backward compat: si no se elige nada,
+// se envía sin fechaPresupuesto y el Apps Script usa hoy.
+var _xubioFechaElegida = null; // string YYYY-MM-DD o null = hoy
+
+function _xubioFormatearFechaArgHumana(yyyymmdd) {
+  // Convierte YYYY-MM-DD a DD/MM/YYYY sin pasar por Date (evita TZ issues)
+  if (!yyyymmdd || !/^\d{4}-\d{2}-\d{2}$/.test(yyyymmdd)) return '';
+  var p = yyyymmdd.split('-');
+  return p[2] + '/' + p[1] + '/' + p[0];
+}
+
+function _xubioHoyYYYYMMDD() {
+  var d = new Date();
+  var yyyy = d.getFullYear();
+  var mm = String(d.getMonth() + 1).padStart(2, '0');
+  var dd = String(d.getDate()).padStart(2, '0');
+  return yyyy + '-' + mm + '-' + dd;
+}
+
+function _xubioSumarDiasYYYYMMDD(n) {
+  var d = new Date();
+  d.setDate(d.getDate() + n);
+  var yyyy = d.getFullYear();
+  var mm = String(d.getMonth() + 1).padStart(2, '0');
+  var dd = String(d.getDate()).padStart(2, '0');
+  return yyyy + '-' + mm + '-' + dd;
+}
+
+function xubioAbrirModalFecha(pedidoId, fila, id, calibres) {
+  _xubioFechaElegida = null; // Reset al default = hoy
+
+  var hoyISO = _xubioHoyYYYYMMDD();
+  var maxISO = _xubioSumarDiasYYYYMMDD(7);
+  var hoyHumana = _xubioFormatearFechaArgHumana(hoyISO);
+
+  var modal = document.getElementById('modal-xubio-fecha');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-xubio-fecha';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  // Guardamos los args en data-* para que el botón Confirmar los pueda leer
+  var calibresJSON = calibres ? JSON.stringify(calibres) : '';
+
+  var html = '';
+  html += '<div class="modal-box">';
+  html +=   '<div class="modal-hdr">';
+  html +=     '<div class="modal-title">📅 Fecha del presupuesto</div>';
+  html +=     '<button class="modal-close" onclick="xubioCerrarModalFecha()">✕</button>';
+  html +=   '</div>';
+  html +=   '<div class="modal-body">';
+  html +=     '<div class="xubio-fecha-intro">Tocá el botón para elegir otra fecha si el presupuesto no es para hoy.</div>';
+  html +=     '<button type="button" class="xubio-fecha-btn" id="xubio-fecha-btn-label">';
+  html +=       '<span class="xfb-icono">📅</span>';
+  html +=       '<span id="xubio-fecha-btn-texto">Hoy (' + hoyHumana + ')</span>';
+  html +=       '<input type="date" id="xubio-fecha-picker" class="xubio-fecha-input-hidden" ';
+  html +=         'min="' + hoyISO + '" max="' + maxISO + '" value="' + hoyISO + '" ';
+  html +=         'onchange="xubioCambiarFechaPicker(this.value)">';
+  html +=     '</button>';
+  html +=   '</div>';
+  html +=   '<div class="modal-footer">';
+  html +=     '<button class="btn-secondary" onclick="xubioCerrarModalFecha()">Cancelar</button>';
+  html +=     '<button class="btn-primary" id="btn-xubio-fecha-ok" ';
+  html +=       'data-pedido="' + pedidoId + '" data-fila="' + fila + '" data-id="' + id + '" ';
+  html +=       'data-calibres="' + encodeURIComponent(calibresJSON) + '" ';
+  html +=       'onclick="xubioConfirmarFecha(this)">✅ Confirmar y crear</button>';
+  html +=   '</div>';
+  html += '</div>';
+
+  modal.innerHTML = html;
+  modal.classList.add('on');
+}
+
+function xubioCambiarFechaPicker(nuevaFechaISO) {
+  if (!nuevaFechaISO) return;
+  var hoyISO = _xubioHoyYYYYMMDD();
+  var btn = document.querySelector('#modal-xubio-fecha .xubio-fecha-btn');
+  var texto = document.getElementById('xubio-fecha-btn-texto');
+
+  if (nuevaFechaISO === hoyISO) {
+    // Volvió a hoy
+    _xubioFechaElegida = null;
+    if (btn) btn.classList.remove('on-elegida');
+    if (texto) texto.textContent = 'Hoy (' + _xubioFormatearFechaArgHumana(hoyISO) + ')';
+  } else {
+    _xubioFechaElegida = nuevaFechaISO;
+    if (btn) btn.classList.add('on-elegida');
+    if (texto) texto.textContent = _xubioFormatearFechaArgHumana(nuevaFechaISO);
+  }
+}
+
+function xubioCerrarModalFecha() {
+  var modal = document.getElementById('modal-xubio-fecha');
+  if (modal) modal.classList.remove('on');
+  _xubioFechaElegida = null;
+}
+
+function xubioConfirmarFecha(btnEl) {
+  var pedidoId = btnEl.getAttribute('data-pedido');
+  var fila = parseInt(btnEl.getAttribute('data-fila'));
+  var id = btnEl.getAttribute('data-id');
+  var calibresEnc = btnEl.getAttribute('data-calibres') || '';
+  var calibres = null;
+  if (calibresEnc) {
+    try { calibres = JSON.parse(decodeURIComponent(calibresEnc)); } catch(e) { calibres = null; }
+  }
+  var fechaElegida = _xubioFechaElegida; // puede ser null = hoy
+  xubioCerrarModalFecha();
+  xubioEjecutarCrearPresupuesto(pedidoId, fila, id, calibres, fechaElegida);
+}
+
+// ── Modal de productos sin mapear ─────────────────────────────────
+function xubioMostrarErrorFaltantes(faltantes) {
+  var lista = (faltantes || []).map(function(f) { return '<li>' + f + '</li>'; }).join('');
+
+  var modal = document.getElementById('modal-xubio-faltantes');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-xubio-faltantes';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = '<div class="modal-box xubio-faltantes-box">'
+    + '<div class="modal-hdr">'
+    +   '<div class="modal-title">⚠️ Faltan productos en Xubio</div>'
+    +   '<button class="modal-close" onclick="xubioCerrarModalFaltantes()">✕</button>'
+    + '</div>'
+    + '<div class="modal-body">'
+    +   '<div class="xubio-faltantes-intro">No se puede crear el presupuesto porque estos productos aún no están mapeados a Xubio:</div>'
+    +   '<ul class="xubio-faltantes-lista">' + lista + '</ul>'
+    +   '<div class="xubio-faltantes-info">Ya le avisamos al admin. Una vez que los agregue, podés volver a intentar.</div>'
+    + '</div>'
+    + '<div class="modal-footer">'
+    +   '<button class="btn-primary" onclick="xubioCerrarModalFaltantes()">Entendido</button>'
+    + '</div>'
+    + '</div>';
+  modal.classList.add('on');
+}
+
+function xubioCerrarModalFaltantes() {
+  var modal = document.getElementById('modal-xubio-faltantes');
+  if (modal) modal.classList.remove('on');
+}
+
+// Cerrar dropdowns al tocar fuera
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.xubio-search-wrap') && !e.target.closest('.xubio-panel')) {
+    document.querySelectorAll('.xubio-dropdown.on').forEach(function(d) {
+      d.classList.remove('on');
+    });
+    // Si se hizo click fuera del panel Xubio completamente, liberar refresh
+    if (!e.target.closest('.xubio-panel')) {
+      setTimeout(function() { _xubioActivo = false; }, 500);
+    }
+  }
+});
+
 // v10 admin — SISTEMA CROSS-DEVICE de pares "no duplicado"
 // Portado de tck-ventas v13.2 (sistema compartido vía Supabase)
 //
