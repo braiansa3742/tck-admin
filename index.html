@@ -1,4 +1,72 @@
 <!DOCTYPE html>
+<!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v10 — 22/04/2026 noche
+     ──────────────────────────────────────────────────────────────────────
+     Cambios v10 (sobre v9.0) — DUPLICADOS CROSS-DEVICE + UX:
+
+     Caso detonante: portar features del tck-ventas v13.2 a admin para que
+     Francisco (admin) tenga la misma UX y persistencia cross-device para
+     la gestión de duplicados.
+
+     CAMBIOS:
+     1. Sistema cross-device de "no duplicado":
+        - window._dupNoDupSet (cache local)
+        - dupCargarNoDuplicados() carga pares desde Supabase al iniciar
+        - dupEstaMarcadoComoDistinto(a,b) helper para filtros
+        - Hook al inicio de cargarPedidos() para tener el set listo
+        - Filtro en detección: si TODOS los otros del grupo están marcados
+          como legítimos respecto a este pedido, NO marcar como duplicado.
+
+     2. Bloqueo "Cancelar" en modal si NO Pendiente:
+        - Si pedido está Confirmado/Entregado, en lugar del botón
+          "✕ Cancelar este pedido" se muestra indicador
+          "🔒 ✅ Confirmado · No se puede cancelar desde acá"
+        - Previene inconsistencia con presupuesto Xubio y stock.
+
+     3. Bloqueo "Unir" si algún activo no es Pendiente:
+        - Banner rojo "⚠️ No se pueden unir porque alguno ya está
+          confirmado o entregado" + botón Unir deshabilitado.
+        - Botón "✅ Son pedidos legítimos" siempre disponible como
+          alternativa.
+
+     4. Banner accionable en card cuando hay duplicado:
+        - 2 botones directos en el banner (sin abrir modal):
+          • Azul: "✅ Son legítimos" → dupMarcarDistintosDirecto()
+          • Blanco: "👁️ Ver detalle" → abre modal como siempre
+        - Si hay Confirmado en el grupo, el banner usa texto especial
+          ("🟠 PEDIDO DOBLE · Alguno ya fue confirmado") con tip de
+          marcar como legítimos.
+
+     5. Badge "PEDIDO DOBLE" agrandado:
+        - 12px con padding 5×12, borde, sombra, flecha "›" como
+          affordance de tap.
+
+     6. dupCancelarPedido reescrito:
+        - Reemplazado confirm() nativo por dupConfirmModal() custom
+        - Validación: si NO Pendiente, muestra modal soloInfo
+          ("No se puede cancelar")
+        - Cuerpo del modal incluye hora, vendedor, total, ID del pedido
+
+     7. Modal dupConfirmModal portado de v13.2 ventas:
+        - Mismo estilo TCK (fondo crema, header rojo+dorado, botones)
+        - Promise<boolean> para await ergonómico
+        - opts.soloInfo para modales informativos
+
+     8. _dupLogAccion (insert en pedido_acciones para auditoría):
+        - Cada acción de duplicados queda registrada
+        - vendedor_que_actuo = "ADMIN" (por estar en admin)
+
+     PRESERVADO INTACTO:
+       - localStorage tck_dup_revisados (atajo visual local complementario)
+       - dupMarcarSeparados() / dupReactivarAlerta() (legacy, siguen vivos)
+       - Toda la lógica de detección por cliente+día+productos
+
+     DEPLOY:
+       1. Apps Script v22 ya debe estar deployado (v21 no tiene los
+          endpoints marcarNoDuplicados/listarNoDuplicados, son v21 mínimo)
+       2. Subir este archivo al repo tck-admin como index.html
+       3. Hard refresh en el navegador (Cmd+Shift+R / Ctrl+Shift+R)
+====================================================================== -->
 <html lang="es">
 <head>
 <!-- Google Analytics -->
@@ -1212,6 +1280,110 @@ body {
   border-color: #A5D6A7;
   color: #2E7D32;
   cursor: default;
+}
+
+/* v10: indicador "🔒 No se puede cancelar" para pedidos no Pendientes en modal */
+.dup-pedido-bloqueado {
+  margin-top: 8px;
+  padding: 9px 12px;
+  background: #FFF3E0;
+  border: 1px solid #FFB74D;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: #6D4C00;
+  text-align: center;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+/* v10: banner accionable en card (botones "Son legítimos / Ver detalle") */
+.dup-alert-acciones {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.dup-alert-btn {
+  flex: 1;
+  padding: 9px 12px;
+  border-radius: 7px;
+  font-family: 'Barlow', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1.5px solid transparent;
+  transition: all .15s;
+  line-height: 1.2;
+}
+.dup-alert-btn-primary {
+  background: linear-gradient(135deg, #1976D2, #1565C0);
+  color: #fff;
+  border-color: #0D47A1;
+}
+.dup-alert-btn-primary:active {
+  transform: scale(.97);
+  background: #0D47A1;
+}
+.dup-alert-btn-secondary {
+  background: #fff;
+  color: #5D4037;
+  border-color: #BCAAA4;
+}
+.dup-alert-btn-secondary:active {
+  transform: scale(.97);
+  background: #F5F0E8;
+}
+
+/* v10: badge "PEDIDO DOBLE" agrandado y con flecha */
+.badge-dup-grande {
+  font-size: 12px !important;
+  padding: 5px 12px !important;
+  border: 1.5px solid rgba(255,255,255,0.45) !important;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.18) !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.4px;
+  border-radius: 7px !important;
+}
+
+/* v10: warning fuerte cuando algún activo no es Pendiente (impide unir) */
+.dup-warn-no-unir {
+  margin: 12px 0 10px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, #FFEBEE, #FCE4EC);
+  border: 1.5px solid #EF9A9A;
+  border-radius: 8px;
+  color: #B71C1C;
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+}
+.dup-warn-no-unir-sub {
+  display: block;
+  font-size: 11.5px;
+  color: #8B1414;
+  margin-top: 4px;
+  font-weight: 500;
+}
+
+/* v10: botón "Son pedidos legítimos" en modal */
+.dup-btn-distintos {
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, #1976D2, #1565C0);
+  color: #fff;
+  border: 1.5px solid #0D47A1;
+  border-radius: 9px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all .15s;
+}
+.dup-btn-distintos:active {
+  transform: scale(.98);
+  background: #0D47A1;
 }
 
 /* Panel de acciones — la zona del CTA */
@@ -8630,6 +8802,10 @@ async function cargarPedidos(silencioso) {
     '<div class="loading"><div class="loading-spinner"></div>Cargando pedidos...</div>';
   try {
     console.log('[TCK] cargarPedidos iniciando, silencioso:', silencioso);
+    // v10: cargar pares "no duplicado" desde Supabase ANTES de procesar (para que el filtro funcione)
+    if (typeof dupCargarNoDuplicados === 'function') {
+      await dupCargarNoDuplicados();
+    }
     var res = await fetch(SHEET_CSV + '&t=' + Date.now());
     var csv = await res.text();
     console.log('[TCK] CSV recibido, líneas:', csv.trim().split('\n').length, 'chars:', csv.length);
@@ -8757,6 +8933,18 @@ async function cargarPedidos(silencioso) {
         for (var n of misProds) { if (sus.has(n)) return true; }
         return false;
       });
+
+      // v10: excluir del grupo los pares ya marcados como "no duplicado" en Supabase
+      // Si TODOS los otros están marcados como legítimos respecto a este pedido, no marcar como duplicado.
+      if (typeof dupEstaMarcadoComoDistinto === 'function') {
+        var otrosNoMarcados = otros.filter(function(x) {
+          return !dupEstaMarcadoComoDistinto(p.pedidoId, x.pedidoId);
+        });
+        if (otrosNoMarcados.length === 0) {
+          p.esDuplicado = false; p.tipoDuplicado = null; p.duplicadoCon = '';
+          return;
+        }
+      }
 
       p.esDuplicado = true;
       p.tipoDuplicado = otrosConProdComun.length > 0 ? 'exacto' : 'parcial';
@@ -9286,6 +9474,12 @@ function _renderDupModal() {
     html += '</div>';
     if (esCancelado) {
       html += '<button class="dup-pedido-accion-cancelar done" disabled>✓ Cancelado</button>';
+    } else if (p.estado !== 'Pendiente') {
+      // v10: bloquear cancelar si NO es Pendiente (Confirmado/Entregado tienen presupuesto Xubio)
+      var iconoEstado = p.estado === 'Confirmado' ? '✅' : (p.estado === 'Entregado' ? '📦' : '⚠️');
+      html += '<div class="dup-pedido-bloqueado">'
+            + '🔒 ' + iconoEstado + ' ' + p.estado + ' · No se puede cancelar desde acá'
+            + '</div>';
     } else {
       html += '<button class="dup-pedido-accion-cancelar" onclick="dupCancelarPedido(\'' + p.pedidoId + '\')">✕ Cancelar este pedido</button>';
     }
@@ -9361,10 +9555,28 @@ function _renderDupModal() {
       html += '</div>';
     }
 
-    html += '<button class="dup-btn-unir" onclick="dupUnirPedidos()">'
-      + '<span class="dup-btn-unir-icon">🔗</span>'
-      + '<span class="dup-btn-unir-text">Unir en 1 pedido</span>'
-      + '</button>';
+    // v10: deshabilitar Unir si algún activo no es Pendiente (Confirmado/Entregado)
+    var hayNoPendienteEnActivos = activos.some(function(x){ return x.estado !== 'Pendiente'; });
+    if (hayNoPendienteEnActivos) {
+      html += '<div class="dup-warn-no-unir">'
+            + '⚠️ <strong>No se pueden unir</strong> porque alguno ya está confirmado o entregado.<br>'
+            + '<span class="dup-warn-no-unir-sub">Unir rompería el presupuesto Xubio y el stock. Si son pedidos legítimos (sucursales / mañana y tarde), marcalos abajo.</span>'
+            + '</div>';
+      html += '<button class="dup-btn-unir" disabled>'
+        + '<span class="dup-btn-unir-icon">🔗</span>'
+        + '<span class="dup-btn-unir-text">Unir en 1 pedido</span>'
+        + '</button>';
+    } else {
+      html += '<button class="dup-btn-unir" onclick="dupUnirPedidos()">'
+        + '<span class="dup-btn-unir-icon">🔗</span>'
+        + '<span class="dup-btn-unir-text">Unir en 1 pedido</span>'
+        + '</button>';
+    }
+
+    // v10: botón "Son legítimos" siempre disponible (también si hay Confirmados)
+    html += '<button class="dup-btn-distintos" onclick="dupMarcarDistintos()">'
+          + '✅ Son pedidos legítimos (no duplicados)'
+          + '</button>';
 
     html += '<div class="dup-acciones-tip">💡 Si en realidad son duplicados (mismo pedido cargado 2 veces), tocá <strong>"✕ Cancelar este pedido"</strong> arriba para borrar el sobrante en lugar de unir.</div>';
     html += '</div>';
@@ -9463,9 +9675,25 @@ function dupSeleccionarVendedor(v) {
 
 // Cancelar un pedido específico del grupo
 async function dupCancelarPedido(pedidoId) {
-  if (!confirm('⚠️ ¿Seguro que querés cancelar este pedido?\n\nQuedará registrado como cancelado.')) return;
+  // v10: usar dupConfirmModal en vez de confirm() nativo
   var p = todosLosPedidos.find(function(x){ return x.pedidoId === pedidoId; });
   if (!p) return;
+  // v10 safety: este botón ya no debería aparecer si NO es Pendiente, pero validamos por las dudas
+  if (p.estado !== 'Pendiente') {
+    await dupConfirmModal('No se puede cancelar', 'Este pedido ya está <b>' + p.estado + '</b>.<br><br>Cancelarlo desde acá rompería el presupuesto Xubio y el stock.', 'Entendido', { soloInfo: true });
+    return;
+  }
+  var hora = (p.fechaHora||'').split(' ')[1] || (p.fechaHora||'').split('T')[1] || '';
+  var cuerpo = '⚠️ ¿Seguro que querés cancelar este pedido?<br><br>' +
+    '<div style="background:#FFF3E0;border-left:3px solid #E65100;padding:10px;margin:8px 0;font-size:13px;text-align:left">' +
+      '🕐 <b>' + hora.substring(0,5) + '</b> · ' + (p.vendedor||'?') + '<br>' +
+      '💰 ' + (p.total||'—') + '<br>' +
+      '🆔 ' + pedidoId +
+    '</div>' +
+    'Quedará registrado como <b style="color:#C62828">Cancelado</b>.';
+  var ok = await dupConfirmModal('Cancelar pedido', cuerpo, '✕ Sí, cancelar');
+  if (!ok) return;
+
   try {
     var params = new URLSearchParams({ accion: 'cambiarEstado', pedidoId: pedidoId, fila: p.fila, estado: 'Cancelado' });
     await fetch(APPS_SCRIPT_URL + '?' + params.toString(), { mode: 'no-cors' });
@@ -9856,8 +10084,8 @@ function badgeHtml(p) {
     'Cancelado':  '<span class="badge badge-cancelado">❌ Cancelado</span>'
   };
   var b = bs[p.estado] || '<span class="badge badge-pendiente">' + p.estado + '</span>';
-  if (p.esDuplicado && p.tipoDuplicado === 'exacto') b += ' <span class="badge badge-dup-exacto" style="cursor:pointer" onclick="event.stopPropagation();abrirModalDuplicados(\'' + p.pedidoId + '\')" title="Ver y resolver">🔴 DUPLICADO</span>';
-  else if (p.esDuplicado) b += ' <span class="badge badge-dup-parcial" style="cursor:pointer" onclick="event.stopPropagation();abrirModalDuplicados(\'' + p.pedidoId + '\')" title="Ver y resolver">🟠 PEDIDO DOBLE</span>';
+  if (p.esDuplicado && p.tipoDuplicado === 'exacto') b += ' <span class="badge badge-dup-exacto badge-dup-grande" style="cursor:pointer" onclick="event.stopPropagation();abrirModalDuplicados(\'' + p.pedidoId + '\')" title="Ver y resolver">🔴 DUPLICADO ›</span>';
+  else if (p.esDuplicado) b += ' <span class="badge badge-dup-parcial badge-dup-grande" style="cursor:pointer" onclick="event.stopPropagation();abrirModalDuplicados(\'' + p.pedidoId + '\')" title="Ver y resolver">🟠 PEDIDO DOBLE ›</span>';
   return b;
 }
 
@@ -9871,12 +10099,45 @@ function renderCard(p) {
     dupAlert = '<div class="dup-alert-exacto">' +
       '<div class="dup-alert-exacto-title">🔴 PEDIDO DUPLICADO EXACTO</div>' +
       '<div class="dup-alert-exacto-body">Este mismo pedido también lo tiene <strong>' + (p.duplicadoCon||'otro vendedor') + '</strong>. Uno debe cancelar antes de remitir.</div>' +
+      // v10: botones accionables directos
+      '<div class="dup-alert-acciones">' +
+        '<button class="dup-alert-btn dup-alert-btn-primary" onclick="event.stopPropagation();dupMarcarDistintosDirecto(\'' + p.pedidoId + '\')">✅ Son legítimos</button>' +
+        '<button class="dup-alert-btn dup-alert-btn-secondary" onclick="event.stopPropagation();abrirModalDuplicados(\'' + p.pedidoId + '\')">👁️ Ver detalle</button>' +
+      '</div>' +
       '</div>';
   } else if (p.tipoDuplicado === 'parcial') {
-    dupAlert = '<div class="dup-alert-parcial">' +
-      '<div class="dup-alert-parcial-title">🟠 CLIENTE CON PEDIDO DOBLE</div>' +
-      '<div class="dup-alert-parcial-body"><strong>' + p.cliente + '</strong> tiene otro pedido con <strong>' + (p.duplicadoCon||'otro vendedor') + '</strong> por monto diferente. Verificar manualmente.</div>' +
-      '</div>';
+    // v10: chequear si hay Confirmados en el grupo (afecta UX)
+    var miMFechaB = (p.pedidoId || '').match(/TCK-(\d{8})/);
+    var miFechaDiaB = miMFechaB ? miMFechaB[1] : (p.fechaHora || '').substring(0,10).replace(/-/g,'');
+    var miCliKeyB = (p.cliente || '').toLowerCase().replace(/\s+/g,' ').trim();
+    var grupoCard = todosLosPedidos.filter(function(x) {
+      if (x.estado === 'Cancelado') return false;
+      var xf = (x.pedidoId || '').match(/TCK-(\d{8})/);
+      var xfd = xf ? xf[1] : (x.fechaHora || '').substring(0,10).replace(/-/g,'');
+      var xcli = (x.cliente || '').toLowerCase().replace(/\s+/g,' ').trim();
+      return xfd === miFechaDiaB && xcli === miCliKeyB;
+    });
+    var hayConfirmadoEnGrupo = grupoCard.some(function(x){ return x.estado !== 'Pendiente'; });
+
+    if (hayConfirmadoEnGrupo) {
+      dupAlert = '<div class="dup-alert-parcial">' +
+        '<div class="dup-alert-parcial-title">🟠 PEDIDO DOBLE · Alguno ya fue confirmado</div>' +
+        '<div class="dup-alert-parcial-body"><strong>' + p.cliente + '</strong> tiene otro pedido con <strong>' + (p.duplicadoCon||'otro vendedor') + '</strong>. No se pueden unir porque alguno ya fue remitido. Si son 2 pedidos legítimos (ej: mañana y tarde), marcalos:</div>' +
+        '<div class="dup-alert-acciones">' +
+          '<button class="dup-alert-btn dup-alert-btn-primary" onclick="event.stopPropagation();dupMarcarDistintosDirecto(\'' + p.pedidoId + '\')">✅ Son legítimos</button>' +
+          '<button class="dup-alert-btn dup-alert-btn-secondary" onclick="event.stopPropagation();abrirModalDuplicados(\'' + p.pedidoId + '\')">👁️ Ver detalle</button>' +
+        '</div>' +
+        '</div>';
+    } else {
+      dupAlert = '<div class="dup-alert-parcial">' +
+        '<div class="dup-alert-parcial-title">🟠 CLIENTE CON PEDIDO DOBLE</div>' +
+        '<div class="dup-alert-parcial-body"><strong>' + p.cliente + '</strong> tiene otro pedido con <strong>' + (p.duplicadoCon||'otro vendedor') + '</strong> por monto diferente. Verificar manualmente.</div>' +
+        '<div class="dup-alert-acciones">' +
+          '<button class="dup-alert-btn dup-alert-btn-primary" onclick="event.stopPropagation();dupMarcarDistintosDirecto(\'' + p.pedidoId + '\')">✅ Son legítimos</button>' +
+          '<button class="dup-alert-btn dup-alert-btn-secondary" onclick="event.stopPropagation();abrirModalDuplicados(\'' + p.pedidoId + '\')">👁️ Ver detalle</button>' +
+        '</div>' +
+        '</div>';
+    }
   }
 
   var btns = '';
@@ -18107,6 +18368,301 @@ if (typeof escapeHtml !== 'function') {
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// v10 admin — SISTEMA CROSS-DEVICE de pares "no duplicado"
+// Portado de tck-ventas v13.2 (sistema compartido vía Supabase)
+//
+// Funciones:
+//   - dupCargarNoDuplicados()     → llamar al cargar pedidos
+//   - dupEstaMarcadoComoDistinto() → helper para filtros
+//   - dupConfirmModal()           → modal custom (reemplaza confirm)
+//   - dupMarcarDistintosDirecto() → marca un grupo desde card sin abrir modal
+//   - dupMarcarDistintos()        → marca desde modal abierto
+//   - _dupLogAccion()             → log auditoría en pedido_acciones
+// ═══════════════════════════════════════════════════════════════
+
+// Set global con pares "no duplicado" → key: "pedidoA|pedidoB" (alfabético)
+window._dupNoDupSet = window._dupNoDupSet || new Set();
+
+// Helper: chequea si 2 pedidos están marcados como legítimos
+function dupEstaMarcadoComoDistinto(pedidoIdA, pedidoIdB) {
+  if (!pedidoIdA || !pedidoIdB || !window._dupNoDupSet) return false;
+  var a = pedidoIdA, b = pedidoIdB;
+  var key = a < b ? (a + '|' + b) : (b + '|' + a);
+  return window._dupNoDupSet.has(key);
+}
+
+// Cargar pares "no duplicado" de los últimos 7 días desde Supabase
+async function dupCargarNoDuplicados() {
+  try {
+    var url = APPS_SCRIPT_URL + '?accion=listarNoDuplicados&dias=7';
+    var resp = await fetch(url);
+    if (!resp || !resp.ok) return;
+    var data = await resp.json();
+    if (!data || data.status !== 'ok' || !Array.isArray(data.pares)) return;
+
+    window._dupNoDupSet.clear();
+    data.pares.forEach(function(par) {
+      var a = par.pedido_a || '';
+      var b = par.pedido_b || '';
+      if (!a || !b) return;
+      var key = a < b ? (a + '|' + b) : (b + '|' + a);
+      window._dupNoDupSet.add(key);
+    });
+  } catch(e) {
+    // Silencioso — si no hay red, badges se muestran normalmente
+  }
+}
+
+// Modal de confirmación TCK-themed (reemplaza confirm() nativo).
+// Retorna Promise<boolean>. Si opts.soloInfo===true, muestra solo botón OK.
+function dupConfirmModal(titulo, cuerpoHtml, labelOk, opts) {
+  opts = opts || {};
+  return new Promise(function(resolve) {
+    var overlay = document.getElementById('dup-confirm-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'dup-confirm-overlay';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;' +
+        'display:flex;align-items:center;justify-content:center;padding:20px;' +
+        'backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);' +
+        'opacity:0;transition:opacity .18s ease;';
+      document.body.appendChild(overlay);
+    }
+
+    var soloInfo = !!opts.soloInfo;
+    overlay.innerHTML =
+      '<div id="dup-confirm-card" style="background:#FAF4EC;border-radius:16px;max-width:460px;width:100%;' +
+      'overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.4);border:2px solid #D4A574;' +
+      'transform:scale(.92);transition:transform .22s cubic-bezier(.34,1.56,.64,1);">' +
+        '<div style="background:linear-gradient(135deg,#8B0000,#A00000);color:#FFD700;padding:18px 22px;' +
+        'font-family:\'Barlow Condensed\',sans-serif;font-weight:700;font-size:20px;letter-spacing:.3px;text-transform:uppercase;">' +
+          titulo +
+        '</div>' +
+        '<div style="padding:20px 22px 18px;font-family:Barlow,sans-serif;font-size:15px;line-height:1.5;color:#333;text-align:center;">' +
+          cuerpoHtml +
+        '</div>' +
+        '<div style="padding:0 18px 18px;display:flex;gap:10px;' +
+        (soloInfo ? 'justify-content:center' : 'flex-direction:column') + ';">' +
+          (soloInfo
+            ? '<button id="dup-confirm-ok" style="background:linear-gradient(135deg,#8B0000,#A00000);color:#FFD700;' +
+              'border:none;padding:14px 32px;border-radius:10px;font-family:\'Barlow Condensed\',sans-serif;font-weight:700;' +
+              'font-size:15px;letter-spacing:.5px;text-transform:uppercase;cursor:pointer;min-width:140px;">' +
+              (labelOk || 'Entendido') + '</button>'
+            : '<button id="dup-confirm-ok" style="background:linear-gradient(135deg,#8B0000,#A00000);color:#FFD700;' +
+              'border:none;padding:14px 20px;border-radius:10px;font-family:\'Barlow Condensed\',sans-serif;font-weight:700;' +
+              'font-size:15px;letter-spacing:.5px;text-transform:uppercase;cursor:pointer;">' +
+              (labelOk || 'Confirmar') + '</button>' +
+              '<button id="dup-confirm-cancel" style="background:white;color:#666;' +
+              'border:1.5px solid #CCC;padding:12px 20px;border-radius:10px;font-family:\'Barlow Condensed\',sans-serif;font-weight:700;' +
+              'font-size:14px;letter-spacing:.3px;text-transform:uppercase;cursor:pointer;">Cancelar</button>'
+          ) +
+        '</div>' +
+      '</div>';
+
+    requestAnimationFrame(function() {
+      overlay.style.opacity = '1';
+      var card = document.getElementById('dup-confirm-card');
+      if (card) card.style.transform = 'scale(1)';
+    });
+
+    var cerrar = function(result) {
+      overlay.style.opacity = '0';
+      var card = document.getElementById('dup-confirm-card');
+      if (card) card.style.transform = 'scale(.92)';
+      setTimeout(function() {
+        if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        resolve(result);
+      }, 180);
+    };
+
+    var btnOk = document.getElementById('dup-confirm-ok');
+    if (btnOk) btnOk.onclick = function() { cerrar(true); };
+    var btnCancel = document.getElementById('dup-confirm-cancel');
+    if (btnCancel) btnCancel.onclick = function() { cerrar(false); };
+
+    if (!soloInfo) {
+      overlay.onclick = function(e) {
+        if (e.target === overlay) cerrar(false);
+      };
+    }
+  });
+}
+
+// Log de acción en pedido_acciones (para auditoría)
+async function _dupLogAccion(payload) {
+  try {
+    var fila = {
+      pedido_id: payload.pedido_id,
+      pedido_id_relacionado: payload.pedido_id_relacionado || null,
+      accion: payload.accion,
+      vendedor_origen: payload.vendedor_origen || null,
+      vendedor_destino: payload.vendedor_destino || null,
+      vendedor_que_actuo: vendedorActual || 'ADMIN',
+      motivo: payload.motivo || null,
+      productos_unificados: payload.productos_unificados || null,
+      monto_resultante: payload.monto_resultante || null,
+      metadata: payload.metadata || null
+    };
+    await sbFetch('pedido_acciones', {
+      method: 'POST',
+      headers: { 'Prefer': 'return=minimal' },
+      body: JSON.stringify(fila)
+    });
+  } catch(e) {
+    console.warn('[v10 admin] No se pudo loggear accion duplicado:', e);
+  }
+}
+
+// Marcar como legítimos directamente desde la card (sin abrir modal)
+async function dupMarcarDistintosDirecto(pedidoId) {
+  var p = todosLosPedidos.find(function(x){ return x.pedidoId === pedidoId; });
+  if (!p) return;
+
+  var mFecha = (p.pedidoId || '').match(/TCK-(\d{8})/);
+  var fechaDia = mFecha ? mFecha[1] : (p.fechaHora || '').substring(0,10).replace(/-/g,'');
+  var cliKey = (p.cliente || '').toLowerCase().replace(/\s+/g,' ').trim();
+  var grupo = todosLosPedidos.filter(function(x) {
+    if (x.estado === 'Cancelado') return false;
+    var xf = (x.pedidoId || '').match(/TCK-(\d{8})/);
+    var xfd = xf ? xf[1] : (x.fechaHora || '').substring(0,10).replace(/-/g,'');
+    var xcli = (x.cliente || '').toLowerCase().replace(/\s+/g,' ').trim();
+    return xfd === fechaDia && xcli === cliKey;
+  });
+
+  if (grupo.length < 2) {
+    toast('Ya no hay otros pedidos para este cliente', 'ok');
+    return;
+  }
+
+  var cuerpo = '✅ ¿Confirmás que estos <b>' + grupo.length + '</b> pedidos son legítimos?<br><br>' +
+    '<div style="background:#F9F9F9;border-left:3px solid #D4A574;padding:10px;margin:8px 0;font-size:13px;text-align:left">' +
+    grupo.map(function(x) {
+      var h = (x.fechaHora||'').split(' ')[1] || (x.fechaHora||'').split('T')[1] || '';
+      return '• <b>' + h.substring(0,5) + '</b> — ' + (x.total||'—') + ' — ' + x.estado + ' (' + (x.vendedor||'?') + ')';
+    }).join('<br>') +
+    '</div>' +
+    'El <b style="color:#E65100">PEDIDO DOBLE</b> se va a ocultar en todos los dispositivos.';
+  var ok = await dupConfirmModal('Marcar como legítimos', cuerpo, '✅ Sí, son legítimos');
+  if (!ok) return;
+
+  // Generar pares todos-vs-todos
+  var pares = [];
+  for (var i = 0; i < grupo.length; i++) {
+    for (var j = i + 1; j < grupo.length; j++) {
+      pares.push({ a: grupo[i].pedidoId, b: grupo[j].pedidoId });
+    }
+  }
+
+  // POST a Apps Script (fire-and-forget)
+  pares.forEach(function(par) {
+    var params = new URLSearchParams({
+      accion:   'marcarNoDuplicados',
+      pedido_a: par.a,
+      pedido_b: par.b,
+      cliente:  p.cliente || '',
+      vendedor: 'ADMIN',
+      motivo:   'Marcado como legítimo desde card admin (sin abrir modal)'
+    });
+    fetch(APPS_SCRIPT_URL + '?' + params.toString(), { mode: 'no-cors' }).catch(function(){});
+    try {
+      if (window._dupNoDupSet) {
+        var key = par.a < par.b ? (par.a + '|' + par.b) : (par.b + '|' + par.a);
+        window._dupNoDupSet.add(key);
+      }
+    } catch(e) {}
+  });
+
+  // Marcar en memoria
+  grupo.forEach(function(pp) {
+    pp.esDuplicado = false;
+    pp.tipoDuplicado = null;
+    pp.duplicadoCon = '';
+  });
+
+  // Log de auditoría
+  for (var k = 0; k < grupo.length; k++) {
+    var pi = grupo[k];
+    var otros = grupo.filter(function(x){ return x.pedidoId !== pi.pedidoId; })
+      .map(function(x){ return x.pedidoId; }).join(', ');
+    await _dupLogAccion({
+      pedido_id: pi.pedidoId,
+      pedido_id_relacionado: otros,
+      accion: 'marcado_distinto',
+      vendedor_origen: pi.vendedor || null,
+      metadata: { cantidad_grupo: grupo.length, desde: 'card_directo_admin' }
+    });
+  }
+
+  renderPedidos();
+  toast('✅ Marcados como pedidos legítimos', 'ok');
+}
+
+// Marcar como legítimos DESDE el modal abierto
+async function dupMarcarDistintos() {
+  var s = _dupModalState;
+  if (!s) return;
+  var activos = s.grupo.filter(function(x){ return !s.cancelados.has(x.pedidoId); });
+  if (activos.length < 2) {
+    toast('Ya queda 1 solo pedido activo', 'ok');
+    return;
+  }
+
+  var cuerpo = '✅ ¿Confirmás que estos <b>' + activos.length + '</b> pedidos son legítimos (no son duplicados)?<br><br>' +
+    'Esto va a esconder la alerta <b style="color:#E65100">PEDIDO DOBLE</b> en TODOS los dispositivos (vendedores y admin).<br><br>' +
+    '<div style="font-size:13px;color:#666">Usá esto si el cliente tiene varias sucursales, o pidió cosas diferentes a propósito (ej: mañana y tarde).</div>';
+  var ok = await dupConfirmModal('Marcar como legítimos', cuerpo, '✅ Sí, son legítimos');
+  if (!ok) return;
+
+  var pares = [];
+  for (var i = 0; i < activos.length; i++) {
+    for (var j = i + 1; j < activos.length; j++) {
+      pares.push({ a: activos[i].pedidoId, b: activos[j].pedidoId });
+    }
+  }
+
+  pares.forEach(function(par) {
+    var params = new URLSearchParams({
+      accion:   'marcarNoDuplicados',
+      pedido_a: par.a,
+      pedido_b: par.b,
+      cliente:  s.cliente || '',
+      vendedor: 'ADMIN',
+      motivo:   'Marcado como legítimo desde modal admin'
+    });
+    fetch(APPS_SCRIPT_URL + '?' + params.toString(), { mode: 'no-cors' }).catch(function(){});
+    try {
+      if (window._dupNoDupSet) {
+        var key1 = par.a < par.b ? (par.a + '|' + par.b) : (par.b + '|' + par.a);
+        window._dupNoDupSet.add(key1);
+      }
+    } catch(e) {}
+  });
+
+  activos.forEach(function(p) {
+    p.esDuplicado = false;
+    p.tipoDuplicado = null;
+    p.duplicadoCon = '';
+  });
+
+  for (var k = 0; k < activos.length; k++) {
+    var pi = activos[k];
+    var otros = activos.filter(function(x){ return x.pedidoId !== pi.pedidoId; })
+      .map(function(x){ return x.pedidoId; }).join(', ');
+    await _dupLogAccion({
+      pedido_id: pi.pedidoId,
+      pedido_id_relacionado: otros,
+      accion: 'marcado_distinto',
+      vendedor_origen: pi.vendedor || null,
+      metadata: { cantidad_grupo: activos.length, persistido_supabase: true, desde: 'modal_admin' }
+    });
+  }
+
+  dupModalCerrar();
+  renderPedidos();
+  toast('✅ Marcados como pedidos legítimos', 'ok');
 }
 </script>
 
