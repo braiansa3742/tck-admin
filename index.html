@@ -1,7 +1,62 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v11.4 — 27/04/2026
+     TCK ADMIN — v11.5 — 29/04/2026
      ──────────────────────────────────────────────────────────────────────
+     LOGÍSTICA — FILTRO POR PRÓXIMA SALIDA + ESTADO DE ENTREGA
+
+     Cambios v11.5 (sobre v11.4):
+
+       PROBLEMA RAÍZ que resuelve:
+         La pestaña "Asignar" en Logística mostraba TODOS los pedidos de
+         cada zona sin filtrar por fecha. Eso mezclaba pedidos atrasados
+         (ej: 254 de TL del martes pasado) con los de la próxima salida
+         (ej: 22 de TL de hoy), generando confusión al armar el camión.
+
+       Cambios:
+
+       1. NUEVA FUNCIÓN lzProximaSalida(zonaKey) — calcula calendario
+          - Zona 1: próximo Lun o Mar a partir de hoy
+          - Zona 2: próximo Jue o Vie a partir de hoy
+          - Am.Fortín: próximo Mar a partir de hoy
+          - TL Mañana / TL Tarde: hoy o mañana según horario
+          - No depende de la data, depende del calendario real
+
+       2. NUEVA FUNCIÓN lzGetEntregaEstado(p) — estado de entrega
+          - Cruza pedidos_zona con tabla entregas
+          - Devuelve: 'pendiente' / 'entregado' / 'no_entregado' / null
+          - Permite excluir pedidos ya entregados de los conteos
+
+       3. lzGetPedidosZona(zonaKey, opciones) — ahora filtra por fecha
+          - Por defecto: pedidos cuya salida_planificada <= proximaSalida
+          - Excluye automáticamente pedidos con entrega='entregado'
+          - Excluye Cancelados
+          - Con opciones.incluirEntregados=true, incluye todos (para drawers)
+
+       4. NUEVOS HELPERS
+          - lzGetAtrasados(zonaKey): pedidos cuya salida_planificada
+            < proximaSalida(zonaKey) y no entregados ni cancelados
+          - lzGetProxSalida(zonaKey): pedidos cuya salida_planificada
+            == proximaSalida(zonaKey)
+          - lzFmtFecha(d): "Jue 30/04" en lugar de "2026-04-30"
+
+       5. UI — BADGE DE ATRASADOS en chips de zona
+          - Si zona tiene atrasados: chip muestra "⚠️ N atrasados" en rojo
+          - El número de la zona muestra solo confirmados de la próx salida
+
+       6. UI — SECCIÓN "ATRASADOS" plegable dentro de cada zona
+          - Acordeón colapsado por defecto
+          - Se expande al tocar el header con badge
+          - Muestra agrupado por ciudad y por fecha original
+          - Cada pedido tiene botón "Reasignar a próxima salida" que
+            actualiza salida_planificada en pedidos_zona
+
+       7. ARREGLOS TÉCNICOS
+          - lzCargarDrawers: límit subido de 200 a 1000 entregas
+          - Cache _asignacionesEstado: NUEVO — guarda estado de entrega
+            por pedido_id (no solo el chofer como _asignaciones)
+          - Salida calculada del calendario (no del primer pedido)
+          - Logs de debug E1, E2, B3 silenciados (solo bajo flag DEBUG)
+
      Cambios v11.4 (sobre v11.3) — SPLIT DE CALIBRES POLLO A/B:
        Modal de calibres rediseñado como wizard con steppers (+/−).
        Permite distribuir las cajas de un genérico (Pollo A o Pollo B)
@@ -5549,6 +5604,142 @@ input[type="date"] {
 }
 .lz-zona-chip.lz-alerta { background: #FFEBEE; color: #C62828; border-color: #EF9A9A; }
 .lz-zona-chip.lz-alerta.sel { background: #C62828; color: #fff; border-color: #C62828; }
+
+/* v11.5 — Badge de atrasados (rojo, llamativo) */
+.lz-zona-chip .lz-badge-atrasado {
+  background: #C62828; color: #fff;
+  border-radius: 10px; padding: 1px 7px;
+  font-size: 11px; font-weight: 800;
+  margin-left: 4px;
+  animation: lz-atrasado-pulse 2s ease-in-out infinite;
+}
+.lz-zona-chip.sel .lz-badge-atrasado {
+  background: #fff; color: #C62828;
+}
+@keyframes lz-atrasado-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.7; }
+}
+
+/* v11.5 — Pill de atrasados en resumen de zona */
+.lz-zona-resumen-pill.lz-pill-atrasado {
+  background: rgba(255, 235, 59, 0.95);
+  color: #5D2D2D;
+  font-weight: 800;
+}
+
+/* v11.5 — Bloque "Atrasados" plegable */
+.lz-atrasados {
+  background: #FFF8E1;
+  border: 2px solid #FFA726;
+  border-radius: 12px;
+  margin: 0 0 14px 0;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(255, 167, 38, 0.18);
+}
+.lz-atrasados-hdr {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+  user-select: none;
+  background: linear-gradient(135deg, #FF9800, #F57C00);
+  color: #fff;
+}
+.lz-atrasados-hdr:hover {
+  background: linear-gradient(135deg, #FB8C00, #EF6C00);
+}
+.lz-atrasados-info { flex: 1; min-width: 0; }
+.lz-atrasados-titulo {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 16px; font-weight: 800;
+  letter-spacing: 0.3px;
+  margin-bottom: 2px;
+}
+.lz-atrasados-sub {
+  font-size: 12px; opacity: 0.95;
+}
+.lz-atrasados-toggle {
+  font-size: 18px; font-weight: 900;
+  flex-shrink: 0;
+}
+.lz-atrasados-body {
+  padding: 8px 12px 12px 12px;
+}
+.lz-atrasados-grupo {
+  margin-bottom: 10px;
+}
+.lz-atrasados-grupo:last-child {
+  margin-bottom: 0;
+}
+.lz-atrasados-grupo-hdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 4px;
+  border-bottom: 1px dashed #E0B273;
+  margin-bottom: 6px;
+}
+.lz-atrasados-fecha {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px; font-weight: 800;
+  color: #BF360C;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.lz-atrasados-grupo-stats {
+  font-size: 11px; color: #6D4C41;
+}
+.lz-atrasado-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #fff;
+  border-radius: 8px;
+  margin-bottom: 4px;
+  border: 1px solid #FFE0B2;
+}
+.lz-atrasado-item-info { flex: 1; min-width: 0; }
+.lz-atrasado-cliente {
+  font-weight: 700; font-size: 13px; color: #3E2723;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lz-atrasado-localidad {
+  font-size: 11px; color: #6D4C41; margin-top: 2px;
+}
+.lz-btn-mover {
+  background: #FF6F00;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.lz-btn-mover:hover { background: #E65100; }
+.lz-btn-mover-todos {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, #FF6F00, #E65100);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+.lz-btn-mover-todos:hover {
+  background: linear-gradient(135deg, #E65100, #BF360C);
+}
 
 /* Bloque rojo de resumen de zona */
 .lz-zona-resumen {
@@ -15638,6 +15829,7 @@ function resolverProveedor(nombreProducto) {
 }
 
 let _asignaciones    = {};
+let _asignacionesEstado = {};   // v11.5: pedido_id → 'pendiente'|'entregado'|'no_entregado'
 let _planillaChofer  = 'Joan';
 
 // ════════════════════════════════════════════════════════════════
@@ -15683,6 +15875,86 @@ function lzNormalizarZona(rawZona) {
   return LZ_ZONA_MAP[k] || null;
 }
 
+// ════════════════════════════════════════════════════════════════
+// v11.5 — CALENDARIO DE SALIDAS POR ZONA
+// ════════════════════════════════════════════════════════════════
+// Días en JS: 0=Dom, 1=Lun, 2=Mar, 3=Mié, 4=Jue, 5=Vie, 6=Sáb
+// Definición de qué días sale cada zona:
+const LZ_DIAS_SALIDA = {
+  'z1':  [1, 2],        // Lun y Mar
+  'z2':  [4, 5],        // Jue y Vie
+  'af':  [2],           // Mar
+  'tlm': [1, 2, 3, 4, 5, 6],  // TL Mañana: Lun-Sáb
+  'tlt': [1, 2, 3, 4, 5, 6]   // TL Tarde:  Lun-Sáb
+};
+
+// Devuelve la próxima fecha (Date object, hora 00:00 local) en que sale
+// la zona, contando desde hoy. Si hoy es un día de salida, devuelve hoy.
+// Si no hay días definidos para esa zona, devuelve null.
+function lzProximaSalida(zonaKey) {
+  const dias = LZ_DIAS_SALIDA[zonaKey];
+  if (!dias || dias.length === 0) return null;
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  // Buscar dentro de los próximos 14 días
+  for (let i = 0; i < 14; i++) {
+    const d = new Date(hoy);
+    d.setDate(hoy.getDate() + i);
+    if (dias.indexOf(d.getDay()) >= 0) return d;
+  }
+  return null;
+}
+
+// Convierte una salida_planificada (string 'YYYY-MM-DD') o un Date a
+// string 'YYYY-MM-DD' para comparar con valores de Supabase.
+function lzFechaISO(d) {
+  if (!d) return null;
+  if (typeof d === 'string') {
+    // Si ya viene como YYYY-MM-DD, devolver tal cual (los primeros 10 chars)
+    return d.length >= 10 ? d.substring(0, 10) : null;
+  }
+  if (d instanceof Date) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + dd;
+  }
+  return null;
+}
+
+// Formatea una fecha para mostrar al usuario: "Jue 30/04"
+function lzFmtFecha(d) {
+  if (!d) return '';
+  let date;
+  if (typeof d === 'string') {
+    // Parsear YYYY-MM-DD como local (no UTC) para evitar shift de día
+    const m = d.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return d;
+    date = new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+  } else if (d instanceof Date) {
+    date = d;
+  } else {
+    return '';
+  }
+  const dias = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  const dd = String(date.getDate()).padStart(2, '0');
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  return dias[date.getDay()] + ' ' + dd + '/' + mm;
+}
+
+// Compara dos fechas (string ISO o Date) y devuelve -1, 0 o 1.
+// Si alguna es inválida, las inválidas son "mayores" (van al final).
+function lzCmpFecha(a, b) {
+  const ai = lzFechaISO(a);
+  const bi = lzFechaISO(b);
+  if (!ai && !bi) return 0;
+  if (!ai) return 1;
+  if (!bi) return -1;
+  if (ai < bi) return -1;
+  if (ai > bi) return 1;
+  return 0;
+}
+
 // v12.0-final: separación TL por turno (cuando Apps Script v25.2 esté listo).
 // Si zona='tl' Y la columna turno trae 'manana', sobrescribimos a 'tlm'.
 function lzGetZonaUI(p) {
@@ -15716,11 +15988,13 @@ async function lzCargarDatos() {
 
     _lzDataLoaded = true;
 
-    // DEBUG temporal — remover en v12.1
-    console.log('[lz] === BLOQUE B3 ===');
-    console.log('[lz] Total pedidos:', _lzPedidosZona.length);
-    console.log('[lz] Total rutas:', _lzRutas.length);
-    console.log('[lz] Counts por zona normalizados:', lzDebugContarPorZona());
+    // v11.5: Debug solo bajo flag
+    if (window.LZ_DEBUG) {
+      console.log('[lz] === BLOQUE B3 ===');
+      console.log('[lz] Total pedidos:', _lzPedidosZona.length);
+      console.log('[lz] Total rutas:', _lzRutas.length);
+      console.log('[lz] Counts por zona normalizados:', lzDebugContarPorZona());
+    }
 
     // Si estamos viendo Logística → Asignar, re-renderizar con la nueva data
     if (typeof _tabActual !== 'undefined' && _tabActual === 'logistica' && _logTab === 'asignar') {
@@ -15748,8 +16022,69 @@ function lzDebugContarPorZona() {
 }
 
 // ── HELPERS PUROS (sin render) ──────────────────────────────
-function lzGetPedidosZona(zonaKey) {
-  return _lzPedidosZona.filter(p => lzGetZonaUI(p) === zonaKey);
+
+// v11.5: Devuelve el estado de la entrega para un pedido.
+// Posibles valores: 'pendiente' | 'entregado' | 'no_entregado' | null (sin entrega)
+function lzGetEntregaEstado(p) {
+  if (!p || !p.pedido_id) return null;
+  return _asignacionesEstado[p.pedido_id] || null;
+}
+
+// v11.5: Para un pedido p, decide si tiene que aparecer en "esta vista de
+// la próxima salida". Reglas:
+//   - Si el estado del pedido es 'cancelado' → NO mostrar
+//   - Si la entrega ya está 'entregado' → NO mostrar
+//   - Si salida_planificada > proximaSalida(zona) → NO mostrar (es futuro lejano)
+//   - Resto → SÍ mostrar (incluye atrasados de salidas pasadas)
+function lzPedidoEnVistaActiva(p, zonaKey) {
+  if (lzGetEstado(p) === 'cancelado') return false;
+  if (lzGetEntregaEstado(p) === 'entregado') return false;
+  const prox = lzProximaSalida(zonaKey);
+  if (!prox) return true;
+  const proxStr = lzFechaISO(prox);
+  const sp = lzFechaISO(p.salida_planificada);
+  if (!sp) return true;  // sin fecha → mostrar (caso defensivo)
+  return sp <= proxStr;
+}
+
+// v11.5: lzGetPedidosZona ahora filtra por la vista activa
+//   opciones.todos = true → trae todos, sin filtros (para drawers especiales)
+function lzGetPedidosZona(zonaKey, opciones) {
+  opciones = opciones || {};
+  const base = _lzPedidosZona.filter(p => lzGetZonaUI(p) === zonaKey);
+  if (opciones.todos) return base;
+  return base.filter(p => lzPedidoEnVistaActiva(p, zonaKey));
+}
+
+// v11.5: Pedidos atrasados = los que tenían salida_planificada anterior
+// a la próxima y siguen pendientes/confirmados (no entregados ni cancelados)
+function lzGetAtrasados(zonaKey) {
+  const prox = lzProximaSalida(zonaKey);
+  if (!prox) return [];
+  const proxStr = lzFechaISO(prox);
+  return _lzPedidosZona
+    .filter(p => lzGetZonaUI(p) === zonaKey)
+    .filter(p => lzGetEstado(p) !== 'cancelado')
+    .filter(p => lzGetEntregaEstado(p) !== 'entregado')
+    .filter(p => {
+      const sp = lzFechaISO(p.salida_planificada);
+      return sp && sp < proxStr;
+    });
+}
+
+// v11.5: Pedidos para la próxima salida = salida_planificada == proximaSalida
+function lzGetProxSalida(zonaKey) {
+  const prox = lzProximaSalida(zonaKey);
+  if (!prox) return [];
+  const proxStr = lzFechaISO(prox);
+  return _lzPedidosZona
+    .filter(p => lzGetZonaUI(p) === zonaKey)
+    .filter(p => lzGetEstado(p) !== 'cancelado')
+    .filter(p => lzGetEntregaEstado(p) !== 'entregado')
+    .filter(p => {
+      const sp = lzFechaISO(p.salida_planificada);
+      return sp === proxStr;
+    });
 }
 
 function lzParseMonto(p) {
@@ -15778,6 +16113,8 @@ function lzGetLocalidad(p) {
 }
 
 function lzGetStatsZona(zonaKey) {
+  // v11.5: stats considera SOLO los que están en la vista activa (filtrados).
+  // Para los conteos del badge de "atrasados" usar lzGetAtrasados aparte.
   const ps = lzGetPedidosZona(zonaKey);
   const confirmados = ps.filter(p => lzGetEstado(p) === 'confirmado');
   const pendientes  = ps.filter(p => lzGetEstado(p) === 'pendiente');
@@ -15786,6 +16123,11 @@ function lzGetStatsZona(zonaKey) {
   const luis = ps.filter(p => lzGetChofer(p) === 'Luis');
   const montoConfirmado = confirmados.reduce((s, p) => s + lzParseMonto(p), 0);
   const montoPendiente  = pendientes.reduce((s, p) => s + lzParseMonto(p), 0);
+
+  // v11.5: separar atrasados (salida pasada) de próx salida
+  const atrasados = lzGetAtrasados(zonaKey);
+  const proxSalida = lzGetProxSalida(zonaKey);
+
   return {
     total: ps.length,
     confirmados: confirmados.length,
@@ -15795,7 +16137,11 @@ function lzGetStatsZona(zonaKey) {
     luis: luis.length,
     montoConfirmado: montoConfirmado,
     montoPendiente: montoPendiente,
-    lista: ps.length > 0 && confirmados.length > 0 && sinAsignar.length === 0 && pendientes.length === 0
+    lista: ps.length > 0 && confirmados.length > 0 && sinAsignar.length === 0 && pendientes.length === 0,
+    // v11.5: nuevos
+    atrasados: atrasados.length,
+    proxSalida: proxSalida.length,
+    montoAtrasados: atrasados.reduce((s, p) => s + lzParseMonto(p), 0)
   };
 }
 
@@ -15884,8 +16230,10 @@ function lzRenderZonaBar() {
     const sel = z.key === _lzActiveZona ? ' sel' : '';
     const badgeC = st.confirmados > 0 ? '<span class="lz-badge-c">' + st.confirmados + '</span>' : '';
     const badgeP = st.pendientes > 0 ? '<span class="lz-badge-p">' + st.pendientes + '</span>' : '';
+    // v11.5: badge ⚠️ de atrasados (rojo)
+    const badgeA = st.atrasados > 0 ? '<span class="lz-badge-atrasado" title="Atrasados de salidas pasadas">⚠️' + st.atrasados + '</span>' : '';
     html += '<button class="lz-zona-chip' + sel + '" onclick="lzSetZona(\'' + z.key + '\')">'
-      + z.nombre + ' ' + badgeC + badgeP + '</button>';
+      + z.nombre + ' ' + badgeC + badgeP + badgeA + '</button>';
   });
   // Chips de alertas (No Entregados / Sin Zona) con counts reales
   const cNoEnt = _lzNoEntregados.length;
@@ -15906,11 +16254,11 @@ function lzRenderResumenZona() {
   const st = lzGetStatsZona(_lzActiveZona);
   const ciudades = lzCiudadesDeZona(_lzActiveZona).length;
 
-  // Salida: tomamos del primer pedido de la zona si tiene salida_planificada
-  const pedidos = lzGetPedidosZona(_lzActiveZona);
+  // v11.5: La salida ahora se calcula del calendario, no del primer pedido
+  const proxDate = lzProximaSalida(_lzActiveZona);
   let salidaTxt = '';
-  if (pedidos.length && pedidos[0].salida_planificada) {
-    salidaTxt = 'Sale ' + pedidos[0].salida_planificada;
+  if (proxDate) {
+    salidaTxt = 'Próx. salida: ' + lzFmtFecha(proxDate);
   }
 
   let pillsHtml = '';
@@ -15918,6 +16266,8 @@ function lzRenderResumenZona() {
   if (st.pendientes > 0)  pillsHtml += '<span class="lz-zona-resumen-pill">⏳ ' + st.pendientes + ' pendientes</span>';
   if (st.joan > 0)        pillsHtml += '<span class="lz-zona-resumen-pill">🚚 ' + st.joan + ' Joan</span>';
   if (st.luis > 0)        pillsHtml += '<span class="lz-zona-resumen-pill">🚚 ' + st.luis + ' Luis</span>';
+  // v11.5: pill de atrasados
+  if (st.atrasados > 0)   pillsHtml += '<span class="lz-zona-resumen-pill lz-pill-atrasado">⚠️ ' + st.atrasados + ' atrasados</span>';
 
   return '<div class="lz-zona-resumen">'
     + '<div class="lz-zona-resumen-top">'
@@ -15969,9 +16319,23 @@ function lzRenderToolbar() {
 // ── 4) Contenido (acordeón ciudad → pedidos) ────────────────
 function lzRenderContenidoZona() {
   const ciudades = lzCiudadesDeZona(_lzActiveZona);
-  if (ciudades.length === 0) {
+
+  // v11.5: Bloque de atrasados (si hay) — se renderiza ANTES del listado normal
+  const atrasados = lzGetAtrasados(_lzActiveZona);
+  let bloqueAtrasados = '';
+  if (atrasados.length > 0) {
+    bloqueAtrasados = lzRenderBloqueAtrasados(atrasados);
+  }
+
+  if (ciudades.length === 0 && atrasados.length === 0) {
     return '<div class="lz-empty"><div class="lz-empty-icon">📭</div>'
       + 'No hay pedidos en esta zona todavía.</div>';
+  }
+  if (ciudades.length === 0) {
+    // Solo atrasados, sin pedidos para próx salida
+    return bloqueAtrasados
+      + '<div class="lz-empty" style="margin-top:12px;"><div class="lz-empty-icon">🌱</div>'
+      + 'Todavía no hay pedidos para la próxima salida.</div>';
   }
 
   // Búsqueda: filtra qué pedidos se muestran
@@ -16029,10 +16393,174 @@ function lzRenderContenidoZona() {
   });
 
   if (html === '') {
-    return '<div class="lz-empty"><div class="lz-empty-icon">🔍</div>'
+    return bloqueAtrasados
+      + '<div class="lz-empty"><div class="lz-empty-icon">🔍</div>'
       + 'Sin resultados para "' + lzEsc(_lzSearchTerm) + '"</div>';
   }
+  return bloqueAtrasados + html;
+}
+
+// ── v11.5: Bloque "Atrasados" plegable ──────────────────────
+let _lzAtrasadosExpand = {};   // zona key → bool
+
+function lzRenderBloqueAtrasados(atrasados) {
+  if (!atrasados || atrasados.length === 0) return '';
+
+  const zonaKey = _lzActiveZona;
+  const expanded = !!_lzAtrasadosExpand[zonaKey];
+
+  // Agrupar por fecha de salida_planificada
+  const porFecha = {};
+  atrasados.forEach(p => {
+    const f = lzFechaISO(p.salida_planificada) || '(sin fecha)';
+    if (!porFecha[f]) porFecha[f] = [];
+    porFecha[f].push(p);
+  });
+  const fechasOrdenadas = Object.keys(porFecha).sort();
+  const monto = atrasados.reduce((s, p) => s + lzParseMonto(p), 0);
+
+  let html = '<div class="lz-atrasados">';
+  html += '<div class="lz-atrasados-hdr" onclick="lzToggleAtrasados()">';
+  html += '<div class="lz-atrasados-info">';
+  html += '<div class="lz-atrasados-titulo">⚠️ ' + atrasados.length
+       + ' pedido' + (atrasados.length !== 1 ? 's' : '')
+       + ' atrasado' + (atrasados.length !== 1 ? 's' : '') + '</div>';
+  html += '<div class="lz-atrasados-sub">' + LZ_FMT_MONEY(monto)
+       + ' · de salidas anteriores que no se entregaron</div>';
+  html += '</div>';
+  html += '<div class="lz-atrasados-toggle">' + (expanded ? '▲' : '▼') + '</div>';
+  html += '</div>';
+
+  if (expanded) {
+    html += '<div class="lz-atrasados-body">';
+    fechasOrdenadas.forEach(f => {
+      const peds = porFecha[f];
+      const fechaTxt = f === '(sin fecha)' ? f : lzFmtFecha(f);
+      const subMonto = peds.reduce((s, p) => s + lzParseMonto(p), 0);
+      html += '<div class="lz-atrasados-grupo">';
+      html += '<div class="lz-atrasados-grupo-hdr">';
+      html += '<span class="lz-atrasados-fecha">' + lzEsc(fechaTxt) + '</span>';
+      html += '<span class="lz-atrasados-grupo-stats">' + peds.length + ' pedidos · '
+           + LZ_FMT_MONEY(subMonto) + '</span>';
+      html += '</div>';
+      // Renderizar cada pedido reusando lzRenderPedido + botón "Mover a próx salida"
+      peds.forEach(p => {
+        html += '<div class="lz-atrasado-item">';
+        html += '<div class="lz-atrasado-item-info">';
+        html += '<div class="lz-atrasado-cliente">' + lzEsc(p.cliente || '—') + '</div>';
+        html += '<div class="lz-atrasado-localidad">📍 ' + lzEsc(lzGetLocalidad(p) || '?')
+             + ' · ' + LZ_FMT_MONEY(lzParseMonto(p)) + '</div>';
+        html += '</div>';
+        html += '<button class="lz-btn-mover" onclick="lzMoverAProxSalida(\''
+             + lzEsc(p.pedido_id) + '\')">'
+             + '↪️ Mover a próx</button>';
+        html += '</div>';
+      });
+      html += '</div>';
+    });
+    // Acción "Mover TODOS"
+    html += '<button class="lz-btn-mover-todos" onclick="lzMoverTodosAProxSalida()">'
+         + '↪️ Mover TODOS los atrasados a la próxima salida</button>';
+    html += '</div>';
+  }
+
+  html += '</div>';
   return html;
+}
+
+function lzToggleAtrasados() {
+  const k = _lzActiveZona;
+  _lzAtrasadosExpand[k] = !_lzAtrasadosExpand[k];
+  // Re-render solo del contenido (no toda la pantalla)
+  const cont = document.getElementById('lz-contenido');
+  if (cont) cont.innerHTML = lzRenderContenidoZona();
+}
+
+async function lzMoverAProxSalida(pedidoId) {
+  const prox = lzProximaSalida(_lzActiveZona);
+  if (!prox) {
+    alert('No hay próxima salida para esta zona.');
+    return;
+  }
+  const proxStr = lzFechaISO(prox);
+  const p = _lzPedidosZona.find(x => x.pedido_id === pedidoId);
+  if (!p) return;
+  const ok = confirm('¿Mover este pedido a la próxima salida (' + lzFmtFecha(prox) + ')?\n\n'
+    + p.cliente + ' · ' + lzGetLocalidad(p) + ' · ' + LZ_FMT_MONEY(lzParseMonto(p)));
+  if (!ok) return;
+  try {
+    // Update local primero (UI optimista)
+    p.salida_planificada = proxStr;
+    p.reagendado_count = (p.reagendado_count || 0) + 1;
+    // PATCH a Supabase
+    await sbFetch('pedidos_zona?pedido_id=eq.' + encodeURIComponent(pedidoId), {
+      method: 'PATCH',
+      headers: { 'Prefer': 'return=minimal' },
+      body: JSON.stringify({
+        salida_planificada: proxStr,
+        reagendado_count: p.reagendado_count,
+        zona_override_por: 'admin (mover atrasado)',
+        actualizado_at: new Date().toISOString()
+      })
+    });
+    // Re-render
+    const cont = document.getElementById('lz-contenido');
+    if (cont) cont.innerHTML = lzRenderContenidoZona();
+    const bar = document.getElementById('lz-zona-bar');
+    if (bar) bar.outerHTML = lzRenderZonaBar();
+  } catch (e) {
+    console.error('[lz] mover a prox salida:', e);
+    alert('Error al mover el pedido. Probá de nuevo.');
+  }
+}
+
+async function lzMoverTodosAProxSalida() {
+  const atrasados = lzGetAtrasados(_lzActiveZona);
+  if (atrasados.length === 0) return;
+  const prox = lzProximaSalida(_lzActiveZona);
+  if (!prox) {
+    alert('No hay próxima salida para esta zona.');
+    return;
+  }
+  const proxStr = lzFechaISO(prox);
+  const monto = atrasados.reduce((s, p) => s + lzParseMonto(p), 0);
+  const ok = confirm('¿Mover los ' + atrasados.length + ' pedidos atrasados ('
+    + LZ_FMT_MONEY(monto) + ') a la próxima salida (' + lzFmtFecha(prox) + ')?');
+  if (!ok) return;
+
+  // Procesamos uno por uno (Supabase no permite update por IN sin RPC)
+  let okCount = 0, errCount = 0;
+  for (const p of atrasados) {
+    try {
+      p.salida_planificada = proxStr;
+      p.reagendado_count = (p.reagendado_count || 0) + 1;
+      await sbFetch('pedidos_zona?pedido_id=eq.' + encodeURIComponent(p.pedido_id), {
+        method: 'PATCH',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({
+          salida_planificada: proxStr,
+          reagendado_count: p.reagendado_count,
+          zona_override_por: 'admin (mover atrasados batch)',
+          actualizado_at: new Date().toISOString()
+        })
+      });
+      okCount++;
+    } catch (e) {
+      console.error('[lz] mover atrasado:', p.pedido_id, e);
+      errCount++;
+    }
+  }
+
+  alert('Movidos: ' + okCount + (errCount > 0 ? ' · Errores: ' + errCount : ''));
+  // Re-render todo
+  const el = document.querySelector('#log-contenido') || document.querySelector('[data-lz-render]');
+  if (el) lzRenderAsignar(el);
+  else {
+    const cont = document.getElementById('lz-contenido');
+    if (cont) cont.innerHTML = lzRenderContenidoZona();
+    const bar = document.getElementById('lz-zona-bar');
+    if (bar) bar.outerHTML = lzRenderZonaBar();
+  }
 }
 
 // ── 5) Card individual de pedido ────────────────────────────
@@ -16354,6 +16882,7 @@ async function lzAsignarChoferSilencioso(pedidoId, chofer) {
 
   // Update local primero (UI optimista)
   _asignaciones[pedidoId] = chofer;
+  _asignacionesEstado[pedidoId] = 'pendiente';  // v11.5
 
   // Si hay match en todosLosPedidos (sistema viejo), actualizar también
   // para que los otros sub-tabs (Joan, Luis, Seguimiento) lo vean.
@@ -16381,6 +16910,7 @@ async function lzAsignarChoferSilencioso(pedidoId, chofer) {
 
 async function lzDesasignarSilencioso(pedidoId) {
   delete _asignaciones[pedidoId];
+  delete _asignacionesEstado[pedidoId];  // v11.5
   const pSheet = todosLosPedidos.find(x => x.pedidoId === pedidoId);
   if (pSheet) delete pSheet.choferAsignado;
   await sbFetch('entregas?pedido_id=eq.' + encodeURIComponent(pedidoId), { method: 'DELETE' });
@@ -16397,21 +16927,25 @@ let _lzSzPedidoSel  = null; // pedido_id seleccionado para asignar ciudad
 // ── CARGA: refresca counts y caches de drawers ───────────────
 async function lzCargarDrawers() {
   // No Entregados: leer de tabla entregas
-  // DEBUG E1: traer TODAS las entregas para ver qué estados existen
+  // v11.5: subido limit de 200 a 1000 (la tabla ya tiene 432+)
   try {
-    const todas = await sbFetch('entregas?select=id,pedido_id,chofer,estado,fecha_asignacion&limit=200&order=fecha_asignacion.desc');
+    const todas = await sbFetch('entregas?select=id,pedido_id,chofer,estado,fecha_asignacion&limit=1000&order=fecha_asignacion.desc');
     if (Array.isArray(todas) && todas.length > 0) {
-      const estados = {};
+      // v11.5: actualizar también el cache de estados para todos los pedidos
       todas.forEach(e => {
-        const k = e.estado == null ? '(null)' : ('"' + e.estado + '"');
-        estados[k] = (estados[k] || 0) + 1;
+        if (e.pedido_id && e.estado) {
+          _asignacionesEstado[e.pedido_id] = e.estado;
+        }
       });
-      console.log('[lz] === DEBUG E1: estados en tabla entregas (últimas 200) ===');
-      console.log('[lz] Total entregas:', todas.length);
-      console.log('[lz] Estados encontrados:', estados);
-      console.log('[lz] Primera entrega:', todas[0]);
-    } else {
-      console.log('[lz] === DEBUG E1: tabla entregas vacía o sin acceso ===');
+      // Debug solo si window.LZ_DEBUG está prendido
+      if (window.LZ_DEBUG) {
+        const estados = {};
+        todas.forEach(e => {
+          const k = e.estado == null ? '(null)' : ('"' + e.estado + '"');
+          estados[k] = (estados[k] || 0) + 1;
+        });
+        console.log('[lz] estados en tabla entregas:', estados, 'total:', todas.length);
+      }
     }
 
     // Filtrar las que matchean nuestro criterio
@@ -16419,38 +16953,31 @@ async function lzCargarDrawers() {
       const est = (e.estado || '').toLowerCase();
       return est === 'no_entregado' || est === 'no entregado' || est === 'noentregado';
     });
-    console.log('[lz] No Entregados encontrados con filtro flexible:', _lzNoEntregados.length);
+    if (window.LZ_DEBUG) console.log('[lz] No Entregados:', _lzNoEntregados.length);
   } catch (e) {
     console.warn('[lz] error cargando entregas:', e);
     _lzNoEntregados = [];
   }
 
   // Sin Zona: filtrar de _lzPedidosZona los que tienen zona null/vacía/sin_zona
-  // DEBUG E2: ver qué valores de zona existen
-  const valoresZona = {};
-  _lzPedidosZona.forEach(p => {
-    const k = p.zona == null ? '(null)' : ('"' + p.zona + '"');
-    valoresZona[k] = (valoresZona[k] || 0) + 1;
-  });
-  console.log('[lz] === DEBUG E2: valores únicos de zona en pedidos_zona ===');
-  console.log(valoresZona);
-
   _lzSinZona = _lzPedidosZona.filter(p => {
     if (!p.zona) return true;
     const z = p.zona.toString().toLowerCase().trim();
     if (z === '' || z === 'sin_zona' || z === 'sinzona' || z === 'none' || z === '(null)') return true;
-    // También: zona que no normaliza a ninguna conocida
     const norm = lzGetZonaUI(p);
     if (!norm) return true;
     return false;
   });
-  console.log('[lz] Sin Zona encontrados:', _lzSinZona.length);
-  if (_lzSinZona.length > 0) console.log('[lz] Primero sin zona:', _lzSinZona[0]);
+  if (window.LZ_DEBUG) console.log('[lz] Sin Zona:', _lzSinZona.length);
 
   // Re-renderizar la barra de chips para que muestre los counts reales
   if (typeof _tabActual !== 'undefined' && _tabActual === 'logistica' && _logTab === 'asignar') {
     const bar = document.getElementById('lz-zona-bar');
     if (bar) bar.outerHTML = lzRenderZonaBar();
+    // v11.5: re-render de contenido para que aparezcan los atrasados ahora que
+    // tenemos _asignacionesEstado actualizado
+    const cont = document.getElementById('lz-contenido');
+    if (cont) cont.innerHTML = lzRenderContenidoZona();
   }
 }
 
@@ -16708,13 +17235,25 @@ function lzAlertaPlaceholder(tipo) {
 }
 
 // ── CARGAR ASIGNACIONES DESDE SUPABASE ───────────────────────
+// v11.5: ahora también carga el ESTADO de la entrega para poder
+// distinguir 'pendiente' / 'entregado' / 'no_entregado' por pedido.
 async function cargarAsignaciones() {
   try {
-    const hoyStr = new Date().toISOString().split('T')[0];
-    const rows = await sbFetch('entregas?fecha_asignacion=gte.' + hoyStr + 'T00:00:00&select=pedido_id,chofer');
+    // v11.5: subimos a 7 días atrás para capturar entregas viejas pendientes
+    const hace7 = new Date();
+    hace7.setDate(hace7.getDate() - 7);
+    const desdeStr = hace7.toISOString().split('T')[0];
+    // v11.5: incluimos estado en el select
+    const rows = await sbFetch(
+      'entregas?fecha_asignacion=gte.' + desdeStr + 'T00:00:00' +
+      '&select=pedido_id,chofer,estado&limit=1000'
+    );
     if (rows && rows.length) {
       rows.forEach(function(r) {
-        if (r.pedido_id && r.chofer) _asignaciones[r.pedido_id] = r.chofer;
+        if (r.pedido_id && r.chofer) {
+          _asignaciones[r.pedido_id] = r.chofer;
+          if (r.estado) _asignacionesEstado[r.pedido_id] = r.estado;
+        }
       });
       // Marcar en pedidos ya cargados
       todosLosPedidos.forEach(function(p) {
