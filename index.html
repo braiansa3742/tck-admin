@@ -15812,6 +15812,346 @@ function lzGetCiudadesCanonicas() {
   return list.filter(c => seen[c] ? false : (seen[c] = true));
 }
 
+// ════════════════════════════════════════════════════════════════
+// v12.0 BLOQUE C — RENDER de la pantalla "Próxima Zona"
+// ════════════════════════════════════════════════════════════════
+
+const LZ_FMT_MONEY = n => '$' + Math.round(n || 0).toLocaleString('es-AR');
+
+// Helper para escapar texto en atributos HTML
+function lzEsc(s) {
+  return (s || '').toString()
+    .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Genera el HTML completo de la pantalla nueva
+function lzRenderAsignar(el) {
+  // Estado de carga
+  if (!_lzDataLoaded) {
+    el.innerHTML = '<div class="planilla-empty">'
+      + '<div class="loading-spinner" style="margin:0 auto 12px;"></div>'
+      + 'Cargando zonas desde Supabase...</div>';
+    // Si la carga aún no terminó, no reintentamos en bucle: lzCargarDatos
+    // ya re-renderiza solo cuando termina.
+    return;
+  }
+
+  // Si no hay pedidos en ninguna zona
+  if (_lzPedidosZona.length === 0) {
+    el.innerHTML = '<div class="planilla-empty">📭 No hay pedidos en zonas todavía.'
+      + '<div style="margin-top:10px;font-size:12px;color:var(--text3);">'
+      + 'Los pedidos aparecen acá cuando el vendedor los registra y el sistema los asigna a una zona.'
+      + '</div></div>';
+    return;
+  }
+
+  // Render principal: barra chips + bloque rojo + toolbar + acordeón + action bar
+  let html = '';
+  html += lzRenderZonaBar();
+  html += lzRenderResumenZona();
+  html += lzRenderToolbar();
+  html += '<div id="lz-contenido">' + lzRenderContenidoZona() + '</div>';
+  html += '<div class="lz-action-bar" id="lz-action-bar">' + lzRenderActionBar() + '</div>';
+
+  el.innerHTML = html;
+}
+
+// ── 1) Barra horizontal de chips de zona ────────────────────
+function lzRenderZonaBar() {
+  let html = '<div class="lz-zona-bar" id="lz-zona-bar">';
+  LZ_ZONAS.forEach(z => {
+    const st = lzGetStatsZona(z.key);
+    const sel = z.key === _lzActiveZona ? ' sel' : '';
+    const badgeC = st.confirmados > 0 ? '<span class="lz-badge-c">' + st.confirmados + '</span>' : '';
+    const badgeP = st.pendientes > 0 ? '<span class="lz-badge-p">' + st.pendientes + '</span>' : '';
+    html += '<button class="lz-zona-chip' + sel + '" onclick="lzSetZona(\'' + z.key + '\')">'
+      + z.nombre + ' ' + badgeC + badgeP + '</button>';
+  });
+  // Chips de alertas (No Entregados / Sin Zona) — los implementamos en bloque E.
+  // Por ahora, placeholders que no hacen nada (o un toast).
+  html += '<button class="lz-zona-chip lz-alerta" onclick="lzAlertaPlaceholder(\'no_entregados\')">'
+    + '⚠️ No Entr. <span class="lz-badge-c">—</span></button>';
+  html += '<button class="lz-zona-chip lz-alerta" onclick="lzAlertaPlaceholder(\'sin_zona\')">'
+    + '❓ Sin Zona <span class="lz-badge-c">—</span></button>';
+  html += '</div>';
+  return html;
+}
+
+// ── 2) Bloque rojo de resumen de zona activa ────────────────
+function lzRenderResumenZona() {
+  const zona = LZ_ZONAS.find(z => z.key === _lzActiveZona);
+  const st = lzGetStatsZona(_lzActiveZona);
+  const ciudades = lzCiudadesDeZona(_lzActiveZona).length;
+
+  // Salida: tomamos del primer pedido de la zona si tiene salida_planificada
+  const pedidos = lzGetPedidosZona(_lzActiveZona);
+  let salidaTxt = '';
+  if (pedidos.length && pedidos[0].salida_planificada) {
+    salidaTxt = 'Sale ' + pedidos[0].salida_planificada;
+  }
+
+  let pillsHtml = '';
+  if (st.confirmados > 0) pillsHtml += '<span class="lz-zona-resumen-pill">✅ ' + st.confirmados + ' confirmados</span>';
+  if (st.pendientes > 0)  pillsHtml += '<span class="lz-zona-resumen-pill">⏳ ' + st.pendientes + ' pendientes</span>';
+  if (st.joan > 0)        pillsHtml += '<span class="lz-zona-resumen-pill">🚚 ' + st.joan + ' Joan</span>';
+  if (st.luis > 0)        pillsHtml += '<span class="lz-zona-resumen-pill">🚚 ' + st.luis + ' Luis</span>';
+
+  return '<div class="lz-zona-resumen">'
+    + '<div class="lz-zona-resumen-top">'
+      + '<div class="lz-zona-resumen-info">'
+        + '<div class="lz-zona-resumen-titulo">' + zona.nombre + '</div>'
+        + '<div class="lz-zona-resumen-sub">' + (salidaTxt ? salidaTxt + ' · ' : '')
+          + ciudades + ' ciudad' + (ciudades !== 1 ? 'es' : '')
+          + ' · ' + zona.dias + '</div>'
+      + '</div>'
+      + '<div class="lz-zona-resumen-cifras">'
+        + '<div class="lz-zona-resumen-cifra">'
+          + '<div class="lz-zona-resumen-num">' + st.confirmados + '</div>'
+          + '<div class="lz-zona-resumen-lbl">Confirm.</div>'
+        + '</div>'
+        + '<div class="lz-zona-resumen-cifra">'
+          + '<div class="lz-zona-resumen-num">' + LZ_FMT_MONEY(st.montoConfirmado) + '</div>'
+          + '<div class="lz-zona-resumen-lbl">Total</div>'
+        + '</div>'
+      + '</div>'
+    + '</div>'
+    + (pillsHtml ? '<div class="lz-zona-resumen-pills">' + pillsHtml + '</div>' : '')
+  + '</div>';
+}
+
+// ── 3) Toolbar (toggle solo confirmados + búsqueda condicional) ──
+function lzRenderToolbar() {
+  const ps = lzGetPedidosZona(_lzActiveZona);
+  // Observación #4: búsqueda solo si zona tiene > 50 pedidos
+  const showSearch = ps.length > 50;
+  let html = '<div class="lz-toolbar">'
+    + '<div class="lz-toolbar-toggle">'
+      + '<label class="lz-switch">'
+        + '<input type="checkbox" id="lz-solo-conf" '
+        + (_lzSoloConfirmados ? 'checked' : '')
+        + ' onchange="lzToggleSoloConfirmados()">'
+        + '<span class="lz-switch-slider"></span>'
+      + '</label>'
+      + '<span class="lz-toolbar-lbl">Solo confirmados</span>'
+    + '</div>';
+  if (showSearch) {
+    html += '<input type="search" class="lz-toolbar-search" id="lz-search" '
+      + 'placeholder="🔍 Buscar cliente..." value="' + lzEsc(_lzSearchTerm) + '" '
+      + 'oninput="lzSetSearch(this.value)">';
+  }
+  html += '</div>';
+  return html;
+}
+
+// ── 4) Contenido (acordeón ciudad → pedidos) ────────────────
+function lzRenderContenidoZona() {
+  const ciudades = lzCiudadesDeZona(_lzActiveZona);
+  if (ciudades.length === 0) {
+    return '<div class="lz-empty"><div class="lz-empty-icon">📭</div>'
+      + 'No hay pedidos en esta zona todavía.</div>';
+  }
+
+  // Búsqueda: filtra qué pedidos se muestran
+  const searchLower = (_lzSearchTerm || '').toLowerCase().trim();
+
+  let html = '';
+  let cityIdx = 0;
+  ciudades.forEach(c => {
+    let pedidosCiudad = lzGetPedidosZona(_lzActiveZona)
+      .filter(p => lzGetLocalidad(p) === c);
+
+    // Aplicar búsqueda por cliente
+    if (searchLower) {
+      pedidosCiudad = pedidosCiudad.filter(p =>
+        (p.cliente || '').toLowerCase().includes(searchLower));
+    }
+    if (pedidosCiudad.length === 0) return;  // no mostrar ciudad si quedó vacía por búsqueda
+
+    const conf = pedidosCiudad.filter(p => lzGetEstado(p) === 'confirmado');
+    const pend = pedidosCiudad.filter(p => lzGetEstado(p) === 'pendiente');
+    const monto = conf.reduce((s, p) => s + lzParseMonto(p), 0);
+    const sinAsignar = conf.filter(p => !lzGetChofer(p));
+    const lista = conf.length > 0 && sinAsignar.length === 0;
+
+    // Observación #5 (la dejamos para v12.1, pero aplicamos lógica simple):
+    // expandir si: hay búsqueda activa (todos abiertos), o si es una de las primeras 2
+    const expandKey = c;
+    const expandedDefault = (cityIdx < 2) || !!searchLower;
+    const expanded = (_lzCiudadesExpand[expandKey] !== undefined)
+      ? _lzCiudadesExpand[expandKey]
+      : expandedDefault;
+
+    const cityIdSafe = c.replace(/[^a-zA-Z0-9]/g, '_');
+    const clsLista = lista ? ' lz-lista' : '';
+    const clsExp = expanded ? ' lz-expanded' : '';
+
+    html += '<div class="lz-ciudad' + clsLista + clsExp + '" id="lz-city-' + cityIdSafe + '">'
+      + '<div class="lz-ciudad-hdr" onclick="lzToggleCiudad(\'' + lzEsc(c) + '\')">'
+        + '<div class="lz-ciudad-hdr-left">'
+          + '<div class="lz-ciudad-nombre">📍 ' + c + '</div>'
+          + '<div class="lz-ciudad-meta">'
+            + '<span>📦 ' + pedidosCiudad.length + ' pedidos</span>'
+            + '<span>✅ ' + conf.length + ' · ⏳ ' + pend.length + '</span>'
+            + '<span>💰 ' + LZ_FMT_MONEY(monto) + '</span>'
+            + (lista ? '<span style="color:var(--green2);font-weight:800;">✓ Lista</span>' : '')
+          + '</div>'
+        + '</div>'
+        + '<div class="lz-ciudad-toggle">▼</div>'
+      + '</div>'
+      + '<div class="lz-ciudad-body">'
+        + pedidosCiudad.map(p => lzRenderPedido(p)).join('')
+      + '</div>'
+    + '</div>';
+    cityIdx++;
+  });
+
+  if (html === '') {
+    return '<div class="lz-empty"><div class="lz-empty-icon">🔍</div>'
+      + 'Sin resultados para "' + lzEsc(_lzSearchTerm) + '"</div>';
+  }
+  return html;
+}
+
+// ── 5) Card individual de pedido ────────────────────────────
+function lzRenderPedido(p) {
+  const isPendiente = lzGetEstado(p) === 'pendiente';
+  const isOculto = _lzSoloConfirmados && isPendiente;
+  let cls = 'lz-pedido';
+  if (isPendiente) cls += ' lz-pendiente';
+  if (isOculto)    cls += ' lz-oculto';
+
+  const chofer = lzGetChofer(p);
+  let choferHtml = '';
+  if (isPendiente) {
+    choferHtml = '<span class="lz-pedido-pendiente-badge">⏳ Esperando confirmación de '
+      + lzEsc(p.vendedor || '?') + '</span>';
+  } else if (chofer) {
+    choferHtml = '<div class="lz-badge-chofer ' + chofer.toLowerCase()
+      + '" onclick="lzAbrirOverride(\'' + lzEsc(p.pedido_id) + '\')">🚚 '
+      + chofer + '</div>';
+  } else {
+    choferHtml = '<div class="lz-pedido-actions">'
+      + '<button class="lz-btn-pedido lz-btn-pedido-joan" '
+      + 'onclick="lzAsignarPedido(\'' + lzEsc(p.pedido_id) + '\',\'Joan\')">🚚 Joan</button>'
+      + '<button class="lz-btn-pedido lz-btn-pedido-luis" '
+      + 'onclick="lzAsignarPedido(\'' + lzEsc(p.pedido_id) + '\',\'Luis\')">🚚 Luis</button>'
+    + '</div>';
+  }
+
+  // Estado y vendedor chips
+  const estadoChip = isPendiente
+    ? '<span class="lz-chip lz-chip-pend">⏳ Pendiente</span>'
+    : '<span class="lz-chip lz-chip-conf">✅ Confirmado</span>';
+  const vKey = (p.vendedor || '').toLowerCase().substring(0, 3);
+  const vendChip = '<span class="lz-chip lz-chip-vend-' + vKey + '">' + lzEsc(p.vendedor || '?') + '</span>';
+
+  return '<div class="' + cls + '">'
+    + '<div class="lz-pedido-hdr">'
+      + '<div style="flex:1;min-width:0;">'
+        + '<div class="lz-pedido-cliente">' + lzEsc(p.cliente || '—') + '</div>'
+      + '</div>'
+      + '<div class="lz-pedido-total">' + LZ_FMT_MONEY(lzParseMonto(p)) + '</div>'
+    + '</div>'
+    + '<div class="lz-pedido-foot">'
+      + '<div style="display:flex;gap:4px;flex-wrap:wrap;">' + estadoChip + vendChip + '</div>'
+      + choferHtml
+    + '</div>'
+  + '</div>';
+}
+
+// ── 6) Action bar inferior (estados según situación) ────────
+function lzRenderActionBar() {
+  const st = lzGetStatsZona(_lzActiveZona);
+  const zona = LZ_ZONAS.find(z => z.key === _lzActiveZona);
+  const sinAsignarConfirmados = lzGetPedidosZona(_lzActiveZona)
+    .filter(p => lzGetEstado(p) === 'confirmado' && !lzGetChofer(p));
+
+  if (st.lista) {
+    return '<button class="lz-action-btn lz-action-cerrar" onclick="lzCerrarZona()">'
+      + '🔒 Cerrar ' + zona.nombre + '</button>';
+  }
+  if (sinAsignarConfirmados.length === 0 && st.confirmados > 0) {
+    return '<div class="lz-action-info">'
+      + '<div class="lz-action-info-txt">✓ Confirmados asignados</div>'
+      + '<div class="lz-action-info-sub">' + st.pendientes
+      + ' pedidos pendientes de confirmación</div>'
+    + '</div>';
+  }
+  if (sinAsignarConfirmados.length > 0) {
+    let html = '<button class="lz-action-btn lz-action-joan" onclick="lzAbrirSalida(\'Joan\')">'
+      + '🚚 Asignar a Joan</button>'
+      + '<button class="lz-action-btn lz-action-luis" onclick="lzAbrirSalida(\'Luis\')">'
+      + '🚚 Asignar a Luis</button>';
+    if (st.pendientes > 0) {
+      html += '<div class="lz-action-warning">⚠️ ' + st.pendientes
+        + ' pendientes quedarán fuera de esta salida</div>';
+    }
+    return html;
+  }
+  return '<div class="lz-action-info">'
+    + '<div class="lz-action-info-txt" style="color:var(--text3)">Sin pedidos confirmados</div>'
+    + '<div class="lz-action-info-sub">' + st.pendientes + ' pendientes de confirmación</div>'
+  + '</div>';
+}
+
+// ════════════════════════════════════════════════════════════════
+// HANDLERS — interacciones del usuario
+// ════════════════════════════════════════════════════════════════
+
+function lzSetZona(key) {
+  _lzActiveZona = key;
+  // Reseteamos estado de acordeón al cambiar de zona
+  _lzCiudadesExpand = {};
+  // Limpiamos búsqueda al cambiar de zona
+  _lzSearchTerm = '';
+  renderLogistica();
+}
+
+function lzToggleSoloConfirmados() {
+  const cb = document.getElementById('lz-solo-conf');
+  if (cb) _lzSoloConfirmados = cb.checked;
+  // No re-renderizamos todo — solo togglear las clases via CSS sería más performante,
+  // pero por simplicidad re-render contenido.
+  const cont = document.getElementById('lz-contenido');
+  if (cont) cont.innerHTML = lzRenderContenidoZona();
+}
+
+function lzSetSearch(val) {
+  _lzSearchTerm = val || '';
+  const cont = document.getElementById('lz-contenido');
+  if (cont) cont.innerHTML = lzRenderContenidoZona();
+}
+
+function lzToggleCiudad(c) {
+  const cur = _lzCiudadesExpand[c];
+  // Si nunca se tocó, asumimos el default (igual que en render). Toggle al opuesto.
+  // Para simplificar: si está undefined o true → false, si false → true.
+  _lzCiudadesExpand[c] = (cur === false) ? true : (cur === true ? false : false);
+  // Re-render contenido para aplicar la clase nueva
+  const cont = document.getElementById('lz-contenido');
+  if (cont) cont.innerHTML = lzRenderContenidoZona();
+}
+
+// ── PLACEHOLDERS para bloques D y E ─────────────────────────
+function lzAlertaPlaceholder(tipo) {
+  toast(tipo === 'no_entregados'
+    ? '⚠️ No Entregados — disponible en bloque E'
+    : '❓ Sin Zona — disponible en bloque E', 'ok');
+}
+function lzAbrirSalida(chofer) {
+  toast('Modal "Asignar a ' + chofer + '" — disponible en bloque D', 'ok');
+}
+function lzAsignarPedido(pid, chofer) {
+  toast('Modal asignar pedido individual — disponible en bloque D', 'ok');
+}
+function lzAbrirOverride(pid) {
+  toast('Modal cambio chofer — disponible en bloque D', 'ok');
+}
+function lzCerrarZona() {
+  toast('Cerrar zona — disponible en bloque D', 'ok');
+}
+
 // ── CARGAR ASIGNACIONES DESDE SUPABASE ───────────────────────
 async function cargarAsignaciones() {
   try {
@@ -16519,6 +16859,12 @@ function renderLogistica() {
 }
 
 function renderLogisticaAsignar(el) {
+  // v12.0 — delegamos al nuevo render basado en zonas
+  return lzRenderAsignar(el);
+}
+
+// v11.4 LEGACY — preservado por si necesitamos rollback rápido
+function renderLogisticaAsignarLegacy(el) {
   const pedidos = todosLosPedidos.filter(p => p.estado === 'Confirmado');
 
   if (!pedidos.length) {
