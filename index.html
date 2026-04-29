@@ -15667,10 +15667,8 @@ let _lzDataLoaded       = false;  // flag para saber si ya se cargó alguna vez
 async function lzCargarDatos() {
   try {
     // Pedidos vivos de la jornada (no entregados, no cancelados)
-    // Nota: el filtro exacto puede ajustarse si la tabla tiene un campo `activo` o similar.
-    const pedidos = await sbFetch(
-      'pedidos_zona?select=*&order=zona.asc,ciudad_canonica.asc'
-    );
+    // v12.0-B2: query sin ORDER BY hasta confirmar nombres de columnas reales
+    const pedidos = await sbFetch('pedidos_zona?select=*&limit=500');
     _lzPedidosZona = Array.isArray(pedidos) ? pedidos : [];
 
     // Ciudades canónicas con su zona (para el grid del drawer "Sin Zona")
@@ -15680,13 +15678,18 @@ async function lzCargarDatos() {
     _lzDataLoaded = true;
 
     // DEBUG temporal — remover en v12.1
-    console.log('[lz] datos cargados:', {
-      pedidos: _lzPedidosZona.length,
-      rutas: _lzRutas.length,
-      muestra_pedido: _lzPedidosZona[0] || null,
-      muestra_ruta: _lzRutas[0] || null,
-      por_zona: lzDebugContarPorZona()
-    });
+    console.log('[lz] === BLOQUE B DEBUG ===');
+    console.log('[lz] Total pedidos:', _lzPedidosZona.length);
+    console.log('[lz] Total rutas:', _lzRutas.length);
+    if (_lzPedidosZona[0]) {
+      console.log('[lz] COLUMNAS de pedidos_zona:', Object.keys(_lzPedidosZona[0]));
+      console.log('[lz] PRIMER PEDIDO completo:', _lzPedidosZona[0]);
+    }
+    if (_lzRutas[0]) {
+      console.log('[lz] COLUMNAS de rutas:', Object.keys(_lzRutas[0]));
+      console.log('[lz] PRIMERA RUTA completa:', _lzRutas[0]);
+    }
+    console.log('[lz] Counts por zona:', lzDebugContarPorZona());
 
     // Si estamos viendo Logística → Asignar, re-renderizar con la nueva data
     if (typeof _tabActual !== 'undefined' && _tabActual === 'logistica' && _logTab === 'asignar') {
