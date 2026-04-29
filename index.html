@@ -16381,22 +16381,55 @@ let _lzSzPedidoSel  = null; // pedido_id seleccionado para asignar ciudad
 // ── CARGA: refresca counts y caches de drawers ───────────────
 async function lzCargarDrawers() {
   // No Entregados: leer de tabla entregas
+  // DEBUG E1: traer TODAS las entregas para ver qué estados existen
   try {
-    const rows = await sbFetch(
-      'entregas?estado=eq.no_entregado&select=*&order=fecha_asignacion.desc&limit=200');
-    _lzNoEntregados = Array.isArray(rows) ? rows : [];
+    const todas = await sbFetch('entregas?select=id,pedido_id,chofer,estado,fecha_asignacion&limit=200&order=fecha_asignacion.desc');
+    if (Array.isArray(todas) && todas.length > 0) {
+      const estados = {};
+      todas.forEach(e => {
+        const k = e.estado == null ? '(null)' : ('"' + e.estado + '"');
+        estados[k] = (estados[k] || 0) + 1;
+      });
+      console.log('[lz] === DEBUG E1: estados en tabla entregas (últimas 200) ===');
+      console.log('[lz] Total entregas:', todas.length);
+      console.log('[lz] Estados encontrados:', estados);
+      console.log('[lz] Primera entrega:', todas[0]);
+    } else {
+      console.log('[lz] === DEBUG E1: tabla entregas vacía o sin acceso ===');
+    }
+
+    // Filtrar las que matchean nuestro criterio
+    _lzNoEntregados = (todas || []).filter(e => {
+      const est = (e.estado || '').toLowerCase();
+      return est === 'no_entregado' || est === 'no entregado' || est === 'noentregado';
+    });
+    console.log('[lz] No Entregados encontrados con filtro flexible:', _lzNoEntregados.length);
   } catch (e) {
-    console.warn('[lz] error cargando no_entregados:', e);
+    console.warn('[lz] error cargando entregas:', e);
     _lzNoEntregados = [];
   }
 
-  // Sin Zona: filtrar de _lzPedidosZona los que tienen zona null o estado sin_zona
+  // Sin Zona: filtrar de _lzPedidosZona los que tienen zona null/vacía/sin_zona
+  // DEBUG E2: ver qué valores de zona existen
+  const valoresZona = {};
+  _lzPedidosZona.forEach(p => {
+    const k = p.zona == null ? '(null)' : ('"' + p.zona + '"');
+    valoresZona[k] = (valoresZona[k] || 0) + 1;
+  });
+  console.log('[lz] === DEBUG E2: valores únicos de zona en pedidos_zona ===');
+  console.log(valoresZona);
+
   _lzSinZona = _lzPedidosZona.filter(p => {
     if (!p.zona) return true;
-    const e = (p.estado || '').toLowerCase();
-    if (e === 'sin_zona') return true;
+    const z = p.zona.toString().toLowerCase().trim();
+    if (z === '' || z === 'sin_zona' || z === 'sinzona' || z === 'none' || z === '(null)') return true;
+    // También: zona que no normaliza a ninguna conocida
+    const norm = lzNormalizarZona(p.zona);
+    if (!norm) return true;
     return false;
   });
+  console.log('[lz] Sin Zona encontrados:', _lzSinZona.length);
+  if (_lzSinZona.length > 0) console.log('[lz] Primero sin zona:', _lzSinZona[0]);
 
   // Re-renderizar la barra de chips para que muestre los counts reales
   if (typeof _tabActual !== 'undefined' && _tabActual === 'logistica' && _logTab === 'asignar') {
