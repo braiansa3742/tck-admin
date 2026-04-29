@@ -15655,20 +15655,25 @@ const LZ_ZONAS = [
 ];
 
 // Mapeo de los valores reales de Supabase → keys cortos de UI
-// La columna `zona` en pedidos_zona contiene 'zona1', 'zona2', 'amfortin', 'tlmanana', 'tltarde'
-// (basado en lo que devuelve el primer pedido en debug)
+// Schema confirmado: la columna `zona` en pedidos_zona contiene
+// 'zona1', 'zona2', 'america_fortin', 'tl' (genérico hasta v25.2 con turno)
 const LZ_ZONA_MAP = {
-  'zona1':    'z1',
-  'zona2':    'z2',
-  'amfortin': 'af',
-  'am_fortin':'af',
-  'amfortín': 'af',
-  'tlmanana': 'tlm',
-  'tl_manana':'tlm',
-  'tlmañana': 'tlm',
-  'tltarde':  'tlt',
-  'tl_tarde': 'tlt',
-  // También aceptar las keys cortas por si en algún pedido vienen así
+  'zona1':           'z1',
+  'zona2':           'z2',
+  'america_fortin':  'af',
+  'amfortin':        'af',
+  'am_fortin':       'af',
+  'amfortín':        'af',
+  // TL: hasta que Apps Script v25.2 infiera turno, todos los 'tl' caen en TL Tarde
+  // (el grueso del volumen — 254 pedidos). Cuando v25.2 deploye, se separan
+  // por la columna `turno` ('manana' / 'tarde').
+  'tl':              'tlt',
+  'tlmanana':        'tlm',
+  'tl_manana':       'tlm',
+  'tlmañana':        'tlm',
+  'tltarde':         'tlt',
+  'tl_tarde':        'tlt',
+  // Aceptar también keys cortas por si en algún pedido vienen así
   'z1': 'z1', 'z2': 'z2', 'af': 'af', 'tlm': 'tlm', 'tlt': 'tlt'
 };
 
@@ -15676,6 +15681,17 @@ function lzNormalizarZona(rawZona) {
   if (!rawZona) return null;
   const k = rawZona.toString().toLowerCase().trim();
   return LZ_ZONA_MAP[k] || null;
+}
+
+// v12.0-final: separación TL por turno (cuando Apps Script v25.2 esté listo).
+// Si zona='tl' Y la columna turno trae 'manana', sobrescribimos a 'tlm'.
+function lzGetZonaUI(p) {
+  const base = lzNormalizarZona(p.zona);
+  if (base === 'tlt' && p.turno) {
+    const t = p.turno.toString().toLowerCase().trim();
+    if (t === 'manana' || t === 'mañana' || t === 'tlm') return 'tlm';
+  }
+  return base;
 }
 
 // Estado runtime del sub-tab Asignar nuevo
@@ -15723,7 +15739,7 @@ async function lzCargarDatos() {
 function lzDebugContarPorZona() {
   const out = { z1: 0, z2: 0, af: 0, tlm: 0, tlt: 0, '(sin_zona)': 0 };
   _lzPedidosZona.forEach(p => {
-    const k = lzNormalizarZona(p.zona);
+    const k = lzGetZonaUI(p);
     if (k && out[k] !== undefined) out[k]++;
     else if (!k) out['(sin_zona)']++;
     else out['(otro:' + p.zona + ')'] = (out['(otro:' + p.zona + ')'] || 0) + 1;
@@ -15733,7 +15749,7 @@ function lzDebugContarPorZona() {
 
 // ── HELPERS PUROS (sin render) ──────────────────────────────
 function lzGetPedidosZona(zonaKey) {
-  return _lzPedidosZona.filter(p => lzNormalizarZona(p.zona) === zonaKey);
+  return _lzPedidosZona.filter(p => lzGetZonaUI(p) === zonaKey);
 }
 
 function lzParseMonto(p) {
@@ -16424,7 +16440,7 @@ async function lzCargarDrawers() {
     const z = p.zona.toString().toLowerCase().trim();
     if (z === '' || z === 'sin_zona' || z === 'sinzona' || z === 'none' || z === '(null)') return true;
     // También: zona que no normaliza a ninguna conocida
-    const norm = lzNormalizarZona(p.zona);
+    const norm = lzGetZonaUI(p);
     if (!norm) return true;
     return false;
   });
