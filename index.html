@@ -57,6 +57,16 @@
           - Salida calculada del calendario (no del primer pedido)
           - Logs de debug E1, E2, B3 silenciados (solo bajo flag DEBUG)
 
+       8. v11.5b — BOTÓN "MARCAR ENTREGADO" en bloque atrasados
+          - Cada pedido atrasado tiene 2 botones ahora:
+              · ✓ Entregado (verde) → asume que ya se entregó físicamente
+              · ↪️ Mover (naranja)  → reagenda para próx salida
+          - Acciones masivas: "Marcar TODOS entregados" + "Mover TODOS"
+          - Si el pedido NO tenía entrega previa, se crea con
+            chofer="Sistema" para dejar traza
+          - Si tenía entrega, se hace UPDATE a estado='entregado'
+          - Doble confirmación en acciones masivas para evitar accidentes
+
      Cambios v11.4 (sobre v11.3) — SPLIT DE CALIBRES POLLO A/B:
        Modal de calibres rediseñado como wizard con steppers (+/−).
        Permite distribuir las cajas de un genérico (Pollo A o Pollo B)
@@ -5722,6 +5732,60 @@ input[type="date"] {
   white-space: nowrap;
 }
 .lz-btn-mover:hover { background: #E65100; }
+
+/* v11.5b — Botón "Marcar entregado" (verde) */
+.lz-btn-entregado {
+  background: #2E7D32;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.lz-btn-entregado:hover { background: #1B5E20; }
+
+/* v11.5b — Contenedor de los 2 botones de acción del item atrasado */
+.lz-atrasado-acciones {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* v11.5b — Botones masivos lado a lado */
+.lz-atrasados-acciones-masivas {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.lz-atrasados-acciones-masivas .lz-btn-mover-todos,
+.lz-atrasados-acciones-masivas .lz-btn-entregado-todos {
+  flex: 1;
+  margin-top: 0;
+}
+
+.lz-btn-entregado-todos {
+  width: 100%;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, #2E7D32, #1B5E20);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+.lz-btn-entregado-todos:hover {
+  background: linear-gradient(135deg, #1B5E20, #0F3D11);
+}
+
 .lz-btn-mover-todos {
   width: 100%;
   margin-top: 10px;
@@ -16494,16 +16558,26 @@ function lzRenderBloqueAtrasados(atrasados) {
         html += '<div class="lz-atrasado-localidad">📍 ' + lzEsc(lzGetLocalidad(p) || '?')
              + ' · ' + LZ_FMT_MONEY(lzParseMonto(p)) + '</div>';
         html += '</div>';
+        // v11.5b: 2 botones — Marcar entregado + Mover a próx
+        html += '<div class="lz-atrasado-acciones">';
+        html += '<button class="lz-btn-entregado" onclick="lzMarcarEntregadoAtrasado(\''
+             + lzEsc(p.pedido_id) + '\')" title="Asumir que ya se entregó pero no se cargó">'
+             + '✓ Entregado</button>';
         html += '<button class="lz-btn-mover" onclick="lzMoverAProxSalida(\''
-             + lzEsc(p.pedido_id) + '\')">'
-             + '↪️ Mover a próx</button>';
+             + lzEsc(p.pedido_id) + '\')" title="Reagendar para la próxima salida">'
+             + '↪️ Mover</button>';
+        html += '</div>';
         html += '</div>';
       });
       html += '</div>';
     });
-    // Acción "Mover TODOS"
+    // v11.5b: 2 acciones masivas — Marcar todos entregado + Mover todos
+    html += '<div class="lz-atrasados-acciones-masivas">';
+    html += '<button class="lz-btn-entregado-todos" onclick="lzMarcarEntregadoTodosAtrasados()">'
+         + '✓ Marcar TODOS entregados</button>';
     html += '<button class="lz-btn-mover-todos" onclick="lzMoverTodosAProxSalida()">'
-         + '↪️ Mover TODOS los atrasados a la próxima salida</button>';
+         + '↪️ Mover TODOS a la próxima salida</button>';
+    html += '</div>';
     html += '</div>';
   }
 
@@ -16604,6 +16678,152 @@ async function lzMoverTodosAProxSalida() {
     const bar = document.getElementById('lz-zona-bar');
     if (bar) bar.outerHTML = lzRenderZonaBar();
   }
+}
+
+// v11.5b: Marcar un pedido atrasado como entregado.
+// Si no hay entrega previa, crea una con chofer="Sistema (admin)" para
+// dejar traza. Si ya hay entrega, actualiza estado a 'entregado'.
+async function lzMarcarEntregadoAtrasado(pedidoId) {
+  const p = _lzPedidosZona.find(x => x.pedido_id === pedidoId);
+  if (!p) return;
+  const ok = confirm('¿Marcar este pedido como ENTREGADO?\n\n'
+    + p.cliente + ' · ' + lzGetLocalidad(p) + ' · ' + LZ_FMT_MONEY(lzParseMonto(p))
+    + '\n\nAcción: se asume que el pedido ya fue entregado físicamente y solo'
+    + ' faltó cargarlo en el sistema.');
+  if (!ok) return;
+  try {
+    const choferActual = _asignaciones[pedidoId] || 'Sistema';
+    const nowIso = new Date().toISOString();
+
+    // Intentar UPDATE primero (si ya había entrega previa)
+    let updateOK = false;
+    try {
+      await sbFetch('entregas?pedido_id=eq.' + encodeURIComponent(pedidoId), {
+        method: 'PATCH',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({
+          estado: 'entregado',
+          fecha_entrega: nowIso,
+          nota: 'Marcado entregado desde admin (atrasado, asumido)'
+        })
+      });
+      updateOK = true;
+    } catch (e1) { /* sigue al INSERT */ }
+
+    // Si no había entrega previa o el PATCH no afectó filas, insertar
+    if (!_asignacionesEstado[pedidoId]) {
+      try {
+        await sbFetch('entregas', {
+          method: 'POST',
+          headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify({
+            pedido_id:        pedidoId,
+            chofer:           choferActual,
+            cliente:          p.cliente || '',
+            ciudad:           lzGetLocalidad(p) || '',
+            estado:           'entregado',
+            monto:            lzParseMonto(p),
+            fecha_asignacion: nowIso,
+            fecha_entrega:    nowIso,
+            nota:             'Auto-creado en admin (atrasado, asumido entregado)'
+          })
+        });
+      } catch (e2) {
+        console.error('[lz] error insert entrega:', e2);
+        if (!updateOK) throw e2;
+      }
+    }
+
+    // Update local
+    _asignacionesEstado[pedidoId] = 'entregado';
+    if (!_asignaciones[pedidoId]) _asignaciones[pedidoId] = choferActual;
+
+    // Re-render
+    const cont = document.getElementById('lz-contenido');
+    if (cont) cont.innerHTML = lzRenderContenidoZona();
+    const bar = document.getElementById('lz-zona-bar');
+    if (bar) bar.outerHTML = lzRenderZonaBar();
+  } catch (e) {
+    console.error('[lz] marcar entregado atrasado:', e);
+    alert('Error al marcar como entregado. Probá de nuevo.');
+  }
+}
+
+// v11.5b: Marcar todos los atrasados de la zona activa como entregados.
+async function lzMarcarEntregadoTodosAtrasados() {
+  const atrasados = lzGetAtrasados(_lzActiveZona);
+  if (atrasados.length === 0) return;
+  const monto = atrasados.reduce((s, p) => s + lzParseMonto(p), 0);
+  const ok = confirm('¿Marcar los ' + atrasados.length + ' pedidos atrasados ('
+    + LZ_FMT_MONEY(monto) + ') como ENTREGADOS?\n\n'
+    + 'Acción: se asume que ya fueron entregados físicamente.\n'
+    + 'Esto NO se puede deshacer fácilmente.');
+  if (!ok) return;
+
+  // Doble confirmación porque es masivo y destructivo
+  const ok2 = confirm('Confirmá una vez más:\n\n'
+    + 'Vas a marcar ' + atrasados.length + ' pedidos como entregados.\n\n'
+    + '¿Seguro?');
+  if (!ok2) return;
+
+  let okCount = 0, errCount = 0;
+  for (const p of atrasados) {
+    try {
+      const pedidoId = p.pedido_id;
+      const choferActual = _asignaciones[pedidoId] || 'Sistema';
+      const nowIso = new Date().toISOString();
+
+      let updateOK = false;
+      try {
+        await sbFetch('entregas?pedido_id=eq.' + encodeURIComponent(pedidoId), {
+          method: 'PATCH',
+          headers: { 'Prefer': 'return=minimal' },
+          body: JSON.stringify({
+            estado: 'entregado',
+            fecha_entrega: nowIso,
+            nota: 'Marcado entregado masivo desde admin (atrasado, asumido)'
+          })
+        });
+        updateOK = true;
+      } catch (e1) { /* sigue al INSERT */ }
+
+      if (!_asignacionesEstado[pedidoId]) {
+        try {
+          await sbFetch('entregas', {
+            method: 'POST',
+            headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+            body: JSON.stringify({
+              pedido_id:        pedidoId,
+              chofer:           choferActual,
+              cliente:          p.cliente || '',
+              ciudad:           lzGetLocalidad(p) || '',
+              estado:           'entregado',
+              monto:            lzParseMonto(p),
+              fecha_asignacion: nowIso,
+              fecha_entrega:    nowIso,
+              nota:             'Auto-creado masivo en admin (atrasado, asumido entregado)'
+            })
+          });
+        } catch (e2) {
+          if (!updateOK) throw e2;
+        }
+      }
+
+      _asignacionesEstado[pedidoId] = 'entregado';
+      if (!_asignaciones[pedidoId]) _asignaciones[pedidoId] = choferActual;
+      okCount++;
+    } catch (e) {
+      console.error('[lz] marcar entregado masivo:', p.pedido_id, e);
+      errCount++;
+    }
+  }
+
+  alert('Marcados entregados: ' + okCount + (errCount > 0 ? ' · Errores: ' + errCount : ''));
+  // Re-render
+  const cont = document.getElementById('lz-contenido');
+  if (cont) cont.innerHTML = lzRenderContenidoZona();
+  const bar = document.getElementById('lz-zona-bar');
+  if (bar) bar.outerHTML = lzRenderZonaBar();
 }
 
 // ── 5) Card individual de pedido ────────────────────────────
