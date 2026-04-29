@@ -15654,6 +15654,30 @@ const LZ_ZONAS = [
   { key: 'tlt', nombre: 'TL Tarde',   dias: 'Lun-Sab (sale al día sgte)' }
 ];
 
+// Mapeo de los valores reales de Supabase → keys cortos de UI
+// La columna `zona` en pedidos_zona contiene 'zona1', 'zona2', 'amfortin', 'tlmanana', 'tltarde'
+// (basado en lo que devuelve el primer pedido en debug)
+const LZ_ZONA_MAP = {
+  'zona1':    'z1',
+  'zona2':    'z2',
+  'amfortin': 'af',
+  'am_fortin':'af',
+  'amfortín': 'af',
+  'tlmanana': 'tlm',
+  'tl_manana':'tlm',
+  'tlmañana': 'tlm',
+  'tltarde':  'tlt',
+  'tl_tarde': 'tlt',
+  // También aceptar las keys cortas por si en algún pedido vienen así
+  'z1': 'z1', 'z2': 'z2', 'af': 'af', 'tlm': 'tlm', 'tlt': 'tlt'
+};
+
+function lzNormalizarZona(rawZona) {
+  if (!rawZona) return null;
+  const k = rawZona.toString().toLowerCase().trim();
+  return LZ_ZONA_MAP[k] || null;
+}
+
 // Estado runtime del sub-tab Asignar nuevo
 let _lzActiveZona       = 'z2';   // zona seleccionada por defecto
 let _lzPedidosZona      = [];     // raw data de tabla pedidos_zona
@@ -15666,30 +15690,21 @@ let _lzDataLoaded       = false;  // flag para saber si ya se cargó alguna vez
 // ── CARGA: pedidos_zona + rutas desde Supabase ──────────────
 async function lzCargarDatos() {
   try {
-    // Pedidos vivos de la jornada (no entregados, no cancelados)
-    // v12.0-B2: query sin ORDER BY hasta confirmar nombres de columnas reales
-    const pedidos = await sbFetch('pedidos_zona?select=*&limit=500');
+    // v12.0-B3: schema confirmado tras debug
+    const pedidos = await sbFetch('pedidos_zona?select=*&limit=2000');
     _lzPedidosZona = Array.isArray(pedidos) ? pedidos : [];
 
     // Ciudades canónicas con su zona (para el grid del drawer "Sin Zona")
-    const rutas = await sbFetch('rutas?select=*');
+    const rutas = await sbFetch('rutas?select=*&order=orden.asc');
     _lzRutas = Array.isArray(rutas) ? rutas : [];
 
     _lzDataLoaded = true;
 
     // DEBUG temporal — remover en v12.1
-    console.log('[lz] === BLOQUE B DEBUG ===');
+    console.log('[lz] === BLOQUE B3 ===');
     console.log('[lz] Total pedidos:', _lzPedidosZona.length);
     console.log('[lz] Total rutas:', _lzRutas.length);
-    if (_lzPedidosZona[0]) {
-      console.log('[lz] COLUMNAS de pedidos_zona:', Object.keys(_lzPedidosZona[0]));
-      console.log('[lz] PRIMER PEDIDO completo:', _lzPedidosZona[0]);
-    }
-    if (_lzRutas[0]) {
-      console.log('[lz] COLUMNAS de rutas:', Object.keys(_lzRutas[0]));
-      console.log('[lz] PRIMERA RUTA completa:', _lzRutas[0]);
-    }
-    console.log('[lz] Counts por zona:', lzDebugContarPorZona());
+    console.log('[lz] Counts por zona normalizados:', lzDebugContarPorZona());
 
     // Si estamos viendo Logística → Asignar, re-renderizar con la nueva data
     if (typeof _tabActual !== 'undefined' && _tabActual === 'logistica' && _logTab === 'asignar') {
@@ -15703,24 +15718,24 @@ async function lzCargarDatos() {
 
 // Helper de debug: contar pedidos por zona para ver en consola
 function lzDebugContarPorZona() {
-  const out = {};
-  LZ_ZONAS.forEach(z => { out[z.key] = 0; });
+  const out = { z1: 0, z2: 0, af: 0, tlm: 0, tlt: 0, '(sin_zona)': 0 };
   _lzPedidosZona.forEach(p => {
-    const k = (p.zona || '').toLowerCase();
-    if (out[k] !== undefined) out[k]++;
-    else out['(otro:' + k + ')'] = (out['(otro:' + k + ')'] || 0) + 1;
+    const k = lzNormalizarZona(p.zona);
+    if (k && out[k] !== undefined) out[k]++;
+    else if (!k) out['(sin_zona)']++;
+    else out['(otro:' + p.zona + ')'] = (out['(otro:' + p.zona + ')'] || 0) + 1;
   });
   return out;
 }
 
 // ── HELPERS PUROS (sin render) ──────────────────────────────
 function lzGetPedidosZona(zonaKey) {
-  return _lzPedidosZona.filter(p => (p.zona || '').toLowerCase() === zonaKey);
+  return _lzPedidosZona.filter(p => lzNormalizarZona(p.zona) === zonaKey);
 }
 
 function lzParseMonto(p) {
-  // El campo puede venir como number o como string (depende de cómo lo escribió el Apps Script)
-  const v = p.total != null ? p.total : (p.monto != null ? p.monto : 0);
+  // total puede venir como number o como string
+  const v = p.total != null ? p.total : 0;
   if (typeof v === 'number') return v;
   return parseInt((v || '0').toString().replace(/[^0-9]/g, '')) || 0;
 }
@@ -15733,15 +15748,23 @@ function lzGetEstado(p) {
   return e;
 }
 
+function lzGetChofer(p) {
+  // El chofer NO está en pedidos_zona — viene de la tabla entregas → _asignaciones
+  return _asignaciones[p.pedido_id] || null;
+}
+
+function lzGetLocalidad(p) {
+  // Schema real: la columna se llama localidad_canonica
+  return (p.localidad_canonica || '').trim();
+}
+
 function lzGetStatsZona(zonaKey) {
   const ps = lzGetPedidosZona(zonaKey);
   const confirmados = ps.filter(p => lzGetEstado(p) === 'confirmado');
   const pendientes  = ps.filter(p => lzGetEstado(p) === 'pendiente');
-  // Para asignación: usamos el campo chofer del pedido si existe, si no el de _asignaciones
-  const choferDe = p => p.chofer || _asignaciones[p.pedido_id] || null;
-  const sinAsignar = confirmados.filter(p => !choferDe(p));
-  const joan = ps.filter(p => choferDe(p) === 'Joan');
-  const luis = ps.filter(p => choferDe(p) === 'Luis');
+  const sinAsignar  = confirmados.filter(p => !lzGetChofer(p));
+  const joan = ps.filter(p => lzGetChofer(p) === 'Joan');
+  const luis = ps.filter(p => lzGetChofer(p) === 'Luis');
   const montoConfirmado = confirmados.reduce((s, p) => s + lzParseMonto(p), 0);
   const montoPendiente  = pendientes.reduce((s, p) => s + lzParseMonto(p), 0);
   return {
@@ -15753,31 +15776,40 @@ function lzGetStatsZona(zonaKey) {
     luis: luis.length,
     montoConfirmado: montoConfirmado,
     montoPendiente: montoPendiente,
-    // Una zona está "lista" cuando tiene confirmados, todos asignados, y cero pendientes
     lista: ps.length > 0 && confirmados.length > 0 && sinAsignar.length === 0 && pendientes.length === 0
   };
 }
 
 function lzCiudadesDeZona(zonaKey) {
-  // Devuelve ciudades únicas de los pedidos de esta zona, en el orden en que aparecen
-  // (que viene ordenado por ciudad_canonica desde el query, pero también respetamos las rutas si existen)
+  // Devuelve ciudades únicas de los pedidos de esta zona,
+  // ordenadas según el campo `orden` de la tabla rutas
   const set = new Set();
   lzGetPedidosZona(zonaKey).forEach(p => {
-    const c = (p.ciudad_canonica || p.ciudad || '').trim();
+    const c = lzGetLocalidad(p);
     if (c) set.add(c);
   });
-  return Array.from(set);
+  const ciudades = Array.from(set);
+  // Si tenemos rutas con orden, ordenamos por ese campo
+  if (_lzRutas.length > 0) {
+    const ordenMap = {};
+    _lzRutas.forEach(r => { if (r.ciudad) ordenMap[r.ciudad] = r.orden || 999; });
+    ciudades.sort((a, b) => (ordenMap[a] || 999) - (ordenMap[b] || 999) || a.localeCompare(b));
+  } else {
+    ciudades.sort();
+  }
+  return ciudades;
 }
 
-// Lista de ciudades canónicas para el drawer "Sin Zona" (28 según el contexto del proyecto)
+// Lista de ciudades canónicas para el drawer "Sin Zona"
 function lzGetCiudadesCanonicas() {
   if (_lzRutas.length === 0) return [];
-  const set = new Set();
-  _lzRutas.forEach(r => {
-    const c = (r.ciudad_canonica || r.ciudad || r.nombre || '').trim();
-    if (c) set.add(c);
-  });
-  return Array.from(set).sort();
+  const list = _lzRutas
+    .filter(r => r.activo !== false)  // si tiene flag activo, respetarlo
+    .map(r => r.ciudad)
+    .filter(Boolean);
+  // Dedup manteniendo orden
+  const seen = {};
+  return list.filter(c => seen[c] ? false : (seen[c] = true));
 }
 
 // ── CARGAR ASIGNACIONES DESDE SUPABASE ───────────────────────
