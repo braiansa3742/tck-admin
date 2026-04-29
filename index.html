@@ -15710,6 +15710,9 @@ async function lzCargarDatos() {
     if (typeof _tabActual !== 'undefined' && _tabActual === 'logistica' && _logTab === 'asignar') {
       renderLogistica();
     }
+
+    // v12.0 BLOQUE E — cargar counts de drawers en background (no bloqueante)
+    lzCargarDrawers();
   } catch (e) {
     console.warn('[lz] lzCargarDatos error:', e);
     _lzDataLoaded = false;
@@ -15868,12 +15871,15 @@ function lzRenderZonaBar() {
     html += '<button class="lz-zona-chip' + sel + '" onclick="lzSetZona(\'' + z.key + '\')">'
       + z.nombre + ' ' + badgeC + badgeP + '</button>';
   });
-  // Chips de alertas (No Entregados / Sin Zona) — los implementamos en bloque E.
-  // Por ahora, placeholders que no hacen nada (o un toast).
+  // Chips de alertas (No Entregados / Sin Zona) con counts reales
+  const cNoEnt = _lzNoEntregados.length;
+  const cSinZ  = _lzSinZona.length;
   html += '<button class="lz-zona-chip lz-alerta" onclick="lzAlertaPlaceholder(\'no_entregados\')">'
-    + '⚠️ No Entr. <span class="lz-badge-c">—</span></button>';
+    + '⚠️ No Entr.' + (cNoEnt > 0 ? ' <span class="lz-badge-c">' + cNoEnt + '</span>' : '')
+    + '</button>';
   html += '<button class="lz-zona-chip lz-alerta" onclick="lzAlertaPlaceholder(\'sin_zona\')">'
-    + '❓ Sin Zona <span class="lz-badge-c">—</span></button>';
+    + '❓ Sin Zona' + (cSinZ > 0 ? ' <span class="lz-badge-c">' + cSinZ + '</span>' : '')
+    + '</button>';
   html += '</div>';
   return html;
 }
@@ -16364,11 +16370,292 @@ async function lzDesasignarSilencioso(pedidoId) {
   await sbFetch('entregas?pedido_id=eq.' + encodeURIComponent(pedidoId), { method: 'DELETE' });
 }
 
-// ── PLACEHOLDERS para bloque E (drawers) ────────────────────
+// ════════════════════════════════════════════════════════════════
+// v12.0 BLOQUE E — DRAWERS (No Entregados + Sin Zona)
+// ════════════════════════════════════════════════════════════════
+
+let _lzNoEntregados = [];   // cache de tabla entregas con estado=no_entregado
+let _lzSinZona      = [];   // pedidos sin zona asignada
+let _lzSzPedidoSel  = null; // pedido_id seleccionado para asignar ciudad
+
+// ── CARGA: refresca counts y caches de drawers ───────────────
+async function lzCargarDrawers() {
+  // No Entregados: leer de tabla entregas
+  try {
+    const rows = await sbFetch(
+      'entregas?estado=eq.no_entregado&select=*&order=fecha_asignacion.desc&limit=200');
+    _lzNoEntregados = Array.isArray(rows) ? rows : [];
+  } catch (e) {
+    console.warn('[lz] error cargando no_entregados:', e);
+    _lzNoEntregados = [];
+  }
+
+  // Sin Zona: filtrar de _lzPedidosZona los que tienen zona null o estado sin_zona
+  _lzSinZona = _lzPedidosZona.filter(p => {
+    if (!p.zona) return true;
+    const e = (p.estado || '').toLowerCase();
+    if (e === 'sin_zona') return true;
+    return false;
+  });
+
+  // Re-renderizar la barra de chips para que muestre los counts reales
+  if (typeof _tabActual !== 'undefined' && _tabActual === 'logistica' && _logTab === 'asignar') {
+    const bar = document.getElementById('lz-zona-bar');
+    if (bar) bar.outerHTML = lzRenderZonaBar();
+  }
+}
+
+// ── Drawer 1: NO ENTREGADOS ─────────────────────────────────
+async function lzAbrirNoEntregados() {
+  const cont = document.getElementById('lz-noent-content');
+  cont.innerHTML = '<div class="lz-empty">'
+    + '<div class="loading-spinner" style="margin:0 auto 12px;"></div>Cargando...</div>';
+  lzAbrirSheet('lz-drawer-noent');
+
+  // Recargar antes de mostrar (por si llegaron nuevos)
+  await lzCargarDrawers();
+
+  if (_lzNoEntregados.length === 0) {
+    cont.innerHTML = '<div class="lz-empty">'
+      + '<div class="lz-empty-icon">✅</div>'
+      + 'Sin pedidos no entregados.</div>';
+    return;
+  }
+
+  cont.innerHTML = _lzNoEntregados.map(e => lzRenderPedidoNoEnt(e)).join('');
+}
+
+function lzRenderPedidoNoEnt(e) {
+  const eid = lzEsc(e.id || e.pedido_id);
+  const monto = typeof e.monto === 'number' ? e.monto : parseInt((e.monto||'0').toString().replace(/[^0-9]/g,'')) || 0;
+  const chofer = e.chofer || '?';
+  const chClass = chofer.toLowerCase();
+  return '<div class="lz-pedido" style="margin-bottom:8px;">'
+    + '<div class="lz-pedido-hdr">'
+      + '<div style="flex:1;min-width:0;">'
+        + '<div class="lz-pedido-cliente">' + lzEsc(e.cliente || '—') + '</div>'
+      + '</div>'
+      + '<div class="lz-pedido-total">' + LZ_FMT_MONEY(monto) + '</div>'
+    + '</div>'
+    + '<div class="lz-pedido-foot" style="margin-bottom:8px;">'
+      + '<span class="lz-chip lz-chip-pend">' + lzEsc(e.ciudad || '?') + '</span>'
+      + '<span class="lz-badge-chofer ' + chClass + '">🚚 ' + chofer + '</span>'
+    + '</div>'
+    + '<div style="display:flex;gap:6px;">'
+      + '<button class="lz-btn-pedido" style="flex:1;background:var(--blue2);color:var(--blue);border-color:#90CAF9;" '
+        + 'onclick="lzNoEntAccion(\'' + eid + '\',\'reagendar\')">📅 Reagendar</button>'
+      + '<button class="lz-btn-pedido" style="flex:1;background:#FFEBEE;color:#C62828;border-color:#EF9A9A;" '
+        + 'onclick="lzNoEntAccion(\'' + eid + '\',\'cancelar\')">✕ Cancelar</button>'
+      + '<button class="lz-btn-pedido" style="flex:1;background:var(--green3);color:var(--green);border-color:#A5D6A7;" '
+        + 'onclick="lzNoEntAccion(\'' + eid + '\',\'entregado\')">✓ Entregado</button>'
+    + '</div>'
+  + '</div>';
+}
+
+async function lzNoEntAccion(entregaId, accion) {
+  const mapEstado = {
+    'reagendar': 'pendiente',  // vuelve a la cola del chofer
+    'cancelar':  'cancelado',
+    'entregado': 'entregado'
+  };
+  const nuevoEstado = mapEstado[accion];
+  if (!nuevoEstado) return;
+
+  try {
+    const body = { estado: nuevoEstado };
+    if (accion === 'reagendar') {
+      body.fecha_asignacion = new Date().toISOString();
+    }
+    await sbFetch('entregas?id=eq.' + encodeURIComponent(entregaId), {
+      method: 'PATCH',
+      headers: { 'Prefer': 'return=minimal' },
+      body: JSON.stringify(body)
+    });
+    // Quitar de cache local
+    _lzNoEntregados = _lzNoEntregados.filter(e => (e.id || e.pedido_id) !== entregaId);
+    // Re-render drawer
+    const cont = document.getElementById('lz-noent-content');
+    if (_lzNoEntregados.length === 0) {
+      cont.innerHTML = '<div class="lz-empty">'
+        + '<div class="lz-empty-icon">✅</div>Sin pedidos no entregados.</div>';
+    } else {
+      cont.innerHTML = _lzNoEntregados.map(e => lzRenderPedidoNoEnt(e)).join('');
+    }
+    const lbl = { 'reagendar': '📅 Reagendado', 'cancelar': '✕ Cancelado', 'entregado': '✓ Entregado' }[accion];
+    toast(lbl, 'ok');
+    // Refrescar barra (cambia el count del chip ⚠️)
+    const bar = document.getElementById('lz-zona-bar');
+    if (bar) bar.outerHTML = lzRenderZonaBar();
+  } catch (err) {
+    toast('❌ Error: ' + (err.message || err), 'err');
+    console.warn('[lz] lzNoEntAccion error:', err);
+  }
+}
+
+// ── Drawer 2: SIN ZONA ──────────────────────────────────────
+async function lzAbrirSinZona() {
+  await lzCargarDrawers();  // refresca _lzSinZona
+  _lzSzPedidoSel = null;
+  document.getElementById('lz-sz-grid-wrap').style.display = 'none';
+
+  const cont = document.getElementById('lz-sz-content');
+  if (_lzSinZona.length === 0) {
+    cont.innerHTML = '<div class="lz-empty">'
+      + '<div class="lz-empty-icon">✅</div>'
+      + 'Todos los pedidos tienen zona asignada.</div>';
+  } else {
+    cont.innerHTML = _lzSinZona.map(p => lzRenderPedidoSinZona(p)).join('');
+  }
+  lzAbrirSheet('lz-drawer-sz');
+}
+
+function lzRenderPedidoSinZona(p) {
+  const pid = lzEsc(p.pedido_id);
+  const vKey = (p.vendedor || '').toLowerCase().substring(0, 3);
+  const sel = _lzSzPedidoSel === p.pedido_id;
+  const borde = sel ? 'border:2px solid var(--red);background:#FFEBEE;' : '';
+  return '<div class="lz-pedido" id="lz-sz-' + pid + '" style="margin-bottom:8px;' + borde + '">'
+    + '<div class="lz-pedido-hdr">'
+      + '<div style="flex:1;min-width:0;">'
+        + '<div class="lz-pedido-cliente">' + lzEsc(p.cliente || '—') + '</div>'
+      + '</div>'
+      + '<div class="lz-pedido-total">' + LZ_FMT_MONEY(lzParseMonto(p)) + '</div>'
+    + '</div>'
+    + '<div class="lz-pedido-foot" style="margin-bottom:8px;">'
+      + '<span class="lz-chip lz-chip-vend-' + vKey + '">' + lzEsc(p.vendedor || '?') + '</span>'
+      + '<span class="lz-chip lz-chip-pend">Sin zona</span>'
+    + '</div>'
+    + '<div style="display:flex;gap:6px;">'
+      + '<button class="lz-btn-pedido" style="flex:1;background:var(--red);color:#fff;border-color:var(--red);" '
+        + 'onclick="lzSzSeleccionar(\'' + pid + '\')">📍 Asignar ciudad</button>'
+      + '<button class="lz-btn-pedido" style="flex:1;background:#FFEBEE;color:#C62828;border-color:#EF9A9A;" '
+        + 'onclick="lzSzCancelar(\'' + pid + '\')">✕ Cancelar</button>'
+    + '</div>'
+  + '</div>';
+}
+
+function lzSzSeleccionar(pid) {
+  _lzSzPedidoSel = pid;
+  // Re-render lista para resaltar el seleccionado
+  const cont = document.getElementById('lz-sz-content');
+  cont.innerHTML = _lzSinZona.map(p => lzRenderPedidoSinZona(p)).join('');
+
+  // Mostrar grid de ciudades
+  const p = _lzSinZona.find(x => x.pedido_id === pid);
+  document.getElementById('lz-sz-pedido-nombre').textContent = p ? p.cliente : '';
+  document.getElementById('lz-sz-grid-wrap').style.display = 'block';
+
+  // Render del grid con todas las ciudades canónicas
+  const ciudades = lzGetCiudadesCanonicas();
+  const gridHtml = ciudades.map(c =>
+    '<button class="lz-ciudad-grid-btn" onclick="lzSzAsignarCiudad(\'' + lzEsc(c) + '\')">'
+    + lzEsc(c) + '</button>'
+  ).join('');
+  document.getElementById('lz-sz-grid').innerHTML = gridHtml;
+
+  // Scrollear al grid para que el usuario lo vea
+  setTimeout(function() {
+    const wrap = document.getElementById('lz-sz-grid-wrap');
+    if (wrap) wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, 50);
+}
+
+async function lzSzAsignarCiudad(ciudad) {
+  if (!_lzSzPedidoSel) { toast('Primero seleccioná un pedido', 'err'); return; }
+  const pid = _lzSzPedidoSel;
+
+  // Buscar la zona de esa ciudad en la tabla rutas
+  const ruta = _lzRutas.find(r => r.ciudad === ciudad);
+  if (!ruta || !ruta.zona) {
+    toast('❌ Esa ciudad no tiene zona configurada en la tabla rutas', 'err');
+    return;
+  }
+
+  try {
+    // PATCH directo a Supabase pedidos_zona
+    // Nota: el endpoint Apps Script `actualizarCiudadPedido` viene en v25.2 (sesión aparte)
+    // Mientras tanto, escribimos directo. El backfill ya manejó esto correctamente.
+    await sbFetch('pedidos_zona?pedido_id=eq.' + encodeURIComponent(pid), {
+      method: 'PATCH',
+      headers: { 'Prefer': 'return=minimal' },
+      body: JSON.stringify({
+        localidad_canonica: ciudad,
+        zona:               ruta.zona,
+        zona_inferida_de:   'admin_manual',
+        zona_override_por:  'Francisco',  // TODO: leer del PIN del usuario logueado
+        actualizado_at:     new Date().toISOString()
+      })
+    });
+
+    // Update local: mover el pedido de _lzSinZona al pool general con su nueva zona/ciudad
+    const idx = _lzPedidosZona.findIndex(x => x.pedido_id === pid);
+    if (idx >= 0) {
+      _lzPedidosZona[idx].localidad_canonica = ciudad;
+      _lzPedidosZona[idx].zona = ruta.zona;
+      _lzPedidosZona[idx].zona_inferida_de = 'admin_manual';
+    }
+    _lzSinZona = _lzSinZona.filter(p => p.pedido_id !== pid);
+    _lzSzPedidoSel = null;
+
+    // Toast con info concreta
+    const zonaUI = lzNormalizarZona(ruta.zona);
+    const zonaNombre = (LZ_ZONAS.find(z => z.key === zonaUI) || {}).nombre || ruta.zona;
+    toast('📍 Pedido asignado a ' + ciudad + ' (' + zonaNombre + ')', 'ok');
+
+    // Re-render drawer
+    const cont = document.getElementById('lz-sz-content');
+    if (_lzSinZona.length === 0) {
+      cont.innerHTML = '<div class="lz-empty">'
+        + '<div class="lz-empty-icon">✅</div>Todos los pedidos tienen zona asignada.</div>';
+      document.getElementById('lz-sz-grid-wrap').style.display = 'none';
+    } else {
+      cont.innerHTML = _lzSinZona.map(p => lzRenderPedidoSinZona(p)).join('');
+      document.getElementById('lz-sz-grid-wrap').style.display = 'none';
+    }
+
+    // Refrescar barra de chips y pantalla principal (el pedido ahora aparece en la zona nueva)
+    const bar = document.getElementById('lz-zona-bar');
+    if (bar) bar.outerHTML = lzRenderZonaBar();
+    if (_lzActiveZona === zonaUI) {
+      const c = document.getElementById('lz-contenido');
+      if (c) c.innerHTML = lzRenderContenidoZona();
+    }
+  } catch (err) {
+    toast('❌ Error al asignar ciudad', 'err');
+    console.warn('[lz] lzSzAsignarCiudad error:', err);
+  }
+}
+
+async function lzSzCancelar(pid) {
+  if (!confirm('¿Cancelar este pedido?')) return;
+  try {
+    await sbFetch('pedidos_zona?pedido_id=eq.' + encodeURIComponent(pid), {
+      method: 'PATCH',
+      headers: { 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ estado: 'cancelado', actualizado_at: new Date().toISOString() })
+    });
+    _lzSinZona = _lzSinZona.filter(p => p.pedido_id !== pid);
+    _lzPedidosZona = _lzPedidosZona.filter(p => p.pedido_id !== pid);
+    toast('✕ Pedido cancelado', 'ok');
+    const cont = document.getElementById('lz-sz-content');
+    if (_lzSinZona.length === 0) {
+      cont.innerHTML = '<div class="lz-empty">'
+        + '<div class="lz-empty-icon">✅</div>Todos los pedidos tienen zona asignada.</div>';
+    } else {
+      cont.innerHTML = _lzSinZona.map(p => lzRenderPedidoSinZona(p)).join('');
+    }
+    const bar = document.getElementById('lz-zona-bar');
+    if (bar) bar.outerHTML = lzRenderZonaBar();
+  } catch (err) {
+    toast('❌ Error al cancelar', 'err');
+    console.warn('[lz] lzSzCancelar error:', err);
+  }
+}
+
+// ── REEMPLAZO del placeholder de bloque C ───────────────────
 function lzAlertaPlaceholder(tipo) {
-  toast(tipo === 'no_entregados'
-    ? '⚠️ No Entregados — disponible en bloque E'
-    : '❓ Sin Zona — disponible en bloque E', 'ok');
+  if (tipo === 'no_entregados') return lzAbrirNoEntregados();
+  if (tipo === 'sin_zona')      return lzAbrirSinZona();
 }
 
 // ── CARGAR ASIGNACIONES DESDE SUPABASE ───────────────────────
@@ -21353,6 +21640,36 @@ async function dupMarcarDistintos() {
       <button class="lz-override-btn lz-override-luis" id="lz-mo-btn-luis" onclick="lzConfirmarOverride('Luis')">🚚 Cambiar a Luis</button>
     </div>
     <button class="lz-override-btn lz-override-quitar" onclick="lzConfirmarOverride(null)">✕ Desasignar chofer</button>
+  </div>
+</div>
+
+<!-- Drawer: No Entregados (pedidos que quedaron sin entregar el día anterior) -->
+<div class="lz-drawer-overlay" id="lz-drawer-noent" onclick="lzCerrarSheet('lz-drawer-noent', event)">
+  <div class="lz-drawer-sheet" onclick="event.stopPropagation()">
+    <div class="lz-modal-pill"></div>
+    <div class="lz-drawer-header">
+      <div class="lz-drawer-title">⚠️ No Entregados</div>
+      <button class="lz-drawer-close" onclick="lzCerrarSheet('lz-drawer-noent')">✕</button>
+    </div>
+    <div id="lz-noent-content"></div>
+  </div>
+</div>
+
+<!-- Drawer: Sin Zona (pedidos con localidad no canónica / ad-hoc) -->
+<div class="lz-drawer-overlay" id="lz-drawer-sz" onclick="lzCerrarSheet('lz-drawer-sz', event)">
+  <div class="lz-drawer-sheet" onclick="event.stopPropagation()">
+    <div class="lz-modal-pill"></div>
+    <div class="lz-drawer-header">
+      <div class="lz-drawer-title">❓ Sin Zona</div>
+      <button class="lz-drawer-close" onclick="lzCerrarSheet('lz-drawer-sz')">✕</button>
+    </div>
+    <div id="lz-sz-content"></div>
+    <div id="lz-sz-grid-wrap" style="display:none;margin-top:12px;padding-top:12px;border-top:1.5px solid var(--cream2);">
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:800;color:var(--text2);margin-bottom:8px;">
+        📍 Asignar a ciudad: <span id="lz-sz-pedido-nombre" style="color:var(--red);"></span>
+      </div>
+      <div class="lz-ciudad-grid" id="lz-sz-grid"></div>
+    </div>
   </div>
 </div>
 
