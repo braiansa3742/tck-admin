@@ -16047,6 +16047,42 @@ function lzPedidoEnVistaActiva(p, zonaKey) {
   return sp <= proxStr;
 }
 
+// v11.5: Helper de diagnóstico — exponé en consola para debug:
+//   lzDebugFiltro('tlt')  → muestra qué pasa con cada pedido de TL Tarde
+function lzDebugFiltro(zonaKey) {
+  zonaKey = zonaKey || _lzActiveZona;
+  const prox = lzProximaSalida(zonaKey);
+  const proxStr = lzFechaISO(prox);
+  const todos = _lzPedidosZona.filter(p => lzGetZonaUI(p) === zonaKey);
+  const stats = {
+    zona: zonaKey,
+    proxima_salida: proxStr,
+    total_en_zona: todos.length,
+    cancelados: 0,
+    entregados: 0,
+    futuro_lejano: 0,
+    en_vista: 0,
+    atrasados: 0,
+    prox_salida_count: 0,
+    sin_fecha: 0,
+    asignacionesEstado_size: Object.keys(_asignacionesEstado).length
+  };
+  todos.forEach(p => {
+    const est = lzGetEntregaEstado(p);
+    if (lzGetEstado(p) === 'cancelado') { stats.cancelados++; return; }
+    if (est === 'entregado') { stats.entregados++; return; }
+    const sp = lzFechaISO(p.salida_planificada);
+    if (!sp) { stats.sin_fecha++; stats.en_vista++; return; }
+    if (sp > proxStr) { stats.futuro_lejano++; return; }
+    if (sp < proxStr) { stats.atrasados++; }
+    if (sp === proxStr) { stats.prox_salida_count++; }
+    stats.en_vista++;
+  });
+  console.table(stats);
+  return stats;
+}
+window.lzDebugFiltro = lzDebugFiltro;  // exponer global para consola
+
 // v11.5: lzGetPedidosZona ahora filtra por la vista activa
 //   opciones.todos = true → trae todos, sin filtros (para drawers especiales)
 function lzGetPedidosZona(zonaKey, opciones) {
@@ -16192,6 +16228,13 @@ function lzEsc(s) {
 
 // Genera el HTML completo de la pantalla nueva
 function lzRenderAsignar(el) {
+  // v11.5: log distintivo para verificar deploy
+  if (!window._lz_v115_logged) {
+    console.log('%c[TCK ADMIN v11.5] Render Logística con filtro por próxima salida ✅',
+      'background: #1E8449; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: bold;');
+    window._lz_v115_logged = true;
+  }
+
   // Estado de carga
   if (!_lzDataLoaded) {
     el.innerHTML = '<div class="planilla-empty">'
@@ -17259,6 +17302,16 @@ async function cargarAsignaciones() {
       todosLosPedidos.forEach(function(p) {
         if (_asignaciones[p.pedidoId]) p.choferAsignado = _asignaciones[p.pedidoId];
       });
+      // v11.5: log informativo siempre (no bajo flag) para diagnóstico inicial
+      const estadosCount = {};
+      Object.values(_asignacionesEstado).forEach(e => {
+        estadosCount[e] = (estadosCount[e] || 0) + 1;
+      });
+      console.log('[lz v11.5] _asignacionesEstado cargado:',
+        Object.keys(_asignacionesEstado).length, 'pedidos.',
+        'Estados:', estadosCount);
+    } else {
+      console.warn('[lz v11.5] cargarAsignaciones: sin filas devueltas de entregas');
     }
     // Si estamos en logística, actualizar ahora que tenemos las asignaciones
     if (typeof _tabActual !== 'undefined' && _tabActual === 'logistica') {
