@@ -16133,23 +16133,242 @@ function lzToggleCiudad(c) {
   if (cont) cont.innerHTML = lzRenderContenidoZona();
 }
 
-// ── PLACEHOLDERS para bloques D y E ─────────────────────────
+// ════════════════════════════════════════════════════════════════
+// v12.0 BLOQUE D — MODALES Y ASIGNACIÓN
+// ════════════════════════════════════════════════════════════════
+
+// Estado runtime de los modales
+let _lzTempChofer       = null;  // chofer elegido en modal salida
+let _lzTempPedidoId     = null;  // pedido en modal override
+let _lzAsignandoLock    = false; // evita doble-click en confirmar
+
+// ── Helpers de modal genéricos ──────────────────────────────
+function lzAbrirSheet(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.add('lz-on');
+  document.body.style.overflow = 'hidden';
+}
+function lzCerrarSheet(id, event) {
+  if (event && event.target.id !== id) return;  // click en sheet interno: no cerrar
+  const el = document.getElementById(id);
+  if (el) el.classList.remove('lz-on');
+  document.body.style.overflow = '';
+  _lzTempChofer = null;
+  _lzTempPedidoId = null;
+}
+
+// ── 1) Asignación masiva de zona entera ─────────────────────
+function lzAbrirSalida(chofer) {
+  _lzTempChofer = chofer;
+  const zona = LZ_ZONAS.find(z => z.key === _lzActiveZona);
+  const ps = lzGetPedidosZona(_lzActiveZona);
+  const confirmadosSinAsignar = ps.filter(p =>
+    lzGetEstado(p) === 'confirmado' && !lzGetChofer(p));
+  const pendientes = ps.filter(p => lzGetEstado(p) === 'pendiente');
+  const monto = confirmadosSinAsignar.reduce((s, p) => s + lzParseMonto(p), 0);
+  const ciudades = new Set(confirmadosSinAsignar.map(p => lzGetLocalidad(p))).size;
+
+  // Salida: tomamos del primer pedido si tiene
+  let salidaTxt = '';
+  if (ps.length && ps[0].salida_planificada) {
+    salidaTxt = '<br>Sale ' + ps[0].salida_planificada;
+  }
+
+  document.getElementById('lz-ms-title').textContent = 'Preparar salida — ' + zona.nombre;
+  document.getElementById('lz-ms-sub').innerHTML =
+    'Vas a asignar <b>' + confirmadosSinAsignar.length
+    + ' pedidos confirmados</b> de ' + zona.nombre
+    + ' a <b>' + chofer + '</b>.' + salidaTxt;
+
+  // Observación #1 cumplida: NO mostramos "kg estimado" inventado.
+  // Solo cantidad, monto, ciudades.
+  document.getElementById('lz-ms-stats').innerHTML =
+      '<div class="lz-modal-stat">'
+        + '<div class="lz-modal-stat-num">' + confirmadosSinAsignar.length + '</div>'
+        + '<div class="lz-modal-stat-lbl">Pedidos</div>'
+      + '</div>'
+      + '<div class="lz-modal-stat">'
+        + '<div class="lz-modal-stat-num">' + LZ_FMT_MONEY(monto) + '</div>'
+        + '<div class="lz-modal-stat-lbl">Monto</div>'
+      + '</div>';
+
+  // Warning de pendientes
+  let warnHtml = '';
+  if (pendientes.length > 0) {
+    warnHtml = '<div class="lz-modal-warn">'
+      + '<div class="lz-modal-warn-title">⚠️ Atención</div>'
+      + pendientes.length + ' pedidos pendientes de confirmación '
+      + '<b>quedarán fuera</b> de esta salida y seguirán en la zona para la próxima.'
+    + '</div>';
+  }
+  document.getElementById('lz-ms-warn').innerHTML = warnHtml;
+
+  // Reset botón confirmar (puede haber quedado deshabilitado de un intento anterior)
+  const btn = document.getElementById('lz-ms-confirm');
+  btn.disabled = false;
+  btn.textContent = 'Confirmar';
+
+  lzAbrirSheet('lz-modal-salida');
+}
+
+async function lzConfirmarSalida() {
+  if (_lzAsignandoLock) return;
+  if (!_lzTempChofer) { lzCerrarSheet('lz-modal-salida'); return; }
+
+  _lzAsignandoLock = true;
+  const btn = document.getElementById('lz-ms-confirm');
+  btn.disabled = true;
+  btn.textContent = 'Asignando...';
+
+  const chofer = _lzTempChofer;
+  const ps = lzGetPedidosZona(_lzActiveZona).filter(p =>
+    lzGetEstado(p) === 'confirmado' && !lzGetChofer(p));
+
+  // Loop secuencial usando la función ya existente asignarChofer().
+  // Cada llamada hace POST a Supabase entregas y actualiza _asignaciones.
+  let ok = 0, err = 0;
+  for (const p of ps) {
+    try {
+      // asignarChofer() de v11.4 espera pedidoId estilo del Sheet (con guiones).
+      // En pedidos_zona la PK también es pedido_id — usamos directamente.
+      await lzAsignarChoferSilencioso(p.pedido_id, chofer);
+      ok++;
+    } catch (e) {
+      err++;
+      console.warn('[lz] error asignando', p.pedido_id, e);
+    }
+  }
+
+  _lzAsignandoLock = false;
+  lzCerrarSheet('lz-modal-salida');
+
+  if (err === 0) {
+    toast('✅ ' + ok + ' pedidos asignados a ' + chofer, 'ok');
+  } else {
+    toast('⚠️ ' + ok + ' OK, ' + err + ' fallaron', 'err');
+  }
+  // Re-render para reflejar los nuevos badges de chofer
+  renderLogistica();
+}
+
+// ── 2) Asignación de un pedido individual (sin modal) ───────
+async function lzAsignarPedido(pid, chofer) {
+  if (_lzAsignandoLock) return;
+  _lzAsignandoLock = true;
+  try {
+    await lzAsignarChoferSilencioso(pid, chofer);
+    toast('✅ Asignado a ' + chofer, 'ok');
+    renderLogistica();
+  } catch (e) {
+    toast('❌ Error al asignar', 'err');
+    console.warn('[lz] lzAsignarPedido error:', e);
+  } finally {
+    _lzAsignandoLock = false;
+  }
+}
+
+// ── 3) Override (cambiar chofer ya asignado) ────────────────
+function lzAbrirOverride(pid) {
+  _lzTempPedidoId = pid;
+  const p = _lzPedidosZona.find(x => x.pedido_id === pid);
+  if (!p) return;
+  const chActual = lzGetChofer(p);
+  document.getElementById('lz-mo-sub').innerHTML =
+    '<b>' + lzEsc(p.cliente || '?') + '</b><br>'
+    + 'Actual: 🚚 ' + (chActual || '?') + ' · ' + LZ_FMT_MONEY(lzParseMonto(p));
+  // Ocultar el botón del chofer actual (no tiene sentido "cambiar a Joan" si ya es Joan)
+  document.getElementById('lz-mo-btn-joan').style.display = chActual === 'Joan' ? 'none' : '';
+  document.getElementById('lz-mo-btn-luis').style.display = chActual === 'Luis' ? 'none' : '';
+  lzAbrirSheet('lz-modal-override');
+}
+
+async function lzConfirmarOverride(nuevoChofer) {
+  if (_lzAsignandoLock) return;
+  if (!_lzTempPedidoId) { lzCerrarSheet('lz-modal-override'); return; }
+  _lzAsignandoLock = true;
+
+  const pid = _lzTempPedidoId;
+  const p = _lzPedidosZona.find(x => x.pedido_id === pid);
+  const chViejo = p ? lzGetChofer(p) : null;
+
+  try {
+    if (nuevoChofer) {
+      await lzAsignarChoferSilencioso(pid, nuevoChofer);
+      toast('✅ ' + (p.cliente || pid) + ': ' + chViejo + ' → ' + nuevoChofer, 'ok');
+    } else {
+      // Desasignar: borrar de _asignaciones y de la tabla entregas
+      await lzDesasignarSilencioso(pid);
+      toast('✕ ' + (p ? p.cliente : pid) + ' desasignado', 'ok');
+    }
+    lzCerrarSheet('lz-modal-override');
+    renderLogistica();
+  } catch (e) {
+    toast('❌ Error al cambiar chofer', 'err');
+    console.warn('[lz] override error:', e);
+  } finally {
+    _lzAsignandoLock = false;
+  }
+}
+
+// ── 4) Cerrar zona (placeholder funcional para v12.1) ───────
+function lzCerrarZona() {
+  const zona = LZ_ZONAS.find(z => z.key === _lzActiveZona);
+  // Por ahora confirm nativo (en v12.1 lo hacemos con sheet bonito)
+  if (!confirm('¿Cerrar ' + zona.nombre + '?\n\n'
+    + 'Una vez cerrada, no se pueden agregar más pedidos a esta salida. '
+    + '(Función completa: pendiente v12.1)')) return;
+  toast('🔒 ' + zona.nombre + ' marcada como cerrada (lógica completa pendiente v12.1)', 'ok');
+}
+
+// ── 5) Helpers internos: asignar/desasignar SIN UI bloqueante ─
+// asignarChofer() original de v11.4 escribe sobre _asignaciones,
+// llama a renderCard de la pantalla vieja y muestra confirm() nativo.
+// Acá replicamos solo el POST a entregas + update _asignaciones,
+// sin interferir con la pantalla nueva.
+async function lzAsignarChoferSilencioso(pedidoId, chofer) {
+  // Buscar info del pedido en _lzPedidosZona (preferido, tiene cliente/total/localidad)
+  const pZona = _lzPedidosZona.find(x => x.pedido_id === pedidoId);
+
+  // Update local primero (UI optimista)
+  _asignaciones[pedidoId] = chofer;
+
+  // Si hay match en todosLosPedidos (sistema viejo), actualizar también
+  // para que los otros sub-tabs (Joan, Luis, Seguimiento) lo vean.
+  const pSheet = todosLosPedidos.find(x => x.pedidoId === pedidoId);
+  if (pSheet) pSheet.choferAsignado = chofer;
+
+  // POST a Supabase entregas (mismo shape que asignarChofer original)
+  const monto = pZona ? lzParseMonto(pZona) : 0;
+  const cliente  = pZona ? (pZona.cliente || '') : (pSheet ? pSheet.cliente : '');
+  const ciudad   = pZona ? lzGetLocalidad(pZona) : (pSheet ? pSheet.localidad : '');
+  await sbFetch('entregas', {
+    method: 'POST',
+    headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify({
+      pedido_id:        pedidoId,
+      chofer:           chofer,
+      cliente:          cliente,
+      ciudad:           ciudad,
+      estado:           'pendiente',
+      monto:            monto,
+      fecha_asignacion: new Date().toISOString()
+    })
+  });
+}
+
+async function lzDesasignarSilencioso(pedidoId) {
+  delete _asignaciones[pedidoId];
+  const pSheet = todosLosPedidos.find(x => x.pedidoId === pedidoId);
+  if (pSheet) delete pSheet.choferAsignado;
+  await sbFetch('entregas?pedido_id=eq.' + encodeURIComponent(pedidoId), { method: 'DELETE' });
+}
+
+// ── PLACEHOLDERS para bloque E (drawers) ────────────────────
 function lzAlertaPlaceholder(tipo) {
   toast(tipo === 'no_entregados'
     ? '⚠️ No Entregados — disponible en bloque E'
     : '❓ Sin Zona — disponible en bloque E', 'ok');
-}
-function lzAbrirSalida(chofer) {
-  toast('Modal "Asignar a ' + chofer + '" — disponible en bloque D', 'ok');
-}
-function lzAsignarPedido(pid, chofer) {
-  toast('Modal asignar pedido individual — disponible en bloque D', 'ok');
-}
-function lzAbrirOverride(pid) {
-  toast('Modal cambio chofer — disponible en bloque D', 'ok');
-}
-function lzCerrarZona() {
-  toast('Cerrar zona — disponible en bloque D', 'ok');
 }
 
 // ── CARGAR ASIGNACIONES DESDE SUPABASE ───────────────────────
@@ -21105,5 +21324,37 @@ async function dupMarcarDistintos() {
 .modal-overlay .xc-success-sub { font-size: 13px !important; color: #666 !important; }
 
 </style>
+
+<!-- ═══ v12.0 BLOQUE D — MODALES DE LOGÍSTICA ZONAS ═══ -->
+
+<!-- Modal: Asignar zona entera a un chofer -->
+<div class="lz-modal-overlay" id="lz-modal-salida" onclick="lzCerrarSheet('lz-modal-salida', event)">
+  <div class="lz-modal-sheet" onclick="event.stopPropagation()">
+    <div class="lz-modal-pill"></div>
+    <div class="lz-modal-title" id="lz-ms-title">Preparar salida</div>
+    <div class="lz-modal-sub" id="lz-ms-sub"></div>
+    <div class="lz-modal-stats" id="lz-ms-stats"></div>
+    <div id="lz-ms-warn"></div>
+    <div class="lz-modal-actions">
+      <button class="lz-modal-btn lz-modal-btn-secondary" onclick="lzCerrarSheet('lz-modal-salida')">Cancelar</button>
+      <button class="lz-modal-btn lz-modal-btn-primary" id="lz-ms-confirm" onclick="lzConfirmarSalida()">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Cambiar chofer de un pedido ya asignado (override) -->
+<div class="lz-modal-overlay" id="lz-modal-override" onclick="lzCerrarSheet('lz-modal-override', event)">
+  <div class="lz-modal-sheet" onclick="event.stopPropagation()">
+    <div class="lz-modal-pill"></div>
+    <div class="lz-modal-title">Cambiar chofer</div>
+    <div class="lz-modal-sub" id="lz-mo-sub"></div>
+    <div class="lz-override-actions">
+      <button class="lz-override-btn lz-override-joan" id="lz-mo-btn-joan" onclick="lzConfirmarOverride('Joan')">🚚 Cambiar a Joan</button>
+      <button class="lz-override-btn lz-override-luis" id="lz-mo-btn-luis" onclick="lzConfirmarOverride('Luis')">🚚 Cambiar a Luis</button>
+    </div>
+    <button class="lz-override-btn lz-override-quitar" onclick="lzConfirmarOverride(null)">✕ Desasignar chofer</button>
+  </div>
+</div>
+
 </body>
 </html>
