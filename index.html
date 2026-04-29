@@ -15640,6 +15640,143 @@ function resolverProveedor(nombreProducto) {
 let _asignaciones    = {};
 let _planillaChofer  = 'Joan';
 
+// ════════════════════════════════════════════════════════════════
+// v12.0 — LOGÍSTICA ZONAS: estado + carga de datos
+// ════════════════════════════════════════════════════════════════
+
+// Metadata de zonas (orden + nombre + ciudades de referencia).
+// Los counts y montos vienen de Supabase en runtime.
+const LZ_ZONAS = [
+  { key: 'z1',  nombre: 'Zona 1',     dias: 'Lun · Mar' },
+  { key: 'z2',  nombre: 'Zona 2',     dias: 'Jue · Vie' },
+  { key: 'af',  nombre: 'Am.Fortín',  dias: 'Mar' },
+  { key: 'tlm', nombre: 'TL Mañana',  dias: 'Lun-Sab (sale a la tarde)' },
+  { key: 'tlt', nombre: 'TL Tarde',   dias: 'Lun-Sab (sale al día sgte)' }
+];
+
+// Estado runtime del sub-tab Asignar nuevo
+let _lzActiveZona       = 'z2';   // zona seleccionada por defecto
+let _lzPedidosZona      = [];     // raw data de tabla pedidos_zona
+let _lzRutas            = [];     // raw data de tabla rutas
+let _lzSearchTerm       = '';     // filtro de búsqueda (observación #4)
+let _lzSoloConfirmados  = false;  // toggle "solo confirmados"
+let _lzCiudadesExpand   = {};     // ciudad → bool (estado de acordeón)
+let _lzDataLoaded       = false;  // flag para saber si ya se cargó alguna vez
+
+// ── CARGA: pedidos_zona + rutas desde Supabase ──────────────
+async function lzCargarDatos() {
+  try {
+    // Pedidos vivos de la jornada (no entregados, no cancelados)
+    // Nota: el filtro exacto puede ajustarse si la tabla tiene un campo `activo` o similar.
+    const pedidos = await sbFetch(
+      'pedidos_zona?select=*&order=zona.asc,ciudad_canonica.asc'
+    );
+    _lzPedidosZona = Array.isArray(pedidos) ? pedidos : [];
+
+    // Ciudades canónicas con su zona (para el grid del drawer "Sin Zona")
+    const rutas = await sbFetch('rutas?select=*');
+    _lzRutas = Array.isArray(rutas) ? rutas : [];
+
+    _lzDataLoaded = true;
+
+    // DEBUG temporal — remover en v12.1
+    console.log('[lz] datos cargados:', {
+      pedidos: _lzPedidosZona.length,
+      rutas: _lzRutas.length,
+      muestra_pedido: _lzPedidosZona[0] || null,
+      muestra_ruta: _lzRutas[0] || null,
+      por_zona: lzDebugContarPorZona()
+    });
+
+    // Si estamos viendo Logística → Asignar, re-renderizar con la nueva data
+    if (typeof _tabActual !== 'undefined' && _tabActual === 'logistica' && _logTab === 'asignar') {
+      renderLogistica();
+    }
+  } catch (e) {
+    console.warn('[lz] lzCargarDatos error:', e);
+    _lzDataLoaded = false;
+  }
+}
+
+// Helper de debug: contar pedidos por zona para ver en consola
+function lzDebugContarPorZona() {
+  const out = {};
+  LZ_ZONAS.forEach(z => { out[z.key] = 0; });
+  _lzPedidosZona.forEach(p => {
+    const k = (p.zona || '').toLowerCase();
+    if (out[k] !== undefined) out[k]++;
+    else out['(otro:' + k + ')'] = (out['(otro:' + k + ')'] || 0) + 1;
+  });
+  return out;
+}
+
+// ── HELPERS PUROS (sin render) ──────────────────────────────
+function lzGetPedidosZona(zonaKey) {
+  return _lzPedidosZona.filter(p => (p.zona || '').toLowerCase() === zonaKey);
+}
+
+function lzParseMonto(p) {
+  // El campo puede venir como number o como string (depende de cómo lo escribió el Apps Script)
+  const v = p.total != null ? p.total : (p.monto != null ? p.monto : 0);
+  if (typeof v === 'number') return v;
+  return parseInt((v || '0').toString().replace(/[^0-9]/g, '')) || 0;
+}
+
+function lzGetEstado(p) {
+  // Normalizar estado a 'confirmado' | 'pendiente' | otro
+  const e = (p.estado || '').toLowerCase().trim();
+  if (e.startsWith('confirm')) return 'confirmado';
+  if (e.startsWith('pend'))    return 'pendiente';
+  return e;
+}
+
+function lzGetStatsZona(zonaKey) {
+  const ps = lzGetPedidosZona(zonaKey);
+  const confirmados = ps.filter(p => lzGetEstado(p) === 'confirmado');
+  const pendientes  = ps.filter(p => lzGetEstado(p) === 'pendiente');
+  // Para asignación: usamos el campo chofer del pedido si existe, si no el de _asignaciones
+  const choferDe = p => p.chofer || _asignaciones[p.pedido_id] || null;
+  const sinAsignar = confirmados.filter(p => !choferDe(p));
+  const joan = ps.filter(p => choferDe(p) === 'Joan');
+  const luis = ps.filter(p => choferDe(p) === 'Luis');
+  const montoConfirmado = confirmados.reduce((s, p) => s + lzParseMonto(p), 0);
+  const montoPendiente  = pendientes.reduce((s, p) => s + lzParseMonto(p), 0);
+  return {
+    total: ps.length,
+    confirmados: confirmados.length,
+    pendientes: pendientes.length,
+    sinAsignar: sinAsignar.length,
+    joan: joan.length,
+    luis: luis.length,
+    montoConfirmado: montoConfirmado,
+    montoPendiente: montoPendiente,
+    // Una zona está "lista" cuando tiene confirmados, todos asignados, y cero pendientes
+    lista: ps.length > 0 && confirmados.length > 0 && sinAsignar.length === 0 && pendientes.length === 0
+  };
+}
+
+function lzCiudadesDeZona(zonaKey) {
+  // Devuelve ciudades únicas de los pedidos de esta zona, en el orden en que aparecen
+  // (que viene ordenado por ciudad_canonica desde el query, pero también respetamos las rutas si existen)
+  const set = new Set();
+  lzGetPedidosZona(zonaKey).forEach(p => {
+    const c = (p.ciudad_canonica || p.ciudad || '').trim();
+    if (c) set.add(c);
+  });
+  return Array.from(set);
+}
+
+// Lista de ciudades canónicas para el drawer "Sin Zona" (28 según el contexto del proyecto)
+function lzGetCiudadesCanonicas() {
+  if (_lzRutas.length === 0) return [];
+  const set = new Set();
+  _lzRutas.forEach(r => {
+    const c = (r.ciudad_canonica || r.ciudad || r.nombre || '').trim();
+    if (c) set.add(c);
+  });
+  return Array.from(set).sort();
+}
+
 // ── CARGAR ASIGNACIONES DESDE SUPABASE ───────────────────────
 async function cargarAsignaciones() {
   try {
@@ -15659,6 +15796,9 @@ async function cargarAsignaciones() {
       renderLogistica();
     }
   } catch(e) { console.warn('cargarAsignaciones:', e); }
+
+  // v12.0 — Cargar datos de zonas en paralelo (no bloquea si falla)
+  lzCargarDatos();
 }
 
 // ── PICKER CHOFER ─────────────────────────────────────────────
