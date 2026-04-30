@@ -1,8 +1,52 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v11.5 — 29/04/2026
+     TCK ADMIN — v11.6 — 30/04/2026
      ──────────────────────────────────────────────────────────────────────
-     LOGÍSTICA — FILTRO POR PRÓXIMA SALIDA + ESTADO DE ENTREGA
+     SEGUIMIENTO REDISEÑADO — POR CHOFER Y ZONA, ENFOCADO EN LO QUE FALTA ENTREGAR
+
+     Cambios v11.6 (sobre v11.5):
+
+       PROBLEMA RAÍZ que resuelve:
+         El tab "Seguimiento" filtraba por fecha_asignacion (cuándo se
+         creó la entrega), no por cuándo se entregaba ni por la salida.
+         Resultado: "Hoy" mezclaba lo entregado hoy con lo que se asignó
+         hoy para mañana. El header mostraba "165" sin distinguir entre
+         entregadas y pendientes de salidas futuras.
+
+       Nuevo concepto:
+         Seguimiento ahora responde "¿qué tiene que entregar este
+         chofer?" — no "qué entregó este día". Vista por chofer,
+         agrupada por zona/salida, con todas las entregas activas y
+         las entregadas de la ronda visibles para mostrar progreso.
+
+       Cambios concretos:
+
+       1. ELIMINADOS chips Hoy / Ayer / Fecha (📆 picker)
+          - Ya no tiene sentido el concepto "día" — la unidad operativa
+            de TCK es la "salida planificada" de cada zona, no el día.
+
+       2. ELIMINADO chip "Todos" — siempre se muestra UN chofer
+          - Default al abrir Seguimiento: Joan
+          - Botones: 🚚 Joan / 🚚 Luis con conteo de pendientes
+
+       3. NUEVA QUERY: trae todas las entregas activas + entregadas
+          recientes del chofer, cruzadas con pedidos_zona.salida_planificada
+          - Activas = pendiente / en_camino / no_encontrado
+          - Entregadas = solo de salidas que aún tienen pendientes
+            (para mostrar progreso de la ronda actual)
+
+       4. AGRUPACIÓN POR ZONA + SALIDA
+          Cada bloque muestra:
+            · 📦 Zona X — Salida [Día DD/MM]
+            · Total entregas, % completado, total $, cobrado $
+            · Lista de entregas con badges (Pendiente / Entregado / etc.)
+
+       5. ORDEN DE BLOQUES
+          - Salidas más cercanas primero (hoy → mañana → futuro)
+          - Dentro del bloque: pendientes arriba, entregadas abajo
+
+       6. ELIMINADOS variables _segFiltroFecha y helpers de fecha
+          - Reemplazados por _segFiltroChofer (default 'Joan')
 
      Cambios v11.5 (sobre v11.4):
 
@@ -18486,67 +18530,54 @@ function renderLogisticaChofer(el, chofer) {
 }
 
 // ══════════════════════════════════════════════════════════
-// SEGUIMIENTO DEL REPARTO
+// SEGUIMIENTO DEL REPARTO — v11.6
 // ══════════════════════════════════════════════════════════
-// Estado del filtro de chofer en Seguimiento
-var _segFiltroChofer = 'todos';
-// Estado del filtro de fecha (YYYY-MM-DD)
-var _segFiltroFecha = (function() {
-  var d = new Date();
-  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-})();
+// REDISEÑO: vista por chofer agrupada por zona/salida.
+// Muestra lo que tiene que entregar (pendientes) + lo ya
+// entregado de la ronda actual (para ver progreso).
+// Filtros eliminados: Hoy / Ayer / Fecha / Todos.
+
+var _segFiltroChofer = 'Joan';  // default al abrir Seguimiento
 
 function segSetFiltroChofer(chofer) {
   _segFiltroChofer = chofer;
   renderLogisticaSeguimiento(document.getElementById('logistica-contenido'));
 }
 
-function segSetFiltroFecha(fechaISO) {
-  _segFiltroFecha = fechaISO;
-  renderLogisticaSeguimiento(document.getElementById('logistica-contenido'));
+// Helper: nombre legible de zona
+function _segNombreZona(z) {
+  if (!z) return 'Sin zona';
+  var map = {
+    'tl_manana': 'TL Mañana',
+    'tl_tarde':  'TL Tarde',
+    'tl':        'Trenque Lauquen',
+    'zona1':     'Zona 1',
+    'zona2':     'Zona 2',
+    'america_fortin': 'América / Fortín',
+    'amfortin':  'América / Fortín'
+  };
+  return map[z] || z;
 }
 
-// Helpers para "hoy" / "ayer" (fecha local, no UTC)
-function _segFechaHoyLocal() {
+// Helper: formateo de salida planificada → "Jue 30/04"
+function _segFmtSalida(fechaISO) {
+  if (!fechaISO) return 'Sin fecha';
+  var p = fechaISO.split('-');
+  if (p.length !== 3) return fechaISO;
+  var d = new Date(+p[0], +p[1]-1, +p[2]);
+  var dias = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  return dias[d.getDay()] + ' ' + p[2] + '/' + p[1];
+}
+
+// Helper: hoy en YYYY-MM-DD local
+function _segHoyLocal() {
   var d = new Date();
   return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 }
-function _segFechaAyerLocal() {
-  var d = new Date(); d.setDate(d.getDate() - 1);
-  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-}
 
-// Formato humano para mostrar "15/04" desde "2026-04-15"
-function _segFormatoFechaCorta(fechaISO) {
-  var parts = fechaISO.split('-');
-  if (parts.length !== 3) return fechaISO;
-  return parts[2] + '/' + parts[1];
-}
-function _segFormatoFechaLarga(fechaISO) {
-  var parts = fechaISO.split('-');
-  if (parts.length !== 3) return fechaISO;
-  // Construcción segura sin parseo de Date que puede tener issues de zona horaria
-  var d = new Date(+parts[0], +parts[1]-1, +parts[2]);
-  var dias = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
-  var meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-  return dias[d.getDay()] + ' ' + d.getDate() + ' de ' + meses[d.getMonth()];
-}
-
-// Texto contextual: "Hoy" / "Ayer" / "15/04"
-function _segEtiquetaFecha(fechaISO) {
-  if (fechaISO === _segFechaHoyLocal()) return 'hoy';
-  if (fechaISO === _segFechaAyerLocal()) return 'ayer';
-  return 'el ' + _segFormatoFechaCorta(fechaISO);
-}
-
-// ══════════════════════════════════════════════════════════
-// HELPER UBICACIÓN (L-4 Paso 2)
-// Renderiza un chip "📍 Ver en Maps" cuando una entrega/devolución
-// tiene coordenadas GPS. Incluye badge de precisión si aplica.
-// ══════════════════════════════════════════════════════════
+// HELPER UBICACIÓN (heredado de v11.5)
 function _renderBotonUbicacion(lat, lng, precision) {
   if (!lat || !lng) return '';
-  // Badge de precisión según accuracy (metros)
   var badge = '';
   var p = parseFloat(precision);
   if (!isNaN(p) && p > 0) {
@@ -18569,94 +18600,50 @@ function _renderBotonUbicacion(lat, lng, precision) {
 async function renderLogisticaSeguimiento(el) {
   el.innerHTML = '<div class="planilla-empty"><div class="loading-spinner" style="margin:0 auto 12px;"></div>Cargando seguimiento...</div>';
   try {
-    // ── Query con rango de fecha específica ──
-    // Calculamos el día siguiente para hacer un rango [fecha 00:00, fecha+1 00:00)
-    const fechaIni = _segFiltroFecha;  // YYYY-MM-DD
-    const partesIni = fechaIni.split('-');
-    const dSig = new Date(+partesIni[0], +partesIni[1]-1, +partesIni[2]);
-    dSig.setDate(dSig.getDate() + 1);
-    const fechaFin = dSig.getFullYear() + '-' + String(dSig.getMonth()+1).padStart(2,'0') + '-' + String(dSig.getDate()).padStart(2,'0');
+    // ── Traer entregas activas de Joan/Luis (todas las que NO están entregadas) ──
+    // + entregadas recientes (últimos 3 días) para mostrar progreso de ronda actual
+    const hoyISO = _segHoyLocal();
+    const hace3d = new Date(); hace3d.setDate(hace3d.getDate() - 3);
+    const fechaCorte = hace3d.getFullYear() + '-' + String(hace3d.getMonth()+1).padStart(2,'0') + '-' + String(hace3d.getDate()).padStart(2,'0');
 
+    // Pedimos todo lo activo + todo lo entregado en últimos 3 días
+    // (filtramos en JS por chofer y por relevancia para reducir queries)
     const entregasRaw = await sbFetch(
-      'entregas?fecha_asignacion=gte.' + fechaIni + 'T00:00:00'
-      + '&fecha_asignacion=lt.' + fechaFin + 'T00:00:00'
-      + '&select=*&order=chofer.asc'
+      'entregas?or=(estado.neq.entregado,fecha_entrega.gte.' + fechaCorte + 'T00:00:00)'
+      + '&select=*&order=chofer.asc&limit=2000'
     ) || [];
+
+    // Cruzamos con pedidos_zona para obtener salida_planificada y zona de cada entrega
+    const pedidoIds = [...new Set(entregasRaw.map(e => e.pedido_id).filter(Boolean))];
+    let mapaSalida = {};  // pedido_id → { salida, zona }
+    if (pedidoIds.length) {
+      // Supabase soporta IN con .in.(a,b,c) — para listas grandes va por bloques
+      const BATCH = 100;
+      for (let i = 0; i < pedidoIds.length; i += BATCH) {
+        const slice = pedidoIds.slice(i, i + BATCH);
+        const filtro = 'pedido_id.in.(' + slice.map(id => encodeURIComponent(id)).join(',') + ')';
+        const pzs = await sbFetch(
+          'pedidos_zona?' + filtro + '&select=pedido_id,salida_planificada,zona&limit=' + (BATCH + 50)
+        ) || [];
+        pzs.forEach(p => {
+          mapaSalida[p.pedido_id] = { salida: p.salida_planificada, zona: p.zona };
+        });
+      }
+    }
+
+    // Conteos por chofer (para los chips)
+    const conteoPendChofer = { Joan: 0, Luis: 0 };
+    entregasRaw.forEach(e => {
+      if (e.estado !== 'entregado' && conteoPendChofer[e.chofer] !== undefined) {
+        conteoPendChofer[e.chofer]++;
+      }
+    });
 
     const parseMonto = m => { const n = parseFloat(m)||0; return n < 1000 && n > 0 ? n*1000 : n; };
     const fmt = n => '$' + Math.round(n).toLocaleString('es-AR');
 
-    // ── Armar UI de filtros (chips de fecha + chofer) SIEMPRE ──
-    // Aunque no haya entregas, el usuario tiene que poder cambiar la fecha
-    const esHoy  = (_segFiltroFecha === _segFechaHoyLocal());
-    const esAyer = (_segFiltroFecha === _segFechaAyerLocal());
-    const esCustom = !esHoy && !esAyer;
-
-    const mkFechaChip = (label, isSel, onclick) => {
-      const bg = isSel ? '#1A237E' : '#fff';
-      const fg = isSel ? '#fff'    : 'var(--text2)';
-      const bd = isSel ? '#1A237E' : 'var(--cream3)';
-      return '<button onclick="' + onclick + '" '
-        + 'style="flex:1;padding:9px 8px;background:' + bg + ';border:1.5px solid ' + bd + ';border-radius:10px;'
-        + 'font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;color:' + fg + ';'
-        + 'cursor:pointer;transition:all .18s;-webkit-tap-highlight-color:transparent;'
-        + 'touch-action:manipulation;user-select:none;">'
-        + label + '</button>';
-    };
-
-    // El chip de "Fecha" es especial: envuelve el botón visual con un input date invisible
-    // ENCIMA de él. Así cualquier tap sobre el chip dispara el picker nativo en el lugar correcto.
-    // Esta técnica es la más confiable cross-browser (iOS, Android, Chrome desktop, Safari).
-    const mkFechaCustomChip = (label, isSel) => {
-      const bg = isSel ? '#1A237E' : '#fff';
-      const fg = isSel ? '#fff'    : 'var(--text2)';
-      const bd = isSel ? '#1A237E' : 'var(--cream3)';
-      return '<div style="flex:1;position:relative;">'
-        + '<button type="button" '
-        + 'style="width:100%;padding:9px 8px;background:' + bg + ';border:1.5px solid ' + bd + ';border-radius:10px;'
-        + 'font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;color:' + fg + ';'
-        + 'cursor:pointer;transition:all .18s;-webkit-tap-highlight-color:transparent;'
-        + 'touch-action:manipulation;user-select:none;pointer-events:none;">'
-        + label + '</button>'
-        + '<input type="date" id="seg-fecha-picker" value="' + _segFiltroFecha + '" '
-        + 'onchange="if(this.value) segSetFiltroFecha(this.value)" '
-        + 'style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;border:0;padding:0;margin:0;background:transparent;">'
-        + '</div>';
-    };
-
-    // Label del chip "Fecha" cambia si hay fecha custom seleccionada
-    const labelCustom = esCustom ? ('📆 ' + _segFormatoFechaCorta(_segFiltroFecha)) : '📆 Fecha';
-
-    let html = '';
-    html += '<div style="display:flex;gap:6px;margin-bottom:8px;">'
-      + mkFechaChip('📅 Hoy',  esHoy,  'segSetFiltroFecha(_segFechaHoyLocal())')
-      + mkFechaChip('Ayer',    esAyer, 'segSetFiltroFecha(_segFechaAyerLocal())')
-      + mkFechaCustomChip(labelCustom, esCustom)
-      + '</div>';
-
-    // ── Si no hay entregas para esta fecha, mostrar empty state pero mantener chips ──
-    if (!entregasRaw.length) {
-      const etiq = _segEtiquetaFecha(_segFiltroFecha);
-      html += '<div class="planilla-empty" style="margin-top:8px;">📭 No hubo entregas asignadas ' + etiq + '.</div>';
-      el.innerHTML = html;
-      return;
-    }
-
-    // ── Conteos por chofer (para los badges de los botones, SIEMPRE sobre todas las entregas) ──
-    const conteoTotal = { todos: entregasRaw.length, Joan: 0, Luis: 0 };
-    entregasRaw.forEach(e => { if (conteoTotal[e.chofer] !== undefined) conteoTotal[e.chofer]++; });
-
-    // ── Aplicar filtro de chofer ──
-    const entregas = (_segFiltroChofer === 'todos')
-      ? entregasRaw
-      : entregasRaw.filter(e => e.chofer === _segFiltroChofer);
-
-    // Agrupar por chofer (para el render de cards)
-    const porChofer = { Joan: [], Luis: [] };
-    entregas.forEach(e => { if (porChofer[e.chofer]) porChofer[e.chofer].push(e); });
-
     // ═══════════════════════════════════════════════════════════
-    // BOTONES DE FILTRO POR CHOFER
+    // CHIPS DE CHOFER (siempre visibles)
     // ═══════════════════════════════════════════════════════════
     const mkBtn = (id, label, count, color, colorBg) => {
       const sel = (_segFiltroChofer === id);
@@ -18666,132 +18653,176 @@ async function renderLogisticaSeguimiento(el) {
       const countBg = sel ? 'rgba(255,255,255,.22)' : colorBg;
       const countFg = sel ? '#fff' : color;
       return '<button onclick="segSetFiltroChofer(\'' + id + '\')" '
-        + 'style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:9px 8px;'
+        + 'style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:11px 8px;'
         + 'background:' + bg + ';border:1.5px solid ' + bd + ';border-radius:10px;'
-        + 'font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;color:' + fg + ';'
+        + 'font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:900;color:' + fg + ';'
         + 'cursor:pointer;transition:all .18s;-webkit-tap-highlight-color:transparent;'
         + 'touch-action:manipulation;user-select:none;">'
         + '<span>' + label + '</span>'
-        + '<span style="background:' + countBg + ';color:' + countFg + ';padding:1px 7px;border-radius:10px;font-size:11px;font-weight:900;min-width:20px;text-align:center;">' + count + '</span>'
+        + '<span style="background:' + countBg + ';color:' + countFg + ';padding:1px 8px;border-radius:10px;font-size:12px;font-weight:900;min-width:22px;text-align:center;">' + count + '</span>'
         + '</button>';
     };
-    html += '<div style="display:flex;gap:6px;margin-bottom:14px;">'
-      + mkBtn('todos', '👥 Todos', conteoTotal.todos, '#1A237E', '#E8EAF6')
-      + mkBtn('Joan',  '🚚 Joan',  conteoTotal.Joan,  '#2E7D32', '#E8F5E9')
-      + mkBtn('Luis',  '🚚 Luis',  conteoTotal.Luis,  '#E65100', '#FFF3E0')
+
+    let html = '';
+    html += '<div style="display:flex;gap:8px;margin-bottom:14px;">'
+      + mkBtn('Joan', '🚚 Joan', conteoPendChofer.Joan, '#2E7D32', '#E8F5E9')
+      + mkBtn('Luis', '🚚 Luis', conteoPendChofer.Luis, '#E65100', '#FFF3E0')
       + '</div>';
 
-    // ═══════════════════════════════════════════════════════════
-    // HEADER AZUL CON TOTALES (ya filtrados)
-    // ═══════════════════════════════════════════════════════════
-    const totalEntregas = entregas.length;
-    const entregadas = entregas.filter(e => e.estado === 'entregado').length;
-    const enCamino   = entregas.filter(e => e.estado === 'en_camino').length;
-    const noEstaban  = entregas.filter(e => e.estado === 'no_encontrado').length;
-    const pendientes = entregas.filter(e => e.estado === 'pendiente').length;
-    const pct = totalEntregas ? Math.round(entregadas/totalEntregas*100) : 0;
-    const cobros = { efectivo: 0, transferencia: 0, cheque: 0, cuenta_corriente: 0 };
-    let totalCobrado = 0;
-    entregas.filter(e => e.estado === 'entregado').forEach(e => {
-      const m = parseMonto(e.monto); totalCobrado += m;
-      if (cobros[e.forma_cobro] !== undefined) cobros[e.forma_cobro] += m;
-    });
-    const totalDia = entregas.reduce((s,e) => s + parseMonto(e.monto), 0);
+    // ── Filtrar por chofer seleccionado ──
+    const entregasChofer = entregasRaw.filter(e => e.chofer === _segFiltroChofer);
 
-    // Armar string dinámico del sub-total del header ("3 pend · 2 en camino · 1 no estaba")
-    var subEstados = [];
-    if (pendientes > 0) subEstados.push(pendientes + ' pend.');
-    if (enCamino > 0)   subEstados.push(enCamino + ' en camino');
-    if (noEstaban > 0)  subEstados.push('<span style="color:#FFAB91;font-weight:700;">' + noEstaban + ' no estaban</span>');
-    var subEstadosStr = subEstados.length ? subEstados.join(' · ') : '✅ Todas completas';
-
-    // Label contextual: combinación de fecha + chofer
-    // Ej: "Total del día" (todos, hoy), "Total · Joan" (Joan, hoy), "Total · 15/04" (todos, custom), "Joan · 15/04" (Joan, custom)
-    let labelScope;
-    if (_segFiltroChofer === 'todos') {
-      if (esHoy)       labelScope = 'Total del día';
-      else if (esAyer) labelScope = 'Total de ayer';
-      else             labelScope = 'Total · ' + _segFormatoFechaCorta(_segFiltroFecha);
-    } else {
-      if (esHoy)       labelScope = _segFiltroChofer + ' · hoy';
-      else if (esAyer) labelScope = _segFiltroChofer + ' · ayer';
-      else             labelScope = _segFiltroChofer + ' · ' + _segFormatoFechaCorta(_segFiltroFecha);
+    if (!entregasChofer.length) {
+      html += '<div class="planilla-empty" style="margin-top:8px;">📭 No hay entregas activas asignadas a ' + _segFiltroChofer + '.</div>';
+      el.innerHTML = html;
+      return;
     }
 
-    html += '<div style="background:linear-gradient(135deg,#1A237E,#283593);border-radius:14px;padding:14px 16px;margin-bottom:14px;">';
-    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
-    html += '<div><div style="font-size:11px;color:rgba(255,255,255,.6);text-transform:uppercase;letter-spacing:.8px;">' + labelScope + '</div><div style="font-family:Barlow Condensed,sans-serif;font-size:28px;font-weight:900;color:#fff;">' + fmt(totalDia) + '</div><div style="font-size:11px;color:rgba(255,255,255,.5);">Cobrado: ' + fmt(totalCobrado) + '</div></div>';
-    html += '<div style="text-align:right"><div style="font-size:11px;color:rgba(255,255,255,.6);text-transform:uppercase;letter-spacing:.8px;">Entregas</div><div style="font-family:Barlow Condensed,sans-serif;font-size:28px;font-weight:900;color:#fff;">' + entregadas + '<span style="font-size:16px;opacity:.6;"> / ' + totalEntregas + '</span></div><div style="font-size:11px;color:rgba(255,255,255,.55);">' + subEstadosStr + '</div></div></div>';
-    html += '<div class="seg-progress-wrap"><div class="seg-progress-bar" style="width:' + pct + '%;background:#FFD700;"></div></div>';
-    html += '<div style="font-size:10px;color:rgba(255,255,255,.5);text-align:center;margin-bottom:10px;">' + pct + '% completado</div>';
-    html += '<div class="seg-cobro-grid"><div class="seg-cobro-item"><div class="seg-cobro-label">💵 Efectivo</div><div class="seg-cobro-val">' + fmt(cobros.efectivo) + '</div></div><div class="seg-cobro-item"><div class="seg-cobro-label">📲 Transfer.</div><div class="seg-cobro-val">' + fmt(cobros.transferencia) + '</div></div><div class="seg-cobro-item"><div class="seg-cobro-label">📋 Cheque</div><div class="seg-cobro-val">' + fmt(cobros.cheque) + '</div></div><div class="seg-cobro-item"><div class="seg-cobro-label">📒 Cta.Cte.</div><div class="seg-cobro-val">' + fmt(cobros.cuenta_corriente) + '</div></div></div></div>';
+    // ═══════════════════════════════════════════════════════════
+    // AGRUPAR POR (zona + salida_planificada)
+    // ═══════════════════════════════════════════════════════════
+    const grupos = {};  // key "zona|salida" → { zona, salida, items: [] }
+    entregasChofer.forEach(e => {
+      const info = mapaSalida[e.pedido_id] || {};
+      const zona = info.zona || 'sin_zona';
+      const salida = info.salida || null;
+      const key = zona + '|' + (salida || 'sin_fecha');
+      if (!grupos[key]) grupos[key] = { zona: zona, salida: salida, items: [] };
+      grupos[key].items.push(e);
+    });
+
+    // Filtrar grupos: dejar solo los que tienen al menos un pendiente
+    // (los grupos donde TODO está entregado se ocultan — ronda finalizada)
+    const gruposVivos = Object.values(grupos).filter(g => {
+      return g.items.some(e => e.estado !== 'entregado');
+    });
+
+    if (!gruposVivos.length) {
+      html += '<div class="planilla-empty" style="margin-top:8px;">✅ ' + _segFiltroChofer + ' no tiene entregas pendientes. Todas las rondas activas están completas.</div>';
+      el.innerHTML = html;
+      return;
+    }
+
+    // Ordenar grupos por salida_planificada (más cercana primero, sin_fecha al final)
+    gruposVivos.sort((a, b) => {
+      if (!a.salida && !b.salida) return 0;
+      if (!a.salida) return 1;
+      if (!b.salida) return -1;
+      return a.salida.localeCompare(b.salida);
+    });
 
     // ═══════════════════════════════════════════════════════════
-    // CARDS POR CHOFER
+    // HEADER GLOBAL: total pendiente del chofer
     // ═══════════════════════════════════════════════════════════
-    ['Joan','Luis'].forEach(chofer => {
-      const items = porChofer[chofer];
-      if (!items.length) return;
+    const totalPend = entregasChofer.filter(e => e.estado !== 'entregado').length;
+    const totalEntregadas = entregasChofer.filter(e => e.estado === 'entregado').length;
+    const totalMontoPend = entregasChofer.filter(e => e.estado !== 'entregado').reduce((s,e) => s + parseMonto(e.monto), 0);
+    const totalCobrado = entregasChofer.filter(e => e.estado === 'entregado').reduce((s,e) => s + parseMonto(e.monto), 0);
+    const colorChofer = _segFiltroChofer === 'Joan' ? '#2E7D32' : '#E65100';
+    const colorChoferDark = _segFiltroChofer === 'Joan' ? '#1B5E20' : '#BF360C';
+
+    html += '<div style="background:linear-gradient(135deg,' + colorChoferDark + ',' + colorChofer + ');border-radius:14px;padding:14px 16px;margin-bottom:14px;color:#fff;">';
+    html += '<div style="font-size:11px;color:rgba(255,255,255,.7);text-transform:uppercase;letter-spacing:.8px;">🚚 ' + _segFiltroChofer + ' · Resumen</div>';
+    html += '<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px;">';
+    html += '<div><div style="font-family:Barlow Condensed,sans-serif;font-size:32px;font-weight:900;line-height:1;">' + totalPend + '</div><div style="font-size:11px;color:rgba(255,255,255,.7);margin-top:2px;">Pendientes · ' + fmt(totalMontoPend) + '</div></div>';
+    if (totalEntregadas > 0) {
+      html += '<div style="text-align:right"><div style="font-family:Barlow Condensed,sans-serif;font-size:24px;font-weight:900;line-height:1;">✓ ' + totalEntregadas + '</div><div style="font-size:11px;color:rgba(255,255,255,.7);margin-top:2px;">Entregadas · ' + fmt(totalCobrado) + '</div></div>';
+    }
+    html += '</div></div>';
+
+    // ═══════════════════════════════════════════════════════════
+    // BLOQUES POR ZONA / SALIDA
+    // ═══════════════════════════════════════════════════════════
+    gruposVivos.forEach(g => {
+      const items = g.items;
+      const pend = items.filter(e => e.estado !== 'entregado').length;
       const ent = items.filter(e => e.estado === 'entregado').length;
-      const tot = items.reduce((s,e) => s + parseMonto(e.monto), 0);
-      const cob = items.filter(e=>e.estado==='entregado').reduce((s,e)=>s+parseMonto(e.monto),0);
-      const pctC = items.length ? Math.round(ent/items.length*100) : 0;
-      const color = chofer === 'Joan' ? '#2E7D32' : '#E65100';
-      html += '<div style="background:#fff;border-radius:14px;margin-bottom:10px;border:1.5px solid #E8EAF6;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.05);">';
-      html += '<div style="background:' + (chofer==='Joan'?'linear-gradient(135deg,#1B5E20,#2E7D32)':'linear-gradient(135deg,#BF360C,#E64A19)') + ';padding:10px 16px;display:flex;align-items:center;justify-content:space-between;"><div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:#fff;">🚚 ' + chofer + '</div><div style="text-align:right"><div style="font-family:Barlow Condensed,sans-serif;font-size:20px;font-weight:900;color:#fff;">' + ent + ' / ' + items.length + '</div><div style="font-size:10px;color:rgba(255,255,255,.65);">' + fmt(cob) + ' cobrado</div></div></div>';
-      html += '<div style="padding:10px 16px 6px;"><div class="seg-progress-wrap" style="margin-top:0;"><div class="seg-progress-bar" style="width:' + pctC + '%;background:' + color + ';"></div></div><div style="font-size:10px;color:var(--text3);text-align:center;margin-bottom:8px;">' + pctC + '% · total: ' + fmt(tot) + '</div></div>';
-      items.forEach(e => {
+      const tot = items.length;
+      const totMonto = items.reduce((s, e) => s + parseMonto(e.monto), 0);
+      const cob = items.filter(e => e.estado === 'entregado').reduce((s, e) => s + parseMonto(e.monto), 0);
+      const pct = tot ? Math.round(ent / tot * 100) : 0;
+
+      const labelZona = _segNombreZona(g.zona);
+      const labelSalida = g.salida ? 'Salida ' + _segFmtSalida(g.salida) : 'Sin fecha programada';
+      const esHoy = g.salida === hoyISO;
+      const esFutura = g.salida && g.salida > hoyISO;
+      const esAtrasada = g.salida && g.salida < hoyISO;
+
+      let badgeFecha = '';
+      if (esHoy)         badgeFecha = '<span style="background:#FFF3E0;color:#E65100;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:900;margin-left:6px;">🔥 HOY</span>';
+      else if (esFutura) badgeFecha = '<span style="background:#E3F2FD;color:#1565C0;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:900;margin-left:6px;">📅 FUTURA</span>';
+      else if (esAtrasada) badgeFecha = '<span style="background:#FFEBEE;color:#C62828;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:900;margin-left:6px;">⚠️ ATRASADA</span>';
+
+      html += '<div style="background:#fff;border-radius:14px;margin-bottom:12px;border:1.5px solid #E8EAF6;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.05);">';
+
+      // Header del bloque
+      html += '<div style="background:linear-gradient(135deg,#1A237E,#283593);padding:10px 14px;color:#fff;">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+      html += '<div><div style="font-family:Barlow Condensed,sans-serif;font-size:17px;font-weight:900;">📦 ' + labelZona + badgeFecha + '</div><div style="font-size:11px;color:rgba(255,255,255,.7);margin-top:1px;">' + labelSalida + '</div></div>';
+      html += '<div style="text-align:right"><div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;">' + ent + ' / ' + tot + '</div><div style="font-size:10px;color:rgba(255,255,255,.6);">' + fmt(totMonto) + '</div></div>';
+      html += '</div>';
+      // Progress bar
+      html += '<div class="seg-progress-wrap" style="margin-top:8px;background:rgba(255,255,255,.18);"><div class="seg-progress-bar" style="width:' + pct + '%;background:#FFD700;"></div></div>';
+      html += '<div style="font-size:10px;color:rgba(255,255,255,.55);text-align:center;margin-top:3px;">' + pct + '% completado · ' + pend + ' pend. · ' + fmt(cob) + ' cobrado</div>';
+      html += '</div>';
+
+      // Lista de entregas: pendientes primero (orden: pendiente, en_camino, no_encontrado, entregado)
+      const ordenEstado = { pendiente: 0, en_camino: 1, no_encontrado: 2, entregado: 3 };
+      const itemsSorted = items.slice().sort((a, b) => {
+        return (ordenEstado[a.estado] || 9) - (ordenEstado[b.estado] || 9);
+      });
+
+      itemsSorted.forEach(e => {
         const m = parseMonto(e.monto);
-        const hora = e.fecha_entrega ? new Date(e.fecha_entrega).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}) : '—';
-        var devInfo = '';
+        const hora = e.fecha_entrega ? new Date(e.fecha_entrega).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'}) : '—';
+        let devInfo = '';
         if (e.devolucion) {
           try {
-            var dev = JSON.parse(e.devolucion);
+            const dev = JSON.parse(e.devolucion);
             devInfo = '<div class="dev-info">↩️ <strong>Devolución:</strong> ' + dev.items + ' — ' + dev.motivo + '</div>';
           } catch(err) {}
         }
-        var montoCobrado = e.monto_cobrado ? fmt(e.monto_cobrado) : fmt(m);
+        const montoCobrado = e.monto_cobrado ? fmt(e.monto_cobrado) : fmt(m);
 
-        // Determinar badge según estado
-        var badgeHtml, subInfoHtml = '';
+        let badgeHtml, subInfoHtml = '';
         if (e.estado === 'entregado') {
           badgeHtml = '<span class="seg-badge-entregado">✅ Entregado</span>';
-          subInfoHtml = '<div style="font-size:11px;color:var(--text3);margin-top:1px;">🕐 ' + hora + ' · ' + (e.forma_cobro||'—').replace('_',' ') + '</div>';
+          subInfoHtml = '<div style="font-size:11px;color:var(--text3);margin-top:1px;">🕐 ' + hora + ' · ' + (e.forma_cobro || '—').replace('_',' ') + '</div>';
         } else if (e.estado === 'en_camino') {
-          var horaEC = e.fecha_en_camino ? new Date(e.fecha_en_camino).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}) : '';
+          const horaEC = e.fecha_en_camino ? new Date(e.fecha_en_camino).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'}) : '';
           badgeHtml = '<span class="seg-badge-encamino">🚛 En camino' + (horaEC ? ' · ' + horaEC : '') + '</span>';
         } else if (e.estado === 'no_encontrado') {
-          var horaNE = e.fecha_no_encontrado ? new Date(e.fecha_no_encontrado).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}) : '';
+          const horaNE = e.fecha_no_encontrado ? new Date(e.fecha_no_encontrado).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'}) : '';
           badgeHtml = '<span class="seg-badge-noestaba">🚪 No estaba' + (horaNE ? ' · ' + horaNE : '') + '</span>';
         } else {
           badgeHtml = '<span class="seg-badge-pendiente">⏳ Pendiente</span>';
         }
 
-        // Botón "Ver en Maps" si hay GPS (sirve para todos los estados que tengan coords)
-        var mapsBtn = (e.lat && e.lng) ? _renderBotonUbicacion(e.lat, e.lng, e.ubicacion_precision) : '';
+        const mapsBtn = (e.lat && e.lng) ? _renderBotonUbicacion(e.lat, e.lng, e.ubicacion_precision) : '';
 
         html += '<div class="seg-row"><div style="flex:1;min-width:0;"><div class="seg-row-nombre">'
-          + (e.cliente||'—')
-          + (e.devolucion?'<span class="dev-badge">↩️ Dev.</span>':'')
-          + '</div><div class="seg-row-ciudad">📍 ' + (e.ciudad||'—') + (e.comercio?' · 🏪 '+e.comercio:'') + '</div>'
+          + (e.cliente || '—')
+          + (e.devolucion ? '<span class="dev-badge">↩️ Dev.</span>' : '')
+          + '</div><div class="seg-row-ciudad">📍 ' + (e.ciudad || '—') + (e.comercio ? ' · 🏪 ' + e.comercio : '') + '</div>'
           + subInfoHtml
           + devInfo
           + mapsBtn
           + '</div><div style="text-align:right;flex-shrink:0;"><div class="seg-row-monto">' + montoCobrado + '</div>'
-          + (e.devolucion&&e.monto_cobrado?'<div style="font-size:10px;color:#999;text-decoration:line-through;">'+fmt(m)+'</div>':'')
+          + (e.devolucion && e.monto_cobrado ? '<div style="font-size:10px;color:#999;text-decoration:line-through;">' + fmt(m) + '</div>' : '')
           + '<div>' + badgeHtml + '</div></div></div>';
       });
+
       html += '</div>';
     });
 
-    // Estado vacío si el filtro no tiene entregas
-    if (!entregas.length) {
-      html += '<div class="planilla-empty" style="margin-top:0;">🔍 No hay entregas para ' + _segFiltroChofer + ' ' + _segEtiquetaFecha(_segFiltroFecha) + '.</div>';
-    }
-
     html += '<button onclick="renderLogisticaSeguimiento(document.getElementById(\'logistica-contenido\'))" style="width:100%;padding:11px;background:#F5F7FF;border:1.5px solid #E8EAF6;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:800;color:#1A237E;cursor:pointer;margin-top:4px;">🔄 Actualizar</button>';
+
     el.innerHTML = html;
-  } catch(e) { el.innerHTML = '<div class="planilla-empty">❌ Error al cargar.</div>'; console.error(e); }
+    console.log('[lz v11.6] Seguimiento render — chofer:', _segFiltroChofer, 'grupos:', gruposVivos.length, 'pendientes:', totalPend);
+  } catch(e) {
+    el.innerHTML = '<div class="planilla-empty">❌ Error al cargar seguimiento.</div>';
+    console.error('[lz v11.6] Error en renderLogisticaSeguimiento:', e);
+  }
 }
 
 // ══════════════════════════════════════════════════════════
