@@ -19313,8 +19313,13 @@ function vetGenerar(opts) {
 }
 
 
-function descargarPlanillaCarga(choferParam) {
-  // v12.2: Acepta string (chofer) o objeto { chofer, vehiculo, viaje_id }
+async function descargarPlanillaCarga(choferParam) {
+  // v12.3.0: reescrito con jsPDF + doc.save() para que el PDF se descargue
+  // como archivo real al celular (Android/iOS). Antes abría una ventana popup
+  // y llamaba win.print() — Francisco al "compartir" mandaba la URL del popup,
+  // no un archivo, y el chofer recibía un link inválido.
+
+  // Acepta string (chofer) o objeto { chofer, vehiculo, viaje_id }
   let chofer, vehiculoExplicito = null, viajeId = null;
   if (typeof choferParam === 'object' && choferParam !== null) {
     chofer = choferParam.chofer;
@@ -19324,287 +19329,519 @@ function descargarPlanillaCarga(choferParam) {
     chofer = choferParam;
   }
 
-  // Fallback al sistema viejo (tab activo) si no hay chofer
   if (!chofer && _logTab === 'joan') chofer = 'Joan';
   if (!chofer && _logTab === 'luis') chofer = 'Luis';
   if (!chofer && _vetDatos) chofer = _vetDatos.chofer;
   if (!chofer) { toast('Seleccioná un chofer primero', 'err'); return; }
 
-  // Vehículo: 1) explícito (del viaje) → 2) _vetDatos → 3) "—"
   let vehiculo = vehiculoExplicito;
   if (!vehiculo && _vetDatos && _vetDatos.chofer === chofer) vehiculo = _vetDatos.vehiculo;
   if (!vehiculo) vehiculo = '—';
 
   const hoyDate0 = new Date();
-  const hoy = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'][hoyDate0.getDay() === 0 ? 6 : hoyDate0.getDay()-1]
+  const hoyTxt = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'][hoyDate0.getDay() === 0 ? 6 : hoyDate0.getDay()-1]
     + ', ' + hoyDate0.getDate() + ' de '
     + ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'][hoyDate0.getMonth()];
-  const fechaPDF = String(hoyDate0.getDate()).padStart(2,'0') + '/'
-    + String(hoyDate0.getMonth()+1).padStart(2,'0') + '/' + hoyDate0.getFullYear();
+  const dd = String(hoyDate0.getDate()).padStart(2,'0');
+  const mm = String(hoyDate0.getMonth()+1).padStart(2,'0');
+  const aaaa = hoyDate0.getFullYear();
+  const fechaPDF = dd + '/' + mm + '/' + aaaa;
 
-  // v12.2: Si recibimos viaje_id, filtramos por pedidos del viaje (sistema nuevo).
-  //        Si no, fallback al sistema viejo (choferAsignado) por compat.
+  // ── Filtrado de pedidos (igual que la versión anterior) ──
   let pedidos;
   if (viajeId) {
-    // Sistema nuevo: traer pedido_ids del viaje (de _lzPedidosZona)
     const idsDelViaje = (typeof lzPedidosDeViaje === 'function')
       ? lzPedidosDeViaje(viajeId).map(p => p.pedido_id)
       : [];
     pedidos = todosLosPedidos.filter(p =>
       p.estado === 'Confirmado' && idsDelViaje.indexOf(p.pedidoId) >= 0
     );
-    console.log('[v12.2 planilla carga] viaje=' + viajeId + ' chofer=' + chofer +
-                ' → ' + pedidos.length + ' pedidos del viaje (de ' + idsDelViaje.length + ' totales en pedidos_zona)');
   } else {
-    // Fallback sistema viejo
     pedidos = todosLosPedidos.filter(p =>
       p.estado === 'Confirmado' && p.choferAsignado === chofer
     );
   }
 
-  // ── TOTALES GLOBALES por categoría → producto ──────────────────
-  const totalesProd = {};
-  pedidos.forEach(function(p) {
-    parsearProductos(p.detalle || p.resumen || '').forEach(function(pr) {
-      const mapeo = vetBuscarMapeo(pr.nombre);
-      const cat   = mapeo ? mapeo[0] : 'Otros';
-      if (!totalesProd[pr.nombre]) totalesProd[pr.nombre] = { cantidad: 0, cat };
-      totalesProd[pr.nombre].cantidad += pr.cantidad;
-    });
-  });
+  if (!pedidos.length) {
+    toast('No hay pedidos confirmados para ' + chofer, 'err');
+    return;
+  }
 
-  const porCatTotal = {};
-  VET_ORDEN_CATS.forEach(c => porCatTotal[c] = []);
-  porCatTotal['Otros'] = [];
-  Object.keys(totalesProd).forEach(function(nombre) {
-    const d = totalesProd[nombre];
-    if (!porCatTotal[d.cat]) porCatTotal[d.cat] = [];
-    porCatTotal[d.cat].push({ nombre, cantidad: d.cantidad });
-  });
+  toast('⏳ Generando PDF...', 'ok');
 
-  let rowsTotal = '', grandTotal = 0;
-  [...VET_ORDEN_CATS, 'Otros'].forEach(function(cat) {
-    const items = porCatTotal[cat];
-    if (!items || !items.length) return;
-    const catUds = items.reduce((a, i) => a + i.cantidad, 0);
-    rowsTotal += '<tr style="background:#E8F5E9;">' +
-      '<td colspan="3" style="padding:7px 12px;font-weight:900;color:#1B5E20;font-size:13px;text-transform:uppercase;letter-spacing:.4px;">' + cat + '</td>' +
-      '<td style="padding:7px 12px;text-align:right;font-weight:900;color:#1B5E20;font-size:13px;">' + catUds + ' u.</td></tr>';
-    items.sort((a,b) => a.nombre.localeCompare(b.nombre)).forEach(function(item) {
-      grandTotal += item.cantidad;
-      const mapeo = vetBuscarMapeo(item.nombre);
-      const presentacion = mapeo ? mapeo[2] || '' : '';
-      rowsTotal += '<tr>' +
-        '<td style="width:28px;padding:5px 4px 5px 20px;"><div style="width:20px;height:20px;border:2px solid #555;border-radius:3px;"></div></td>' +
-        '<td style="padding:5px 4px 5px 4px;font-size:13px;color:#333;">' + item.nombre + '</td>' +
-        '<td style="padding:5px 8px;font-size:11px;color:#888;font-style:italic;">' + presentacion + '</td>' +
-        '<td style="padding:5px 12px;text-align:right;font-size:16px;font-weight:900;color:#222;">' + item.cantidad + '</td></tr>';
-    });
-  });
+  try {
+    const [jsPDF, logoB64] = await Promise.all([
+      _cargarJsPDF(),
+      _cargarLogoBase64()
+    ]);
 
-  // ── DESGLOSE POR CIUDAD (orden inverso de ruta = orden de carga) ──
-  const porCiudadProds = {};
-  pedidos.forEach(function(p) {
-    const ciudadRaw = (p.localidad || '').trim();
-    const FALSAS = ['campo', 'campo tck', 'catalogo web tck', ''];
-    const ciudad = FALSAS.includes(ciudadRaw.toLowerCase()) ? '⚠️ Sin localidad' : ciudadRaw;
-    if (!porCiudadProds[ciudad]) porCiudadProds[ciudad] = {};
-    parsearProductos(p.detalle || p.resumen || '').forEach(function(pr) {
-      const mapeo = vetBuscarMapeo(pr.nombre);
-      const cat   = mapeo ? mapeo[0] : 'Otros';
-      if (!porCiudadProds[ciudad][cat]) porCiudadProds[ciudad][cat] = {};
-      if (!porCiudadProds[ciudad][cat][pr.nombre]) porCiudadProds[ciudad][cat][pr.nombre] = 0;
-      porCiudadProds[ciudad][cat][pr.nombre] += pr.cantidad;
-    });
-  });
-
-  // Ordenar ciudades en orden inverso de ruta para la sección de carga
-  const todasCiudades = Object.keys(porCiudadProds);
-  todasCiudades.sort(function(a, b) {
-    const ia = RUTA_FIJA.findIndex(c => a.toLowerCase().includes(c.toLowerCase()));
-    const ib = RUTA_FIJA.findIndex(c => b.toLowerCase().includes(c.toLowerCase()));
-    const ra = ia === -1 ? 999 : ia;
-    const rb = ib === -1 ? 999 : ib;
-    return rb - ra; // INVERSO: última parada primero (se carga al fondo)
-  });
-
-  let rowsCiudad = '';
-  let numParada = todasCiudades.length;
-  todasCiudades.forEach(function(ciudad) {
-    const cats = porCiudadProds[ciudad];
-    let cityTotal = 0;
-    [...VET_ORDEN_CATS, 'Otros'].forEach(c => {
-      if (cats[c]) Object.values(cats[c]).forEach(q => cityTotal += q);
-    });
-    rowsCiudad += '<tr style="background:#1B5E20;color:#fff;">' +
-      '<td colspan="3" style="padding:9px 12px;font-size:14px;font-weight:900;">' +
-      '📍 Parada ' + numParada-- + ' — ' + ciudad +
-      '<span style="float:right;opacity:.8;font-size:12px;">' + cityTotal + ' bultos</span></td></tr>';
-    [...VET_ORDEN_CATS, 'Otros'].forEach(function(cat) {
-      if (!cats[cat]) return;
-      const catTotal = Object.values(cats[cat]).reduce((a,b) => a+b, 0);
-      rowsCiudad += '<tr style="background:#E8F5E9;">' +
-        '<td colspan="3" style="padding:5px 12px 5px 20px;font-size:12px;font-weight:700;color:#1B5E20;text-transform:uppercase;">' + cat + '</td>' +
-        '<td style="padding:5px 12px;text-align:right;font-size:12px;font-weight:700;color:#1B5E20;">' + catTotal + ' u.</td></tr>';
-      Object.keys(cats[cat]).sort().forEach(function(nombre) {
-        const mapeo = vetBuscarMapeo(nombre);
-        const presentacion = mapeo ? mapeo[2] || '' : '';
-        rowsCiudad += '<tr>' +
-          '<td style="width:28px;padding:4px 4px 4px 32px;"><div style="width:20px;height:20px;border:2px solid #555;border-radius:3px;"></div></td>' +
-          '<td style="padding:4px 4px 4px 4px;font-size:12px;color:#333;">' + nombre + '</td>' +
-          '<td style="padding:4px 8px;font-size:10px;color:#888;font-style:italic;">' + presentacion + '</td>' +
-          '<td style="padding:4px 12px;text-align:right;font-size:14px;font-weight:900;color:#222;">' + cats[cat][nombre] + '</td></tr>';
+    // ── Cálculo de totales globales y por ciudad ──
+    const totalesProd = {};
+    pedidos.forEach(function(p) {
+      parsearProductos(p.detalle || p.resumen || '').forEach(function(pr) {
+        const mapeo = vetBuscarMapeo(pr.nombre);
+        const cat   = mapeo ? mapeo[0] : 'Otros';
+        if (!totalesProd[pr.nombre]) totalesProd[pr.nombre] = { cantidad: 0, cat };
+        totalesProd[pr.nombre].cantidad += pr.cantidad;
       });
     });
-  });
 
-  // ── FECHA formateada para nombre de archivo ────────────────────
-  const hoyDate = new Date();
-  const dd = String(hoyDate.getDate()).padStart(2,'0');
-  const mm = String(hoyDate.getMonth()+1).padStart(2,'0');
-  const aaaa = hoyDate.getFullYear();
+    const porCatTotal = {};
+    [...VET_ORDEN_CATS, 'Otros'].forEach(c => porCatTotal[c] = []);
+    Object.keys(totalesProd).forEach(function(nombre) {
+      const d = totalesProd[nombre];
+      if (!porCatTotal[d.cat]) porCatTotal[d.cat] = [];
+      porCatTotal[d.cat].push({ nombre, cantidad: d.cantidad });
+    });
 
-  const html = '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
-    '<title>Carga_' + chofer + '_' + dd + '-' + mm + '-' + aaaa + '</title>' +
-    '<style>' +
-    'body{font-family:Arial,sans-serif;padding:20px;color:#222;font-size:13px;max-width:800px;margin:0 auto;}' +
-    'h1{color:#1B5E20;margin:0 0 2px;font-size:22px;font-weight:900;}' +
-    'h2{color:#1B5E20;margin:20px 0 8px;font-size:16px;font-weight:900;border-bottom:2px solid #1B5E20;padding-bottom:4px;}' +
-    '.sub{color:#555;font-size:12px;margin:2px 0 10px;}' +
-    '.info{display:flex;gap:24px;margin:10px 0 6px;font-size:13px;background:#F1F8E9;border-radius:8px;padding:10px 14px;}' +
-    'table{width:100%;border-collapse:collapse;margin-top:4px;margin-bottom:16px;}' +
-    'td{border-bottom:1px solid #eee;vertical-align:middle;}' +
-    'tr:nth-child(even) td{background:#fafafa;}' +
-    '.total-row td{background:#1B5E20!important;color:#fff;padding:10px 12px;font-weight:900;font-size:15px;border:none;}' +
-    '.firma{margin-top:28px;border:1.5px dashed #aaa;border-radius:8px;padding:16px 20px;}' +
-    '.firma-title{font-weight:900;font-size:13px;color:#333;margin-bottom:12px;}' +
-    '.firma-line{border-bottom:1px solid #333;margin-bottom:20px;height:28px;}' +
-    '.firma-label{font-size:11px;color:#888;margin-top:4px;}' +
-    '.page-break{page-break-before:always;}' +
-    '@media print{.no-print{display:none!important;}}' +
-    '</style></head><body>' +
+    const porCiudadProds = {};
+    pedidos.forEach(function(p) {
+      const ciudadRaw = (p.localidad || '').trim();
+      const FALSAS = ['campo', 'campo tck', 'catalogo web tck', ''];
+      const ciudad = FALSAS.includes(ciudadRaw.toLowerCase()) ? 'Sin localidad' : ciudadRaw;
+      if (!porCiudadProds[ciudad]) porCiudadProds[ciudad] = {};
+      parsearProductos(p.detalle || p.resumen || '').forEach(function(pr) {
+        const mapeo = vetBuscarMapeo(pr.nombre);
+        const cat   = mapeo ? mapeo[0] : 'Otros';
+        if (!porCiudadProds[ciudad][cat]) porCiudadProds[ciudad][cat] = {};
+        if (!porCiudadProds[ciudad][cat][pr.nombre]) porCiudadProds[ciudad][cat][pr.nombre] = 0;
+        porCiudadProds[ciudad][cat][pr.nombre] += pr.cantidad;
+      });
+    });
+
+    const todasCiudades = Object.keys(porCiudadProds);
+    todasCiudades.sort(function(a, b) {
+      const ia = RUTA_FIJA.findIndex(c => a.toLowerCase().includes(c.toLowerCase()));
+      const ib = RUTA_FIJA.findIndex(c => b.toLowerCase().includes(c.toLowerCase()));
+      const ra = ia === -1 ? 999 : ia;
+      const rb = ib === -1 ? 999 : ib;
+      return rb - ra;
+    });
+
+    // ── PDF ──
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const W = 210, H = 297, M = 15;
+    let y = 14;
+
+    const headerPagina = function(titulo) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(27, 94, 32);
+      doc.text(titulo + ' · ' + chofer + ' · ' + fechaPDF, M, y);
+      doc.setDrawColor(27, 94, 32);
+      doc.line(M, y + 2, W - M, y + 2);
+      y += 8;
+    };
 
     // ── ENCABEZADO ──
-    '<h1>📦 PLANILLA DE CARGA</h1>' +
-    '<div class="sub">The Chicken Kings S.R.L. · ' + hoy + '</div>' +
-    '<div class="info">' +
-    '<span>🚚 <strong>Chofer:</strong> ' + chofer + '</span>' +
-    '<span>🚛 <strong>Vehículo:</strong> ' + vehiculo + '</span>' +
-    '<span>📋 <strong>Pedidos:</strong> ' + pedidos.length + '</span>' +
-    '</div>' +
+    if (logoB64) {
+      try { doc.addImage(logoB64, 'PNG', M, y, 24, 24); } catch(e) {}
+    }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(15);
+    doc.setTextColor(27, 94, 32);
+    doc.text('PLANILLA DE CARGA', W - M, y + 7, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(110, 110, 110);
+    doc.text('TCK The Chicken Kings S.R.L.', W - M, y + 13, { align: 'right' });
+    doc.text(hoyTxt, W - M, y + 18, { align: 'right' });
+    y += 28;
+
+    // ── BOX INFO ──
+    doc.setFillColor(232, 245, 233);
+    doc.roundedRect(M, y, W - M*2, 14, 2, 2, 'F');
+    doc.setTextColor(40, 40, 40);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text('Chofer: ' + chofer, M + 4, y + 6);
+    doc.text('Vehículo: ' + vehiculo, M + 70, y + 6);
+    doc.text('Pedidos: ' + pedidos.length, M + 130, y + 6);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(100, 100, 100);
+    doc.text('CUIT: ' + TCK_EMPRESA.cuit + ' · Establecimiento: San Lorenzo 460, Trenque Lauquen', M + 4, y + 11);
+    y += 20;
 
     // ── SECCIÓN 1: TOTALES GLOBALES ──
-    '<h2>📊 TOTALES A SACAR DE CÁMARA</h2>' +
-    '<table><tbody>' + rowsTotal +
-    '<tr class="total-row"><td></td><td colspan="2" style="padding:10px 12px;font-weight:900;font-size:15px;">TOTAL BULTOS</td>' +
-    '<td style="padding:10px 12px;text-align:right;font-weight:900;font-size:15px;">' + grandTotal + '</td></tr>' +
-    '</tbody></table>' +
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(27, 94, 32);
+    doc.text('TOTALES A SACAR DE CÁMARA', M, y);
+    y += 6;
 
-    // ── FIRMA DEL CHOFER ──
-    '<div class="firma">' +
-    '<div class="firma-title">✍️ Conformidad de recepción de mercadería</div>' +
-    '<div style="display:flex;gap:40px;">' +
-    '<div style="flex:1;"><div class="firma-line"></div><div class="firma-label">Firma del chofer (' + chofer + ')</div></div>' +
-    '<div style="flex:1;"><div class="firma-line"></div><div class="firma-label">Aclaración</div></div>' +
-    '<div style="width:120px;"><div class="firma-line"></div><div class="firma-label">Hora de salida</div></div>' +
-    '</div>' +
-    '<div style="margin-top:12px;font-size:11px;color:#888;">' +
-    'Declaro haber recibido conforme la totalidad de la mercadería detallada arriba (' + grandTotal + ' bultos) para su entrega en ruta. Fecha: ' + fechaPDF + '</div>' +
-    '</div>' +
+    // Header tabla
+    doc.setFillColor(27, 94, 32);
+    doc.rect(M, y, W - M*2, 7, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text('PRODUCTO', M + 8, y + 5);
+    doc.text('PRESENTACIÓN', M + 95, y + 5);
+    doc.text('CANT.', W - M - 4, y + 5, { align: 'right' });
+    y += 7;
 
-    // ── SECCIÓN 2: DESGLOSE POR CIUDAD (orden de carga = inverso de ruta) ──
-    '<h2 class="page-break">🗺️ ORDEN DE CARGA POR CIUDAD</h2>' +
-    '<div class="sub" style="margin-bottom:10px;">⚠️ Cargar en este orden — la primera parada se carga ÚLTIMA (queda al frente del camión)</div>' +
-    '<table><tbody>' + rowsCiudad + '</tbody></table>' +
+    let grandTotal = 0;
+    [...VET_ORDEN_CATS, 'Otros'].forEach(function(cat) {
+      const items = porCatTotal[cat];
+      if (!items || !items.length) return;
+      const catUds = items.reduce((a, i) => a + i.cantidad, 0);
 
-    '<div class="no-print" style="margin-top:20px;text-align:center;">' +
-    '<button onclick="window.print()" style="padding:12px 32px;background:#1B5E20;color:#fff;border:none;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;margin-right:12px;">🖨️ Imprimir</button>' +
-    '</div>' +
-    '<p style="margin-top:20px;text-align:center;color:#aaa;font-size:10px;">Generado por sistema TCK · ' + fechaPDF + '</p>' +
-    '</body></html>';
+      if (y > H - 30) { doc.addPage(); y = 14; headerPagina('TOTALES'); }
 
-  const win = window.open('', '_blank');
-  if (!win) { toast('Habilitá las ventanas emergentes del browser', 'err'); return; }
-  win.document.title = 'Carga_' + chofer + '_' + dd + '-' + mm + '-' + aaaa;
-  win.document.write(html);
-  win.document.close();
-  setTimeout(() => win.print(), 600);
+      // Fila categoría
+      doc.setFillColor(232, 245, 233);
+      doc.rect(M, y, W - M*2, 6, 'F');
+      doc.setTextColor(27, 94, 32);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.text(cat.toUpperCase(), M + 2, y + 4);
+      doc.text(catUds + ' u.', W - M - 4, y + 4, { align: 'right' });
+      y += 6;
+
+      items.sort((a,b) => a.nombre.localeCompare(b.nombre)).forEach(function(item) {
+        grandTotal += item.cantidad;
+        const mapeo = vetBuscarMapeo(item.nombre);
+        const presentacion = mapeo ? mapeo[2] || '' : '';
+
+        if (y > H - 25) { doc.addPage(); y = 14; headerPagina('TOTALES'); }
+
+        doc.setTextColor(40, 40, 40);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        // Checkbox
+        doc.setDrawColor(120, 120, 120);
+        doc.rect(M + 2, y + 1, 3.5, 3.5);
+        // Nombre (truncado si es muy largo)
+        let nom = item.nombre;
+        if (nom.length > 50) nom = nom.substring(0, 48) + '...';
+        doc.text(nom, M + 8, y + 4);
+        // Presentación
+        if (presentacion) {
+          doc.setFontSize(7);
+          doc.setTextColor(140, 140, 140);
+          doc.text(presentacion, M + 95, y + 4);
+        }
+        // Cantidad
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(40, 40, 40);
+        doc.text(String(item.cantidad), W - M - 4, y + 4, { align: 'right' });
+        y += 5.5;
+      });
+    });
+
+    // ── TOTAL ──
+    if (y > H - 25) { doc.addPage(); y = 14; headerPagina('TOTALES'); }
+    y += 1;
+    doc.setFillColor(27, 94, 32);
+    doc.rect(M, y, W - M*2, 9, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text('TOTAL BULTOS A CARGAR', M + 2, y + 6);
+    doc.text(String(grandTotal), W - M - 4, y + 6, { align: 'right' });
+    y += 14;
+
+    // ── FIRMA ──
+    if (y > H - 50) { doc.addPage(); y = 14; }
+    doc.setDrawColor(170, 170, 170);
+    doc.setLineDashPattern([1.5, 1.5], 0);
+    doc.roundedRect(M, y, W - M*2, 38, 2, 2);
+    doc.setLineDashPattern([], 0);
+    doc.setTextColor(50, 50, 50);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text('Conformidad de recepción de mercadería', M + 3, y + 6);
+
+    // Líneas de firma
+    doc.setDrawColor(60, 60, 60);
+    doc.line(M + 3, y + 22, M + 75, y + 22);
+    doc.line(M + 80, y + 22, M + 140, y + 22);
+    doc.line(M + 145, y + 22, W - M - 3, y + 22);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    doc.setTextColor(120, 120, 120);
+    doc.text('Firma del chofer (' + chofer + ')', M + 3, y + 26);
+    doc.text('Aclaración', M + 80, y + 26);
+    doc.text('Hora de salida', M + 145, y + 26);
+
+    doc.setFontSize(7);
+    doc.setTextColor(100, 100, 100);
+    doc.text('Declaro recibir conforme la totalidad de la mercadería detallada (' + grandTotal + ' bultos) para entrega en ruta. Fecha: ' + fechaPDF, M + 3, y + 33);
+    y += 42;
+
+    // ── SECCIÓN 2: ORDEN DE CARGA POR CIUDAD (página nueva) ──
+    doc.addPage();
+    y = 14;
+    if (logoB64) {
+      try { doc.addImage(logoB64, 'PNG', M, y, 18, 18); } catch(e) {}
+    }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.setTextColor(27, 94, 32);
+    doc.text('ORDEN DE CARGA POR CIUDAD', W - M, y + 6, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(110, 110, 110);
+    doc.text(chofer + ' · ' + fechaPDF, W - M, y + 11, { align: 'right' });
+    y += 22;
+
+    doc.setFillColor(255, 243, 224);
+    doc.roundedRect(M, y, W - M*2, 8, 2, 2, 'F');
+    doc.setFontSize(8);
+    doc.setTextColor(180, 100, 0);
+    doc.setFont('helvetica', 'bold');
+    doc.text('IMPORTANTE: cargar en este orden — la primera parada se carga ÚLTIMA (queda al frente del camión)', W/2, y + 5, { align: 'center' });
+    y += 12;
+
+    let numParada = todasCiudades.length;
+    todasCiudades.forEach(function(ciudad) {
+      const cats = porCiudadProds[ciudad];
+      let cityTotal = 0;
+      [...VET_ORDEN_CATS, 'Otros'].forEach(c => {
+        if (cats[c]) Object.values(cats[c]).forEach(q => cityTotal += q);
+      });
+
+      if (y > H - 30) { doc.addPage(); y = 14; headerPagina('ORDEN DE CARGA'); }
+
+      // Fila ciudad
+      doc.setFillColor(27, 94, 32);
+      doc.rect(M, y, W - M*2, 8, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text('Parada ' + numParada-- + ' — ' + ciudad, M + 2, y + 5.5);
+      doc.setFontSize(9);
+      doc.text(cityTotal + ' bultos', W - M - 2, y + 5.5, { align: 'right' });
+      y += 9;
+
+      [...VET_ORDEN_CATS, 'Otros'].forEach(function(cat) {
+        if (!cats[cat]) return;
+        const catTotal = Object.values(cats[cat]).reduce((a,b) => a+b, 0);
+
+        if (y > H - 25) { doc.addPage(); y = 14; headerPagina('ORDEN DE CARGA'); }
+
+        doc.setFillColor(232, 245, 233);
+        doc.rect(M, y, W - M*2, 5.5, 'F');
+        doc.setTextColor(27, 94, 32);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.text(cat.toUpperCase(), M + 4, y + 3.8);
+        doc.text(catTotal + ' u.', W - M - 4, y + 3.8, { align: 'right' });
+        y += 5.5;
+
+        Object.keys(cats[cat]).sort().forEach(function(nombre) {
+          const mapeo = vetBuscarMapeo(nombre);
+          const presentacion = mapeo ? mapeo[2] || '' : '';
+
+          if (y > H - 20) { doc.addPage(); y = 14; headerPagina('ORDEN DE CARGA'); }
+
+          doc.setTextColor(40, 40, 40);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8);
+          doc.setDrawColor(120, 120, 120);
+          doc.rect(M + 6, y + 0.5, 3, 3);
+          let nom = nombre;
+          if (nom.length > 50) nom = nom.substring(0, 48) + '...';
+          doc.text(nom, M + 11, y + 3);
+          if (presentacion) {
+            doc.setFontSize(6.5);
+            doc.setTextColor(140, 140, 140);
+            doc.text(presentacion, M + 95, y + 3);
+          }
+          doc.setFontSize(9);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(40, 40, 40);
+          doc.text(String(cats[cat][nombre]), W - M - 4, y + 3, { align: 'right' });
+          y += 4.5;
+        });
+      });
+      y += 2;
+    });
+
+    // ── FOOTER ──
+    doc.setFontSize(7);
+    doc.setTextColor(150, 150, 150);
+    doc.setFont('helvetica', 'normal');
+    const totalPaginas = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= totalPaginas; i++) {
+      doc.setPage(i);
+      doc.text('Pág ' + i + '/' + totalPaginas + ' · Sistema TCK · ' + fechaPDF, W/2, H - 6, { align: 'center' });
+    }
+
+    // ── DESCARGAR ──
+    const nombreArchivo = 'Carga-' + chofer + '-' + dd + '-' + mm + '-' + aaaa + '.pdf';
+    doc.save(nombreArchivo);
+    toast('✅ PDF descargado: ' + nombreArchivo, 'ok');
+
+  } catch(err) {
+    console.error('descargarPlanillaCarga:', err);
+    toast('❌ Error generando PDF: ' + (err.message || 'desconocido'), 'err');
+  }
 }
 
-function descargarPDFVet() {
+
+async function descargarPDFVet() {
+  // v12.3.0: reescrito con jsPDF + doc.save() para que el PDF se descargue
+  // como archivo real al celular (Android/iOS). Antes abría una ventana popup
+  // y llamaba win.print() — Francisco al "compartir" mandaba la URL del popup,
+  // no un archivo, y el chofer recibía un link inválido.
   if (!_vetDatos) { toast('Generá la planilla primero', 'err'); return; }
-  const { chofer, vehiculo, ciudades, porCiudad, hoy, fechaPDF, totalUds, totalKg } = _vetDatos;
+  const { chofer, vehiculo, ciudades, porCiudad, fechaPDF } = _vetDatos;
 
-  let rows = '';
-  let grandUds = 0, grandKg = 0;
+  toast('⏳ Generando PDF...', 'ok');
 
-  ciudades.forEach(function(ciudad) {
-    const cats = porCiudad[ciudad];
-    if (!Object.keys(cats).length) return;
-    let cityUds = 0, cityKg = 0;
-    VET_ORDEN_CATS.forEach(function(c) {
-      if (cats[c]) { cityUds += cats[c].uds; cityKg += cats[c].kg; }
+  try {
+    const [jsPDF, logoB64] = await Promise.all([
+      _cargarJsPDF(),
+      _cargarLogoBase64()
+    ]);
+
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const W = 210, H = 297, M = 15;
+    let y = 14;
+
+    // Helper para meter una página nueva manteniendo header simple
+    const nuevaPagina = function() {
+      doc.addPage();
+      y = 14;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(21, 101, 192);
+      doc.text('PLANILLA VETERINARIA · ' + chofer + ' · ' + fechaPDF, M, y);
+      doc.setDrawColor(21, 101, 192);
+      doc.line(M, y + 2, W - M, y + 2);
+      y += 8;
+    };
+
+    // ── ENCABEZADO ──
+    if (logoB64) {
+      try { doc.addImage(logoB64, 'PNG', M, y, 24, 24); } catch(e) {}
+    }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(15);
+    doc.setTextColor(21, 101, 192);
+    doc.text('PLANILLA VETERINARIA', W - M, y + 7, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(110, 110, 110);
+    doc.text('TCK The Chicken Kings S.R.L.', W - M, y + 13, { align: 'right' });
+    doc.text(fechaPDF, W - M, y + 18, { align: 'right' });
+    y += 28;
+
+    // ── BOX INFO ──
+    doc.setFillColor(232, 242, 254);
+    doc.roundedRect(M, y, W - M*2, 18, 2, 2, 'F');
+    doc.setTextColor(40, 40, 40);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text('Chofer: ' + chofer, M + 4, y + 7);
+    doc.text('Vehículo: ' + vehiculo, M + 4, y + 13);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(100, 100, 100);
+    doc.text('Establecimiento: TCK The Chicken Kings S.R.L. · San Lorenzo 460, Trenque Lauquen', M + 75, y + 7);
+    doc.text('CUIT: ' + TCK_EMPRESA.cuit, M + 75, y + 13);
+    y += 24;
+
+    // ── HEADER TABLA ──
+    const drawHeader = function() {
+      doc.setFillColor(21, 101, 192);
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.rect(M, y, W - M*2, 7, 'F');
+      doc.text('DESTINO / CATEGORÍA', M + 2, y + 5);
+      doc.text('UNIDADES', W - M - 35, y + 5, { align: 'right' });
+      doc.text('KG', W - M - 4, y + 5, { align: 'right' });
+      y += 7;
+    };
+    drawHeader();
+
+    // ── FILAS POR CIUDAD ──
+    let grandUds = 0, grandKg = 0;
+    let zebra = false;
+
+    ciudades.forEach(function(ciudad) {
+      const cats = porCiudad[ciudad];
+      if (!Object.keys(cats).length) return;
+      let cityUds = 0, cityKg = 0;
+      VET_ORDEN_CATS.forEach(function(c) {
+        if (cats[c]) { cityUds += cats[c].uds; cityKg += cats[c].kg; }
+      });
+      grandUds += cityUds; grandKg += cityKg;
+
+      // Salto de página si no entra
+      if (y > H - 35) { nuevaPagina(); drawHeader(); }
+
+      // Fila ciudad (azul)
+      doc.setFillColor(21, 101, 192);
+      doc.rect(M, y, W - M*2, 7, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.text(ciudad, M + 2, y + 5);
+      doc.text(String(cityUds), W - M - 35, y + 5, { align: 'right' });
+      doc.text(String(Math.round(cityKg)), W - M - 4, y + 5, { align: 'right' });
+      y += 7;
+      zebra = false;
+
+      VET_ORDEN_CATS.forEach(function(cat) {
+        if (!cats[cat]) return;
+        const d = cats[cat];
+
+        if (y > H - 25) { nuevaPagina(); drawHeader(); }
+
+        if (zebra) {
+          doc.setFillColor(245, 247, 255);
+          doc.rect(M, y, W - M*2, 6, 'F');
+        }
+        doc.setTextColor(40, 40, 40);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.text('   ' + cat, M + 2, y + 4);
+        doc.text(String(d.uds), W - M - 35, y + 4, { align: 'right' });
+        doc.text(String(Math.round(d.kg * 10) / 10), W - M - 4, y + 4, { align: 'right' });
+        y += 6;
+        zebra = !zebra;
+      });
     });
-    grandUds += cityUds; grandKg += cityKg;
 
-    rows += '<tr style="background:#1565C0;color:#fff;">' +
-      '<td colspan="3" style="padding:8px 12px;font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:900;">' +
-      '📍 ' + ciudad + '</td>' +
-      '<td style="padding:8px 12px;text-align:right;font-weight:900;">' + cityUds + '</td>' +
-      '<td style="padding:8px 12px;text-align:right;font-weight:900;">' + Math.round(cityKg) + '</td>' +
-      '</tr>';
+    // ── TOTAL ──
+    if (y > H - 25) { nuevaPagina(); drawHeader(); }
+    y += 2;
+    doc.setFillColor(27, 94, 32);
+    doc.rect(M, y, W - M*2, 9, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text('TOTAL GENERAL', M + 2, y + 6);
+    doc.text(String(grandUds), W - M - 35, y + 6, { align: 'right' });
+    doc.text(String(Math.round(grandKg)), W - M - 4, y + 6, { align: 'right' });
+    y += 14;
 
-    VET_ORDEN_CATS.forEach(function(cat) {
-      if (!cats[cat]) return;
-      const d = cats[cat];
-      rows += '<tr>' +
-        '<td></td>' +
-        '<td colspan="2" style="padding:6px 12px;font-size:13px;">' + cat + '</td>' +
-        '<td style="padding:6px 12px;text-align:right;font-size:13px;">' + d.uds + '</td>' +
-        '<td style="padding:6px 12px;text-align:right;font-size:13px;font-weight:700;">' + (Math.round(d.kg * 10) / 10) + '</td>' +
-        '</tr>';
-    });
-  });
+    // ── FOOTER ──
+    doc.setFontSize(7);
+    doc.setTextColor(150, 150, 150);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Documento generado por sistema TCK · ' + fechaPDF, W/2, H - 8, { align: 'center' });
 
-  const hoyDateV = new Date();
-  const ddV = String(hoyDateV.getDate()).padStart(2,'0');
-  const mmV = String(hoyDateV.getMonth()+1).padStart(2,'0');
-  const aaV = hoyDateV.getFullYear();
-  const tituloVet = 'Vet_' + chofer + '_' + ddV + '-' + mmV + '-' + aaV;
+    // ── DESCARGAR ──
+    const hoyDateV = new Date();
+    const ddV = String(hoyDateV.getDate()).padStart(2,'0');
+    const mmV = String(hoyDateV.getMonth()+1).padStart(2,'0');
+    const aaV = hoyDateV.getFullYear();
+    const nombreArchivo = 'Veterinaria-' + chofer + '-' + ddV + '-' + mmV + '-' + aaV + '.pdf';
 
-  const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + tituloVet + '</title>' +
-    '<style>body{font-family:Arial,sans-serif;padding:24px;color:#222;font-size:13px;}' +
-    'h2{color:#1565C0;margin:0 0 4px;}p{margin:2px 0 0;color:#555;font-size:12px;}' +
-    'table{width:100%;border-collapse:collapse;margin-top:16px;}' +
-    'th{background:#1565C0;color:#fff;padding:8px 12px;text-align:left;font-size:13px;}' +
-    'th:last-child,th:nth-last-child(2){text-align:right;}' +
-    'tr:nth-child(even){background:#f5f7ff;}' +
-    'td{border-bottom:1px solid #e0e0e0;}' +
-    '.total{background:#1B5E20!important;color:#fff;font-weight:900;}' +
-    '.total td{color:#fff;padding:10px 12px;font-weight:900;border:none;}' +
-    '@media print{button{display:none}}' +
-    '</style></head><body>' +
-    '<h2>INFORME PARA CERTIFICADO VETERINARIO</h2>' +
-    '<p>Generado el ' + fechaPDF + ' · TCK The Chicken Kings S.R.L</p>' +
-    '<p style="margin-top:8px;">Chofer: <strong>' + chofer + '</strong> &nbsp;|&nbsp; Vehículo: <strong>' + vehiculo + '</strong></p>' +
-    '<p>Establecimiento: The Chicken Kings S.R.L · San Lorenzo N° 460, Trenque Lauquen</p>' +
-    '<table><thead><tr>' +
-    '<th></th><th>Destino</th><th>Categoría</th>' +
-    '<th style="text-align:right">Unidades</th><th style="text-align:right">Kg</th>' +
-    '</tr></thead><tbody>' + rows +
-    '<tr class="total"><td colspan="3">TOTAL GENERAL</td>' +
-    '<td style="text-align:right">' + grandUds + '</td>' +
-    '<td style="text-align:right">' + Math.round(grandKg) + '</td></tr>' +
-    '</tbody></table>' +
-    '<p style="margin-top:24px;text-align:center;color:#aaa;font-size:11px;">Documento generado por sistema TCK · ' + fechaPDF + '</p>' +
-    '</body></html>';
+    doc.save(nombreArchivo);
+    toast('✅ PDF descargado: ' + nombreArchivo, 'ok');
 
-  const win = window.open('', '_blank');
-  if (!win) { toast('Habilitá las ventanas emergentes del browser', 'err'); return; }
-  win.document.title = tituloVet;
-  win.document.write(html);
-  win.document.close();
-  setTimeout(() => win.print(), 500);
+  } catch(err) {
+    console.error('descargarPDFVet:', err);
+    toast('❌ Error generando PDF: ' + (err.message || 'desconocido'), 'err');
+  }
 }
 
 function cerrarVetModal() {
