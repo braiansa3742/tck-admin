@@ -10953,53 +10953,20 @@ function notificarNuevoPedido(cantidad) {
 }
 
 function notificarDuplicados(dups) {
-  const nuevos = dups.filter(p => !duplicadosNotificados.has(p.pedidoId));
-  if (!nuevos.length) return;
-  nuevos.forEach(p => duplicadosNotificados.add(p.pedidoId));
-  sonarTono([1200, 800, 1200, 600], 0.15);
-  if (navigator.vibrate) navigator.vibrate([300, 100, 300, 100, 300]);
-  toast('⚠️ ' + nuevos.length + ' duplicado' + (nuevos.length > 1 ? 's' : '') + ' detectado' + (nuevos.length > 1 ? 's' : '') + '!', 'err');
-  setTimeout(function() {
-    const hora = new Date().toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'});
-    let msg = '⚠️ *TCK — Pedidos duplicados detectados*\n🕐 ' + hora + '\n\n';
-    nuevos.forEach(function(p) {
-      msg += '👤 *' + p.cliente + '*';
-      if (p.comercio) msg += ' (' + p.comercio + ')';
-      msg += '\n💰 ' + fmtTotal(p.total) + ' · ' + p.localidad;
-      msg += '\n📋 ' + p.pedidoId;
-      msg += '\n⚠️ También en: ' + (p.duplicadoCon || 'otro vendedor') + '\n\n';
-    });
-    msg += '_Verificar antes de remitir_';
-    mostrarBotonAlertaAdmin(msg);
-  }, 1000);
+  // v12.5.0: NO-OP. El admin tiene su tab de duplicados y filtros propios para
+  // gestionar duplicados sin necesidad de aviso pop-up. Este aviso era redundante
+  // y muy invasivo (banner rojo persistente + tono fuerte + vibración).
+  // Después del fix anti-dup en ventas v14.3.0, los duplicados deberían ser excepción.
+  return;
 }
 
-function mostrarBotonAlertaAdmin(msg) {
-  let banner = document.getElementById('dup-banner');
-  if (!banner) {
-    banner = document.createElement('div');
-    banner.id = 'dup-banner';
-    banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:9999;background:#C62828;color:#fff;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;box-shadow:0 -4px 16px rgba(0,0,0,.3);';
-    document.body.appendChild(banner);
-  }
-  banner._msg = msg;
-  banner.innerHTML =
-    '<div style="font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:700;">⚠️ Pedidos duplicados detectados</div>' +
-    '<div style="display:flex;gap:8px;">' +
-    '<button style="background:#fff;color:#C62828;border:none;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer;font-size:13px;" onclick="avisarAdmin()">📲 Avisar admin</button>' +
-    '<button style="background:rgba(255,255,255,.2);color:#fff;border:none;border-radius:8px;padding:8px 12px;font-size:14px;cursor:pointer;" onclick="cerrarBanner()">✕</button>' +
-    '</div>';
-}
-
+// v12.5.0: funciones huérfanas conservadas por compatibilidad. No se llaman más.
+function mostrarBotonAlertaAdmin(msg) { return; }
 function cerrarBanner() {
   const b = document.getElementById('dup-banner');
   if (b) b.remove();
 }
-
-function avisarAdmin() {
-  const b = document.getElementById('dup-banner');
-  if (b && b._msg) window.open('https://wa.me/' + NUM_ADMIN + '?text=' + encodeURIComponent(b._msg), '_blank');
-}
+function avisarAdmin() { return; }
 
 // ── PIN / LOGIN ───────────────────────────────────────────────────
 function seleccionarVendedor(nombre, inicial, color) {
@@ -11091,7 +11058,8 @@ function login(nombre) {
   cargarAsignaciones();
   mostrarTabs();
   mostrarBotonesManual();
-  checkPrimeraVez();
+  // v12.5.0: removido checkPrimeraVez() — el manual ya no se abre solo al inicio.
+  // Sigue accesible vía botón 📖 en el header. Razón: nadie lo miraba y molestaba.
   // Iniciar tracking GPS continuo (solo vendedores, no Admin)
   if (nombre !== 'ADMIN') trackingIniciar();
   // Cargar objetivos
