@@ -1,8 +1,36 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v12.0 — 02/05/2026
+     TCK ADMIN — v12.1 — 02/05/2026
      ──────────────────────────────────────────────────────────────────────
-     SUBENTREGA 4 — CLEANUP + TAB HISTÓRICO (rediseño Logística completo)
+     UI: VIAJES POR FECHA (Opción B) + ocultar TL vacíos
+
+     Cambios v12.1 (sobre v12.0):
+
+       1. lzRenderViajes REORGANIZADO:
+          · ANTES: agrupado por zona (TL primero, después zonas grandes)
+          · AHORA: agrupado por FECHA (cronológico)
+            - Bloques diarios con título "📅 Lunes 4 de mayo"
+            - Dentro de cada día, ordenado por zona (TL primero)
+            - Marcas visuales: HOY (amarillo pulse), MAÑANA (azul),
+              ATRASADO (rojo)
+
+       2. FILTRO de viajes vacíos:
+          · TL (tl/tl_manana/tl_tarde) vacíos → OCULTOS
+          · zona1/zona2/america_fortin vacíos → MOSTRADOS
+            (porque son viajes semanales fijos que se van a hacer
+             aunque no tengan pedidos cargados todavía)
+
+       3. CSS nuevo .lz-fecha-seccion con variantes:
+          · .es-hoy: amarillo + animación pulse
+          · .es-manana: azul
+          · .es-atrasado: rojo (caso anómalo: viaje vencido sin cerrar)
+
+     Pendiente Etapa 2:
+       · Botón manual "+ Crear viajes próxima semana" en admin
+       · Apps Script: corregir ZONA_CALENDARIO para sáb mañana sí, dom no
+       · Apps Script: lógica TL admite múltiples viajes/día (deja sin viaje
+         si en_ruta en lugar de derivar al próximo día)
+       · Cron diario amanecer: crear viajes próximos 7 días automático
 
      Cambios v12.0 (sobre v11.9):
 
@@ -6329,6 +6357,66 @@ input[type="date"] {
   font-size: 11px;
   color: var(--text3);
   font-weight: 600;
+}
+
+/* ════════════════════════════════════════════════
+   v12.1 — SECCIONES POR FECHA (Opción B)
+   ════════════════════════════════════════════════ */
+.lz-fecha-seccion {
+  margin-bottom: 22px;
+  background: rgba(255,255,255,.5);
+  border-radius: 14px;
+  padding: 12px;
+  border: 1px solid var(--cream3);
+}
+.lz-fecha-seccion.es-hoy {
+  background: linear-gradient(135deg, #FFFDE7, #FFF9C4);
+  border-color: #FFD54F;
+  border-width: 2px;
+}
+.lz-fecha-seccion.es-manana {
+  background: linear-gradient(135deg, #E3F2FD, #BBDEFB);
+  border-color: #64B5F6;
+}
+.lz-fecha-seccion.es-atrasado {
+  background: linear-gradient(135deg, #FFEBEE, #FFCDD2);
+  border-color: var(--red);
+}
+.lz-fecha-hdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 4px 10px;
+  margin-bottom: 8px;
+  border-bottom: 1.5px dashed var(--cream3);
+}
+.lz-fecha-titulo {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--text);
+  text-transform: capitalize;
+}
+.lz-fecha-marca {
+  background: var(--red);
+  color: #fff;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .5px;
+}
+.lz-fecha-seccion.es-hoy .lz-fecha-marca {
+  background: #F57C00;
+  animation: pulseHoy 2s ease infinite;
+}
+.lz-fecha-seccion.es-manana .lz-fecha-marca {
+  background: #1976D2;
+}
+@keyframes pulseHoy {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245,124,0,.4); }
+  50% { box-shadow: 0 0 0 6px rgba(245,124,0,0); }
 }
 
 /* Card de viaje */
@@ -17389,34 +17477,88 @@ function lzRenderViajes(el) {
     return;
   }
 
-  // ── Agrupar viajes por zona ───────────────────────────────
-  const porZona = {};
-  _lzViajes.forEach(v => {
-    if (!porZona[v.zona]) porZona[v.zona] = [];
-    porZona[v.zona].push(v);
+  // ── v12.1: FILTRAR viajes que se muestran ────────────────
+  // Reglas:
+  //  · TL (tl, tl_manana, tl_tarde) vacíos → OCULTAR
+  //  · zonas grandes vacías (zona1, zona2, america_fortin) → MOSTRAR
+  //    (porque se van a hacer aunque tengan 0 pedidos)
+  const esTL = (zona) => zona === 'tl' || zona === 'tl_manana' || zona === 'tl_tarde';
+  const viajesVisibles = _lzViajes.filter(v => {
+    const totalPed = Number(v.total_pedidos) || 0;
+    if (totalPed > 0) return true;       // tiene pedidos → siempre mostrar
+    if (esTL(v.zona)) return false;      // TL vacío → ocultar
+    return true;                          // zona grande vacía → mostrar
   });
 
-  // Orden de zonas en pantalla (TL primero por volumen)
-  const ordenZonas = ['tl_manana', 'tl_tarde', 'tl', 'zona1', 'zona2', 'america_fortin'];
-  const zonasOrdenadas = Object.keys(porZona).sort((a, b) => {
-    const ia = ordenZonas.indexOf(a);
-    const ib = ordenZonas.indexOf(b);
-    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  if (viajesVisibles.length === 0) {
+    html += '<div class="planilla-empty" style="margin:20px 0;">'
+      + '🚛 No hay viajes con pedidos por ahora.'
+      + '<div style="margin-top:10px;font-size:12px;color:var(--text3);">'
+      + 'Cuando entren pedidos nuevos, aparecerán acá.'
+      + '</div></div>';
+    el.innerHTML = html;
+    return;
+  }
+
+  // ── v12.1: AGRUPAR POR FECHA (Opción B) ──────────────────
+  // Agrupamos viajes por fecha_salida y dentro de cada fecha
+  // los ordenamos por zona (TL primero por volumen)
+  const ordenZonasIntra = ['tl_manana', 'tl_tarde', 'tl', 'zona1', 'zona2', 'america_fortin'];
+  const porFecha = {};
+  viajesVisibles.forEach(v => {
+    const f = v.fecha_salida || '';
+    if (!porFecha[f]) porFecha[f] = [];
+    porFecha[f].push(v);
   });
 
-  // ── Render de cada zona con sus viajes ────────────────────
-  zonasOrdenadas.forEach(zonaBackend => {
-    const viajesZona = porZona[zonaBackend];
-    const nombre = lzZonaNombreFromKey(zonaBackend);
-    const dias   = lzZonaDiasFromKey(zonaBackend);
+  const fechasOrdenadas = Object.keys(porFecha).sort(); // YYYY-MM-DD ordena bien lexicográficamente
 
-    html += '<div class="lz-viaje-zona-section">';
-    html += '  <div class="lz-viaje-zona-hdr">';
-    html += '    <div class="lz-viaje-zona-nombre">📍 ' + nombre + '</div>';
-    if (dias) html += '    <div class="lz-viaje-zona-meta">' + dias + '</div>';
+  // Helper: nombre legible del día (Lunes 4 de mayo)
+  const _diaSemana = (isoDate) => {
+    const partes = isoDate.split('-');
+    const d = new Date(+partes[0], +partes[1]-1, +partes[2]);
+    const dias = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+    const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+    return dias[d.getDay()] + ' ' + d.getDate() + ' de ' + meses[d.getMonth()];
+  };
+
+  // Helper: marca "HOY" o "MAÑANA" si aplica
+  const _marcaTemporal = (isoDate) => {
+    const hoy = new Date();
+    hoy.setHours(0,0,0,0);
+    const partes = isoDate.split('-');
+    const fechaViaje = new Date(+partes[0], +partes[1]-1, +partes[2]);
+    fechaViaje.setHours(0,0,0,0);
+    const diff = Math.round((fechaViaje - hoy) / 86400000);
+    if (diff === 0) return ' HOY';
+    if (diff === 1) return ' MAÑANA';
+    if (diff < 0) return ' ATRASADO';
+    return '';
+  };
+
+  // ── Render: cada fecha como bloque con título + cards adentro ──
+  fechasOrdenadas.forEach(fechaISO => {
+    const viajesDeEseDia = porFecha[fechaISO];
+    // Ordenar dentro del día por zona (TL primero)
+    viajesDeEseDia.sort((a, b) => {
+      const ia = ordenZonasIntra.indexOf(a.zona);
+      const ib = ordenZonasIntra.indexOf(b.zona);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+
+    const marcaTmp = _marcaTemporal(fechaISO);
+    let claseSeccion = 'lz-fecha-seccion';
+    if (marcaTmp === ' HOY') claseSeccion += ' es-hoy';
+    else if (marcaTmp === ' MAÑANA') claseSeccion += ' es-manana';
+    else if (marcaTmp === ' ATRASADO') claseSeccion += ' es-atrasado';
+
+    html += '<div class="' + claseSeccion + '">';
+    html += '  <div class="lz-fecha-hdr">';
+    html += '    <div class="lz-fecha-titulo">📅 ' + _diaSemana(fechaISO) + '</div>';
+    if (marcaTmp) html += '    <div class="lz-fecha-marca">' + marcaTmp.trim() + '</div>';
     html += '  </div>';
 
-    viajesZona.forEach(v => {
+    viajesDeEseDia.forEach(v => {
       html += lzRenderViajeCard(v);
     });
 
