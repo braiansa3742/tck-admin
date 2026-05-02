@@ -1,8 +1,31 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v11.7 — 01/05/2026
+     TCK ADMIN — v11.8 — 02/05/2026
      ──────────────────────────────────────────────────────────────────────
-     SUBENTREGA 1 — FIX CALENDARIO DE ZONAS
+     SUBENTREGA 2 — VISTA DE VIAJES (rediseño Logística parte 2)
+
+     Cambios v11.8 (sobre v11.7):
+
+       1. NUEVA VISTA "Viajes" (default del tab Logística).
+          Cards por zona mostrando viajes activos: planificado, preparando,
+          en_ruta y rindiendo. Cada card muestra fecha, chofer (si está
+          asignado), pedidos, monto, ciudades. En_ruta tiene barra progreso.
+
+       2. NUEVA VISTA "En Curso" (reemplaza Seguimiento).
+          Solo viajes en_ruta. Cards grandes con avatar del chofer (verde
+          Joan / naranja Luis), stats grid (entregadas/pendientes/cobrado)
+          y barra de progreso del viaje completo.
+
+       3. ELIMINADOS tabs Joan/Luis. Info ya está en cada viaje.
+
+       4. AUTO-REFRESH cada 30 segundos cuando estás en Logística.
+
+       5. CLICK en card de viaje → placeholder por ahora (alert).
+          La pantalla de detalle llega en Subentrega 3.
+
+       NOTA: este código LEE viajes desde Apps Script v25.6.2 vía
+       endpoint viajeListar. Si Apps Script no está deployado o no tiene
+       la tabla viajes en Supabase, la vista muestra "Sin viajes activos".
 
      Cambios v11.7 (sobre v11.6):
 
@@ -6169,6 +6192,319 @@ input[type="date"] {
 }
 .lz-empty-icon { font-size: 40px; margin-bottom: 10px; opacity: .5; }
 
+/* ════════════════════════════════════════════════
+   v11.8 — VISTA DE VIAJES (Subentrega 2)
+   ════════════════════════════════════════════════ */
+
+/* Sección alertas arriba */
+.lz-alertas-section {
+  background: linear-gradient(135deg, #FFEBEE, #FFCDD2);
+  border-radius: 14px;
+  padding: 12px;
+  margin-bottom: 16px;
+  border: 1.5px solid #EF5350;
+}
+.lz-alertas-titulo {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 900;
+  color: var(--red);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+}
+.lz-alerta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #fff;
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s;
+}
+.lz-alerta-row:hover { background: #FAFAFA; }
+.lz-alerta-row:last-child { margin-bottom: 0; }
+.lz-alerta-num {
+  background: var(--red);
+  color: #fff;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 900;
+  font-size: 12px;
+}
+
+/* Section de zona */
+.lz-viaje-zona-section { margin-bottom: 18px; }
+.lz-viaje-zona-hdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0 4px 8px;
+  border-bottom: 2px solid var(--cream3);
+  margin-bottom: 10px;
+}
+.lz-viaje-zona-nombre {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+.lz-viaje-zona-meta {
+  font-size: 11px;
+  color: var(--text3);
+  font-weight: 600;
+}
+
+/* Card de viaje */
+.lz-viaje-card {
+  background: #fff;
+  border-radius: 14px;
+  margin-bottom: 10px;
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(0,0,0,.06);
+  border: 1.5px solid var(--cream3);
+  cursor: pointer;
+  transition: all .2s ease;
+  touch-action: manipulation;
+}
+.lz-viaje-card:active { transform: scale(.98); }
+.lz-viaje-card:hover { box-shadow: 0 4px 14px rgba(0,0,0,.1); }
+.lz-viaje-card.planificado { border-left: 4px solid var(--blue); }
+.lz-viaje-card.preparando  { border-left: 4px solid var(--orange); }
+.lz-viaje-card.en_ruta     {
+  border-left: 4px solid var(--green2);
+  background: linear-gradient(135deg, #fff, #F1F8E9);
+}
+.lz-viaje-card.rindiendo   {
+  border-left: 4px solid var(--gold);
+  background: linear-gradient(135deg, #fff, #FFFDE7);
+}
+
+.lz-viaje-card-top {
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.lz-viaje-fecha-badge {
+  background: var(--cream2);
+  border-radius: 10px;
+  padding: 6px 10px;
+  text-align: center;
+  flex-shrink: 0;
+  min-width: 50px;
+}
+.lz-viaje-fecha-dia {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 18px;
+  font-weight: 900;
+  color: var(--red);
+  line-height: 1;
+}
+.lz-viaje-fecha-mes {
+  font-size: 9px;
+  color: var(--text3);
+  text-transform: uppercase;
+  font-weight: 700;
+  margin-top: 2px;
+}
+
+.lz-viaje-info { flex: 1; min-width: 0; }
+.lz-viaje-titulo {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.lz-viaje-meta {
+  font-size: 11px;
+  color: var(--text3);
+  margin-top: 3px;
+}
+.lz-viaje-chofer-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--cream2);
+  border-radius: 10px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.lz-viaje-chofer-badge.joan { background: var(--green3); color: var(--green); }
+.lz-viaje-chofer-badge.luis { background: var(--orange2); color: var(--orange); }
+
+.lz-viaje-estado-pill {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 3px 10px;
+  border-radius: 12px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  flex-shrink: 0;
+}
+.lz-viaje-estado-pill.estado-planificado { background: var(--blue2); color: var(--blue); }
+.lz-viaje-estado-pill.estado-preparando  { background: var(--orange2); color: var(--orange); }
+.lz-viaje-estado-pill.estado-en_ruta     { background: var(--green3); color: var(--green); }
+.lz-viaje-estado-pill.estado-rindiendo   { background: #FFF8E1; color: #F57F17; }
+
+.lz-viaje-stats-line {
+  padding: 0 14px 12px;
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text2);
+  flex-wrap: wrap;
+}
+.lz-viaje-stat {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.lz-viaje-stat-num {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 900;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.lz-viaje-progreso { padding: 0 14px 12px; }
+.lz-viaje-progreso-bar {
+  background: var(--cream3);
+  border-radius: 4px;
+  height: 6px;
+  overflow: hidden;
+}
+.lz-viaje-progreso-fill {
+  background: linear-gradient(90deg, var(--green2), var(--green));
+  height: 100%;
+}
+.lz-viaje-progreso-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text3);
+  font-weight: 600;
+}
+
+/* Vista En Curso */
+.lz-encurso-card {
+  background: linear-gradient(135deg, #fff, #F1F8E9);
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 10px;
+  box-shadow: 0 3px 12px rgba(46,125,50,.15);
+  border-left: 5px solid var(--green2);
+}
+.lz-encurso-card-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.lz-encurso-avatar {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  background: var(--green2);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 20px;
+  font-weight: 900;
+}
+.lz-encurso-avatar.luis { background: var(--orange); }
+.lz-encurso-info { flex: 1; }
+.lz-encurso-chofer {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 17px;
+  font-weight: 900;
+  color: var(--text);
+}
+.lz-encurso-meta {
+  font-size: 11px;
+  color: var(--text3);
+  margin-top: 2px;
+}
+.lz-encurso-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.lz-encurso-stat {
+  background: rgba(46,125,50,.08);
+  border-radius: 10px;
+  padding: 8px;
+  text-align: center;
+}
+.lz-encurso-stat-num {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 18px;
+  font-weight: 900;
+  color: var(--text);
+}
+.lz-encurso-stat-lbl {
+  font-size: 9px;
+  color: var(--text3);
+  text-transform: uppercase;
+  font-weight: 700;
+  margin-top: 2px;
+}
+.lz-encurso-progreso-bar {
+  background: rgba(46,125,50,.15);
+  border-radius: 6px;
+  height: 8px;
+  overflow: hidden;
+}
+.lz-encurso-progreso-fill {
+  background: linear-gradient(90deg, var(--green2), var(--green));
+  height: 100%;
+}
+.lz-encurso-progreso-txt {
+  text-align: center;
+  font-size: 11px;
+  color: var(--green);
+  font-weight: 700;
+  margin-top: 4px;
+}
+
+.lz-sin-encurso {
+  background: #fff;
+  border-radius: 14px;
+  padding: 30px 20px;
+  text-align: center;
+  border: 1.5px dashed var(--cream3);
+  margin-top: 16px;
+}
+.lz-sin-encurso-ico { font-size: 40px; opacity: .5; margin-bottom: 12px; }
+.lz-sin-encurso-tit {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--text2);
+}
+.lz-sin-encurso-sub {
+  font-size: 12px;
+  color: var(--text3);
+  margin-top: 6px;
+  line-height: 1.4;
+}
+
 
 /* ════════════════════════════════════════════════
    DASHBOARD CARD admin (igual que tck-ventas)
@@ -8468,12 +8804,10 @@ input[type="date"] {
         
       </div>
 
-      <!-- Tabs: Asignar | Por chofer | Vet -->
+      <!-- v11.8: Tabs simplificados — Viajes | En Curso | Cheques | Devoluciones -->
       <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
-        <button class="planilla-chofer-tab sel" id="log-tab-asignar"  onclick="logisticaSelTab('asignar',this)">📋 Asignar</button>
-        <button class="planilla-chofer-tab" id="log-tab-joan"    onclick="logisticaSelTab('joan',this)">🚚 Joan</button>
-        <button class="planilla-chofer-tab" id="log-tab-luis"    onclick="logisticaSelTab('luis',this)">🚚 Luis</button>
-        <button class="planilla-chofer-tab" id="log-tab-seguimiento" onclick="logisticaSelTab('seguimiento',this)">📊 Seguimiento</button>
+        <button class="planilla-chofer-tab sel" id="log-tab-viajes" onclick="logisticaSelTab('viajes',this)">🚛 Viajes</button>
+        <button class="planilla-chofer-tab" id="log-tab-encurso" onclick="logisticaSelTab('encurso',this)">📊 En Curso</button>
         <button class="planilla-chofer-tab" id="log-tab-cheques" onclick="logisticaSelTab('cheques',this)">📋 Cheques</button>
         <button class="planilla-chofer-tab" id="log-tab-devoluciones" onclick="logisticaSelTab('devoluciones',this)">↩️ Devoluciones</button>
       </div>
@@ -16355,6 +16689,427 @@ function lzEsc(s) {
 }
 
 // Genera el HTML completo de la pantalla nueva
+// ════════════════════════════════════════════════════════════════
+// v11.8 — VISTA DE VIAJES (Subentrega 2 del rediseño Logística)
+// ════════════════════════════════════════════════════════════════
+// Reemplaza la vista "Asignar pedido por pedido" por "Asignar a nivel viaje".
+// Cada viaje agrupa N pedidos por zona+fecha y tiene su ciclo de vida:
+//   planificado → preparando → en_ruta → rindiendo → cerrado
+//
+// Esta subentrega solo MUESTRA viajes. La interacción (asignar chofer,
+// cerrar viaje, reagendar) llega en Subentrega 3.
+
+// Estado del módulo
+let _lzViajes = [];           // viajes activos (no cerrados)
+let _lzViajesLoading = false;
+let _lzViajesLoadedAt = null;
+
+// Mapa zona backend → key UI lz (al revés de LZ_ZONA_MAP)
+const LZ_ZONA_BACKEND = {
+  'z1':  'zona1',
+  'z2':  'zona2',
+  'af':  'america_fortin',
+  'tlm': 'tl_manana',
+  'tlt': 'tl_tarde'
+};
+
+const LZ_MESES_CORTOS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+const LZ_DIAS_CORTOS  = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+
+// ───────────────────────────────────────────────────────────────
+// CARGA DE VIAJES desde Apps Script
+// ───────────────────────────────────────────────────────────────
+async function lzCargarViajes() {
+  if (_lzViajesLoading) return;
+  _lzViajesLoading = true;
+  try {
+    // Traer viajes en estados activos (no cerrados)
+    const url = APPS_SCRIPT_URL +
+      '?accion=viajeListar' +
+      '&estados=' + encodeURIComponent('planificado,preparando,en_ruta,rindiendo') +
+      '&orden=fecha_salida.asc';
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (data.status === 'ok' && Array.isArray(data.viajes)) {
+      _lzViajes = data.viajes;
+      _lzViajesLoadedAt = new Date();
+      // Re-render si el usuario está en este tab
+      if (typeof _tabActual !== 'undefined' && _tabActual === 'logistica') {
+        if (_logTab === 'viajes' || _logTab === 'encurso') {
+          renderLogistica();
+        }
+      }
+    } else {
+      console.warn('[lz viajes] respuesta inesperada:', data);
+    }
+  } catch(err) {
+    console.error('[lz viajes] error cargando:', err);
+  } finally {
+    _lzViajesLoading = false;
+  }
+}
+
+// ───────────────────────────────────────────────────────────────
+// HELPERS
+// ───────────────────────────────────────────────────────────────
+
+function lzZonaUIfromBackend(zonaBackend) {
+  if (!zonaBackend) return null;
+  const k = String(zonaBackend).toLowerCase().trim();
+  return LZ_ZONA_MAP[k] || null;
+}
+
+function lzZonaNombreFromKey(zonaBackend) {
+  const ui = lzZonaUIfromBackend(zonaBackend);
+  if (!ui) return zonaBackend;
+  const z = LZ_ZONAS.find(x => x.key === ui);
+  return z ? z.nombre : zonaBackend;
+}
+
+function lzZonaDiasFromKey(zonaBackend) {
+  const ui = lzZonaUIfromBackend(zonaBackend);
+  if (!ui) return '';
+  const z = LZ_ZONAS.find(x => x.key === ui);
+  return z ? z.dias : '';
+}
+
+function lzFechaCard(fechaSalidaISO) {
+  // 'YYYY-MM-DD' → { dia: 4, mes: 'May', diaSemana: 'Lun', diaCompleto: 'Lun May' }
+  if (!fechaSalidaISO) return { dia: '?', mes: '', diaSemana: '', diaCompleto: '' };
+  const partes = String(fechaSalidaISO).split('-');
+  if (partes.length !== 3) return { dia: '?', mes: '', diaSemana: '', diaCompleto: '' };
+  const d = new Date(+partes[0], +partes[1] - 1, +partes[2]);
+  const dia = d.getDate();
+  const mes = LZ_MESES_CORTOS[d.getMonth()] || '';
+  const diaSemana = LZ_DIAS_CORTOS[d.getDay()] || '';
+  return { dia, mes, diaSemana, diaCompleto: diaSemana + ' ' + mes };
+}
+
+function lzFmtMoneda(n) {
+  const v = Number(n) || 0;
+  if (v >= 1000000) return '$' + (v / 1000000).toFixed(1) + 'M';
+  if (v >= 1000) return '$' + Math.round(v / 1000) + 'k';
+  return '$' + Math.round(v);
+}
+
+function lzCiudadesEnViaje(viajeId) {
+  // Cuenta ciudades únicas en pedidos asociados al viaje
+  const set = new Set();
+  _lzPedidosZona.forEach(p => {
+    if (p.viaje_id === viajeId && p.localidad_canonica) {
+      set.add(p.localidad_canonica);
+    }
+  });
+  return set.size;
+}
+
+function lzPedidosDeViaje(viajeId) {
+  return _lzPedidosZona.filter(p => p.viaje_id === viajeId);
+}
+
+function lzPendientesEnViaje(viajeId) {
+  return _lzPedidosZona.filter(p => p.viaje_id === viajeId && p.estado === 'Pendiente').length;
+}
+
+// ───────────────────────────────────────────────────────────────
+// RENDER PRINCIPAL: VISTA DE VIAJES
+// ───────────────────────────────────────────────────────────────
+function lzRenderViajes(el) {
+  if (!window._lz_v118_logged) {
+    console.log('%c[TCK ADMIN v11.8] Vista de Viajes activa ✅',
+      'background: #2E7D32; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: bold;');
+    window._lz_v118_logged = true;
+  }
+
+  // Cargar viajes si no están cargados o si pasó más de 30 segundos
+  if (!_lzViajesLoadedAt || (new Date() - _lzViajesLoadedAt) > 30000) {
+    lzCargarViajes();
+  }
+
+  // Estado de carga inicial: muestra spinner pero no bloquea
+  if (!_lzDataLoaded && _lzViajes.length === 0) {
+    el.innerHTML = '<div class="planilla-empty">'
+      + '<div class="loading-spinner" style="margin:0 auto 12px;"></div>'
+      + 'Cargando viajes y pedidos...</div>';
+    return;
+  }
+
+  let html = '';
+
+  // ── Sección de alertas (solo si hay) ──────────────────────
+  const cSinZ  = _lzSinZona ? _lzSinZona.length : 0;
+  const cNoEnt = _lzNoEntregados ? _lzNoEntregados.length : 0;
+  if (cSinZ > 0 || cNoEnt > 0) {
+    html += '<div class="lz-alertas-section">';
+    html += '  <div class="lz-alertas-titulo">⚠️ Atención</div>';
+    if (cSinZ > 0) {
+      html += '  <div class="lz-alerta-row" onclick="lzAlertaPlaceholder(\'sin_zona\')">';
+      html += '    <span>📭 Pedidos sin zona</span>';
+      html += '    <span class="lz-alerta-num">' + cSinZ + '</span>';
+      html += '  </div>';
+    }
+    if (cNoEnt > 0) {
+      html += '  <div class="lz-alerta-row" onclick="lzAlertaPlaceholder(\'no_entregados\')">';
+      html += '    <span>🚪 No entregados pendientes</span>';
+      html += '    <span class="lz-alerta-num">' + cNoEnt + '</span>';
+      html += '  </div>';
+    }
+    html += '</div>';
+  }
+
+  // ── Mensaje si no hay viajes ──────────────────────────────
+  if (_lzViajes.length === 0) {
+    html += '<div class="planilla-empty" style="margin:20px 0;">'
+      + '🚛 Aún no hay viajes activos.'
+      + '<div style="margin-top:10px;font-size:12px;color:var(--text3);">'
+      + 'Los viajes se crean automáticamente cuando entran pedidos.'
+      + '</div></div>';
+    el.innerHTML = html;
+    return;
+  }
+
+  // ── Agrupar viajes por zona ───────────────────────────────
+  const porZona = {};
+  _lzViajes.forEach(v => {
+    if (!porZona[v.zona]) porZona[v.zona] = [];
+    porZona[v.zona].push(v);
+  });
+
+  // Orden de zonas en pantalla (TL primero por volumen)
+  const ordenZonas = ['tl_manana', 'tl_tarde', 'tl', 'zona1', 'zona2', 'america_fortin'];
+  const zonasOrdenadas = Object.keys(porZona).sort((a, b) => {
+    const ia = ordenZonas.indexOf(a);
+    const ib = ordenZonas.indexOf(b);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
+
+  // ── Render de cada zona con sus viajes ────────────────────
+  zonasOrdenadas.forEach(zonaBackend => {
+    const viajesZona = porZona[zonaBackend];
+    const nombre = lzZonaNombreFromKey(zonaBackend);
+    const dias   = lzZonaDiasFromKey(zonaBackend);
+
+    html += '<div class="lz-viaje-zona-section">';
+    html += '  <div class="lz-viaje-zona-hdr">';
+    html += '    <div class="lz-viaje-zona-nombre">📍 ' + nombre + '</div>';
+    if (dias) html += '    <div class="lz-viaje-zona-meta">' + dias + '</div>';
+    html += '  </div>';
+
+    viajesZona.forEach(v => {
+      html += lzRenderViajeCard(v);
+    });
+
+    html += '</div>';
+  });
+
+  el.innerHTML = html;
+}
+
+// ───────────────────────────────────────────────────────────────
+// RENDER de UNA card de viaje
+// ───────────────────────────────────────────────────────────────
+function lzRenderViajeCard(v) {
+  const fecha = lzFechaCard(v.fecha_salida);
+  const estado = String(v.estado || 'planificado').toLowerCase();
+  const ciudades = lzCiudadesEnViaje(v.id);
+  const pendientes = lzPendientesEnViaje(v.id);
+
+  // Estado pill text
+  const estadoText = {
+    'planificado': 'Planificado',
+    'preparando':  'Preparando',
+    'en_ruta':     'En ruta',
+    'rindiendo':   'Rindiendo'
+  }[estado] || estado;
+
+  // Chofer badge (si ya está asignado)
+  let choferBadge = '';
+  if (v.chofer && v.chofer !== '—' && v.chofer !== '-') {
+    const choferKey = String(v.chofer).toLowerCase();
+    let cls = '';
+    if (choferKey.indexOf('joan') >= 0) cls = ' joan';
+    else if (choferKey.indexOf('luis') >= 0) cls = ' luis';
+    const vehCorto = v.vehiculo && v.vehiculo !== '—'
+      ? ' · ' + String(v.vehiculo).split(' ')[0] : '';
+    choferBadge = '<span class="lz-viaje-chofer-badge' + cls + '">'
+      + (cls === ' joan' ? '🟢' : cls === ' luis' ? '🟠' : '🚛')
+      + ' ' + lzEsc(v.chofer) + vehCorto + '</span>';
+  }
+
+  let html = '<div class="lz-viaje-card ' + estado + '" onclick="lzAbrirDetalleViaje(\'' + v.id + '\')">';
+
+  // Top: fecha + info + estado
+  html += '  <div class="lz-viaje-card-top">';
+  html += '    <div class="lz-viaje-fecha-badge">';
+  html += '      <div class="lz-viaje-fecha-dia">' + fecha.dia + '</div>';
+  html += '      <div class="lz-viaje-fecha-mes">' + fecha.diaCompleto + '</div>';
+  html += '    </div>';
+
+  html += '    <div class="lz-viaje-info">';
+  // Título: si tiene chofer, mostrar # viaje + chofer; si no, "Próximo viaje"
+  let titulo = (v.chofer && v.chofer !== '—')
+    ? 'Viaje #' + (v.id ? v.id.substring(0,4) : '????')
+    : 'Próximo viaje';
+  html += '      <div class="lz-viaje-titulo">' + lzEsc(titulo) + ' ' + choferBadge + '</div>';
+
+  // Sub texto
+  let sub = '';
+  if (v.chofer === '—' || !v.chofer) {
+    sub = 'Sin chofer asignado · click para configurar';
+  } else if (estado === 'planificado' || estado === 'preparando') {
+    sub = 'click para configurar';
+  }
+  if (sub) html += '      <div class="lz-viaje-meta">' + sub + '</div>';
+  html += '    </div>';
+
+  html += '    <div class="lz-viaje-estado-pill estado-' + estado + '">' + estadoText + '</div>';
+  html += '  </div>';
+
+  // Stats line: pedidos / monto / ciudades
+  if (estado === 'en_ruta') {
+    // Si está en ruta, mostrar barra de progreso
+    const cobrado = Number(v.monto_cobrado) || 0;
+    const total = Number(v.monto_total) || 1;
+    const pct = Math.min(100, Math.round((cobrado / total) * 100));
+    html += '  <div class="lz-viaje-progreso">';
+    html += '    <div class="lz-viaje-progreso-bar">';
+    html += '      <div class="lz-viaje-progreso-fill" style="width:' + pct + '%;"></div>';
+    html += '    </div>';
+    html += '    <div class="lz-viaje-progreso-meta">';
+    html += '      <span>' + (v.total_pedidos || 0) + ' pedidos</span>';
+    html += '      <span>' + lzFmtMoneda(cobrado) + ' / ' + lzFmtMoneda(total) + '</span>';
+    html += '    </div>';
+    html += '  </div>';
+  } else {
+    // Stats normales
+    html += '  <div class="lz-viaje-stats-line">';
+    html += '    <div class="lz-viaje-stat">📦 <span class="lz-viaje-stat-num">' + (v.total_pedidos || 0) + '</span> pedidos</div>';
+    html += '    <div class="lz-viaje-stat">💰 <span class="lz-viaje-stat-num">' + lzFmtMoneda(v.monto_total) + '</span></div>';
+    if (ciudades > 0) {
+      html += '    <div class="lz-viaje-stat">📍 <span class="lz-viaje-stat-num">' + ciudades + '</span> ciudades</div>';
+    }
+    if (pendientes > 0) {
+      html += '    <div class="lz-viaje-stat" style="color:var(--orange);">⚠️ <span class="lz-viaje-stat-num">' + pendientes + '</span> sin facturar</div>';
+    }
+    html += '  </div>';
+  }
+
+  html += '</div>';
+  return html;
+}
+
+// ───────────────────────────────────────────────────────────────
+// VISTA: VIAJES EN CURSO (tiempo real)
+// ───────────────────────────────────────────────────────────────
+function lzRenderEnCurso(el) {
+  // Cargar/refrescar viajes
+  if (!_lzViajesLoadedAt || (new Date() - _lzViajesLoadedAt) > 30000) {
+    lzCargarViajes();
+  }
+
+  // Filtrar solo en_ruta
+  const enRuta = _lzViajes.filter(v => v.estado === 'en_ruta');
+
+  let html = '';
+
+  if (enRuta.length === 0) {
+    html += '<div class="lz-sin-encurso">';
+    html += '  <div class="lz-sin-encurso-ico">🛑</div>';
+    html += '  <div class="lz-sin-encurso-tit">Sin viajes en curso</div>';
+    html += '  <div class="lz-sin-encurso-sub">Cuando un chofer arranque un viaje, aparecerá acá en tiempo real</div>';
+    html += '</div>';
+    el.innerHTML = html;
+    return;
+  }
+
+  enRuta.forEach(v => {
+    const choferKey = String(v.chofer || '').toLowerCase();
+    const isJoan = choferKey.indexOf('joan') >= 0;
+    const isLuis = choferKey.indexOf('luis') >= 0;
+    const avatar = (v.chofer || '?').charAt(0).toUpperCase();
+    const colorClase = isJoan ? '' : isLuis ? ' luis' : '';
+    const cardStyle = isLuis
+      ? 'border-left-color:var(--luis);background:linear-gradient(135deg,#fff,#FFF3E0);'
+      : '';
+
+    const cobrado = Number(v.monto_cobrado) || 0;
+    const total = Number(v.monto_total) || 1;
+    const pct = Math.min(100, Math.round((cobrado / total) * 100));
+
+    const totalPedidos = v.total_pedidos || 0;
+    // Aproximación: entregadas = cobrado/total * pedidos
+    const entregadas = Math.round((cobrado / total) * totalPedidos);
+    const pendientes = totalPedidos - entregadas;
+
+    const fecha = lzFechaCard(v.fecha_salida);
+    const zonaNombre = lzZonaNombreFromKey(v.zona);
+
+    html += '<div class="lz-encurso-card" style="' + cardStyle + '">';
+    html += '  <div class="lz-encurso-card-top">';
+    html += '    <div class="lz-encurso-avatar' + colorClase + '">' + avatar + '</div>';
+    html += '    <div class="lz-encurso-info">';
+    html += '      <div class="lz-encurso-chofer">' + lzEsc(v.chofer) + ' · ' + zonaNombre + '</div>';
+    html += '      <div class="lz-encurso-meta">🚛 ' + lzEsc(v.vehiculo || '') +
+            ' · Salió ' + fecha.diaCompleto + ' ' + fecha.dia +
+            ' · Viaje #' + (v.id ? v.id.substring(0,4) : '?') + '</div>';
+    html += '    </div>';
+    html += '  </div>';
+
+    html += '  <div class="lz-encurso-stats-grid">';
+    html += '    <div class="lz-encurso-stat">';
+    html += '      <div class="lz-encurso-stat-num">' + entregadas + '</div>';
+    html += '      <div class="lz-encurso-stat-lbl">Entregadas</div>';
+    html += '    </div>';
+    html += '    <div class="lz-encurso-stat">';
+    html += '      <div class="lz-encurso-stat-num">' + pendientes + '</div>';
+    html += '      <div class="lz-encurso-stat-lbl">Pendientes</div>';
+    html += '    </div>';
+    html += '    <div class="lz-encurso-stat">';
+    html += '      <div class="lz-encurso-stat-num">' + lzFmtMoneda(cobrado) + '</div>';
+    html += '      <div class="lz-encurso-stat-lbl">Cobrado</div>';
+    html += '    </div>';
+    html += '  </div>';
+
+    const fillStyle = isLuis
+      ? 'background:linear-gradient(90deg,var(--luis),#F57C00);'
+      : '';
+    html += '  <div class="lz-encurso-progreso-bar">';
+    html += '    <div class="lz-encurso-progreso-fill" style="width:' + pct + '%;' + fillStyle + '"></div>';
+    html += '  </div>';
+    html += '  <div class="lz-encurso-progreso-txt"' +
+            (isLuis ? ' style="color:var(--luis);"' : '') + '>' +
+            pct + '% del viaje completo</div>';
+    html += '</div>';
+  });
+
+  el.innerHTML = html;
+}
+
+// ───────────────────────────────────────────────────────────────
+// PLACEHOLDER: detalle del viaje (Subentrega 3)
+// ───────────────────────────────────────────────────────────────
+function lzAbrirDetalleViaje(viajeId) {
+  // En Subentrega 3 esto va a abrir un modal con todo el detalle
+  // (chofer, vehículo, pedidos, botón cerrar viaje, etc.)
+  alert('Detalle del viaje #' + viajeId.substring(0,4) +
+        '\n\nLa pantalla de detalle se agrega en la próxima subentrega.\n\n' +
+        'Por ahora podés ver los pedidos asociados en la consola del navegador.');
+  console.log('[lz] Pedidos del viaje ' + viajeId + ':',
+    lzPedidosDeViaje(viajeId));
+}
+
+// ───────────────────────────────────────────────────────────────
+// AUTO-REFRESH cada 30 segundos cuando estamos en logística
+// ───────────────────────────────────────────────────────────────
+setInterval(() => {
+  if (typeof _tabActual !== 'undefined' && _tabActual === 'logistica') {
+    if (_logTab === 'viajes' || _logTab === 'encurso') {
+      lzCargarViajes();
+    }
+  }
+}, 30000);
+
+
 function lzRenderAsignar(el) {
   // v11.5: log distintivo para verificar deploy
   if (!window._lz_v115_logged) {
@@ -18223,7 +18978,7 @@ function cerrarVetModal() {
 const DIAS_ES_LOG  = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
 const MESES_ES_LOG = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 
-let _logTab = 'asignar';
+let _logTab = 'viajes'; // v11.8: default cambió de 'asignar' a 'viajes'
 
 function logisticaSelTab(tab, btn) {
   _logTab = tab;
@@ -18280,18 +19035,22 @@ function renderLogistica() {
   const fechaEl = document.getElementById('planilla-fecha');
   if (fechaEl) fechaEl.textContent = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' });
 
-  // Tab vet accesible desde Joan/Luis, no como subtab independiente
-  if (_logTab === 'joan') { renderLogisticaChofer(el, 'Joan'); return; }
-  if (_logTab === 'luis') { renderLogisticaChofer(el, 'Luis'); return; }
-  if (_logTab === 'seguimiento') { renderLogisticaSeguimiento(el); return; }
-  if (_logTab === 'cheques') { renderLogisticaCheques(el); return; }
+  // v11.8: nueva organización de subtabs basada en VIAJES
+  // - viajes (DEFAULT): vista principal con cards por zona
+  // - encurso: viajes en_ruta tiempo real (reemplaza Seguimiento)
+  // - cheques, devoluciones: sin cambios
+  // Tabs Joan/Luis eliminados (info se ve por viaje)
+  if (_logTab === 'encurso')      { lzRenderEnCurso(el); return; }
+  if (_logTab === 'seguimiento')  { lzRenderEnCurso(el); return; }  // alias retrocompat
+  if (_logTab === 'cheques')      { renderLogisticaCheques(el); return; }
   if (_logTab === 'devoluciones') { renderLogisticaDevoluciones(el); return; }
-  renderLogisticaAsignar(el);
+  // Tabs viejos (joan, luis, asignar) caen al fallback de viajes
+  lzRenderViajes(el);
 }
 
 function renderLogisticaAsignar(el) {
-  // v12.0 — delegamos al nuevo render basado en zonas
-  return lzRenderAsignar(el);
+  // v11.8 — quedó como fallback en caso de necesidad
+  return lzRenderViajes(el);
 }
 
 // v11.4 LEGACY — preservado por si necesitamos rollback rápido
