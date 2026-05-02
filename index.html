@@ -1,8 +1,41 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v11.8 — 02/05/2026
+     TCK ADMIN — v11.9 — 02/05/2026
      ──────────────────────────────────────────────────────────────────────
-     SUBENTREGA 2 — VISTA DE VIAJES (rediseño Logística parte 2)
+     SUBENTREGA 3 — DETALLE DE VIAJE (rediseño Logística parte 3)
+
+     Cambios v11.9 (sobre v11.8):
+
+       1. MODAL DETALLE de viaje (full-screen).
+          Click en una card de viaje → abre modal con:
+            · Header con fecha, zona, estado
+            · Banner contextual según estado
+            · Selector chofer + vehículo (editable si planificado/preparando)
+            · Lista de pedidos (Confirmados arriba, Pendientes destacados)
+            · Acciones según estado del viaje
+
+       2. FLUJO DE CIERRE de viaje.
+          Botón "🏁 Cerrar viaje e imprimir planillas":
+            · Si hay Pendientes → modal de confirmación con explicación
+            · Pendientes se desasocian (van al próximo viaje cuando facturen)
+            · Estado pasa a en_ruta vía endpoint viajeArrancar
+            · Botones de planilla se habilitan
+            · Bloqueado si no hay chofer asignado o no hay pedidos
+
+       3. ASIGNAR CHOFER + VEHÍCULO en línea.
+          Cambia estado planificado → preparando.
+          Endpoint: viajeAsignarChofer.
+
+       4. REAGENDAR viaje.
+          Cambiar fecha de salida + motivo opcional.
+          Endpoint: viajeReagendar.
+
+       5. CONFIRMAR RENDICIÓN del chofer (cuando viaje está en estado
+          rindiendo). Endpoint: viajeConfirmarRendicion.
+
+       6. INTEGRACIÓN con planillas existentes.
+          Botones llaman a descargarPlanillaCarga(chofer) y vetGenerar()
+          inyectando chofer/vehículo del viaje.
 
      Cambios v11.8 (sobre v11.7):
 
@@ -6503,6 +6536,324 @@ input[type="date"] {
   color: var(--text3);
   margin-top: 6px;
   line-height: 1.4;
+}
+
+/* ════════════════════════════════════════════════
+   v11.9 — MODAL DETALLE DE VIAJE (Subentrega 3)
+   ════════════════════════════════════════════════ */
+.v-detalle-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.5);
+  z-index: 800;
+  display: none;
+  overflow-y: auto;
+}
+.v-detalle-overlay.open { display: block; }
+.v-detalle-sheet {
+  background: var(--cream);
+  min-height: 100vh;
+  max-width: 480px;
+  margin: 0 auto;
+  padding-bottom: 40px;
+}
+.v-detalle-hdr {
+  background: linear-gradient(135deg, var(--red), var(--red2));
+  padding: 14px 16px;
+  color: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.v-detalle-back {
+  background: rgba(255,255,255,.2);
+  border: none;
+  color: #fff;
+  font-size: 14px;
+  padding: 6px 12px;
+  border-radius: 16px;
+  cursor: pointer;
+  margin-bottom: 8px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+}
+.v-detalle-titulo {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1;
+}
+.v-detalle-sub {
+  font-size: 12px;
+  opacity: .9;
+  margin-top: 4px;
+}
+.v-detalle-reagendado {
+  margin-top: 6px;
+  background: rgba(255,255,255,.18);
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  display: inline-block;
+}
+
+.v-banner-info,
+.v-banner-warn,
+.v-banner-success {
+  margin: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border-left: 4px solid;
+}
+.v-banner-info {
+  background: linear-gradient(135deg, var(--blue2), #BBDEFB);
+  border-left-color: var(--blue);
+  color: var(--blue);
+}
+.v-banner-warn {
+  background: linear-gradient(135deg, var(--orange2), #FFE0B2);
+  border-left-color: var(--orange);
+  color: var(--orange);
+}
+.v-banner-success {
+  background: linear-gradient(135deg, var(--green3), #C8E6C9);
+  border-left-color: var(--green);
+  color: var(--green);
+}
+
+.v-detalle-section {
+  background: #fff;
+  margin: 12px;
+  border-radius: 14px;
+  padding: 14px;
+  box-shadow: 0 2px 10px rgba(0,0,0,.05);
+}
+.v-detalle-titulo-mini {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 15px;
+  font-weight: 900;
+  color: var(--text);
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+}
+.v-detalle-section-hdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.v-detalle-section-hdr .v-detalle-titulo-mini { margin-bottom: 0; }
+.v-detalle-cnt {
+  background: var(--cream2);
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text2);
+}
+
+.v-detalle-config-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.v-detalle-config-field { flex: 1; }
+.v-detalle-config-field label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text3);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+.v-detalle-config-field select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1.5px solid var(--cream3);
+  border-radius: 10px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  background: #fff;
+  color: var(--text);
+}
+.v-detalle-static {
+  padding: 10px 12px;
+  border: 1.5px solid var(--cream3);
+  border-radius: 10px;
+  background: var(--cream2);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text2);
+}
+
+.v-btn-guardar-config {
+  width: 100%;
+  padding: 12px;
+  background: linear-gradient(135deg, var(--blue), #1565C0);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  margin-top: 8px;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+}
+.v-btn-guardar-config.hidden { display: none; }
+.v-btn-guardar-config:disabled {
+  background: var(--cream3);
+  color: var(--text3);
+  cursor: not-allowed;
+}
+
+/* Pedidos */
+.v-pedido-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--cream3);
+  gap: 8px;
+}
+.v-pedido-row:last-child { border-bottom: none; }
+.v-pedido-row.no-facturado {
+  background: var(--orange2);
+  padding: 10px;
+  border-radius: 8px;
+  border-bottom: none;
+  margin-bottom: 4px;
+  border: 1px solid #FFB74D;
+}
+.v-pedido-info { flex: 1; min-width: 0; }
+.v-pedido-cliente {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v-pedido-meta {
+  font-size: 10px;
+  color: var(--text3);
+  margin-top: 2px;
+}
+.v-pedido-right {
+  text-align: right;
+  flex-shrink: 0;
+}
+.v-pedido-monto {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 900;
+  color: var(--green);
+}
+.v-pedido-estado-mini {
+  font-size: 9px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 6px;
+  text-transform: uppercase;
+  display: inline-block;
+  margin-top: 2px;
+}
+.v-pedido-estado-mini.estado-mini-pend { background: var(--orange2); color: var(--orange); }
+.v-pedido-estado-mini.estado-mini-conf { background: var(--green3); color: var(--green); }
+
+.v-sin-pedidos {
+  text-align: center;
+  padding: 24px 12px;
+  color: var(--text3);
+  font-size: 13px;
+}
+.v-sin-pedidos-icono {
+  font-size: 32px;
+  opacity: .5;
+  margin-bottom: 8px;
+}
+
+/* Acciones */
+.v-detalle-acciones {
+  margin: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.v-btn-grande {
+  padding: 14px;
+  border: none;
+  border-radius: 12px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 15px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.v-btn-cerrar {
+  background: linear-gradient(135deg, var(--red), var(--red2));
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(139,0,0,.3);
+}
+.v-btn-cerrar:disabled {
+  background: var(--cream3);
+  color: var(--text3);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.v-btn-planilla {
+  background: #fff;
+  border: 2px solid var(--green2);
+  color: var(--green);
+}
+.v-btn-planilla:disabled {
+  border-color: var(--cream3);
+  color: var(--text3);
+  cursor: not-allowed;
+  background: var(--cream2);
+}
+.v-btn-planilla.activo {
+  background: var(--green3);
+}
+.v-btn-confirmar-rend {
+  background: linear-gradient(135deg, var(--green2), var(--green));
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(27,94,32,.3);
+}
+.v-btn-reagendar {
+  background: #fff;
+  border: 1.5px solid var(--orange);
+  color: var(--orange);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 10px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+.v-warn-pendientes {
+  background: linear-gradient(135deg, var(--orange2), #FFE0B2);
+  border-left: 4px solid var(--orange);
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--orange);
+  font-weight: 600;
 }
 
 
@@ -17086,17 +17437,8 @@ function lzRenderEnCurso(el) {
 }
 
 // ───────────────────────────────────────────────────────────────
-// PLACEHOLDER: detalle del viaje (Subentrega 3)
+// lzAbrirDetalleViaje — definida en bloque v11.9 (Subentrega 3)
 // ───────────────────────────────────────────────────────────────
-function lzAbrirDetalleViaje(viajeId) {
-  // En Subentrega 3 esto va a abrir un modal con todo el detalle
-  // (chofer, vehículo, pedidos, botón cerrar viaje, etc.)
-  alert('Detalle del viaje #' + viajeId.substring(0,4) +
-        '\n\nLa pantalla de detalle se agrega en la próxima subentrega.\n\n' +
-        'Por ahora podés ver los pedidos asociados en la consola del navegador.');
-  console.log('[lz] Pedidos del viaje ' + viajeId + ':',
-    lzPedidosDeViaje(viajeId));
-}
 
 // ───────────────────────────────────────────────────────────────
 // AUTO-REFRESH cada 30 segundos cuando estamos en logística
@@ -17109,6 +17451,515 @@ setInterval(() => {
   }
 }, 30000);
 
+
+// ════════════════════════════════════════════════════════════════
+// v11.9 — DETALLE DE VIAJE (Subentrega 3)
+// ════════════════════════════════════════════════════════════════
+// Modal full-screen con todo lo que necesita Francisco para gestionar
+// un viaje: asignar chofer/vehículo, ver pedidos, cerrar viaje, reagendar.
+
+const VEHICULOS_DISPONIBLES = [
+  'Daily AG308YN',
+  'Iveco Tector AG495LU',
+  'Iveco Tector AF979ZU'
+];
+
+let _vDetalleId = null;       // ID del viaje abierto
+let _vDetalleData = null;     // Datos del viaje en memoria
+
+// ───────────────────────────────────────────────────────────────
+// ABRIR MODAL DETALLE
+// ───────────────────────────────────────────────────────────────
+function lzAbrirDetalleViaje(viajeId) {
+  _vDetalleId = viajeId;
+  _vDetalleData = _lzViajes.find(v => v.id === viajeId);
+  if (!_vDetalleData) {
+    toast('Viaje no encontrado', 'err');
+    return;
+  }
+
+  // Crear overlay si no existe
+  let overlay = document.getElementById('v-detalle-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'v-detalle-overlay';
+    overlay.className = 'v-detalle-overlay';
+    document.body.appendChild(overlay);
+  }
+
+  overlay.innerHTML = lzRenderDetalleViaje();
+  overlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function lzCerrarDetalleViaje() {
+  const overlay = document.getElementById('v-detalle-overlay');
+  if (overlay) overlay.classList.remove('open');
+  document.body.style.overflow = '';
+  _vDetalleId = null;
+  _vDetalleData = null;
+}
+
+// ───────────────────────────────────────────────────────────────
+// RENDER DEL MODAL COMPLETO
+// ───────────────────────────────────────────────────────────────
+function lzRenderDetalleViaje() {
+  const v = _vDetalleData;
+  if (!v) return '';
+
+  const fecha = lzFechaCard(v.fecha_salida);
+  const estado = String(v.estado || 'planificado').toLowerCase();
+  const zonaNombre = lzZonaNombreFromKey(v.zona);
+  const pedidos = lzPedidosDeViaje(v.id);
+  const pendientes = pedidos.filter(p => p.estado === 'Pendiente').length;
+  const confirmados = pedidos.filter(p => p.estado === 'Confirmado').length;
+  const tieneChofer = v.chofer && v.chofer !== '—' && v.chofer !== '-';
+
+  let html = '<div class="v-detalle-sheet">';
+
+  // ── HEADER ───────────────────────────────────────────────
+  html += '  <div class="v-detalle-hdr">';
+  html += '    <button class="v-detalle-back" onclick="lzCerrarDetalleViaje()">← Volver</button>';
+  html += '    <div class="v-detalle-titulo">🚛 Viaje ' + lzEsc(zonaNombre) + '</div>';
+  html += '    <div class="v-detalle-sub">Salida: ' + fecha.diaCompleto + ' ' + fecha.dia +
+          ' · Estado: <strong>' + estado.charAt(0).toUpperCase() + estado.slice(1) + '</strong></div>';
+  if (v.reagendado) {
+    html += '    <div class="v-detalle-reagendado">📅 Reagendado' +
+            (v.motivo_reagendo ? ': ' + lzEsc(v.motivo_reagendo) : '') + '</div>';
+  }
+  html += '  </div>';
+
+  // ── BANNER de estado ─────────────────────────────────────
+  if (estado === 'planificado' || estado === 'preparando') {
+    html += '  <div class="v-banner-info">';
+    html += '    💡 Estado <strong>' + (estado === 'planificado' ? 'Planificado' : 'Preparando') + '</strong>: ';
+    html += '    los vendedores pueden seguir sumando pedidos hasta que cierres el viaje.';
+    html += '  </div>';
+  } else if (estado === 'en_ruta') {
+    html += '  <div class="v-banner-success">';
+    html += '    🚛 Viaje <strong>en ruta</strong> — el chofer está entregando.';
+    html += '  </div>';
+  } else if (estado === 'rindiendo') {
+    html += '  <div class="v-banner-warn">';
+    html += '    💰 Viaje cerrado, esperando rendición del chofer.';
+    html += '  </div>';
+  }
+
+  // ── CONFIGURACIÓN (chofer + vehículo) ────────────────────
+  // Solo editable si está planificado o preparando
+  const editable = (estado === 'planificado' || estado === 'preparando');
+  html += '  <div class="v-detalle-section">';
+  html += '    <div class="v-detalle-titulo-mini">⚙️ Configurar viaje</div>';
+  html += '    <div class="v-detalle-config-row">';
+  html += '      <div class="v-detalle-config-field">';
+  html += '        <label>Chofer</label>';
+  if (editable) {
+    html += '        <select id="v-chofer-sel" onchange="lzMarcarConfigCambiada()">';
+    html += '          <option value="">— Elegir —</option>';
+    html += '          <option value="Joan"' + (v.chofer === 'Joan' ? ' selected' : '') + '>🟢 Joan</option>';
+    html += '          <option value="Luis"' + (v.chofer === 'Luis' ? ' selected' : '') + '>🟠 Luis</option>';
+    html += '        </select>';
+  } else {
+    html += '        <div class="v-detalle-static">' + lzEsc(tieneChofer ? v.chofer : '—') + '</div>';
+  }
+  html += '      </div>';
+  html += '      <div class="v-detalle-config-field">';
+  html += '        <label>Vehículo</label>';
+  if (editable) {
+    html += '        <select id="v-vehiculo-sel" onchange="lzMarcarConfigCambiada()">';
+    html += '          <option value="">— Elegir —</option>';
+    VEHICULOS_DISPONIBLES.forEach(veh => {
+      const sel = (v.vehiculo === veh) ? ' selected' : '';
+      html += '          <option value="' + lzEsc(veh) + '"' + sel + '>' + lzEsc(veh) + '</option>';
+    });
+    html += '        </select>';
+  } else {
+    html += '        <div class="v-detalle-static">' + lzEsc(v.vehiculo || '—') + '</div>';
+  }
+  html += '      </div>';
+  html += '    </div>';
+  if (editable) {
+    html += '    <button class="v-btn-guardar-config hidden" id="v-btn-guardar-config" ' +
+            'onclick="lzGuardarConfigViaje()">💾 Guardar cambios</button>';
+  }
+  html += '  </div>';
+
+  // ── PEDIDOS DEL VIAJE ────────────────────────────────────
+  const totalMonto = pedidos.reduce((s, p) => s + (Number(p.total) || 0), 0);
+  html += '  <div class="v-detalle-section">';
+  html += '    <div class="v-detalle-section-hdr">';
+  html += '      <div class="v-detalle-titulo-mini">📦 Pedidos del viaje</div>';
+  html += '      <div class="v-detalle-cnt">' + pedidos.length + ' · ' + lzFmtMoneda(totalMonto) + '</div>';
+  html += '    </div>';
+
+  if (pedidos.length === 0) {
+    html += '    <div class="v-sin-pedidos">';
+    html += '      <div class="v-sin-pedidos-icono">📭</div>';
+    html += '      Aún no hay pedidos asociados a este viaje.';
+    html += '    </div>';
+  } else {
+    // Pedidos ordenados: Confirmados primero, después Pendientes (warn)
+    const ordenados = [...pedidos].sort((a, b) => {
+      // Pendientes al final para destacarlos
+      if (a.estado === 'Pendiente' && b.estado !== 'Pendiente') return 1;
+      if (b.estado === 'Pendiente' && a.estado !== 'Pendiente') return -1;
+      // Por ciudad
+      return (a.localidad_canonica || '').localeCompare(b.localidad_canonica || '');
+    });
+    ordenados.forEach(p => {
+      html += lzRenderPedidoEnViaje(p);
+    });
+  }
+  html += '  </div>';
+
+  // ── ACCIONES ─────────────────────────────────────────────
+  html += '  <div class="v-detalle-acciones">';
+
+  if (estado === 'planificado' || estado === 'preparando') {
+    // Botón principal: cerrar viaje
+    const noTieneChofer = !tieneChofer;
+    const sinPedidos = pedidos.length === 0;
+    let btnDisabled = '';
+    let btnTitle = '';
+    if (noTieneChofer) {
+      btnDisabled = ' disabled';
+      btnTitle = ' title="Asigná un chofer primero"';
+    } else if (sinPedidos) {
+      btnDisabled = ' disabled';
+      btnTitle = ' title="No hay pedidos para cargar"';
+    }
+
+    html += '    <button class="v-btn-grande v-btn-cerrar"' + btnDisabled + btnTitle +
+            ' onclick="lzCerrarViajeBtn()">';
+    html += '      🏁 Cerrar viaje e imprimir planillas';
+    html += '    </button>';
+
+    if (pendientes > 0) {
+      html += '    <div class="v-warn-pendientes">';
+      html += '      ⚠️ Tenés <strong>' + pendientes + ' pedido' + (pendientes > 1 ? 's' : '') +
+              ' sin facturar</strong>. Si cerrás ahora, ' + (pendientes > 1 ? 'quedan' : 'queda') +
+              ' afuera.';
+      html += '    </div>';
+    }
+
+    // Botones de planillas — DESHABILITADOS hasta cerrar
+    html += '    <button class="v-btn-grande v-btn-planilla" disabled ' +
+            'title="Cerrá el viaje primero">';
+    html += '      📦 Planilla de carga';
+    html += '    </button>';
+    html += '    <button class="v-btn-grande v-btn-planilla" disabled ' +
+            'title="Cerrá el viaje primero">';
+    html += '      🩺 Planilla veterinaria';
+    html += '    </button>';
+
+    // Reagendar
+    html += '    <button class="v-btn-reagendar" onclick="lzAbrirReagendar()">';
+    html += '      📅 Reagendar viaje';
+    html += '    </button>';
+
+  } else if (estado === 'en_ruta') {
+    // Viaje en ruta: planillas habilitadas, no se puede cerrar de nuevo
+    html += '    <button class="v-btn-grande v-btn-planilla activo" ' +
+            'onclick="lzImprimirPlanillaCargaViaje()">';
+    html += '      📦 Planilla de carga (reimprimir)';
+    html += '    </button>';
+    if (v.zona !== 'tl' && v.zona !== 'tl_manana' && v.zona !== 'tl_tarde') {
+      html += '    <button class="v-btn-grande v-btn-planilla activo" ' +
+              'onclick="lzImprimirPlanillaVetViaje()">';
+      html += '      🩺 Planilla veterinaria (reimprimir)';
+      html += '    </button>';
+    }
+  } else if (estado === 'rindiendo') {
+    html += '    <button class="v-btn-grande v-btn-confirmar-rend" ' +
+            'onclick="lzConfirmarRendicionViaje()">';
+    html += '      ✅ Confirmar rendición del chofer';
+    html += '    </button>';
+  }
+
+  html += '  </div>';
+
+  html += '</div>';
+  return html;
+}
+
+// ───────────────────────────────────────────────────────────────
+// RENDER de un pedido dentro del modal
+// ───────────────────────────────────────────────────────────────
+function lzRenderPedidoEnViaje(p) {
+  const isPend = p.estado === 'Pendiente';
+  const cls = isPend ? ' no-facturado' : '';
+  const monto = Number(p.total) || 0;
+
+  let html = '<div class="v-pedido-row' + cls + '">';
+  html += '  <div class="v-pedido-info">';
+  html += '    <div class="v-pedido-cliente">';
+  if (isPend) html += '⚠️ ';
+  html += lzEsc(p.cliente || '(sin cliente)');
+  html += '    </div>';
+  html += '    <div class="v-pedido-meta">📍 ' + lzEsc(p.localidad_canonica || 'Sin ciudad');
+  if (p.vendedor) html += ' · ' + lzEsc(p.vendedor);
+  if (isPend) html += ' · <span style="color:var(--orange);font-weight:700;">Falta facturar Xubio</span>';
+  html += '    </div>';
+  html += '  </div>';
+  html += '  <div class="v-pedido-right">';
+  html += '    <div class="v-pedido-monto">' + lzFmtMoneda(monto) + '</div>';
+  const estadoTxt = isPend ? 'Pendiente' : p.estado;
+  const estadoCls = isPend ? 'estado-mini-pend' : 'estado-mini-conf';
+  html += '    <div class="v-pedido-estado-mini ' + estadoCls + '">' + estadoTxt + '</div>';
+  html += '  </div>';
+  html += '</div>';
+  return html;
+}
+
+// ───────────────────────────────────────────────────────────────
+// MARCA QUE LA CONFIG CAMBIÓ (mostrar botón Guardar)
+// ───────────────────────────────────────────────────────────────
+function lzMarcarConfigCambiada() {
+  const btn = document.getElementById('v-btn-guardar-config');
+  if (btn) btn.classList.remove('hidden');
+}
+
+// ───────────────────────────────────────────────────────────────
+// GUARDAR CONFIGURACIÓN (chofer + vehículo) → Apps Script
+// ───────────────────────────────────────────────────────────────
+async function lzGuardarConfigViaje() {
+  const chofer = document.getElementById('v-chofer-sel').value;
+  const vehiculo = document.getElementById('v-vehiculo-sel').value;
+  if (!chofer || !vehiculo) {
+    toast('Elegí chofer y vehículo', 'err');
+    return;
+  }
+
+  const btn = document.getElementById('v-btn-guardar-config');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Guardando...';
+  }
+
+  try {
+    const url = APPS_SCRIPT_URL +
+      '?accion=viajeAsignarChofer' +
+      '&viaje_id=' + encodeURIComponent(_vDetalleId) +
+      '&chofer=' + encodeURIComponent(chofer) +
+      '&vehiculo=' + encodeURIComponent(vehiculo);
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (data.status === 'ok') {
+      toast('✅ Chofer asignado', 'ok');
+      // Actualizar en memoria
+      _vDetalleData.chofer = chofer;
+      _vDetalleData.vehiculo = vehiculo;
+      _vDetalleData.estado = 'preparando';
+      // Re-render del modal
+      const overlay = document.getElementById('v-detalle-overlay');
+      if (overlay) overlay.innerHTML = lzRenderDetalleViaje();
+      // Recargar lista de viajes en background
+      lzCargarViajes();
+    } else {
+      toast('❌ ' + (data.message || 'Error al asignar'), 'err');
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '💾 Guardar cambios';
+      }
+    }
+  } catch(err) {
+    toast('❌ Error de conexión', 'err');
+    console.error('[lz] guardarConfig error:', err);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '💾 Guardar cambios';
+    }
+  }
+}
+
+// ───────────────────────────────────────────────────────────────
+// CERRAR VIAJE
+// ───────────────────────────────────────────────────────────────
+function lzCerrarViajeBtn() {
+  const v = _vDetalleData;
+  if (!v) return;
+  const pedidos = lzPedidosDeViaje(v.id);
+  const pendientes = pedidos.filter(p => p.estado === 'Pendiente').length;
+
+  // Si hay pendientes, mostrar modal de confirmación
+  if (pendientes > 0) {
+    let msg = 'Tenés ' + pendientes + ' pedido' + (pendientes > 1 ? 's' : '') +
+              ' sin facturar (Pendiente). Si cerrás ahora:\n\n' +
+              '• Esos pedidos quedan AFUERA del viaje\n' +
+              '• Cuando el vendedor los facture (pasen a Confirmado), se asignan al PRÓXIMO viaje de la zona\n' +
+              '• Hay que avisar al cliente que su pedido se entrega la próxima semana\n\n' +
+              '¿Confirmás cerrar el viaje?';
+    if (!confirm(msg)) return;
+  } else {
+    // Sin pendientes: confirmación simple
+    if (!confirm('¿Cerrar viaje e imprimir planillas?\n\n' +
+                 'Una vez cerrado, no se pueden agregar más pedidos.')) return;
+  }
+
+  lzEjecutarCerrarViaje();
+}
+
+async function lzEjecutarCerrarViaje() {
+  const v = _vDetalleData;
+
+  try {
+    // 1. Si hay pendientes, desasociarlos primero
+    const pedidos = lzPedidosDeViaje(v.id);
+    const pendientes = pedidos.filter(p => p.estado === 'Pendiente');
+    for (const p of pendientes) {
+      const urlD = APPS_SCRIPT_URL +
+        '?accion=viajeQuitarPedido' +
+        '&pedido_id=' + encodeURIComponent(p.pedido_id);
+      try { await fetch(urlD); } catch(e) { console.warn('No se pudo desasociar', p.pedido_id, e); }
+    }
+
+    // 2. Cambiar viaje a en_ruta usando endpoint viajeArrancar
+    const url = APPS_SCRIPT_URL +
+      '?accion=viajeArrancar' +
+      '&viaje_id=' + encodeURIComponent(v.id);
+    const resp = await fetch(url);
+    const data = await resp.json();
+
+    if (data.status === 'ok') {
+      toast('✅ Viaje cerrado. Imprimí las planillas para cargar el camión.', 'ok');
+      // Actualizar en memoria
+      _vDetalleData.estado = 'en_ruta';
+      // Re-render del modal
+      const overlay = document.getElementById('v-detalle-overlay');
+      if (overlay) overlay.innerHTML = lzRenderDetalleViaje();
+      // Recargar viajes
+      lzCargarViajes();
+    } else {
+      toast('❌ ' + (data.message || 'Error al cerrar viaje'), 'err');
+    }
+  } catch(err) {
+    toast('❌ Error de conexión', 'err');
+    console.error('[lz] cerrarViaje error:', err);
+  }
+}
+
+// ───────────────────────────────────────────────────────────────
+// IMPRIMIR PLANILLAS DEL VIAJE (reusa funciones existentes)
+// ───────────────────────────────────────────────────────────────
+function lzImprimirPlanillaCargaViaje() {
+  const v = _vDetalleData;
+  if (!v || !v.chofer || v.chofer === '—') {
+    toast('Falta chofer asignado', 'err');
+    return;
+  }
+  // Llama a función existente con chofer del viaje
+  if (typeof descargarPlanillaCarga === 'function') {
+    descargarPlanillaCarga(v.chofer);
+  } else {
+    toast('Función de planilla no disponible', 'err');
+  }
+}
+
+function lzImprimirPlanillaVetViaje() {
+  const v = _vDetalleData;
+  if (!v || !v.chofer || v.chofer === '—') {
+    toast('Falta chofer asignado', 'err');
+    return;
+  }
+  // Setea _vetDatos y llama a vetGenerar (las planillas vet usan estado global)
+  if (typeof _vetDatos !== 'undefined') {
+    window._vetDatos = { chofer: v.chofer, vehiculo: v.vehiculo };
+  }
+  // Pre-llenar selectores en el modal vet existente
+  const choferSel = document.getElementById('vet-chofer-sel');
+  const vehSel = document.getElementById('vet-vehiculo-sel');
+  if (choferSel) choferSel.value = v.chofer;
+  if (vehSel) vehSel.value = v.vehiculo;
+
+  // Abrir modal vet existente
+  if (typeof abrirVetModal === 'function') {
+    abrirVetModal();
+  } else {
+    // Si no existe, intentar generar directo
+    if (typeof vetGenerar === 'function') vetGenerar();
+  }
+}
+
+// ───────────────────────────────────────────────────────────────
+// REAGENDAR VIAJE
+// ───────────────────────────────────────────────────────────────
+function lzAbrirReagendar() {
+  const v = _vDetalleData;
+  if (!v) return;
+
+  const fechaActual = v.fecha_salida;
+  const nuevaFecha = prompt(
+    'Reagendar viaje\n\n' +
+    'Fecha actual: ' + fechaActual + '\n\n' +
+    'Ingresá nueva fecha (formato YYYY-MM-DD):',
+    fechaActual
+  );
+  if (!nuevaFecha || nuevaFecha === fechaActual) return;
+
+  // Validar formato
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(nuevaFecha)) {
+    toast('Formato inválido. Usá YYYY-MM-DD', 'err');
+    return;
+  }
+
+  const motivo = prompt('Motivo del reagendo (opcional):', '');
+
+  lzEjecutarReagendar(nuevaFecha, motivo || '');
+}
+
+async function lzEjecutarReagendar(nuevaFecha, motivo) {
+  try {
+    const url = APPS_SCRIPT_URL +
+      '?accion=viajeReagendar' +
+      '&viaje_id=' + encodeURIComponent(_vDetalleId) +
+      '&nueva_fecha=' + encodeURIComponent(nuevaFecha) +
+      (motivo ? '&motivo=' + encodeURIComponent(motivo) : '');
+    const resp = await fetch(url);
+    const data = await resp.json();
+
+    if (data.status === 'ok') {
+      toast('✅ Viaje reagendado al ' + nuevaFecha, 'ok');
+      _vDetalleData.fecha_salida = nuevaFecha;
+      _vDetalleData.reagendado = true;
+      _vDetalleData.motivo_reagendo = motivo;
+      const overlay = document.getElementById('v-detalle-overlay');
+      if (overlay) overlay.innerHTML = lzRenderDetalleViaje();
+      lzCargarViajes();
+    } else {
+      toast('❌ ' + (data.message || 'Error al reagendar'), 'err');
+    }
+  } catch(err) {
+    toast('❌ Error de conexión', 'err');
+    console.error('[lz] reagendar error:', err);
+  }
+}
+
+// ───────────────────────────────────────────────────────────────
+// CONFIRMAR RENDICIÓN (cuando viaje está en estado rindiendo)
+// ───────────────────────────────────────────────────────────────
+async function lzConfirmarRendicionViaje() {
+  if (!confirm('¿Confirmar rendición del chofer?\n\n' +
+               'Esto marca el viaje como cerrado definitivamente.')) return;
+
+  try {
+    const url = APPS_SCRIPT_URL +
+      '?accion=viajeConfirmarRendicion' +
+      '&viaje_id=' + encodeURIComponent(_vDetalleId);
+    const resp = await fetch(url);
+    const data = await resp.json();
+
+    if (data.status === 'ok') {
+      toast('✅ Rendición confirmada. Viaje cerrado.', 'ok');
+      lzCerrarDetalleViaje();
+      lzCargarViajes();
+    } else {
+      toast('❌ ' + (data.message || 'Error'), 'err');
+    }
+  } catch(err) {
+    toast('❌ Error de conexión', 'err');
+    console.error('[lz] confirmarRend error:', err);
+  }
+}
 
 function lzRenderAsignar(el) {
   // v11.5: log distintivo para verificar deploy
