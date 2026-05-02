@@ -9481,6 +9481,7 @@ input[type="date"] {
               <option value="">— Elegir —</option>
               <option value="Joan">🚚 Joan</option>
               <option value="Luis">🚚 Luis</option>
+              <option value="Juan Pablo">🚚 Juampi</option>
             </select>
           </div>
           <div style="flex:1;">
@@ -9490,6 +9491,7 @@ input[type="date"] {
               <option value="Daily AG308YN">Daily · AG308YN</option>
               <option value="Iveco Tector AG495LU">Iveco Tector · AG495LU</option>
               <option value="Iveco Tector AF979ZU">Iveco Tector · AF979ZU</option>
+              <option value="Renault Kangoo AE244GL">Renault Kangoo · AE244GL</option>
             </select>
           </div>
         </div>
@@ -17261,6 +17263,7 @@ function lzGetStatsZona(zonaKey) {
   const sinAsignar  = confirmados.filter(p => !lzGetChofer(p));
   const joan = ps.filter(p => lzGetChofer(p) === 'Joan');
   const luis = ps.filter(p => lzGetChofer(p) === 'Luis');
+  const juampi = ps.filter(p => lzGetChofer(p) === 'Juan Pablo');   // v12.4.0
   const montoConfirmado = confirmados.reduce((s, p) => s + lzParseMonto(p), 0);
   const montoPendiente  = pendientes.reduce((s, p) => s + lzParseMonto(p), 0);
 
@@ -17275,6 +17278,7 @@ function lzGetStatsZona(zonaKey) {
     sinAsignar: sinAsignar.length,
     joan: joan.length,
     luis: luis.length,
+    juampi: juampi.length,   // v12.4.0
     montoConfirmado: montoConfirmado,
     montoPendiente: montoPendiente,
     lista: ps.length > 0 && confirmados.length > 0 && sinAsignar.length === 0 && pendientes.length === 0,
@@ -17720,13 +17724,18 @@ function lzRenderEnCurso(el) {
 
   enRuta.forEach(v => {
     const choferKey = String(v.chofer || '').toLowerCase();
-    const isJoan = choferKey.indexOf('joan') >= 0;
+    // v12.4.0: chequear 'juan pablo' antes que 'joan' por si en algún caso
+    // hubiera substring confuso. isJuampi excluye match con 'joan'.
+    const isJuampi = choferKey.indexOf('juan pablo') >= 0;
+    const isJoan = !isJuampi && choferKey.indexOf('joan') >= 0;
     const isLuis = choferKey.indexOf('luis') >= 0;
     const avatar = (v.chofer || '?').charAt(0).toUpperCase();
-    const colorClase = isJoan ? '' : isLuis ? ' luis' : '';
+    const colorClase = isJoan ? '' : (isLuis ? ' luis' : (isJuampi ? ' juampi' : ''));
     const cardStyle = isLuis
       ? 'border-left-color:var(--luis);background:linear-gradient(135deg,#fff,#FFF3E0);'
-      : '';
+      : (isJuampi
+          ? 'border-left-color:#1565C0;background:linear-gradient(135deg,#fff,#E3F2FD);'
+          : '');
 
     const cobrado = Number(v.monto_cobrado) || 0;
     const total = Number(v.monto_total) || 1;
@@ -17768,12 +17777,12 @@ function lzRenderEnCurso(el) {
 
     const fillStyle = isLuis
       ? 'background:linear-gradient(90deg,var(--luis),#F57C00);'
-      : '';
+      : (isJuampi ? 'background:linear-gradient(90deg,#1565C0,#1976D2);' : '');
     html += '  <div class="lz-encurso-progreso-bar">';
     html += '    <div class="lz-encurso-progreso-fill" style="width:' + pct + '%;' + fillStyle + '"></div>';
     html += '  </div>';
     html += '  <div class="lz-encurso-progreso-txt"' +
-            (isLuis ? ' style="color:var(--luis);"' : '') + '>' +
+            (isLuis ? ' style="color:var(--luis);"' : (isJuampi ? ' style="color:#1565C0;"' : '')) + '>' +
             pct + '% del viaje completo</div>';
     html += '</div>';
   });
@@ -17806,7 +17815,8 @@ setInterval(() => {
 const VEHICULOS_DISPONIBLES = [
   'Daily AG308YN',
   'Iveco Tector AG495LU',
-  'Iveco Tector AF979ZU'
+  'Iveco Tector AF979ZU',
+  'Renault Kangoo AE244GL'   // v12.4.0 (2/5/2026): nuevo vehículo Juan Pablo
 ];
 
 let _vDetalleId = null;       // ID del viaje abierto
@@ -17903,6 +17913,7 @@ function lzRenderDetalleViaje() {
     html += '          <option value="">— Elegir —</option>';
     html += '          <option value="Joan"' + (v.chofer === 'Joan' ? ' selected' : '') + '>🟢 Joan</option>';
     html += '          <option value="Luis"' + (v.chofer === 'Luis' ? ' selected' : '') + '>🟠 Luis</option>';
+    html += '          <option value="Juan Pablo"' + (v.chofer === 'Juan Pablo' ? ' selected' : '') + '>🔵 Juampi</option>';
     html += '        </select>';
   } else {
     html += '        <div class="v-detalle-static">' + lzEsc(tieneChofer ? v.chofer : '—') + '</div>';
@@ -18969,6 +18980,7 @@ function mostrarPickerChofer(btn, event) {
     '<div class="chofer-picker">' +
       '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Joan" onclick="asignarChoferBtn(this,event)">🚚 Joan</button>' +
       '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Luis" onclick="asignarChoferBtn(this,event)">🚚 Luis</button>' +
+      '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Juan Pablo" onclick="asignarChoferBtn(this,event)">🚚 Juampi</button>' +
     '</div>' +
     '<button class="chofer-picker-cancel" data-pid="' + pedidoId + '" onclick="cancelarPickerChoferBtn(this,event)">Cancelar</button>';
 }
@@ -19038,7 +19050,7 @@ async function desasignarChofer(pedidoId, event) {
 function planillaSelChofer(btn) {
   // legacy — redirigir al nuevo sistema
   const chofer = btn.getAttribute('data-chofer');
-  const tab = chofer === 'Joan' ? 'joan' : chofer === 'Luis' ? 'luis' : 'asignar';
+  const tab = chofer === 'Joan' ? 'joan' : chofer === 'Luis' ? 'luis' : chofer === 'Juan Pablo' ? 'juampi' : 'asignar';
   logisticaSelTab(tab, btn);
 }
 
@@ -19331,6 +19343,7 @@ async function descargarPlanillaCarga(choferParam) {
 
   if (!chofer && _logTab === 'joan') chofer = 'Joan';
   if (!chofer && _logTab === 'luis') chofer = 'Luis';
+  if (!chofer && _logTab === 'juampi') chofer = 'Juan Pablo';   // v12.4.0
   if (!chofer && _vetDatos) chofer = _vetDatos.chofer;
   if (!chofer) { toast('Seleccioná un chofer primero', 'err'); return; }
 
@@ -20184,7 +20197,7 @@ async function renderLogisticaDevoluciones(el) {
     _devCache = devsRaw;
 
     // Contar devoluciones por chofer (sobre TODAS las del período, no filtradas)
-    var conteoPorChofer = { todos: devsRaw.length, Joan: 0, Luis: 0 };
+    var conteoPorChofer = { todos: devsRaw.length, Joan: 0, Luis: 0, 'Juan Pablo': 0 };
     devsRaw.forEach(function(d) {
       if (conteoPorChofer[d.chofer] !== undefined) conteoPorChofer[d.chofer]++;
     });
@@ -20263,6 +20276,7 @@ async function renderLogisticaDevoluciones(el) {
       + mkChoferChip('todos', '👥 Todos', conteoPorChofer.todos, '#1A237E', '#E8EAF6')
       + mkChoferChip('Joan',  '🚚 Joan',  conteoPorChofer.Joan,  '#2E7D32', '#E8F5E9')
       + mkChoferChip('Luis',  '🚚 Luis',  conteoPorChofer.Luis,  '#E65100', '#FFF3E0')
+      + mkChoferChip('Juan Pablo', '🚚 Juampi', conteoPorChofer['Juan Pablo'], '#1565C0', '#E3F2FD')
       + '</div>';
 
     // Chip toggle "Solo pendientes"
@@ -20412,7 +20426,7 @@ async function renderLogisticaDevoluciones(el) {
                    + ' ' + String(fecha.getHours()).padStart(2,'0') + ':' + String(fecha.getMinutes()).padStart(2,'0');
       var catInfo = DEV_CAT_LABELS[d.motivo_categoria] || { label: d.motivo_categoria || '—', emoji: '❓', color: '#757575' };
       var recInfo = DEV_RECLAMO_LABELS[d.reclamo_estado] || DEV_RECLAMO_LABELS.por_evaluar;
-      var choferColor = d.chofer === 'Joan' ? '#2E7D32' : (d.chofer === 'Luis' ? '#E65100' : '#757575');
+      var choferColor = d.chofer === 'Joan' ? '#2E7D32' : (d.chofer === 'Luis' ? '#E65100' : (d.chofer === 'Juan Pablo' ? '#1565C0' : '#757575'));
 
       html += '<div onclick="devAbrirModal(\'' + d.id + '\')" '
         + 'style="background:#fff;border:1.5px solid var(--cream3);border-radius:12px;padding:12px 14px;margin-bottom:8px;cursor:pointer;transition:all .15s;-webkit-tap-highlight-color:transparent;touch-action:manipulation;">';
