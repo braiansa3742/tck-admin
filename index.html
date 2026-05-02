@@ -1,8 +1,24 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v11.6 — 30/04/2026
+     TCK ADMIN — v11.7 — 01/05/2026
      ──────────────────────────────────────────────────────────────────────
-     SEGUIMIENTO REDISEÑADO — POR CHOFER Y ZONA, ENFOCADO EN LO QUE FALTA ENTREGAR
+     SUBENTREGA 1 — FIX CALENDARIO DE ZONAS
+
+     Cambios v11.7 (sobre v11.6):
+
+       FIX URGENTE de LZ_DIAS_SALIDA:
+         · z1 (Zona 1):   [1, 2]    → [1]      // SOLO lunes (entrega lun-mar)
+         · z2 (Zona 2):   [4, 5]    → [4]      // SOLO jueves (entrega jue-vie)
+         · af, tlm, tlt: sin cambios
+
+       PROBLEMA RESUELTO:
+         El admin mostraba "Próx. salida" mal calculada cuando se entraba
+         un martes (decía "martes" en vez del próximo lunes) o un viernes
+         (decía "viernes" en vez del próximo jueves). Coincide con el fix
+         del Apps Script v25.6.1 hecho el mismo día.
+
+       NOTA: este es el primer paso del rediseño de Logística (v12.0).
+       Las próximas subentregas agregan el sistema de viajes.
 
      Cambios v11.6 (sobre v11.5):
 
@@ -15947,8 +15963,8 @@ let _planillaChofer  = 'Joan';
 // Metadata de zonas (orden + nombre + ciudades de referencia).
 // Los counts y montos vienen de Supabase en runtime.
 const LZ_ZONAS = [
-  { key: 'z1',  nombre: 'Zona 1',     dias: 'Lun · Mar' },
-  { key: 'z2',  nombre: 'Zona 2',     dias: 'Jue · Vie' },
+  { key: 'z1',  nombre: 'Zona 1',     dias: 'Sale Lun (entrega lun-mar)' },
+  { key: 'z2',  nombre: 'Zona 2',     dias: 'Sale Jue (entrega jue-vie)' },
   { key: 'af',  nombre: 'Am.Fortín',  dias: 'Mar' },
   { key: 'tlm', nombre: 'TL Mañana',  dias: 'Lun-Sab (sale a la tarde)' },
   { key: 'tlt', nombre: 'TL Tarde',   dias: 'Lun-Sab (sale al día sgte)' }
@@ -15984,16 +16000,20 @@ function lzNormalizarZona(rawZona) {
 }
 
 // ════════════════════════════════════════════════════════════════
-// v11.5 — CALENDARIO DE SALIDAS POR ZONA
+// v11.7 — CALENDARIO DE SALIDAS POR ZONA (corregido)
 // ════════════════════════════════════════════════════════════════
 // Días en JS: 0=Dom, 1=Lun, 2=Mar, 3=Mié, 4=Jue, 5=Vie, 6=Sáb
-// Definición de qué días sale cada zona:
+// Definición de qué días SALE el camión (no en qué días entrega):
+//   · z1: sale lunes (entrega lun-mar)
+//   · z2: sale jueves (entrega jue-vie)
+//   · af: sale martes
+//   · tlm/tlt: todos los días hábiles
 const LZ_DIAS_SALIDA = {
-  'z1':  [1, 2],        // Lun y Mar
-  'z2':  [4, 5],        // Jue y Vie
-  'af':  [2],           // Mar
-  'tlm': [1, 2, 3, 4, 5, 6],  // TL Mañana: Lun-Sáb
-  'tlt': [1, 2, 3, 4, 5, 6]   // TL Tarde:  Lun-Sáb
+  'z1':  [1],                    // SOLO lunes (camión sale lunes)
+  'z2':  [4],                    // SOLO jueves (camión sale jueves)
+  'af':  [2],                    // Martes
+  'tlm': [1, 2, 3, 4, 5, 6],     // TL Mañana: Lun-Sáb
+  'tlt': [1, 2, 3, 4, 5, 6]      // TL Tarde:  Lun-Sáb
 };
 
 // Devuelve la próxima fecha (Date object, hora 00:00 local) en que sale
