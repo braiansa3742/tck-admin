@@ -1,8 +1,44 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v11.9 — 02/05/2026
+     TCK ADMIN — v12.0 — 02/05/2026
      ──────────────────────────────────────────────────────────────────────
-     SUBENTREGA 3 — DETALLE DE VIAJE (rediseño Logística parte 3)
+     SUBENTREGA 4 — CLEANUP + TAB HISTÓRICO (rediseño Logística completo)
+
+     Cambios v12.0 (sobre v11.9):
+
+       1. CLEANUP AGRESIVO de funciones legacy (-60kb).
+          Eliminadas 35 funciones del flujo viejo:
+            · lzRenderAsignar, lzRenderZonaBar, lzRenderResumenZona,
+              lzRenderToolbar, lzRenderContenidoZona, lzRenderActionBar,
+              lzRenderBloqueAtrasados, lzRenderPedido
+            · lzAsignarPedido, lzAsignarChoferSilencioso,
+              lzDesasignarSilencioso, lzAbrirOverride, lzConfirmarOverride
+            · lzAbrirSalida, lzConfirmarSalida, lzCerrarZona
+            · lzMover/MarcarEntregado* (4 funciones de atrasados)
+            · lzSetZona, lzToggleSoloConfirmados, lzSetSearch, lzToggleCiudad
+            · lzToggleAtrasados
+            · renderLogisticaChofer, renderLogisticaSeguimiento,
+              renderLogisticaAsignar, renderLogisticaAsignarLegacy
+            · seg* (segSetFiltroChofer, _segNombreZona, _segFmtSalida,
+              _segHoyLocal y variable _segFiltroChofer)
+          También eliminados modales lz-modal-salida y lz-modal-override.
+
+          CONSERVADAS por seguridad:
+            · lzAbrirSheet, lzCerrarSheet (drawers de No Entregados/Sin Zona)
+            · lzAlertaPlaceholder + lzAbrir/Render NoEnt/SinZona
+            · lzCargarDrawers (usado por código nuevo)
+            · asignarChoferBtn, desasignarChoferBtn, mostrarPickerChofer
+              (usados por tab Pedidos, NO por logística)
+
+       2. NUEVO TAB "📜 Histórico".
+          Lista de viajes cerrados con:
+            · Filtros por período: 7 / 14 / 30 / 90 días
+            · Stats globales (cant viajes, pedidos, cobrado)
+            · Lista clickeable que abre el detalle en read-only
+          Endpoint: viajeListar?estado=cerrado
+
+       3. Nueva organización de subtabs Logística (final):
+            🚛 Viajes  |  📊 En Curso  |  📜 Histórico  |  📋 Cheques  |  ↩️ Devoluciones
 
      Cambios v11.9 (sobre v11.8):
 
@@ -6856,6 +6892,139 @@ input[type="date"] {
   font-weight: 600;
 }
 
+/* ════════════════════════════════════════════════
+   v12.0 — TAB HISTÓRICO (Subentrega 4)
+   ════════════════════════════════════════════════ */
+.lz-hist-filtros {
+  display: flex;
+  gap: 6px;
+  padding: 0 0 12px;
+  overflow-x: auto;
+}
+.lz-hist-filtro {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  background: var(--cream2);
+  border: 1.5px solid var(--cream3);
+  border-radius: 16px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.lz-hist-filtro.sel {
+  background: var(--red);
+  color: #fff;
+  border-color: var(--red);
+}
+
+.lz-hist-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 16px;
+  background: linear-gradient(135deg, var(--text), #2C1610);
+  border-radius: 14px;
+  padding: 14px;
+  color: #fff;
+}
+.lz-hist-stat {
+  text-align: center;
+}
+.lz-hist-stat-num {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 22px;
+  font-weight: 900;
+  color: var(--gold);
+  line-height: 1;
+}
+.lz-hist-stat-lbl {
+  font-size: 10px;
+  text-transform: uppercase;
+  font-weight: 700;
+  margin-top: 4px;
+  opacity: .85;
+}
+
+.lz-hist-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lz-hist-row {
+  background: #fff;
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  border: 1.5px solid var(--cream3);
+  transition: all .15s ease;
+  touch-action: manipulation;
+}
+.lz-hist-row:active { transform: scale(.98); }
+.lz-hist-row:hover { box-shadow: 0 3px 10px rgba(0,0,0,.08); }
+
+.lz-hist-fecha-badge {
+  background: var(--cream2);
+  border-radius: 10px;
+  padding: 6px 10px;
+  text-align: center;
+  flex-shrink: 0;
+  min-width: 50px;
+}
+.lz-hist-fecha-dia {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 18px;
+  font-weight: 900;
+  color: var(--red);
+  line-height: 1;
+}
+.lz-hist-fecha-mes {
+  font-size: 9px;
+  color: var(--text3);
+  text-transform: uppercase;
+  font-weight: 700;
+  margin-top: 2px;
+}
+
+.lz-hist-info { flex: 1; min-width: 0; }
+.lz-hist-titulo {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.lz-hist-meta {
+  font-size: 11px;
+  color: var(--text3);
+  margin-top: 3px;
+}
+
+.lz-hist-cifras {
+  text-align: right;
+  flex-shrink: 0;
+}
+.lz-hist-cobrado {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--green);
+  line-height: 1;
+}
+.lz-hist-de {
+  font-size: 10px;
+  color: var(--text3);
+  margin-top: 2px;
+}
+
 
 /* ════════════════════════════════════════════════
    DASHBOARD CARD admin (igual que tck-ventas)
@@ -9155,10 +9324,11 @@ input[type="date"] {
         
       </div>
 
-      <!-- v11.8: Tabs simplificados — Viajes | En Curso | Cheques | Devoluciones -->
+      <!-- v12.0: Tabs simplificados — Viajes | En Curso | Histórico | Cheques | Devoluciones -->
       <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
         <button class="planilla-chofer-tab sel" id="log-tab-viajes" onclick="logisticaSelTab('viajes',this)">🚛 Viajes</button>
         <button class="planilla-chofer-tab" id="log-tab-encurso" onclick="logisticaSelTab('encurso',this)">📊 En Curso</button>
+        <button class="planilla-chofer-tab" id="log-tab-historico" onclick="logisticaSelTab('historico',this)">📜 Histórico</button>
         <button class="planilla-chofer-tab" id="log-tab-cheques" onclick="logisticaSelTab('cheques',this)">📋 Cheques</button>
         <button class="planilla-chofer-tab" id="log-tab-devoluciones" onclick="logisticaSelTab('devoluciones',this)">↩️ Devoluciones</button>
       </div>
@@ -17961,660 +18131,238 @@ async function lzConfirmarRendicionViaje() {
   }
 }
 
-function lzRenderAsignar(el) {
-  // v11.5: log distintivo para verificar deploy
-  if (!window._lz_v115_logged) {
-    console.log('%c[TCK ADMIN v11.5] Render Logística con filtro por próxima salida ✅',
-      'background: #1E8449; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: bold;');
-    window._lz_v115_logged = true;
+// ════════════════════════════════════════════════════════════════
+// v12.0 — TAB HISTÓRICO DE VIAJES (Subentrega 4)
+// ════════════════════════════════════════════════════════════════
+// Lista todos los viajes cerrados con stats y permite ver el detalle
+// (modal en read-only).
+
+let _lzViajesCerrados = [];
+let _lzViajesCerradosLoadedAt = null;
+let _lzHistFiltro = '7'; // días: 7, 14, 30, 90
+
+async function lzCargarViajesCerrados() {
+  try {
+    // Calcular fecha desde según filtro
+    const dias = parseInt(_lzHistFiltro) || 30;
+    const desde = new Date();
+    desde.setDate(desde.getDate() - dias);
+    const desdeISO = desde.toISOString().substring(0, 10);
+
+    const url = APPS_SCRIPT_URL +
+      '?accion=viajeListar' +
+      '&estado=cerrado' +
+      '&desde=' + encodeURIComponent(desdeISO) +
+      '&orden=fecha_salida.desc' +
+      '&limit=50';
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (data.status === 'ok' && Array.isArray(data.viajes)) {
+      _lzViajesCerrados = data.viajes;
+      _lzViajesCerradosLoadedAt = new Date();
+      // Re-render si estamos en el tab
+      if (typeof _tabActual !== 'undefined' && _tabActual === 'logistica' && _logTab === 'historico') {
+        renderLogistica();
+      }
+    }
+  } catch(err) {
+    console.error('[lz hist] error:', err);
+  }
+}
+
+function lzSetFiltroHist(dias) {
+  _lzHistFiltro = String(dias);
+  _lzViajesCerradosLoadedAt = null; // forzar recarga
+  lzCargarViajesCerrados();
+  renderLogistica();
+}
+
+function lzRenderHistorico(el) {
+  // Cargar si no está cargado o pasó más de 30 segundos
+  if (!_lzViajesCerradosLoadedAt || (new Date() - _lzViajesCerradosLoadedAt) > 30000) {
+    lzCargarViajesCerrados();
   }
 
-  // Estado de carga
-  if (!_lzDataLoaded) {
-    el.innerHTML = '<div class="planilla-empty">'
-      + '<div class="loading-spinner" style="margin:0 auto 12px;"></div>'
-      + 'Cargando zonas desde Supabase...</div>';
-    // Si la carga aún no terminó, no reintentamos en bucle: lzCargarDatos
-    // ya re-renderiza solo cuando termina.
-    return;
-  }
-
-  // Si no hay pedidos en ninguna zona
-  if (_lzPedidosZona.length === 0) {
-    el.innerHTML = '<div class="planilla-empty">📭 No hay pedidos en zonas todavía.'
-      + '<div style="margin-top:10px;font-size:12px;color:var(--text3);">'
-      + 'Los pedidos aparecen acá cuando el vendedor los registra y el sistema los asigna a una zona.'
-      + '</div></div>';
-    return;
-  }
-
-  // Render principal: barra chips + bloque rojo + toolbar + acordeón + action bar
   let html = '';
-  html += lzRenderZonaBar();
-  html += lzRenderResumenZona();
-  html += lzRenderToolbar();
-  html += '<div id="lz-contenido">' + lzRenderContenidoZona() + '</div>';
-  html += '<div class="lz-action-bar" id="lz-action-bar">' + lzRenderActionBar() + '</div>';
+
+  // Filtros
+  html += '<div class="lz-hist-filtros">';
+  ['7', '14', '30', '90'].forEach(d => {
+    const sel = (_lzHistFiltro === d) ? ' sel' : '';
+    html += '<button class="lz-hist-filtro' + sel + '" onclick="lzSetFiltroHist(\'' + d + '\')">' +
+            d + ' días</button>';
+  });
+  html += '</div>';
+
+  if (_lzViajesCerrados.length === 0) {
+    html += '<div class="lz-sin-encurso">';
+    html += '  <div class="lz-sin-encurso-ico">📜</div>';
+    html += '  <div class="lz-sin-encurso-tit">Sin viajes cerrados</div>';
+    html += '  <div class="lz-sin-encurso-sub">No hay viajes cerrados en los últimos ' + _lzHistFiltro + ' días</div>';
+    html += '</div>';
+    el.innerHTML = html;
+    return;
+  }
+
+  // Stats globales del período
+  let totalEntregado = 0;
+  let totalCobrado = 0;
+  let totalPedidos = 0;
+  _lzViajesCerrados.forEach(v => {
+    totalEntregado += Number(v.monto_total) || 0;
+    totalCobrado   += Number(v.monto_cobrado) || 0;
+    totalPedidos   += Number(v.total_pedidos) || 0;
+  });
+
+  html += '<div class="lz-hist-stats">';
+  html += '  <div class="lz-hist-stat">';
+  html += '    <div class="lz-hist-stat-num">' + _lzViajesCerrados.length + '</div>';
+  html += '    <div class="lz-hist-stat-lbl">Viajes</div>';
+  html += '  </div>';
+  html += '  <div class="lz-hist-stat">';
+  html += '    <div class="lz-hist-stat-num">' + totalPedidos + '</div>';
+  html += '    <div class="lz-hist-stat-lbl">Pedidos</div>';
+  html += '  </div>';
+  html += '  <div class="lz-hist-stat">';
+  html += '    <div class="lz-hist-stat-num">' + lzFmtMoneda(totalCobrado) + '</div>';
+  html += '    <div class="lz-hist-stat-lbl">Cobrado</div>';
+  html += '  </div>';
+  html += '</div>';
+
+  // Lista de viajes cerrados
+  html += '<div class="lz-hist-lista">';
+  _lzViajesCerrados.forEach(v => {
+    html += lzRenderHistViajeRow(v);
+  });
+  html += '</div>';
 
   el.innerHTML = html;
 }
 
-// ── 1) Barra horizontal de chips de zona ────────────────────
-function lzRenderZonaBar() {
-  let html = '<div class="lz-zona-bar" id="lz-zona-bar">';
-  LZ_ZONAS.forEach(z => {
-    const st = lzGetStatsZona(z.key);
-    const sel = z.key === _lzActiveZona ? ' sel' : '';
-    const badgeC = st.confirmados > 0 ? '<span class="lz-badge-c">' + st.confirmados + '</span>' : '';
-    const badgeP = st.pendientes > 0 ? '<span class="lz-badge-p">' + st.pendientes + '</span>' : '';
-    // v11.5: badge ⚠️ de atrasados (rojo)
-    const badgeA = st.atrasados > 0 ? '<span class="lz-badge-atrasado" title="Atrasados de salidas pasadas">⚠️' + st.atrasados + '</span>' : '';
-    html += '<button class="lz-zona-chip' + sel + '" onclick="lzSetZona(\'' + z.key + '\')">'
-      + z.nombre + ' ' + badgeC + badgeP + badgeA + '</button>';
-  });
-  // Chips de alertas (No Entregados / Sin Zona) con counts reales
-  const cNoEnt = _lzNoEntregados.length;
-  const cSinZ  = _lzSinZona.length;
-  html += '<button class="lz-zona-chip lz-alerta" onclick="lzAlertaPlaceholder(\'no_entregados\')">'
-    + '⚠️ No Entr.' + (cNoEnt > 0 ? ' <span class="lz-badge-c">' + cNoEnt + '</span>' : '')
-    + '</button>';
-  html += '<button class="lz-zona-chip lz-alerta" onclick="lzAlertaPlaceholder(\'sin_zona\')">'
-    + '❓ Sin Zona' + (cSinZ > 0 ? ' <span class="lz-badge-c">' + cSinZ + '</span>' : '')
-    + '</button>';
+function lzRenderHistViajeRow(v) {
+  const fecha = lzFechaCard(v.fecha_salida);
+  const zonaNombre = lzZonaNombreFromKey(v.zona);
+  const cobrado = Number(v.monto_cobrado) || 0;
+  const total = Number(v.monto_total) || 0;
+  const totalPedidos = v.total_pedidos || 0;
+  // Aproximación de entregadas (cobrado/total * pedidos)
+  const entregadas = total > 0 ? Math.round((cobrado / total) * totalPedidos) : 0;
+
+  // Color del badge según el chofer
+  const choferKey = String(v.chofer || '').toLowerCase();
+  let choferCls = '';
+  if (choferKey.indexOf('joan') >= 0) choferCls = ' joan';
+  else if (choferKey.indexOf('luis') >= 0) choferCls = ' luis';
+
+  let html = '<div class="lz-hist-row" onclick="lzAbrirDetalleViajeCerrado(\'' + v.id + '\')">';
+
+  html += '  <div class="lz-hist-fecha-badge">';
+  html += '    <div class="lz-hist-fecha-dia">' + fecha.dia + '</div>';
+  html += '    <div class="lz-hist-fecha-mes">' + fecha.diaCompleto + '</div>';
+  html += '  </div>';
+
+  html += '  <div class="lz-hist-info">';
+  html += '    <div class="lz-hist-titulo">';
+  html += '      ' + lzEsc(zonaNombre);
+  if (v.chofer && v.chofer !== '—') {
+    html += '      <span class="lz-viaje-chofer-badge' + choferCls + '" style="margin-left:6px;">';
+    html += (choferCls === ' joan' ? '🟢' : choferCls === ' luis' ? '🟠' : '🚛') +
+            ' ' + lzEsc(v.chofer);
+    html += '      </span>';
+  }
+  html += '    </div>';
+  html += '    <div class="lz-hist-meta">' + entregadas + ' de ' + totalPedidos + ' entregadas</div>';
+  html += '  </div>';
+
+  html += '  <div class="lz-hist-cifras">';
+  html += '    <div class="lz-hist-cobrado">' + lzFmtMoneda(cobrado) + '</div>';
+  html += '    <div class="lz-hist-de">de ' + lzFmtMoneda(total) + '</div>';
+  html += '  </div>';
+
   html += '</div>';
   return html;
 }
+
+function lzAbrirDetalleViajeCerrado(viajeId) {
+  // Reusar el mismo modal que lzAbrirDetalleViaje pero sobre _lzViajesCerrados
+  _vDetalleData = _lzViajesCerrados.find(v => v.id === viajeId);
+  if (!_vDetalleData) {
+    toast('Viaje no encontrado', 'err');
+    return;
+  }
+  _vDetalleId = viajeId;
+
+  let overlay = document.getElementById('v-detalle-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'v-detalle-overlay';
+    overlay.className = 'v-detalle-overlay';
+    document.body.appendChild(overlay);
+  }
+  overlay.innerHTML = lzRenderDetalleViaje();
+  overlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+
+// (eliminada en v12.0: lzRenderAsignar)
+
+// ── 1) Barra horizontal de chips de zona ────────────────────
+
+// (eliminada en v12.0: lzRenderZonaBar)
 
 // ── 2) Bloque rojo de resumen de zona activa ────────────────
-function lzRenderResumenZona() {
-  const zona = LZ_ZONAS.find(z => z.key === _lzActiveZona);
-  const st = lzGetStatsZona(_lzActiveZona);
-  const ciudades = lzCiudadesDeZona(_lzActiveZona).length;
 
-  // v11.5: La salida ahora se calcula del calendario, no del primer pedido
-  const proxDate = lzProximaSalida(_lzActiveZona);
-  let salidaTxt = '';
-  if (proxDate) {
-    salidaTxt = 'Próx. salida: ' + lzFmtFecha(proxDate);
-  }
-
-  let pillsHtml = '';
-  if (st.confirmados > 0) pillsHtml += '<span class="lz-zona-resumen-pill">✅ ' + st.confirmados + ' confirmados</span>';
-  if (st.pendientes > 0)  pillsHtml += '<span class="lz-zona-resumen-pill">⏳ ' + st.pendientes + ' pendientes</span>';
-  if (st.joan > 0)        pillsHtml += '<span class="lz-zona-resumen-pill">🚚 ' + st.joan + ' Joan</span>';
-  if (st.luis > 0)        pillsHtml += '<span class="lz-zona-resumen-pill">🚚 ' + st.luis + ' Luis</span>';
-  // v11.5: pill de atrasados
-  if (st.atrasados > 0)   pillsHtml += '<span class="lz-zona-resumen-pill lz-pill-atrasado">⚠️ ' + st.atrasados + ' atrasados</span>';
-
-  return '<div class="lz-zona-resumen">'
-    + '<div class="lz-zona-resumen-top">'
-      + '<div class="lz-zona-resumen-info">'
-        + '<div class="lz-zona-resumen-titulo">' + zona.nombre + '</div>'
-        + '<div class="lz-zona-resumen-sub">' + (salidaTxt ? salidaTxt + ' · ' : '')
-          + ciudades + ' ciudad' + (ciudades !== 1 ? 'es' : '')
-          + ' · ' + zona.dias + '</div>'
-      + '</div>'
-      + '<div class="lz-zona-resumen-cifras">'
-        + '<div class="lz-zona-resumen-cifra">'
-          + '<div class="lz-zona-resumen-num">' + st.confirmados + '</div>'
-          + '<div class="lz-zona-resumen-lbl">Confirm.</div>'
-        + '</div>'
-        + '<div class="lz-zona-resumen-cifra">'
-          + '<div class="lz-zona-resumen-num">' + LZ_FMT_MONEY(st.montoConfirmado) + '</div>'
-          + '<div class="lz-zona-resumen-lbl">Total</div>'
-        + '</div>'
-      + '</div>'
-    + '</div>'
-    + (pillsHtml ? '<div class="lz-zona-resumen-pills">' + pillsHtml + '</div>' : '')
-  + '</div>';
-}
+// (eliminada en v12.0: lzRenderResumenZona)
 
 // ── 3) Toolbar (toggle solo confirmados + búsqueda condicional) ──
-function lzRenderToolbar() {
-  const ps = lzGetPedidosZona(_lzActiveZona);
-  // Observación #4: búsqueda solo si zona tiene > 50 pedidos
-  const showSearch = ps.length > 50;
-  let html = '<div class="lz-toolbar">'
-    + '<div class="lz-toolbar-toggle">'
-      + '<label class="lz-switch">'
-        + '<input type="checkbox" id="lz-solo-conf" '
-        + (_lzSoloConfirmados ? 'checked' : '')
-        + ' onchange="lzToggleSoloConfirmados()">'
-        + '<span class="lz-switch-slider"></span>'
-      + '</label>'
-      + '<span class="lz-toolbar-lbl">Solo confirmados</span>'
-    + '</div>';
-  if (showSearch) {
-    html += '<input type="search" class="lz-toolbar-search" id="lz-search" '
-      + 'placeholder="🔍 Buscar cliente..." value="' + lzEsc(_lzSearchTerm) + '" '
-      + 'oninput="lzSetSearch(this.value)">';
-  }
-  html += '</div>';
-  return html;
-}
+
+// (eliminada en v12.0: lzRenderToolbar)
 
 // ── 4) Contenido (acordeón ciudad → pedidos) ────────────────
-function lzRenderContenidoZona() {
-  const ciudades = lzCiudadesDeZona(_lzActiveZona);
 
-  // v11.5: Bloque de atrasados (si hay) — se renderiza ANTES del listado normal
-  const atrasados = lzGetAtrasados(_lzActiveZona);
-  let bloqueAtrasados = '';
-  if (atrasados.length > 0) {
-    bloqueAtrasados = lzRenderBloqueAtrasados(atrasados);
-  }
-
-  if (ciudades.length === 0 && atrasados.length === 0) {
-    return '<div class="lz-empty"><div class="lz-empty-icon">📭</div>'
-      + 'No hay pedidos en esta zona todavía.</div>';
-  }
-  if (ciudades.length === 0) {
-    // Solo atrasados, sin pedidos para próx salida
-    return bloqueAtrasados
-      + '<div class="lz-empty" style="margin-top:12px;"><div class="lz-empty-icon">🌱</div>'
-      + 'Todavía no hay pedidos para la próxima salida.</div>';
-  }
-
-  // Búsqueda: filtra qué pedidos se muestran
-  const searchLower = (_lzSearchTerm || '').toLowerCase().trim();
-
-  let html = '';
-  let cityIdx = 0;
-  ciudades.forEach(c => {
-    let pedidosCiudad = lzGetPedidosZona(_lzActiveZona)
-      .filter(p => lzGetLocalidad(p) === c);
-
-    // Aplicar búsqueda por cliente
-    if (searchLower) {
-      pedidosCiudad = pedidosCiudad.filter(p =>
-        (p.cliente || '').toLowerCase().includes(searchLower));
-    }
-    if (pedidosCiudad.length === 0) return;  // no mostrar ciudad si quedó vacía por búsqueda
-
-    const conf = pedidosCiudad.filter(p => lzGetEstado(p) === 'confirmado');
-    const pend = pedidosCiudad.filter(p => lzGetEstado(p) === 'pendiente');
-    const monto = conf.reduce((s, p) => s + lzParseMonto(p), 0);
-    const sinAsignar = conf.filter(p => !lzGetChofer(p));
-    const lista = conf.length > 0 && sinAsignar.length === 0;
-
-    // Observación #5 (la dejamos para v12.1, pero aplicamos lógica simple):
-    // expandir si: hay búsqueda activa (todos abiertos), o si es una de las primeras 2
-    const expandKey = c;
-    const expandedDefault = (cityIdx < 2) || !!searchLower;
-    const expanded = (_lzCiudadesExpand[expandKey] !== undefined)
-      ? _lzCiudadesExpand[expandKey]
-      : expandedDefault;
-
-    const cityIdSafe = c.replace(/[^a-zA-Z0-9]/g, '_');
-    const clsLista = lista ? ' lz-lista' : '';
-    const clsExp = expanded ? ' lz-expanded' : '';
-
-    html += '<div class="lz-ciudad' + clsLista + clsExp + '" id="lz-city-' + cityIdSafe + '">'
-      + '<div class="lz-ciudad-hdr" onclick="lzToggleCiudad(\'' + lzEsc(c) + '\')">'
-        + '<div class="lz-ciudad-hdr-left">'
-          + '<div class="lz-ciudad-nombre">📍 ' + c + '</div>'
-          + '<div class="lz-ciudad-meta">'
-            + '<span>📦 ' + pedidosCiudad.length + ' pedidos</span>'
-            + '<span>✅ ' + conf.length + ' · ⏳ ' + pend.length + '</span>'
-            + '<span>💰 ' + LZ_FMT_MONEY(monto) + '</span>'
-            + (lista ? '<span style="color:var(--green2);font-weight:800;">✓ Lista</span>' : '')
-          + '</div>'
-        + '</div>'
-        + '<div class="lz-ciudad-toggle">▼</div>'
-      + '</div>'
-      + '<div class="lz-ciudad-body">'
-        + pedidosCiudad.map(p => lzRenderPedido(p)).join('')
-      + '</div>'
-    + '</div>';
-    cityIdx++;
-  });
-
-  if (html === '') {
-    return bloqueAtrasados
-      + '<div class="lz-empty"><div class="lz-empty-icon">🔍</div>'
-      + 'Sin resultados para "' + lzEsc(_lzSearchTerm) + '"</div>';
-  }
-  return bloqueAtrasados + html;
-}
+// (eliminada en v12.0: lzRenderContenidoZona)
 
 // ── v11.5: Bloque "Atrasados" plegable ──────────────────────
 let _lzAtrasadosExpand = {};   // zona key → bool
 
-function lzRenderBloqueAtrasados(atrasados) {
-  if (!atrasados || atrasados.length === 0) return '';
+// (eliminada en v12.0: lzRenderBloqueAtrasados)
 
-  const zonaKey = _lzActiveZona;
-  const expanded = !!_lzAtrasadosExpand[zonaKey];
+// (eliminada en v12.0: lzToggleAtrasados)
 
-  // Agrupar por fecha de salida_planificada
-  const porFecha = {};
-  atrasados.forEach(p => {
-    const f = lzFechaISO(p.salida_planificada) || '(sin fecha)';
-    if (!porFecha[f]) porFecha[f] = [];
-    porFecha[f].push(p);
-  });
-  const fechasOrdenadas = Object.keys(porFecha).sort();
-  const monto = atrasados.reduce((s, p) => s + lzParseMonto(p), 0);
+// (eliminada en v12.0: lzMoverAProxSalida)
 
-  let html = '<div class="lz-atrasados">';
-  html += '<div class="lz-atrasados-hdr" onclick="lzToggleAtrasados()">';
-  html += '<div class="lz-atrasados-info">';
-  html += '<div class="lz-atrasados-titulo">⚠️ ' + atrasados.length
-       + ' pedido' + (atrasados.length !== 1 ? 's' : '')
-       + ' atrasado' + (atrasados.length !== 1 ? 's' : '') + '</div>';
-  html += '<div class="lz-atrasados-sub">' + LZ_FMT_MONEY(monto)
-       + ' · de salidas anteriores que no se entregaron</div>';
-  html += '</div>';
-  html += '<div class="lz-atrasados-toggle">' + (expanded ? '▲' : '▼') + '</div>';
-  html += '</div>';
-
-  if (expanded) {
-    html += '<div class="lz-atrasados-body">';
-    fechasOrdenadas.forEach(f => {
-      const peds = porFecha[f];
-      const fechaTxt = f === '(sin fecha)' ? f : lzFmtFecha(f);
-      const subMonto = peds.reduce((s, p) => s + lzParseMonto(p), 0);
-      html += '<div class="lz-atrasados-grupo">';
-      html += '<div class="lz-atrasados-grupo-hdr">';
-      html += '<span class="lz-atrasados-fecha">' + lzEsc(fechaTxt) + '</span>';
-      html += '<span class="lz-atrasados-grupo-stats">' + peds.length + ' pedidos · '
-           + LZ_FMT_MONEY(subMonto) + '</span>';
-      html += '</div>';
-      // Renderizar cada pedido reusando lzRenderPedido + botón "Mover a próx salida"
-      peds.forEach(p => {
-        html += '<div class="lz-atrasado-item">';
-        html += '<div class="lz-atrasado-item-info">';
-        html += '<div class="lz-atrasado-cliente">' + lzEsc(p.cliente || '—') + '</div>';
-        html += '<div class="lz-atrasado-localidad">📍 ' + lzEsc(lzGetLocalidad(p) || '?')
-             + ' · ' + LZ_FMT_MONEY(lzParseMonto(p)) + '</div>';
-        html += '</div>';
-        // v11.5b: 2 botones — Marcar entregado + Mover a próx
-        html += '<div class="lz-atrasado-acciones">';
-        html += '<button class="lz-btn-entregado" onclick="lzMarcarEntregadoAtrasado(\''
-             + lzEsc(p.pedido_id) + '\')" title="Asumir que ya se entregó pero no se cargó">'
-             + '✓ Entregado</button>';
-        html += '<button class="lz-btn-mover" onclick="lzMoverAProxSalida(\''
-             + lzEsc(p.pedido_id) + '\')" title="Reagendar para la próxima salida">'
-             + '↪️ Mover</button>';
-        html += '</div>';
-        html += '</div>';
-      });
-      html += '</div>';
-    });
-    // v11.5b: 2 acciones masivas — Marcar todos entregado + Mover todos
-    html += '<div class="lz-atrasados-acciones-masivas">';
-    html += '<button class="lz-btn-entregado-todos" onclick="lzMarcarEntregadoTodosAtrasados()">'
-         + '✓ Marcar TODOS entregados</button>';
-    html += '<button class="lz-btn-mover-todos" onclick="lzMoverTodosAProxSalida()">'
-         + '↪️ Mover TODOS a la próxima salida</button>';
-    html += '</div>';
-    html += '</div>';
-  }
-
-  html += '</div>';
-  return html;
-}
-
-function lzToggleAtrasados() {
-  const k = _lzActiveZona;
-  _lzAtrasadosExpand[k] = !_lzAtrasadosExpand[k];
-  // Re-render solo del contenido (no toda la pantalla)
-  const cont = document.getElementById('lz-contenido');
-  if (cont) cont.innerHTML = lzRenderContenidoZona();
-}
-
-async function lzMoverAProxSalida(pedidoId) {
-  const prox = lzProximaSalida(_lzActiveZona);
-  if (!prox) {
-    alert('No hay próxima salida para esta zona.');
-    return;
-  }
-  const proxStr = lzFechaISO(prox);
-  const p = _lzPedidosZona.find(x => x.pedido_id === pedidoId);
-  if (!p) return;
-  const ok = confirm('¿Mover este pedido a la próxima salida (' + lzFmtFecha(prox) + ')?\n\n'
-    + p.cliente + ' · ' + lzGetLocalidad(p) + ' · ' + LZ_FMT_MONEY(lzParseMonto(p)));
-  if (!ok) return;
-  try {
-    // Update local primero (UI optimista)
-    p.salida_planificada = proxStr;
-    p.reagendado_count = (p.reagendado_count || 0) + 1;
-    // PATCH a Supabase
-    await sbFetch('pedidos_zona?pedido_id=eq.' + encodeURIComponent(pedidoId), {
-      method: 'PATCH',
-      headers: { 'Prefer': 'return=minimal' },
-      body: JSON.stringify({
-        salida_planificada: proxStr,
-        reagendado_count: p.reagendado_count,
-        zona_override_por: 'admin (mover atrasado)',
-        actualizado_at: new Date().toISOString()
-      })
-    });
-    // Re-render
-    const cont = document.getElementById('lz-contenido');
-    if (cont) cont.innerHTML = lzRenderContenidoZona();
-    const bar = document.getElementById('lz-zona-bar');
-    if (bar) bar.outerHTML = lzRenderZonaBar();
-  } catch (e) {
-    console.error('[lz] mover a prox salida:', e);
-    alert('Error al mover el pedido. Probá de nuevo.');
-  }
-}
-
-async function lzMoverTodosAProxSalida() {
-  const atrasados = lzGetAtrasados(_lzActiveZona);
-  if (atrasados.length === 0) return;
-  const prox = lzProximaSalida(_lzActiveZona);
-  if (!prox) {
-    alert('No hay próxima salida para esta zona.');
-    return;
-  }
-  const proxStr = lzFechaISO(prox);
-  const monto = atrasados.reduce((s, p) => s + lzParseMonto(p), 0);
-  const ok = confirm('¿Mover los ' + atrasados.length + ' pedidos atrasados ('
-    + LZ_FMT_MONEY(monto) + ') a la próxima salida (' + lzFmtFecha(prox) + ')?');
-  if (!ok) return;
-
-  // Procesamos uno por uno (Supabase no permite update por IN sin RPC)
-  let okCount = 0, errCount = 0;
-  for (const p of atrasados) {
-    try {
-      p.salida_planificada = proxStr;
-      p.reagendado_count = (p.reagendado_count || 0) + 1;
-      await sbFetch('pedidos_zona?pedido_id=eq.' + encodeURIComponent(p.pedido_id), {
-        method: 'PATCH',
-        headers: { 'Prefer': 'return=minimal' },
-        body: JSON.stringify({
-          salida_planificada: proxStr,
-          reagendado_count: p.reagendado_count,
-          zona_override_por: 'admin (mover atrasados batch)',
-          actualizado_at: new Date().toISOString()
-        })
-      });
-      okCount++;
-    } catch (e) {
-      console.error('[lz] mover atrasado:', p.pedido_id, e);
-      errCount++;
-    }
-  }
-
-  alert('Movidos: ' + okCount + (errCount > 0 ? ' · Errores: ' + errCount : ''));
-  // Re-render todo
-  const el = document.querySelector('#log-contenido') || document.querySelector('[data-lz-render]');
-  if (el) lzRenderAsignar(el);
-  else {
-    const cont = document.getElementById('lz-contenido');
-    if (cont) cont.innerHTML = lzRenderContenidoZona();
-    const bar = document.getElementById('lz-zona-bar');
-    if (bar) bar.outerHTML = lzRenderZonaBar();
-  }
-}
+// (eliminada en v12.0: lzMoverTodosAProxSalida)
 
 // v11.5b: Marcar un pedido atrasado como entregado.
 // Si no hay entrega previa, crea una con chofer="Sistema (admin)" para
 // dejar traza. Si ya hay entrega, actualiza estado a 'entregado'.
-async function lzMarcarEntregadoAtrasado(pedidoId) {
-  const p = _lzPedidosZona.find(x => x.pedido_id === pedidoId);
-  if (!p) return;
-  const ok = confirm('¿Marcar este pedido como ENTREGADO?\n\n'
-    + p.cliente + ' · ' + lzGetLocalidad(p) + ' · ' + LZ_FMT_MONEY(lzParseMonto(p))
-    + '\n\nAcción: se asume que el pedido ya fue entregado físicamente y solo'
-    + ' faltó cargarlo en el sistema.');
-  if (!ok) return;
-  try {
-    const choferActual = _asignaciones[pedidoId] || 'Sistema';
-    const nowIso = new Date().toISOString();
 
-    // Intentar UPDATE primero (si ya había entrega previa)
-    let updateOK = false;
-    try {
-      await sbFetch('entregas?pedido_id=eq.' + encodeURIComponent(pedidoId), {
-        method: 'PATCH',
-        headers: { 'Prefer': 'return=minimal' },
-        body: JSON.stringify({
-          estado: 'entregado',
-          fecha_entrega: nowIso,
-          nota: 'Marcado entregado desde admin (atrasado, asumido)'
-        })
-      });
-      updateOK = true;
-    } catch (e1) { /* sigue al INSERT */ }
-
-    // Si no había entrega previa o el PATCH no afectó filas, insertar
-    if (!_asignacionesEstado[pedidoId]) {
-      try {
-        await sbFetch('entregas', {
-          method: 'POST',
-          headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-          body: JSON.stringify({
-            pedido_id:        pedidoId,
-            chofer:           choferActual,
-            cliente:          p.cliente || '',
-            ciudad:           lzGetLocalidad(p) || '',
-            estado:           'entregado',
-            monto:            lzParseMonto(p),
-            fecha_asignacion: nowIso,
-            fecha_entrega:    nowIso,
-            nota:             'Auto-creado en admin (atrasado, asumido entregado)'
-          })
-        });
-      } catch (e2) {
-        console.error('[lz] error insert entrega:', e2);
-        if (!updateOK) throw e2;
-      }
-    }
-
-    // Update local
-    _asignacionesEstado[pedidoId] = 'entregado';
-    if (!_asignaciones[pedidoId]) _asignaciones[pedidoId] = choferActual;
-
-    // Re-render
-    const cont = document.getElementById('lz-contenido');
-    if (cont) cont.innerHTML = lzRenderContenidoZona();
-    const bar = document.getElementById('lz-zona-bar');
-    if (bar) bar.outerHTML = lzRenderZonaBar();
-  } catch (e) {
-    console.error('[lz] marcar entregado atrasado:', e);
-    alert('Error al marcar como entregado. Probá de nuevo.');
-  }
-}
+// (eliminada en v12.0: lzMarcarEntregadoAtrasado)
 
 // v11.5b: Marcar todos los atrasados de la zona activa como entregados.
-async function lzMarcarEntregadoTodosAtrasados() {
-  const atrasados = lzGetAtrasados(_lzActiveZona);
-  if (atrasados.length === 0) return;
-  const monto = atrasados.reduce((s, p) => s + lzParseMonto(p), 0);
-  const ok = confirm('¿Marcar los ' + atrasados.length + ' pedidos atrasados ('
-    + LZ_FMT_MONEY(monto) + ') como ENTREGADOS?\n\n'
-    + 'Acción: se asume que ya fueron entregados físicamente.\n'
-    + 'Esto NO se puede deshacer fácilmente.');
-  if (!ok) return;
 
-  // Doble confirmación porque es masivo y destructivo
-  const ok2 = confirm('Confirmá una vez más:\n\n'
-    + 'Vas a marcar ' + atrasados.length + ' pedidos como entregados.\n\n'
-    + '¿Seguro?');
-  if (!ok2) return;
-
-  let okCount = 0, errCount = 0;
-  for (const p of atrasados) {
-    try {
-      const pedidoId = p.pedido_id;
-      const choferActual = _asignaciones[pedidoId] || 'Sistema';
-      const nowIso = new Date().toISOString();
-
-      let updateOK = false;
-      try {
-        await sbFetch('entregas?pedido_id=eq.' + encodeURIComponent(pedidoId), {
-          method: 'PATCH',
-          headers: { 'Prefer': 'return=minimal' },
-          body: JSON.stringify({
-            estado: 'entregado',
-            fecha_entrega: nowIso,
-            nota: 'Marcado entregado masivo desde admin (atrasado, asumido)'
-          })
-        });
-        updateOK = true;
-      } catch (e1) { /* sigue al INSERT */ }
-
-      if (!_asignacionesEstado[pedidoId]) {
-        try {
-          await sbFetch('entregas', {
-            method: 'POST',
-            headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-            body: JSON.stringify({
-              pedido_id:        pedidoId,
-              chofer:           choferActual,
-              cliente:          p.cliente || '',
-              ciudad:           lzGetLocalidad(p) || '',
-              estado:           'entregado',
-              monto:            lzParseMonto(p),
-              fecha_asignacion: nowIso,
-              fecha_entrega:    nowIso,
-              nota:             'Auto-creado masivo en admin (atrasado, asumido entregado)'
-            })
-          });
-        } catch (e2) {
-          if (!updateOK) throw e2;
-        }
-      }
-
-      _asignacionesEstado[pedidoId] = 'entregado';
-      if (!_asignaciones[pedidoId]) _asignaciones[pedidoId] = choferActual;
-      okCount++;
-    } catch (e) {
-      console.error('[lz] marcar entregado masivo:', p.pedido_id, e);
-      errCount++;
-    }
-  }
-
-  alert('Marcados entregados: ' + okCount + (errCount > 0 ? ' · Errores: ' + errCount : ''));
-  // Re-render
-  const cont = document.getElementById('lz-contenido');
-  if (cont) cont.innerHTML = lzRenderContenidoZona();
-  const bar = document.getElementById('lz-zona-bar');
-  if (bar) bar.outerHTML = lzRenderZonaBar();
-}
+// (eliminada en v12.0: lzMarcarEntregadoTodosAtrasados)
 
 // ── 5) Card individual de pedido ────────────────────────────
-function lzRenderPedido(p) {
-  const isPendiente = lzGetEstado(p) === 'pendiente';
-  const isOculto = _lzSoloConfirmados && isPendiente;
-  let cls = 'lz-pedido';
-  if (isPendiente) cls += ' lz-pendiente';
-  if (isOculto)    cls += ' lz-oculto';
 
-  const chofer = lzGetChofer(p);
-  let choferHtml = '';
-  if (isPendiente) {
-    choferHtml = '<span class="lz-pedido-pendiente-badge">⏳ Esperando confirmación de '
-      + lzEsc(p.vendedor || '?') + '</span>';
-  } else if (chofer) {
-    choferHtml = '<div class="lz-badge-chofer ' + chofer.toLowerCase()
-      + '" onclick="lzAbrirOverride(\'' + lzEsc(p.pedido_id) + '\')">🚚 '
-      + chofer + '</div>';
-  } else {
-    choferHtml = '<div class="lz-pedido-actions">'
-      + '<button class="lz-btn-pedido lz-btn-pedido-joan" '
-      + 'onclick="lzAsignarPedido(\'' + lzEsc(p.pedido_id) + '\',\'Joan\')">🚚 Joan</button>'
-      + '<button class="lz-btn-pedido lz-btn-pedido-luis" '
-      + 'onclick="lzAsignarPedido(\'' + lzEsc(p.pedido_id) + '\',\'Luis\')">🚚 Luis</button>'
-    + '</div>';
-  }
-
-  // Estado y vendedor chips
-  const estadoChip = isPendiente
-    ? '<span class="lz-chip lz-chip-pend">⏳ Pendiente</span>'
-    : '<span class="lz-chip lz-chip-conf">✅ Confirmado</span>';
-  const vKey = (p.vendedor || '').toLowerCase().substring(0, 3);
-  const vendChip = '<span class="lz-chip lz-chip-vend-' + vKey + '">' + lzEsc(p.vendedor || '?') + '</span>';
-
-  return '<div class="' + cls + '">'
-    + '<div class="lz-pedido-hdr">'
-      + '<div style="flex:1;min-width:0;">'
-        + '<div class="lz-pedido-cliente">' + lzEsc(p.cliente || '—') + '</div>'
-      + '</div>'
-      + '<div class="lz-pedido-total">' + LZ_FMT_MONEY(lzParseMonto(p)) + '</div>'
-    + '</div>'
-    + '<div class="lz-pedido-foot">'
-      + '<div style="display:flex;gap:4px;flex-wrap:wrap;">' + estadoChip + vendChip + '</div>'
-      + choferHtml
-    + '</div>'
-  + '</div>';
-}
+// (eliminada en v12.0: lzRenderPedido)
 
 // ── 6) Action bar inferior (estados según situación) ────────
-function lzRenderActionBar() {
-  const st = lzGetStatsZona(_lzActiveZona);
-  const zona = LZ_ZONAS.find(z => z.key === _lzActiveZona);
-  const sinAsignarConfirmados = lzGetPedidosZona(_lzActiveZona)
-    .filter(p => lzGetEstado(p) === 'confirmado' && !lzGetChofer(p));
 
-  if (st.lista) {
-    return '<button class="lz-action-btn lz-action-cerrar" onclick="lzCerrarZona()">'
-      + '🔒 Cerrar ' + zona.nombre + '</button>';
-  }
-  if (sinAsignarConfirmados.length === 0 && st.confirmados > 0) {
-    return '<div class="lz-action-info">'
-      + '<div class="lz-action-info-txt">✓ Confirmados asignados</div>'
-      + '<div class="lz-action-info-sub">' + st.pendientes
-      + ' pedidos pendientes de confirmación</div>'
-    + '</div>';
-  }
-  if (sinAsignarConfirmados.length > 0) {
-    let html = '<button class="lz-action-btn lz-action-joan" onclick="lzAbrirSalida(\'Joan\')">'
-      + '🚚 Asignar a Joan</button>'
-      + '<button class="lz-action-btn lz-action-luis" onclick="lzAbrirSalida(\'Luis\')">'
-      + '🚚 Asignar a Luis</button>';
-    if (st.pendientes > 0) {
-      html += '<div class="lz-action-warning">⚠️ ' + st.pendientes
-        + ' pendientes quedarán fuera de esta salida</div>';
-    }
-    return html;
-  }
-  return '<div class="lz-action-info">'
-    + '<div class="lz-action-info-txt" style="color:var(--text3)">Sin pedidos confirmados</div>'
-    + '<div class="lz-action-info-sub">' + st.pendientes + ' pendientes de confirmación</div>'
-  + '</div>';
-}
+// (eliminada en v12.0: lzRenderActionBar)
 
 // ════════════════════════════════════════════════════════════════
 // HANDLERS — interacciones del usuario
 // ════════════════════════════════════════════════════════════════
 
-function lzSetZona(key) {
-  _lzActiveZona = key;
-  // Reseteamos estado de acordeón al cambiar de zona
-  _lzCiudadesExpand = {};
-  // Limpiamos búsqueda al cambiar de zona
-  _lzSearchTerm = '';
-  renderLogistica();
-}
+// (eliminada en v12.0: lzSetZona)
 
-function lzToggleSoloConfirmados() {
-  const cb = document.getElementById('lz-solo-conf');
-  if (cb) _lzSoloConfirmados = cb.checked;
-  // No re-renderizamos todo — solo togglear las clases via CSS sería más performante,
-  // pero por simplicidad re-render contenido.
-  const cont = document.getElementById('lz-contenido');
-  if (cont) cont.innerHTML = lzRenderContenidoZona();
-}
+// (eliminada en v12.0: lzToggleSoloConfirmados)
 
-function lzSetSearch(val) {
-  _lzSearchTerm = val || '';
-  const cont = document.getElementById('lz-contenido');
-  if (cont) cont.innerHTML = lzRenderContenidoZona();
-}
+// (eliminada en v12.0: lzSetSearch)
 
-function lzToggleCiudad(c) {
-  const cur = _lzCiudadesExpand[c];
-  // Si nunca se tocó, asumimos el default (igual que en render). Toggle al opuesto.
-  // Para simplificar: si está undefined o true → false, si false → true.
-  _lzCiudadesExpand[c] = (cur === false) ? true : (cur === true ? false : false);
-  // Re-render contenido para aplicar la clase nueva
-  const cont = document.getElementById('lz-contenido');
-  if (cont) cont.innerHTML = lzRenderContenidoZona();
-}
+// (eliminada en v12.0: lzToggleCiudad)
 
 // ════════════════════════════════════════════════════════════════
 // v12.0 BLOQUE D — MODALES Y ASIGNACIÓN
@@ -18626,228 +18374,53 @@ let _lzTempPedidoId     = null;  // pedido en modal override
 let _lzAsignandoLock    = false; // evita doble-click en confirmar
 
 // ── Helpers de modal genéricos ──────────────────────────────
+
+// (eliminada en v12.0: lzAbrirSheet)
+
+// v12.0: lzAbrirSheet/lzCerrarSheet RESTAURADAS — los drawers de
+// No Entregados y Sin Zona (que conservamos) las necesitan.
 function lzAbrirSheet(id) {
   const el = document.getElementById(id);
-  if (!el) return;
-  el.classList.add('lz-on');
-  document.body.style.overflow = 'hidden';
+  if (el) el.classList.add('open');
 }
+
+// (eliminada en v12.0: lzCerrarSheet)
+
 function lzCerrarSheet(id, event) {
-  if (event && event.target.id !== id) return;  // click en sheet interno: no cerrar
+  if (event && event.target.id !== id) return;
   const el = document.getElementById(id);
-  if (el) el.classList.remove('lz-on');
-  document.body.style.overflow = '';
-  _lzTempChofer = null;
-  _lzTempPedidoId = null;
+  if (el) el.classList.remove('open');
 }
 
 // ── 1) Asignación masiva de zona entera ─────────────────────
-function lzAbrirSalida(chofer) {
-  _lzTempChofer = chofer;
-  const zona = LZ_ZONAS.find(z => z.key === _lzActiveZona);
-  const ps = lzGetPedidosZona(_lzActiveZona);
-  const confirmadosSinAsignar = ps.filter(p =>
-    lzGetEstado(p) === 'confirmado' && !lzGetChofer(p));
-  const pendientes = ps.filter(p => lzGetEstado(p) === 'pendiente');
-  const monto = confirmadosSinAsignar.reduce((s, p) => s + lzParseMonto(p), 0);
-  const ciudades = new Set(confirmadosSinAsignar.map(p => lzGetLocalidad(p))).size;
 
-  // Salida: tomamos del primer pedido si tiene
-  let salidaTxt = '';
-  if (ps.length && ps[0].salida_planificada) {
-    salidaTxt = '<br>Sale ' + ps[0].salida_planificada;
-  }
+// (eliminada en v12.0: lzAbrirSalida)
 
-  document.getElementById('lz-ms-title').textContent = 'Preparar salida — ' + zona.nombre;
-  document.getElementById('lz-ms-sub').innerHTML =
-    'Vas a asignar <b>' + confirmadosSinAsignar.length
-    + ' pedidos confirmados</b> de ' + zona.nombre
-    + ' a <b>' + chofer + '</b>.' + salidaTxt;
-
-  // Observación #1 cumplida: NO mostramos "kg estimado" inventado.
-  // Solo cantidad, monto, ciudades.
-  document.getElementById('lz-ms-stats').innerHTML =
-      '<div class="lz-modal-stat">'
-        + '<div class="lz-modal-stat-num">' + confirmadosSinAsignar.length + '</div>'
-        + '<div class="lz-modal-stat-lbl">Pedidos</div>'
-      + '</div>'
-      + '<div class="lz-modal-stat">'
-        + '<div class="lz-modal-stat-num">' + LZ_FMT_MONEY(monto) + '</div>'
-        + '<div class="lz-modal-stat-lbl">Monto</div>'
-      + '</div>';
-
-  // Warning de pendientes
-  let warnHtml = '';
-  if (pendientes.length > 0) {
-    warnHtml = '<div class="lz-modal-warn">'
-      + '<div class="lz-modal-warn-title">⚠️ Atención</div>'
-      + pendientes.length + ' pedidos pendientes de confirmación '
-      + '<b>quedarán fuera</b> de esta salida y seguirán en la zona para la próxima.'
-    + '</div>';
-  }
-  document.getElementById('lz-ms-warn').innerHTML = warnHtml;
-
-  // Reset botón confirmar (puede haber quedado deshabilitado de un intento anterior)
-  const btn = document.getElementById('lz-ms-confirm');
-  btn.disabled = false;
-  btn.textContent = 'Confirmar';
-
-  lzAbrirSheet('lz-modal-salida');
-}
-
-async function lzConfirmarSalida() {
-  if (_lzAsignandoLock) return;
-  if (!_lzTempChofer) { lzCerrarSheet('lz-modal-salida'); return; }
-
-  _lzAsignandoLock = true;
-  const btn = document.getElementById('lz-ms-confirm');
-  btn.disabled = true;
-  btn.textContent = 'Asignando...';
-
-  const chofer = _lzTempChofer;
-  const ps = lzGetPedidosZona(_lzActiveZona).filter(p =>
-    lzGetEstado(p) === 'confirmado' && !lzGetChofer(p));
-
-  // Loop secuencial usando la función ya existente asignarChofer().
-  // Cada llamada hace POST a Supabase entregas y actualiza _asignaciones.
-  let ok = 0, err = 0;
-  for (const p of ps) {
-    try {
-      // asignarChofer() de v11.4 espera pedidoId estilo del Sheet (con guiones).
-      // En pedidos_zona la PK también es pedido_id — usamos directamente.
-      await lzAsignarChoferSilencioso(p.pedido_id, chofer);
-      ok++;
-    } catch (e) {
-      err++;
-      console.warn('[lz] error asignando', p.pedido_id, e);
-    }
-  }
-
-  _lzAsignandoLock = false;
-  lzCerrarSheet('lz-modal-salida');
-
-  if (err === 0) {
-    toast('✅ ' + ok + ' pedidos asignados a ' + chofer, 'ok');
-  } else {
-    toast('⚠️ ' + ok + ' OK, ' + err + ' fallaron', 'err');
-  }
-  // Re-render para reflejar los nuevos badges de chofer
-  renderLogistica();
-}
+// (eliminada en v12.0: lzConfirmarSalida)
 
 // ── 2) Asignación de un pedido individual (sin modal) ───────
-async function lzAsignarPedido(pid, chofer) {
-  if (_lzAsignandoLock) return;
-  _lzAsignandoLock = true;
-  try {
-    await lzAsignarChoferSilencioso(pid, chofer);
-    toast('✅ Asignado a ' + chofer, 'ok');
-    renderLogistica();
-  } catch (e) {
-    toast('❌ Error al asignar', 'err');
-    console.warn('[lz] lzAsignarPedido error:', e);
-  } finally {
-    _lzAsignandoLock = false;
-  }
-}
+
+// (eliminada en v12.0: lzAsignarPedido)
 
 // ── 3) Override (cambiar chofer ya asignado) ────────────────
-function lzAbrirOverride(pid) {
-  _lzTempPedidoId = pid;
-  const p = _lzPedidosZona.find(x => x.pedido_id === pid);
-  if (!p) return;
-  const chActual = lzGetChofer(p);
-  document.getElementById('lz-mo-sub').innerHTML =
-    '<b>' + lzEsc(p.cliente || '?') + '</b><br>'
-    + 'Actual: 🚚 ' + (chActual || '?') + ' · ' + LZ_FMT_MONEY(lzParseMonto(p));
-  // Ocultar el botón del chofer actual (no tiene sentido "cambiar a Joan" si ya es Joan)
-  document.getElementById('lz-mo-btn-joan').style.display = chActual === 'Joan' ? 'none' : '';
-  document.getElementById('lz-mo-btn-luis').style.display = chActual === 'Luis' ? 'none' : '';
-  lzAbrirSheet('lz-modal-override');
-}
 
-async function lzConfirmarOverride(nuevoChofer) {
-  if (_lzAsignandoLock) return;
-  if (!_lzTempPedidoId) { lzCerrarSheet('lz-modal-override'); return; }
-  _lzAsignandoLock = true;
+// (eliminada en v12.0: lzAbrirOverride)
 
-  const pid = _lzTempPedidoId;
-  const p = _lzPedidosZona.find(x => x.pedido_id === pid);
-  const chViejo = p ? lzGetChofer(p) : null;
-
-  try {
-    if (nuevoChofer) {
-      await lzAsignarChoferSilencioso(pid, nuevoChofer);
-      toast('✅ ' + (p.cliente || pid) + ': ' + chViejo + ' → ' + nuevoChofer, 'ok');
-    } else {
-      // Desasignar: borrar de _asignaciones y de la tabla entregas
-      await lzDesasignarSilencioso(pid);
-      toast('✕ ' + (p ? p.cliente : pid) + ' desasignado', 'ok');
-    }
-    lzCerrarSheet('lz-modal-override');
-    renderLogistica();
-  } catch (e) {
-    toast('❌ Error al cambiar chofer', 'err');
-    console.warn('[lz] override error:', e);
-  } finally {
-    _lzAsignandoLock = false;
-  }
-}
+// (eliminada en v12.0: lzConfirmarOverride)
 
 // ── 4) Cerrar zona (placeholder funcional para v12.1) ───────
-function lzCerrarZona() {
-  const zona = LZ_ZONAS.find(z => z.key === _lzActiveZona);
-  // Por ahora confirm nativo (en v12.1 lo hacemos con sheet bonito)
-  if (!confirm('¿Cerrar ' + zona.nombre + '?\n\n'
-    + 'Una vez cerrada, no se pueden agregar más pedidos a esta salida. '
-    + '(Función completa: pendiente v12.1)')) return;
-  toast('🔒 ' + zona.nombre + ' marcada como cerrada (lógica completa pendiente v12.1)', 'ok');
-}
+
+// (eliminada en v12.0: lzCerrarZona)
 
 // ── 5) Helpers internos: asignar/desasignar SIN UI bloqueante ─
 // asignarChofer() original de v11.4 escribe sobre _asignaciones,
 // llama a renderCard de la pantalla vieja y muestra confirm() nativo.
 // Acá replicamos solo el POST a entregas + update _asignaciones,
 // sin interferir con la pantalla nueva.
-async function lzAsignarChoferSilencioso(pedidoId, chofer) {
-  // Buscar info del pedido en _lzPedidosZona (preferido, tiene cliente/total/localidad)
-  const pZona = _lzPedidosZona.find(x => x.pedido_id === pedidoId);
 
-  // Update local primero (UI optimista)
-  _asignaciones[pedidoId] = chofer;
-  _asignacionesEstado[pedidoId] = 'pendiente';  // v11.5
+// (eliminada en v12.0: lzAsignarChoferSilencioso)
 
-  // Si hay match en todosLosPedidos (sistema viejo), actualizar también
-  // para que los otros sub-tabs (Joan, Luis, Seguimiento) lo vean.
-  const pSheet = todosLosPedidos.find(x => x.pedidoId === pedidoId);
-  if (pSheet) pSheet.choferAsignado = chofer;
-
-  // POST a Supabase entregas (mismo shape que asignarChofer original)
-  const monto = pZona ? lzParseMonto(pZona) : 0;
-  const cliente  = pZona ? (pZona.cliente || '') : (pSheet ? pSheet.cliente : '');
-  const ciudad   = pZona ? lzGetLocalidad(pZona) : (pSheet ? pSheet.localidad : '');
-  await sbFetch('entregas', {
-    method: 'POST',
-    headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-    body: JSON.stringify({
-      pedido_id:        pedidoId,
-      chofer:           chofer,
-      cliente:          cliente,
-      ciudad:           ciudad,
-      estado:           'pendiente',
-      monto:            monto,
-      fecha_asignacion: new Date().toISOString()
-    })
-  });
-}
-
-async function lzDesasignarSilencioso(pedidoId) {
-  delete _asignaciones[pedidoId];
-  delete _asignacionesEstado[pedidoId];  // v11.5
-  const pSheet = todosLosPedidos.find(x => x.pedidoId === pedidoId);
-  if (pSheet) delete pSheet.choferAsignado;
-  await sbFetch('entregas?pedido_id=eq.' + encodeURIComponent(pedidoId), { method: 'DELETE' });
-}
+// (eliminada en v12.0: lzDesasignarSilencioso)
 
 // ════════════════════════════════════════════════════════════════
 // v12.0 BLOQUE E — DRAWERS (No Entregados + Sin Zona)
@@ -19886,12 +19459,13 @@ function renderLogistica() {
   const fechaEl = document.getElementById('planilla-fecha');
   if (fechaEl) fechaEl.textContent = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' });
 
-  // v11.8: nueva organización de subtabs basada en VIAJES
+  // v12.0: nueva organización de subtabs basada en VIAJES
   // - viajes (DEFAULT): vista principal con cards por zona
-  // - encurso: viajes en_ruta tiempo real (reemplaza Seguimiento)
+  // - encurso: viajes en_ruta tiempo real
+  // - historico: viajes cerrados con stats (últimos 7/14/30/90 días)
   // - cheques, devoluciones: sin cambios
-  // Tabs Joan/Luis eliminados (info se ve por viaje)
   if (_logTab === 'encurso')      { lzRenderEnCurso(el); return; }
+  if (_logTab === 'historico')    { lzRenderHistorico(el); return; }
   if (_logTab === 'seguimiento')  { lzRenderEnCurso(el); return; }  // alias retrocompat
   if (_logTab === 'cheques')      { renderLogisticaCheques(el); return; }
   if (_logTab === 'devoluciones') { renderLogisticaDevoluciones(el); return; }
@@ -19899,265 +19473,13 @@ function renderLogistica() {
   lzRenderViajes(el);
 }
 
-function renderLogisticaAsignar(el) {
-  // v11.8 — quedó como fallback en caso de necesidad
-  return lzRenderViajes(el);
-}
+// (eliminada en v12.0: renderLogisticaAsignar)
 
 // v11.4 LEGACY — preservado por si necesitamos rollback rápido
-function renderLogisticaAsignarLegacy(el) {
-  const pedidos = todosLosPedidos.filter(p => p.estado === 'Confirmado');
 
-  if (!pedidos.length) {
-    const total      = todosLosPedidos.length;
-    const pendientes = todosLosPedidos.filter(p => p.estado === 'Pendiente').length;
-    const confirmados = todosLosPedidos.filter(p => p.estado === 'Confirmado').length;
-    const otros      = total - pendientes - confirmados;
-    if (total === 0) {
-      el.innerHTML = '<div class="planilla-empty"><div class="loading-spinner" style="margin:0 auto 12px;"></div>Cargando pedidos...</div>';
-      setTimeout(function() { if (_tabActual === 'logistica') renderLogistica(); }, 1500);
-    } else {
-      el.innerHTML = '<div class="planilla-empty">📭 No hay pedidos confirmados.' +
-        '<div style="margin-top:10px;font-size:12px;color:var(--text3);background:#F5F5F5;border-radius:8px;padding:10px;text-align:left;">' +
-        '📊 Total en sistema: <strong>' + total + '</strong><br>' +
-        '⏳ Pendientes: <strong>' + pendientes + '</strong><br>' +
-        '✅ Confirmados: <strong>' + confirmados + '</strong><br>' +
-        (otros > 0 ? '📦 Entregados/Cancelados: <strong>' + otros + '</strong><br>' : '') +
-        '<br><small>Los pedidos aparecen aquí cuando el vendedor toca "✅ Ya remití en Xubio".</small>' +
-        '</div></div>';
-    }
-    return;
-  }
+// (eliminada en v12.0: renderLogisticaAsignarLegacy)
 
-  const fmt = n => '$' + Math.round(n).toLocaleString('es-AR');
-  const parseMonto = t => parseInt((t||'0').toString().replace(/[^0-9]/g,'')) || 0;
-  const totalMonto = pedidos.reduce((a,p) => a + parseMonto(p.total), 0);
-  const asignados  = pedidos.filter(p => p.choferAsignado).length;
-
-  // ── Resumen ──
-  let html = '<div style="background:#F0F4FF;border-radius:12px;padding:12px 16px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">';
-  html += '<div>';
-  html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:#1565C0;">' + pedidos.length + ' pedidos confirmados</div>';
-  html += '<div style="font-size:12px;color:var(--text3);margin-top:2px;">' + asignados + ' asignados · ' + (pedidos.length - asignados) + ' sin chofer</div>';
-  html += '</div>';
-  html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#1565C0;">' + fmt(totalMonto) + '</div>';
-  html += '</div>';
-
-  // ── Agrupar por ciudad en orden ruta ──
-  const porCiudad = {};
-  pedidos.forEach(p => {
-    const ciudad = (p.localidad || 'Sin ciudad').trim();
-    if (!porCiudad[ciudad]) porCiudad[ciudad] = [];
-    porCiudad[ciudad].push(p);
-  });
-
-  const todasCiudades = Object.keys(porCiudad).sort((a,b) => {
-    const ia = RUTA_FIJA.findIndex(c => a.toLowerCase().includes(c.toLowerCase()));
-    const ib = RUTA_FIJA.findIndex(c => b.toLowerCase().includes(c.toLowerCase()));
-    if (ia === -1 && ib === -1) return a.localeCompare(b);
-    return (ia===-1?999:ia) - (ib===-1?999:ib);
-  });
-
-  todasCiudades.forEach(ciudad => {
-    const items = porCiudad[ciudad];
-    const totalCiudad = items.reduce((a,p) => a + parseMonto(p.total), 0);
-    const mismoCh = items.every(p => p.choferAsignado) && items.every(p => p.choferAsignado === items[0].choferAsignado);
-    const ciudadSafe = ciudad.replace(/"/g,'&quot;');
-
-    html += '<div class="log-ciudad-bloque">';
-    html += '<div class="log-ciudad-hdr">';
-    html += '<div class="log-ciudad-nombre">📍 ' + ciudad + ' <span>(' + items.length + ' · ' + fmt(totalCiudad) + ')</span></div>';
-    if (!mismoCh) {
-      html += '<div class="log-ciudad-asignar-todos">';
-      html += '<button class="log-ciudad-btn" data-dia="" data-turno="" data-ciudad="' + ciudadSafe + '" data-chofer="Joan" onclick="logAsignarCiudadBtn(this,event)">J</button>';
-      html += '<button class="log-ciudad-btn" data-dia="" data-turno="" data-ciudad="' + ciudadSafe + '" data-chofer="Luis" onclick="logAsignarCiudadBtn(this,event)">L</button>';
-      html += '</div>';
-    }
-    html += '</div>';
-
-    items.forEach(p => {
-      const monto   = parseMonto(p.total);
-      const pidSafe = p.pedidoId.replace(/"/g,'&quot;');
-      const entregaBadge = p.fechaEntrega ? ' <span style="background:#E3F2FD;color:#1565C0;border-radius:20px;padding:1px 6px;font-size:10px;font-weight:800;">' + (p.turnoEntrega==='Mañana'?'🌅':'🌆') + ' ' + p.fechaEntrega.split(' ').slice(0,2).join(' ') + '</span>' : '';
-      const prods = parsearProductos(p.detalle||p.resumen||'');
-
-      html += '<div class="log-pedido-row">';
-      html += '<div class="log-pedido-info">';
-      html += '<div class="log-pedido-cliente">' + (p.cliente||'—') + (p.comercio ? ' <span style="font-weight:400;font-size:12px;">· '+p.comercio+'</span>' : '') + entregaBadge + '</div>';
-      if (prods.length) html += '<div class="log-pedido-prods">' + prods.map(pr => pr.cantidad+'x '+pr.nombre).join(' · ') + '</div>';
-      html += '</div>';
-      html += '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0;">';
-      html += '<div class="log-pedido-monto">' + fmt(monto) + '</div>';
-      if (p.choferAsignado) {
-        const chClass = (p.choferAsignado||'').toLowerCase();
-        html += '<div class="log-chofer-badge ' + chClass + '">🚚 ' + p.choferAsignado + ' <button data-pid="' + pidSafe + '" onclick="logDesasignarBtn(this,event)">✕</button></div>';
-      } else {
-        html += '<div class="log-asignar-picker">';
-        html += '<button class="log-asignar-btn joan" data-pid="' + pidSafe + '" data-chofer="Joan" onclick="logAsignarBtn(this,event)">🚚 Joan</button>';
-        html += '<button class="log-asignar-btn luis" data-pid="' + pidSafe + '" data-chofer="Luis" onclick="logAsignarBtn(this,event)">🚚 Luis</button>';
-        html += '</div>';
-      }
-      html += '</div></div>';
-    });
-
-    html += '</div>';
-  });
-
-  el.innerHTML = html;
-}
-
-function renderLogisticaChofer(el, chofer) {
-  const hoy          = new Date();
-  const diaHoyNombre = DIAS_ES_LOG[hoy.getDay()];
-  const diaHoyNum    = hoy.getDate();
-  const mesHoyNombre = MESES_ES_LOG[hoy.getMonth()];
-  const hoyLabel     = diaHoyNombre + ' ' + diaHoyNum + ' de ' + mesHoyNombre;
-
-  const pedidos = todosLosPedidos.filter(p => {
-    if (p.estado !== 'Confirmado') return false;
-    if (p.choferAsignado !== chofer) return false;
-    return !p.fechaEntrega || p.fechaEntrega === hoyLabel;
-  });
-
-  if (!pedidos.length) {
-    el.innerHTML = '<div class="planilla-empty">📭 No hay entregas asignadas a ' + chofer + '.<br><small>Asigná pedidos confirmados en el tab Asignar.</small></div>';
-    return;
-  }
-
-  // ── Agrupar por ciudad en orden de ruta ──
-  const porCiudad = {};
-  pedidos.forEach(p => {
-    const ciudad = (p.localidad||'Sin ciudad').trim();
-    if (!porCiudad[ciudad]) porCiudad[ciudad] = [];
-    porCiudad[ciudad].push(p);
-  });
-
-  const ciudadesRuta = Object.keys(porCiudad).sort((a,b) => {
-    const ia = RUTA_FIJA.findIndex(c => a.toLowerCase().includes(c.toLowerCase()));
-    const ib = RUTA_FIJA.findIndex(c => b.toLowerCase().includes(c.toLowerCase()));
-    return (ia===-1?999:ia) - (ib===-1?999:ib);
-  });
-
-  // ── Totales por producto (para saber cuánto cargar) ──
-  const totalesProds = {};
-  let totalMonto = 0;
-  let totalBultos = 0;
-  pedidos.forEach(p => {
-    parsearProductos(p.detalle || p.resumen || '').forEach(pr => {
-      if (!totalesProds[pr.nombre]) totalesProds[pr.nombre] = 0;
-      totalesProds[pr.nombre] += pr.cantidad;
-      totalBultos += pr.cantidad;
-    });
-    totalMonto += parseFloat((p.total||'0').toString().replace(/[^0-9.,]/g,'').replace(',','.')) || 0;
-  });
-
-  const fmt = n => '$' + Math.round(n).toLocaleString('es-AR');
-
-  let html = '';
-
-  // ══ SECCIÓN 1: RESUMEN DE CARGA ══════════════════════════════
-  html += '<div style="background:linear-gradient(135deg,#1565C0,#1976D2);border-radius:14px;padding:16px;margin-bottom:16px;">';
-  html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#fff;margin-bottom:2px;">🚚 ' + chofer + ' — ' + hoyLabel + '</div>';
-  html += '<div style="font-size:12px;color:rgba(255,255,255,.75);">' + pedidos.length + ' entrega' + (pedidos.length>1?'s':'') + ' · ' + totalBultos + ' bultos · ' + fmt(totalMonto) + '</div>';
-  html += '</div>';
-
-  // Botones acción — solo lo que tiene sentido en este tab
-  html += '<div style="display:flex;gap:8px;margin-bottom:16px;">';
-  html += '<button onclick="descargarPlanillaCarga(\'' + chofer + '\')" style="flex:1;padding:10px;background:#1B5E20;color:#fff;border:none;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;cursor:pointer;touch-action:manipulation;">🖨️ Planilla de Carga</button>';
-  html += '<button onclick="abrirCertVet(\'' + chofer + '\')" style="flex:1;padding:10px;background:#1565C0;color:#fff;border:none;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;cursor:pointer;touch-action:manipulation;">🩺 Vet</button>';
-  html += '</div>';
-
-  // ── LISTA DE PRODUCTOS A CARGAR ──────────────────────────────
-  html += '<div class="planilla-totales" style="margin-bottom:16px;">';
-  html += '<div class="planilla-totales-title">📦 Productos a cargar — totales</div>';
-  Object.keys(totalesProds).sort().forEach(prod => {
-    const cant = totalesProds[prod];
-    html += '<div class="planilla-total-row">';
-    html += '<span>' + prod + '</span>';
-    html += '<span class="planilla-total-cant" style="font-size:22px;">' + cant + ' u.</span>';
-    html += '</div>';
-  });
-  html += '</div>';
-
-  // ══ SECCIÓN 2: ORDEN DE CARGA (ruta INVERSA) ══════════════════
-  // El camión carga en orden INVERSO a la ruta: lo último que entrega va primero (fondo del camión)
-  const ciudadesInversa = [...ciudadesRuta].reverse();
-
-  html += '<div style="background:#FFF8E1;border:1.5px solid #FFE082;border-radius:14px;padding:14px 16px;margin-bottom:16px;">';
-  html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:16px;font-weight:900;color:#795548;margin-bottom:6px;">📥 ORDEN DE CARGA AL CAMIÓN</div>';
-  html += '<div style="font-size:11px;color:#795548;background:#FFF3CD;border-radius:6px;padding:6px 10px;margin-bottom:10px;">⚠️ Cargar en este orden numérico. El Nº1 entra <strong>primero al fondo</strong> del camión (última entrega). El último número entra <strong>al frente</strong> (primera entrega).</div>';
-
-  ciudadesInversa.forEach((ciudad, idx) => {
-    const items = porCiudad[ciudad];
-    const totalCiudad = items.reduce((a,p) => a + (parseFloat((p.total||'0').toString().replace(/[^0-9.,]/g,'').replace(',','.')) || 0), 0);
-    const prodsCiudad = {};
-    items.forEach(p => {
-      parsearProductos(p.detalle||p.resumen||'').forEach(pr => {
-        prodsCiudad[pr.nombre] = (prodsCiudad[pr.nombre]||0) + pr.cantidad;
-      });
-    });
-    const prodStr = Object.keys(prodsCiudad).map(k => prodsCiudad[k] + 'x ' + k).join(', ');
-
-    html += '<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid rgba(121,85,72,.12);">';
-    html += '<div style="background:#795548;color:#fff;border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;flex-shrink:0;">' + (idx+1) + '</div>';
-    html += '<div style="flex:1;">';
-    html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:900;color:#4E342E;">' + ciudad + ' <span style="font-weight:400;font-size:12px;color:#795548;">(' + items.length + ' entrega' + (items.length>1?'s':'') + ')</span></div>';
-    html += '<div style="font-size:11px;color:#795548;margin-top:2px;">' + prodStr + '</div>';
-    html += '</div></div>';
-  });
-  html += '</div>';
-
-  // ══ SECCIÓN 3: DETALLE POR PARADA (orden de entrega) ══════════
-  html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:900;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">🗺️ Orden de entrega</div>';
-
-  let parada = 1;
-  ciudadesRuta.forEach(ciudad => {
-    const items = porCiudad[ciudad];
-    const totalCiudad = items.reduce((a,p) => a + (parseFloat((p.total||'0').toString().replace(/[^0-9.,]/g,'').replace(',','.')) || 0), 0);
-
-    html += '<div class="planilla-seccion">';
-    html += '<div class="planilla-seccion-hdr">';
-    html += '<div class="planilla-seccion-ciudad">📍 ' + ciudad + '</div>';
-    html += '<div class="planilla-seccion-count">Parada ' + parada++ + ' · ' + fmt(totalCiudad) + '</div>';
-    html += '</div>';
-
-    items.forEach(p => {
-      const prods = parsearProductos(p.detalle||p.resumen||'');
-      const monto = parseFloat((p.total||'0').toString().replace(/[^0-9.,]/g,'').replace(',','.')) || 0;
-      const tel = (p.telCliente||'').replace(/\D/g,'');
-      const waNum = tel ? (tel.startsWith('549') ? tel : '549' + tel) : '';
-
-      html += '<div class="planilla-cliente-row">';
-      html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">';
-      html += '<div class="planilla-cliente-nombre">' + (p.cliente||'—') + (p.comercio ? ' <span style="font-weight:400;font-size:12px;">· '+p.comercio+'</span>' : '') + '</div>';
-      html += '<div class="planilla-cliente-monto">' + fmt(monto) + '</div>';
-      html += '</div>';
-
-      // Productos a bajar — listados claramente
-      if (prods.length) {
-        html += '<div style="background:#F0F4FF;border-radius:8px;padding:8px 10px;margin-bottom:6px;">';
-        prods.forEach(pr => {
-          html += '<div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0;">';
-          html += '<span>📦 ' + pr.nombre + '</span>';
-          html += '<span style="font-family:Barlow Condensed,sans-serif;font-weight:900;color:#1565C0;">' + pr.cantidad + ' u.</span>';
-          html += '</div>';
-        });
-        html += '</div>';
-      }
-
-      // Botón WA si hay teléfono
-      if (waNum) {
-        const msg = encodeURIComponent('Hola ' + (p.cliente||'') + '! 🐔 Soy el repartidor de TCK. Estoy en camino a ' + ciudad + ' con tu pedido. En breve llego! 🚚');
-        html += '<a href="https://wa.me/' + waNum + '?text=' + msg + '" style="display:inline-flex;align-items:center;gap:4px;background:#25D366;color:#fff;border-radius:8px;padding:5px 10px;font-size:12px;font-weight:700;text-decoration:none;margin-top:2px;">📲 Avisar</a>';
-      }
-
-      html += '</div>';
-    });
-    html += '</div>';
-  });
-
-  el.innerHTML = html;
-}
+// (eliminada en v12.0: renderLogisticaChofer)
 
 // ══════════════════════════════════════════════════════════
 // SEGUIMIENTO DEL REPARTO — v11.6
@@ -20167,43 +19489,18 @@ function renderLogisticaChofer(el, chofer) {
 // entregado de la ronda actual (para ver progreso).
 // Filtros eliminados: Hoy / Ayer / Fecha / Todos.
 
-var _segFiltroChofer = 'Joan';  // default al abrir Seguimiento
+// (eliminada en v12.0: _segFiltroChofer)
 
-function segSetFiltroChofer(chofer) {
-  _segFiltroChofer = chofer;
-  renderLogisticaSeguimiento(document.getElementById('logistica-contenido'));
-}
+// (eliminada en v12.0: segSetFiltroChofer)
 
 // Helper: nombre legible de zona
-function _segNombreZona(z) {
-  if (!z) return 'Sin zona';
-  var map = {
-    'tl_manana': 'TL Mañana',
-    'tl_tarde':  'TL Tarde',
-    'tl':        'Trenque Lauquen',
-    'zona1':     'Zona 1',
-    'zona2':     'Zona 2',
-    'america_fortin': 'América / Fortín',
-    'amfortin':  'América / Fortín'
-  };
-  return map[z] || z;
-}
+// (eliminada en v12.0: _segNombreZona)
 
 // Helper: formateo de salida planificada → "Jue 30/04"
-function _segFmtSalida(fechaISO) {
-  if (!fechaISO) return 'Sin fecha';
-  var p = fechaISO.split('-');
-  if (p.length !== 3) return fechaISO;
-  var d = new Date(+p[0], +p[1]-1, +p[2]);
-  var dias = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
-  return dias[d.getDay()] + ' ' + p[2] + '/' + p[1];
-}
+// (eliminada en v12.0: _segFmtSalida)
 
 // Helper: hoy en YYYY-MM-DD local
-function _segHoyLocal() {
-  var d = new Date();
-  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-}
+// (eliminada en v12.0: _segHoyLocal)
 
 // HELPER UBICACIÓN (heredado de v11.5)
 function _renderBotonUbicacion(lat, lng, precision) {
@@ -20227,233 +19524,7 @@ function _renderBotonUbicacion(lat, lng, precision) {
     + 'margin-top:4px;">📍 Ver en Maps' + badge + '</a>';
 }
 
-async function renderLogisticaSeguimiento(el) {
-  el.innerHTML = '<div class="planilla-empty"><div class="loading-spinner" style="margin:0 auto 12px;"></div>Cargando seguimiento...</div>';
-  try {
-    // ── Traer entregas activas de Joan/Luis (todas las que NO están entregadas) ──
-    // + entregadas recientes (últimos 3 días) para mostrar progreso de ronda actual
-    const hoyISO = _segHoyLocal();
-    const hace3d = new Date(); hace3d.setDate(hace3d.getDate() - 3);
-    const fechaCorte = hace3d.getFullYear() + '-' + String(hace3d.getMonth()+1).padStart(2,'0') + '-' + String(hace3d.getDate()).padStart(2,'0');
-
-    // Pedimos todo lo activo + todo lo entregado en últimos 3 días
-    // (filtramos en JS por chofer y por relevancia para reducir queries)
-    const entregasRaw = await sbFetch(
-      'entregas?or=(estado.neq.entregado,fecha_entrega.gte.' + fechaCorte + 'T00:00:00)'
-      + '&select=*&order=chofer.asc&limit=2000'
-    ) || [];
-
-    // Cruzamos con pedidos_zona para obtener salida_planificada y zona de cada entrega
-    const pedidoIds = [...new Set(entregasRaw.map(e => e.pedido_id).filter(Boolean))];
-    let mapaSalida = {};  // pedido_id → { salida, zona }
-    if (pedidoIds.length) {
-      // Supabase soporta IN con .in.(a,b,c) — para listas grandes va por bloques
-      const BATCH = 100;
-      for (let i = 0; i < pedidoIds.length; i += BATCH) {
-        const slice = pedidoIds.slice(i, i + BATCH);
-        const filtro = 'pedido_id.in.(' + slice.map(id => encodeURIComponent(id)).join(',') + ')';
-        const pzs = await sbFetch(
-          'pedidos_zona?' + filtro + '&select=pedido_id,salida_planificada,zona&limit=' + (BATCH + 50)
-        ) || [];
-        pzs.forEach(p => {
-          mapaSalida[p.pedido_id] = { salida: p.salida_planificada, zona: p.zona };
-        });
-      }
-    }
-
-    // Conteos por chofer (para los chips)
-    const conteoPendChofer = { Joan: 0, Luis: 0 };
-    entregasRaw.forEach(e => {
-      if (e.estado !== 'entregado' && conteoPendChofer[e.chofer] !== undefined) {
-        conteoPendChofer[e.chofer]++;
-      }
-    });
-
-    const parseMonto = m => { const n = parseFloat(m)||0; return n < 1000 && n > 0 ? n*1000 : n; };
-    const fmt = n => '$' + Math.round(n).toLocaleString('es-AR');
-
-    // ═══════════════════════════════════════════════════════════
-    // CHIPS DE CHOFER (siempre visibles)
-    // ═══════════════════════════════════════════════════════════
-    const mkBtn = (id, label, count, color, colorBg) => {
-      const sel = (_segFiltroChofer === id);
-      const bg = sel ? color : '#fff';
-      const fg = sel ? '#fff' : 'var(--text2)';
-      const bd = sel ? color : 'var(--cream3)';
-      const countBg = sel ? 'rgba(255,255,255,.22)' : colorBg;
-      const countFg = sel ? '#fff' : color;
-      return '<button onclick="segSetFiltroChofer(\'' + id + '\')" '
-        + 'style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:11px 8px;'
-        + 'background:' + bg + ';border:1.5px solid ' + bd + ';border-radius:10px;'
-        + 'font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:900;color:' + fg + ';'
-        + 'cursor:pointer;transition:all .18s;-webkit-tap-highlight-color:transparent;'
-        + 'touch-action:manipulation;user-select:none;">'
-        + '<span>' + label + '</span>'
-        + '<span style="background:' + countBg + ';color:' + countFg + ';padding:1px 8px;border-radius:10px;font-size:12px;font-weight:900;min-width:22px;text-align:center;">' + count + '</span>'
-        + '</button>';
-    };
-
-    let html = '';
-    html += '<div style="display:flex;gap:8px;margin-bottom:14px;">'
-      + mkBtn('Joan', '🚚 Joan', conteoPendChofer.Joan, '#2E7D32', '#E8F5E9')
-      + mkBtn('Luis', '🚚 Luis', conteoPendChofer.Luis, '#E65100', '#FFF3E0')
-      + '</div>';
-
-    // ── Filtrar por chofer seleccionado ──
-    const entregasChofer = entregasRaw.filter(e => e.chofer === _segFiltroChofer);
-
-    if (!entregasChofer.length) {
-      html += '<div class="planilla-empty" style="margin-top:8px;">📭 No hay entregas activas asignadas a ' + _segFiltroChofer + '.</div>';
-      el.innerHTML = html;
-      return;
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    // AGRUPAR POR (zona + salida_planificada)
-    // ═══════════════════════════════════════════════════════════
-    const grupos = {};  // key "zona|salida" → { zona, salida, items: [] }
-    entregasChofer.forEach(e => {
-      const info = mapaSalida[e.pedido_id] || {};
-      const zona = info.zona || 'sin_zona';
-      const salida = info.salida || null;
-      const key = zona + '|' + (salida || 'sin_fecha');
-      if (!grupos[key]) grupos[key] = { zona: zona, salida: salida, items: [] };
-      grupos[key].items.push(e);
-    });
-
-    // Filtrar grupos: dejar solo los que tienen al menos un pendiente
-    // (los grupos donde TODO está entregado se ocultan — ronda finalizada)
-    const gruposVivos = Object.values(grupos).filter(g => {
-      return g.items.some(e => e.estado !== 'entregado');
-    });
-
-    if (!gruposVivos.length) {
-      html += '<div class="planilla-empty" style="margin-top:8px;">✅ ' + _segFiltroChofer + ' no tiene entregas pendientes. Todas las rondas activas están completas.</div>';
-      el.innerHTML = html;
-      return;
-    }
-
-    // Ordenar grupos por salida_planificada (más cercana primero, sin_fecha al final)
-    gruposVivos.sort((a, b) => {
-      if (!a.salida && !b.salida) return 0;
-      if (!a.salida) return 1;
-      if (!b.salida) return -1;
-      return a.salida.localeCompare(b.salida);
-    });
-
-    // ═══════════════════════════════════════════════════════════
-    // HEADER GLOBAL: total pendiente del chofer
-    // ═══════════════════════════════════════════════════════════
-    const totalPend = entregasChofer.filter(e => e.estado !== 'entregado').length;
-    const totalEntregadas = entregasChofer.filter(e => e.estado === 'entregado').length;
-    const totalMontoPend = entregasChofer.filter(e => e.estado !== 'entregado').reduce((s,e) => s + parseMonto(e.monto), 0);
-    const totalCobrado = entregasChofer.filter(e => e.estado === 'entregado').reduce((s,e) => s + parseMonto(e.monto), 0);
-    const colorChofer = _segFiltroChofer === 'Joan' ? '#2E7D32' : '#E65100';
-    const colorChoferDark = _segFiltroChofer === 'Joan' ? '#1B5E20' : '#BF360C';
-
-    html += '<div style="background:linear-gradient(135deg,' + colorChoferDark + ',' + colorChofer + ');border-radius:14px;padding:14px 16px;margin-bottom:14px;color:#fff;">';
-    html += '<div style="font-size:11px;color:rgba(255,255,255,.7);text-transform:uppercase;letter-spacing:.8px;">🚚 ' + _segFiltroChofer + ' · Resumen</div>';
-    html += '<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px;">';
-    html += '<div><div style="font-family:Barlow Condensed,sans-serif;font-size:32px;font-weight:900;line-height:1;">' + totalPend + '</div><div style="font-size:11px;color:rgba(255,255,255,.7);margin-top:2px;">Pendientes · ' + fmt(totalMontoPend) + '</div></div>';
-    if (totalEntregadas > 0) {
-      html += '<div style="text-align:right"><div style="font-family:Barlow Condensed,sans-serif;font-size:24px;font-weight:900;line-height:1;">✓ ' + totalEntregadas + '</div><div style="font-size:11px;color:rgba(255,255,255,.7);margin-top:2px;">Entregadas · ' + fmt(totalCobrado) + '</div></div>';
-    }
-    html += '</div></div>';
-
-    // ═══════════════════════════════════════════════════════════
-    // BLOQUES POR ZONA / SALIDA
-    // ═══════════════════════════════════════════════════════════
-    gruposVivos.forEach(g => {
-      const items = g.items;
-      const pend = items.filter(e => e.estado !== 'entregado').length;
-      const ent = items.filter(e => e.estado === 'entregado').length;
-      const tot = items.length;
-      const totMonto = items.reduce((s, e) => s + parseMonto(e.monto), 0);
-      const cob = items.filter(e => e.estado === 'entregado').reduce((s, e) => s + parseMonto(e.monto), 0);
-      const pct = tot ? Math.round(ent / tot * 100) : 0;
-
-      const labelZona = _segNombreZona(g.zona);
-      const labelSalida = g.salida ? 'Salida ' + _segFmtSalida(g.salida) : 'Sin fecha programada';
-      const esHoy = g.salida === hoyISO;
-      const esFutura = g.salida && g.salida > hoyISO;
-      const esAtrasada = g.salida && g.salida < hoyISO;
-
-      let badgeFecha = '';
-      if (esHoy)         badgeFecha = '<span style="background:#FFF3E0;color:#E65100;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:900;margin-left:6px;">🔥 HOY</span>';
-      else if (esFutura) badgeFecha = '<span style="background:#E3F2FD;color:#1565C0;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:900;margin-left:6px;">📅 FUTURA</span>';
-      else if (esAtrasada) badgeFecha = '<span style="background:#FFEBEE;color:#C62828;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:900;margin-left:6px;">⚠️ ATRASADA</span>';
-
-      html += '<div style="background:#fff;border-radius:14px;margin-bottom:12px;border:1.5px solid #E8EAF6;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.05);">';
-
-      // Header del bloque
-      html += '<div style="background:linear-gradient(135deg,#1A237E,#283593);padding:10px 14px;color:#fff;">';
-      html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
-      html += '<div><div style="font-family:Barlow Condensed,sans-serif;font-size:17px;font-weight:900;">📦 ' + labelZona + badgeFecha + '</div><div style="font-size:11px;color:rgba(255,255,255,.7);margin-top:1px;">' + labelSalida + '</div></div>';
-      html += '<div style="text-align:right"><div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;">' + ent + ' / ' + tot + '</div><div style="font-size:10px;color:rgba(255,255,255,.6);">' + fmt(totMonto) + '</div></div>';
-      html += '</div>';
-      // Progress bar
-      html += '<div class="seg-progress-wrap" style="margin-top:8px;background:rgba(255,255,255,.18);"><div class="seg-progress-bar" style="width:' + pct + '%;background:#FFD700;"></div></div>';
-      html += '<div style="font-size:10px;color:rgba(255,255,255,.55);text-align:center;margin-top:3px;">' + pct + '% completado · ' + pend + ' pend. · ' + fmt(cob) + ' cobrado</div>';
-      html += '</div>';
-
-      // Lista de entregas: pendientes primero (orden: pendiente, en_camino, no_encontrado, entregado)
-      const ordenEstado = { pendiente: 0, en_camino: 1, no_encontrado: 2, entregado: 3 };
-      const itemsSorted = items.slice().sort((a, b) => {
-        return (ordenEstado[a.estado] || 9) - (ordenEstado[b.estado] || 9);
-      });
-
-      itemsSorted.forEach(e => {
-        const m = parseMonto(e.monto);
-        const hora = e.fecha_entrega ? new Date(e.fecha_entrega).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'}) : '—';
-        let devInfo = '';
-        if (e.devolucion) {
-          try {
-            const dev = JSON.parse(e.devolucion);
-            devInfo = '<div class="dev-info">↩️ <strong>Devolución:</strong> ' + dev.items + ' — ' + dev.motivo + '</div>';
-          } catch(err) {}
-        }
-        const montoCobrado = e.monto_cobrado ? fmt(e.monto_cobrado) : fmt(m);
-
-        let badgeHtml, subInfoHtml = '';
-        if (e.estado === 'entregado') {
-          badgeHtml = '<span class="seg-badge-entregado">✅ Entregado</span>';
-          subInfoHtml = '<div style="font-size:11px;color:var(--text3);margin-top:1px;">🕐 ' + hora + ' · ' + (e.forma_cobro || '—').replace('_',' ') + '</div>';
-        } else if (e.estado === 'en_camino') {
-          const horaEC = e.fecha_en_camino ? new Date(e.fecha_en_camino).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'}) : '';
-          badgeHtml = '<span class="seg-badge-encamino">🚛 En camino' + (horaEC ? ' · ' + horaEC : '') + '</span>';
-        } else if (e.estado === 'no_encontrado') {
-          const horaNE = e.fecha_no_encontrado ? new Date(e.fecha_no_encontrado).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'}) : '';
-          badgeHtml = '<span class="seg-badge-noestaba">🚪 No estaba' + (horaNE ? ' · ' + horaNE : '') + '</span>';
-        } else {
-          badgeHtml = '<span class="seg-badge-pendiente">⏳ Pendiente</span>';
-        }
-
-        const mapsBtn = (e.lat && e.lng) ? _renderBotonUbicacion(e.lat, e.lng, e.ubicacion_precision) : '';
-
-        html += '<div class="seg-row"><div style="flex:1;min-width:0;"><div class="seg-row-nombre">'
-          + (e.cliente || '—')
-          + (e.devolucion ? '<span class="dev-badge">↩️ Dev.</span>' : '')
-          + '</div><div class="seg-row-ciudad">📍 ' + (e.ciudad || '—') + (e.comercio ? ' · 🏪 ' + e.comercio : '') + '</div>'
-          + subInfoHtml
-          + devInfo
-          + mapsBtn
-          + '</div><div style="text-align:right;flex-shrink:0;"><div class="seg-row-monto">' + montoCobrado + '</div>'
-          + (e.devolucion && e.monto_cobrado ? '<div style="font-size:10px;color:#999;text-decoration:line-through;">' + fmt(m) + '</div>' : '')
-          + '<div>' + badgeHtml + '</div></div></div>';
-      });
-
-      html += '</div>';
-    });
-
-    html += '<button onclick="renderLogisticaSeguimiento(document.getElementById(\'logistica-contenido\'))" style="width:100%;padding:11px;background:#F5F7FF;border:1.5px solid #E8EAF6;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:800;color:#1A237E;cursor:pointer;margin-top:4px;">🔄 Actualizar</button>';
-
-    el.innerHTML = html;
-    console.log('[lz v11.6] Seguimiento render — chofer:', _segFiltroChofer, 'grupos:', gruposVivos.length, 'pendientes:', totalPend);
-  } catch(e) {
-    el.innerHTML = '<div class="planilla-empty">❌ Error al cargar seguimiento.</div>';
-    console.error('[lz v11.6] Error en renderLogisticaSeguimiento:', e);
-  }
-}
+// (eliminada en v12.0: renderLogisticaSeguimiento)
 
 // ══════════════════════════════════════════════════════════
 // PANEL DE CHEQUES
@@ -24135,35 +23206,8 @@ async function dupMarcarDistintos() {
 </style>
 
 <!-- ═══ v12.0 BLOQUE D — MODALES DE LOGÍSTICA ZONAS ═══ -->
-
-<!-- Modal: Asignar zona entera a un chofer -->
-<div class="lz-modal-overlay" id="lz-modal-salida" onclick="lzCerrarSheet('lz-modal-salida', event)">
-  <div class="lz-modal-sheet" onclick="event.stopPropagation()">
-    <div class="lz-modal-pill"></div>
-    <div class="lz-modal-title" id="lz-ms-title">Preparar salida</div>
-    <div class="lz-modal-sub" id="lz-ms-sub"></div>
-    <div class="lz-modal-stats" id="lz-ms-stats"></div>
-    <div id="lz-ms-warn"></div>
-    <div class="lz-modal-actions">
-      <button class="lz-modal-btn lz-modal-btn-secondary" onclick="lzCerrarSheet('lz-modal-salida')">Cancelar</button>
-      <button class="lz-modal-btn lz-modal-btn-primary" id="lz-ms-confirm" onclick="lzConfirmarSalida()">Confirmar</button>
-    </div>
-  </div>
-</div>
-
-<!-- Modal: Cambiar chofer de un pedido ya asignado (override) -->
-<div class="lz-modal-overlay" id="lz-modal-override" onclick="lzCerrarSheet('lz-modal-override', event)">
-  <div class="lz-modal-sheet" onclick="event.stopPropagation()">
-    <div class="lz-modal-pill"></div>
-    <div class="lz-modal-title">Cambiar chofer</div>
-    <div class="lz-modal-sub" id="lz-mo-sub"></div>
-    <div class="lz-override-actions">
-      <button class="lz-override-btn lz-override-joan" id="lz-mo-btn-joan" onclick="lzConfirmarOverride('Joan')">🚚 Cambiar a Joan</button>
-      <button class="lz-override-btn lz-override-luis" id="lz-mo-btn-luis" onclick="lzConfirmarOverride('Luis')">🚚 Cambiar a Luis</button>
-    </div>
-    <button class="lz-override-btn lz-override-quitar" onclick="lzConfirmarOverride(null)">✕ Desasignar chofer</button>
-  </div>
-</div>
+<!-- Modales lz-modal-salida y lz-modal-override eliminados en v12.0 -->
+<!-- Los reemplaza el modal de detalle de viaje (v-detalle-overlay, generado en JS) -->
 
 <!-- Drawer: No Entregados (pedidos que quedaron sin entregar el día anterior) -->
 <div class="lz-drawer-overlay" id="lz-drawer-noent" onclick="lzCerrarSheet('lz-drawer-noent', event)">
