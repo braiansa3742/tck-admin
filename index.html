@@ -1,8 +1,41 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v12.1 — 02/05/2026
+     TCK ADMIN — v12.2 — 02/05/2026
      ──────────────────────────────────────────────────────────────────────
-     UI: VIAJES POR FECHA (Opción B) + ocultar TL vacíos
+     PLANILLAS: BUGS A + B + C + D corregidos
+
+     Cambios v12.2 (sobre v12.1):
+
+       1. BUG A: descargarPlanillaCarga + vetGenerar ahora aceptan
+          objeto opcional { chofer, vehiculo, viaje_id }.
+          Si reciben viaje_id, filtran pedidos por:
+            todosLosPedidos[].pedidoId ∈ lzPedidosDeViaje(viaje_id).pedido_id
+          (sistema nuevo).
+          Si no, fallback a p.choferAsignado === chofer (sistema viejo).
+
+       2. BUG B+C+D: parsearProductos REESCRITO.
+          Antes: catálogo siempre cantidad 1; combos/promos perdían los
+                 productos internos (✓ Nx ...); headers contaban como
+                 productos fantasma.
+          Ahora:
+            · "🔥 *OFERTAS — COMBOS*"             → SKIP
+            · "🔥 *COMBO X* × N"                  → SKIP (header)
+            · "🎁 *PROMO 1+1: ...* × N"           → SKIP (header)
+            · "✓ Nx Producto"                     → producto real, cant N
+            · "💰 $X (-N%)"                       → SKIP (subtotal)
+            · "emoji *Nombre*" + sig "N caja..."  → producto, cant N
+            · "Nx Nombre"                         → producto, cant N
+          Validado con datos reales: COMBO CRUJIENTE de Lisandro
+          (TCK-20260422-1005-LIS-N579) ahora se parsea correcto:
+            · Medallón Pollo Clásico ×1
+            · Papa Bastón Balcarce ×2
+            · Alita Granel ×1
+            · Filet Merluza ×1
+            · Maple N°2 ×12 (antes contaba 1)
+
+       3. lzImprimirPlanillaCargaViaje + lzImprimirPlanillaVetViaje
+          ahora pasan { chofer, vehiculo, viaje_id }. Planilla vet ya
+          NO abre el modal de selección (chofer/vehículo vienen del viaje).
 
      Cambios v12.1 (sobre v12.0):
 
@@ -18159,9 +18192,13 @@ function lzImprimirPlanillaCargaViaje() {
     toast('Falta chofer asignado', 'err');
     return;
   }
-  // Llama a función existente con chofer del viaje
+  // v12.2: pasamos objeto con viaje_id para filtrar pedidos del viaje
   if (typeof descargarPlanillaCarga === 'function') {
-    descargarPlanillaCarga(v.chofer);
+    descargarPlanillaCarga({
+      chofer:   v.chofer,
+      vehiculo: v.vehiculo,
+      viaje_id: v.id
+    });
   } else {
     toast('Función de planilla no disponible', 'err');
   }
@@ -18173,22 +18210,17 @@ function lzImprimirPlanillaVetViaje() {
     toast('Falta chofer asignado', 'err');
     return;
   }
-  // Setea _vetDatos y llama a vetGenerar (las planillas vet usan estado global)
-  if (typeof _vetDatos !== 'undefined') {
+  // v12.2: llamada directa con viaje_id (saltea el modal vet de selección)
+  if (typeof vetGenerar === 'function') {
+    // Asegurar que _vetDatos esté seteado por compatibilidad con código viejo
     window._vetDatos = { chofer: v.chofer, vehiculo: v.vehiculo };
-  }
-  // Pre-llenar selectores en el modal vet existente
-  const choferSel = document.getElementById('vet-chofer-sel');
-  const vehSel = document.getElementById('vet-vehiculo-sel');
-  if (choferSel) choferSel.value = v.chofer;
-  if (vehSel) vehSel.value = v.vehiculo;
-
-  // Abrir modal vet existente
-  if (typeof abrirVetModal === 'function') {
-    abrirVetModal();
+    vetGenerar({
+      chofer:   v.chofer,
+      vehiculo: v.vehiculo,
+      viaje_id: v.id
+    });
   } else {
-    // Si no existe, intentar generar directo
-    if (typeof vetGenerar === 'function') vetGenerar();
+    toast('Función vet no disponible', 'err');
   }
 }
 
@@ -19144,21 +19176,44 @@ function vetActualizarVehiculo() {
   // Podría pre-seleccionar vehículo por chofer en el futuro
 }
 
-function vetGenerar() {
-  const chofer   = document.getElementById('vet-chofer-sel').value;
-  const vehiculo = document.getElementById('vet-vehiculo-sel').value;
+function vetGenerar(opts) {
+  // v12.2: Acepta opts opcional con { chofer, vehiculo, viaje_id }
+  //        Si no, lee de los selectores del modal vet (modo viejo)
+  let chofer, vehiculo, viajeId = null;
+  if (opts && typeof opts === 'object') {
+    chofer = opts.chofer;
+    vehiculo = opts.vehiculo;
+    viajeId = opts.viaje_id || null;
+  } else {
+    chofer   = document.getElementById('vet-chofer-sel').value;
+    vehiculo = document.getElementById('vet-vehiculo-sel').value;
+  }
 
   if (!chofer)   { toast('Elegí un chofer', 'err'); return; }
   if (!vehiculo) { toast('Elegí un vehículo', 'err'); return; }
 
-  // Pedidos confirmados asignados a este chofer
-  // Si no hay asignados, usar todos los confirmados (Supabase puede no haber cargado)
-  let pedidos = todosLosPedidos.filter(p =>
-    p.estado === 'Confirmado' && p.choferAsignado === chofer
-  );
-  const sinAsignar = pedidos.length === 0;
-  if (sinAsignar) {
-    pedidos = todosLosPedidos.filter(p => p.estado === 'Confirmado');
+  // v12.2: Si recibimos viaje_id, filtramos por pedidos del viaje (sistema nuevo).
+  //        Si no, fallback al sistema viejo (choferAsignado).
+  let pedidos;
+  if (viajeId) {
+    const idsDelViaje = (typeof lzPedidosDeViaje === 'function')
+      ? lzPedidosDeViaje(viajeId).map(p => p.pedido_id)
+      : [];
+    pedidos = todosLosPedidos.filter(p =>
+      p.estado === 'Confirmado' && idsDelViaje.indexOf(p.pedidoId) >= 0
+    );
+    console.log('[v12.2 planilla vet] viaje=' + viajeId + ' chofer=' + chofer +
+                ' → ' + pedidos.length + ' pedidos del viaje');
+  } else {
+    // Pedidos confirmados asignados a este chofer
+    // Si no hay asignados, usar todos los confirmados (Supabase puede no haber cargado)
+    pedidos = todosLosPedidos.filter(p =>
+      p.estado === 'Confirmado' && p.choferAsignado === chofer
+    );
+    const sinAsignar = pedidos.length === 0;
+    if (sinAsignar) {
+      pedidos = todosLosPedidos.filter(p => p.estado === 'Confirmado');
+    }
   }
 
   if (!pedidos.length) {
@@ -19259,21 +19314,26 @@ function vetGenerar() {
 
 
 function descargarPlanillaCarga(choferParam) {
-  // Obtener chofer: parámetro → tab activo → _vetDatos
-  let chofer = choferParam;
+  // v12.2: Acepta string (chofer) o objeto { chofer, vehiculo, viaje_id }
+  let chofer, vehiculoExplicito = null, viajeId = null;
+  if (typeof choferParam === 'object' && choferParam !== null) {
+    chofer = choferParam.chofer;
+    vehiculoExplicito = choferParam.vehiculo || null;
+    viajeId = choferParam.viaje_id || null;
+  } else {
+    chofer = choferParam;
+  }
+
+  // Fallback al sistema viejo (tab activo) si no hay chofer
   if (!chofer && _logTab === 'joan') chofer = 'Joan';
   if (!chofer && _logTab === 'luis') chofer = 'Luis';
   if (!chofer && _vetDatos) chofer = _vetDatos.chofer;
   if (!chofer) { toast('Seleccioná un chofer primero', 'err'); return; }
 
-  // Vehículo: de _vetDatos si coincide, sino primer vehículo asignado
-  let vehiculo = (_vetDatos && _vetDatos.chofer === chofer) ? _vetDatos.vehiculo : '';
-  // Intentar detectar vehículo de Supabase (asignaciones)
-  if (!vehiculo) {
-    const pedidosChofer = todosLosPedidos.filter(p => p.estado === 'Confirmado' && p.choferAsignado === chofer);
-    // Por ahora dejamos vacío si no hay datos — se puede completar a mano
-    vehiculo = vehiculo || '—';
-  }
+  // Vehículo: 1) explícito (del viaje) → 2) _vetDatos → 3) "—"
+  let vehiculo = vehiculoExplicito;
+  if (!vehiculo && _vetDatos && _vetDatos.chofer === chofer) vehiculo = _vetDatos.vehiculo;
+  if (!vehiculo) vehiculo = '—';
 
   const hoyDate0 = new Date();
   const hoy = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'][hoyDate0.getDay() === 0 ? 6 : hoyDate0.getDay()-1]
@@ -19282,10 +19342,25 @@ function descargarPlanillaCarga(choferParam) {
   const fechaPDF = String(hoyDate0.getDate()).padStart(2,'0') + '/'
     + String(hoyDate0.getMonth()+1).padStart(2,'0') + '/' + hoyDate0.getFullYear();
 
-  // Pedidos confirmados de este chofer
-  const pedidos = todosLosPedidos.filter(p =>
-    p.estado === 'Confirmado' && p.choferAsignado === chofer
-  );
+  // v12.2: Si recibimos viaje_id, filtramos por pedidos del viaje (sistema nuevo).
+  //        Si no, fallback al sistema viejo (choferAsignado) por compat.
+  let pedidos;
+  if (viajeId) {
+    // Sistema nuevo: traer pedido_ids del viaje (de _lzPedidosZona)
+    const idsDelViaje = (typeof lzPedidosDeViaje === 'function')
+      ? lzPedidosDeViaje(viajeId).map(p => p.pedido_id)
+      : [];
+    pedidos = todosLosPedidos.filter(p =>
+      p.estado === 'Confirmado' && idsDelViaje.indexOf(p.pedidoId) >= 0
+    );
+    console.log('[v12.2 planilla carga] viaje=' + viajeId + ' chofer=' + chofer +
+                ' → ' + pedidos.length + ' pedidos del viaje (de ' + idsDelViaje.length + ' totales en pedidos_zona)');
+  } else {
+    // Fallback sistema viejo
+    pedidos = todosLosPedidos.filter(p =>
+      p.estado === 'Confirmado' && p.choferAsignado === chofer
+    );
+  }
 
   // ── TOTALES GLOBALES por categoría → producto ──────────────────
   const totalesProd = {};
@@ -19554,44 +19629,91 @@ function logisticaSelTab(tab, btn) {
 }
 
 // ── PARSEAR PRODUCTOS DEL DETALLE ─────────────────────────────
+// v12.2: Parser reescrito.
+// Bugs corregidos:
+//   B1) Catálogo: cantidad viene en la PARTE SIGUIENTE (post-split por |),
+//       no en la misma. Antes daba siempre cantidad 1.
+//   B2) Headers de combo (🔥 *NOMBRE* × N) se contaban como productos
+//       fantasma. Ahora se ignoran.
+//   B3) Productos del combo (✓ Nx Producto) no matcheaban → se perdían.
+//       Ahora se reconocen explícitamente.
+//   B4) Promos idem combos.
+//   B5) Headers "🔥 *OFERTAS — COMBOS*" se contaban como producto.
 function parsearProductos(detalle) {
   var resultado = [];
   if (!detalle) return resultado;
   var partes = detalle.split('|').map(function(s){ return s.trim(); });
-  partes.forEach(function(parte) {
-    if (!parte) return;
-    var nombre = '', cantidad = 1, emoji = '';
 
-    // Formato campo: "1x Nombre del producto (x ...) → $..."
-    var mCampo = parte.match(/^(\d+)x\s+(.+?)(?:\s*\(|\s*→)/);
-    if (mCampo) {
-      cantidad = parseInt(mCampo[1]) || 1;
-      nombre   = mCampo[2].trim();
-      resultado.push({ nombre: nombre, cantidad: cantidad, emoji: emoji });
-      return;
+  var i = 0;
+  while (i < partes.length) {
+    var parte = partes[i];
+    if (!parte) { i++; continue; }
+
+    // SKIP: header genérico de ofertas
+    if (/^🔥\s*\*OFERTAS/i.test(parte) || /^🎁\s*\*OFERTAS/i.test(parte)) { i++; continue; }
+    // SKIP: header de combo "🔥 *NOMBRE* × N"
+    if (/^🔥\s*\*.+\*\s*[×x]\s*\d+/i.test(parte)) { i++; continue; }
+    // SKIP: header de promo "🎁 *PROMO ...*"
+    if (/^🎁\s*\*PROMO/i.test(parte)) { i++; continue; }
+    // SKIP: subtotal con dinero "💰 $X (-N%)"
+    if (/^💰/.test(parte)) { i++; continue; }
+    // SKIP: notas de combos/descuentos al final
+    if (/^COMBOS:|^DESCUENTOS:/i.test(parte)) { i++; continue; }
+
+    // Producto interno de combo/promo: "✓ Nx Nombre"
+    var mComboLine = parte.match(/^✓\s*(\d+)x\s+(.+)$/);
+    if (mComboLine) {
+      resultado.push({
+        nombre:   mComboLine[2].trim(),
+        cantidad: parseInt(mComboLine[1]) || 1,
+        emoji:    ''
+      });
+      i++; continue;
     }
 
-    // Formato catalogo: "🐔 *Nombre* | N cajas ... x $... → $..."
-    var mCat = parte.match(/^(\S+)\s+\*(.+?)\*/);
+    // Catálogo: "emoji *Nombre*" → cantidad y unidad vienen en la SIGUIENTE parte
+    //   ej: "🐔 *Suprema IQF*" | "2 cajas (15 Kg c/u) x $102.000 → $204.000"
+    var mCat = parte.match(/^(\S+)\s+\*(.+?)\*$/);
     if (mCat) {
-      // Verificar si es emoji
       var posibleEmoji = mCat[1];
-      emoji   = posibleEmoji.length <= 2 ? posibleEmoji : '';
-      nombre  = mCat[2].trim();
-      // Buscar cantidad: "N cajas" o "N bolsas" o "N maples"
-      var mCant = parte.match(/\|\s*(\d+)\s+(?:caja|bolsa|maple|paquete|unidad|caja|lata)/i);
-      if (mCant) cantidad = parseInt(mCant[1]) || 1;
+      var emoji   = posibleEmoji.length <= 2 ? posibleEmoji : '';
+      var nombre  = mCat[2].trim();
+      var cantidad = 1;
+      // Mirar siguiente parte para cantidad+unidad
+      if (i + 1 < partes.length) {
+        var sig = partes[i + 1];
+        var mCant = sig.match(/^(\d+)\s+(?:caja|bolsa|maple|paquete|unidad|lata|kilo|kg)s?\b/i);
+        if (mCant) {
+          cantidad = parseInt(mCant[1]) || 1;
+          i++; // consumir también la siguiente parte
+        }
+      }
       resultado.push({ nombre: nombre, cantidad: cantidad, emoji: emoji });
-      return;
+      i++; continue;
     }
 
-    // Formato Xubio: "*Nombre* (x ...) → $..."
-    var mXubio = parte.match(/\*(.+?)\*/);
-    if (mXubio) {
-      nombre = mXubio[1].trim();
-      resultado.push({ nombre: nombre, cantidad: 1, emoji: '' });
+    // Formato campo / manual WA: "Nx Nombre (...) → $..." o "Nx Nombre[-N%] → $..."
+    var mCampo = parte.match(/^(\d+)x\s+(.+?)(?:\s*\(|\s*→|\s*\[|$)/);
+    if (mCampo) {
+      resultado.push({
+        nombre:   mCampo[2].trim(),
+        cantidad: parseInt(mCampo[1]) || 1,
+        emoji:    ''
+      });
+      i++; continue;
     }
-  });
+
+    // Formato Xubio crudo: "*Nombre*"
+    var mXubio = parte.match(/^\*(.+?)\*$/);
+    if (mXubio) {
+      resultado.push({ nombre: mXubio[1].trim(), cantidad: 1, emoji: '' });
+      i++; continue;
+    }
+
+    // Si nada matcheó, ignorar (probablemente sea una línea de info como "(15 Kg)")
+    i++;
+  }
+
   return resultado;
 }
 
