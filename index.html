@@ -1,5 +1,74 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v12.7.0 — 06/05/2026
+     ──────────────────────────────────────────────────────────────────────
+     N40b — PRODUCTOS CANÓNICOS (canonización en parseProds)
+
+     Cambios v12.7.0 (sobre v12.6.0):
+
+       1. Nuevo bloque productos_canonicos:
+          - Carga desde Supabase tabla productos_canonicos al login.
+          - Cache localStorage 1h con refresh background.
+          - Función canonizarProducto(nombreCrudo) → producto canónico
+            o null. Match estricto: nombre o aliases[].
+
+       2. parseProds() usa canonizarProducto():
+          - Si matchea, devuelve nombre canónico + emoji canónico.
+          - Si no matchea, devuelve nombre crudo + registra grafía en
+            tabla productos_sin_canonizar (para revisión humana).
+          - Comportamiento "fallback": si Supabase falla o cache aún
+            no se cargó, parseProds devuelve nombre crudo (modo viejo).
+
+       3. Tab nuevo "🔧 Sin canonizar" en menú Más (solo Admin):
+          - Lista las grafías pendientes con sugerencias fuzzy
+            (Levenshtein normalizado, top 3, score >= 40%).
+          - Botones para resolver: agregar como alias del canónico
+            sugerido, elegir canónico manual, o ignorar.
+          - Badge en menú con cantidad de pendientes.
+          - Al resolver, refresca cache local de productos_canonicos.
+
+       4. Pedidos viejos con productos deprecados (Hamburguesa
+          Mexicana, Arvejas, 5 Vegetales): se muestran con su nombre
+          canónico igual (decisión: el histórico real se respeta).
+          La inactividad solo aplica al tomador de pedidos nuevos.
+
+     PRESERVADO (sin cambios desde v12.6.0):
+       - LOGÍSTICA — Detalle del viaje, stats reales, cancelados ocultos
+       - Tab Reportes (Hoy/Período/Inteligencia/Mi Ronda)
+       - Sistema de duplicados v10
+       - Integración Xubio v23
+       - Tab Acciones Duplicados
+       - Tab Rendiciones
+
+     DEPLOY:
+       1. Asegurar que tabla productos_canonicos en Supabase tenga
+          poblados los 57 productos (script tck-n40-productos-canonicos.sql
+          ya corrido).
+       2. Asegurar que tabla productos_sin_canonizar exista en Supabase
+          (CREATE TABLE ya corrido).
+       3. Subir este archivo al repo tck-admin como index.html.
+       4. Hard refresh (Ctrl+Shift+R) en el navegador de Francisco.
+       5. Validar:
+          a) Login funciona normal.
+          b) Reportes siguen funcionando (Productos del día, Productos
+             más pedidos).
+          c) Console no tira errores de productos_canonicos.
+          d) Como Admin, abrir Menú Más → "Sin canonizar". Si después
+             de unas horas de uso aparecen grafías pendientes, validar
+             que las sugerencias se calculan y la resolución funciona.
+
+     LIMITACIONES CONOCIDAS (intencionales, fix a futuro):
+       - parseProds usa match estricto. Una grafía que difiere por una
+         letra del canónico va a caer en "Sin canonizar" en lugar de
+         resolverse automáticamente. El admin la resuelve manualmente
+         y queda como alias para futuras apariciones.
+       - Apps Script NO está modificado todavía. Por ahora, la
+         canonización es solo del lado del cliente (admin/ventas).
+         El Sheet sigue almacenando los nombres crudos. Esto es correcto
+         para esta fase: queremos validar el flujo antes de tocar
+         backend.
+═════════════════════════════════════════════════════════════════════════ -->
+<!-- ═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v12.6.0 — 06/05/2026
      ──────────────────────────────────────────────────────────────────────
      LOGÍSTICA — Detalle del viaje: stats reales + cancelados ocultos
@@ -9675,6 +9744,45 @@ input[type="date"] {
     </div>
   </div>
 
+  <!-- ═══════════════════════════════════════════════════════════════
+       v12.7.0 N40b — VIEW: PRODUCTOS SIN CANONIZAR
+       Solo accesible si vendedorActual === 'ADMIN'.
+       Muestra grafías nuevas de productos detectadas por parseProds()
+       que no matchearon contra productos_canonicos.aliases[].
+       Permite resolver: agregar como alias del canónico que corresponde,
+       o marcar como "ignorar" (resuelto sin asignación).
+  ═══════════════════════════════════════════════════════════════ -->
+  <div class="view" id="view-prod-canon">
+    <div style="padding:12px 14px;padding-bottom:80px;">
+
+      <div style="background:linear-gradient(135deg,#1B5E20,#2E7D32);border-radius:12px;padding:14px 16px;margin-bottom:14px;color:#fff;display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:22px;line-height:1;">🔧 Productos sin canonizar</div>
+          <div style="font-size:11px;color:rgba(255,255,255,.75);margin-top:3px;">Grafías detectadas que no matchean con ningún canónico</div>
+        </div>
+        <button onclick="pcanonRecargar()" style="background:rgba(255,255,255,.2);border:none;border-radius:50%;width:34px;height:34px;color:#fff;cursor:pointer;font-size:16px;">🔄</button>
+      </div>
+
+      <!-- Mini-stats -->
+      <div id="pcanon-stats" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:14px;">
+        <div style="background:#fff;border-radius:10px;padding:10px 12px;text-align:center;">
+          <div id="pcanon-stat-pendientes" style="font-family:'Barlow Condensed',sans-serif;font-size:24px;font-weight:900;color:#EF6C00;">—</div>
+          <div style="font-size:11px;color:var(--text3);">Pendientes</div>
+        </div>
+        <div style="background:#fff;border-radius:10px;padding:10px 12px;text-align:center;">
+          <div id="pcanon-stat-resueltas" style="font-family:'Barlow Condensed',sans-serif;font-size:24px;font-weight:900;color:#2E7D32;">—</div>
+          <div style="font-size:11px;color:var(--text3);">Resueltas</div>
+        </div>
+      </div>
+
+      <!-- Lista de pendientes -->
+      <div id="pcanon-lista">
+        <div style="text-align:center;padding:24px;color:var(--text3);font-size:12px;font-style:italic;">Cargando...</div>
+      </div>
+
+    </div>
+  </div>
+
 </div>
 <nav class="tab-nav" id="tab-nav">
   <button class="tab-btn" id="tab-btn-logistica" onclick="cambiarTab('logistica')">
@@ -9715,6 +9823,10 @@ input[type="date"] {
     <span class="tab-icon">📋</span>
     <span class="tab-label">Duplicados</span>
   </button>
+  <button class="tab-btn" id="tab-btn-prod-canon" onclick="cambiarTab('prod-canon')" style="display:none !important;">
+    <span class="tab-icon">🔧</span>
+    <span class="tab-label">Sin canon.</span>
+  </button>
 </nav>
 
 <!-- MENÚ "MÁS" (sheet inferior) — solo Clientes + Visitas -->
@@ -9739,6 +9851,11 @@ input[type="date"] {
       <button class="menu-mas-item" id="menu-mas-acc-dup" onclick="cambiarTab('acc-dup');cerrarMenuMas()">
         <div class="menu-mas-icon">📋</div>
         <div class="menu-mas-lbl">Duplicados</div>
+      </button>
+      <button class="menu-mas-item" id="menu-mas-prod-canon" onclick="cambiarTab('prod-canon');cerrarMenuMas()" style="display:none;">
+        <div class="menu-mas-icon">🔧</div>
+        <div class="menu-mas-lbl">Sin canonizar</div>
+        <div class="menu-mas-badge" id="menu-mas-pcanon-badge" style="display:none;background:#EF6C00;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;margin-top:3px;">0</div>
       </button>
     </div>
     <button class="menu-mas-cerrar" onclick="cerrarMenuMas()">Cerrar</button>
@@ -9952,6 +10069,198 @@ function limpiarSesion() {
 // ── SUPABASE CONFIG ──────────────────────────────────────────────
 const SUPABASE_URL  = 'https://frhevcgxcuqkkakwnmrw.supabase.co';
 const SUPABASE_KEY  = 'sb_publishable_rRuseS1OttY_jisrsBc3qg_JBCE8vkH';
+
+// ═══════════════════════════════════════════════════════════════════
+// v12.7.0 — PRODUCTOS CANÓNICOS (N40b)
+// ═══════════════════════════════════════════════════════════════════
+// Lee la tabla productos_canonicos de Supabase y construye un índice
+// en memoria para canonización rápida en parseProds().
+//
+// _prodCanonicos: array crudo de productos_canonicos
+// _prodCanonAliasMap: { 'pollo a x6' → { nombre, emoji, ... } }
+//                     (claves normalizadas: lowercase + sin tildes + trim)
+//
+// Refresca cada 1 hora (o al login). Cache TTL en localStorage.
+// Si falla la carga, fallback: parseProds devuelve el nombre crudo
+// (modo "como antes") — no rompe nada.
+// ═══════════════════════════════════════════════════════════════════
+
+var _prodCanonicos      = [];
+var _prodCanonAliasMap  = {};
+var _prodCanonNombreMap = {};   // canonico exacto → producto (case-insensitive)
+var _prodCanonLoaded    = false;
+var _prodSinCanonBuffer = {};   // grafías nuevas detectadas en sesión actual (key normalizada → nombre crudo)
+var _prodSinCanonFlushTimer = null;
+
+const PROD_CANON_CACHE_KEY = 'tck_prod_canon_v1';
+const PROD_CANON_CACHE_TTL = 60 * 60 * 1000; // 1 hora
+
+// Normaliza para comparación: lowercase, sin tildes, sin emojis,
+// sin caracteres no-palabra colapsados a espacio simple.
+// "Pollo Ginosa x6" → "pollo ginosa x6"
+// "🐔 Pollo Ginosa x6" → "pollo ginosa x6"
+function _prodCanonNormalizar(s) {
+  if (!s) return '';
+  return String(s).trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')        // tildes
+    .replace(/[°º]/g, '')                                     // ordinales
+    .replace(/[^a-z0-9 \/\-]/g, ' ')                          // emojis y símbolos → espacio
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Carga productos_canonicos desde Supabase y arma los índices.
+// Usa cache localStorage si está fresco (< 1h).
+async function cargarProductosCanonicos() {
+  // 1. Intentar cache local
+  try {
+    var cached = localStorage.getItem(PROD_CANON_CACHE_KEY);
+    if (cached) {
+      var data = JSON.parse(cached);
+      if (data && data.ts && (Date.now() - data.ts) < PROD_CANON_CACHE_TTL && Array.isArray(data.productos)) {
+        _aplicarProductosCanonicos(data.productos);
+        _prodCanonLoaded = true;
+        // Refresh en background sin bloquear
+        _refrescarProductosCanonicosBg();
+        return;
+      }
+    }
+  } catch(e) {}
+
+  // 2. Sin cache válida — fetch directo
+  try {
+    var resp = await fetch(SUPABASE_URL + '/rest/v1/productos_canonicos?select=nombre,emoji,categoria,activo,sin_stock,aliases&order=orden.asc', {
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY
+      }
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var productos = await resp.json();
+    _aplicarProductosCanonicos(productos);
+    _prodCanonLoaded = true;
+    try {
+      localStorage.setItem(PROD_CANON_CACHE_KEY, JSON.stringify({ ts: Date.now(), productos: productos }));
+    } catch(e) {}
+    console.log('[TCK ProdCanon] ' + productos.length + ' productos canónicos cargados');
+  } catch(e) {
+    console.warn('[TCK ProdCanon] Error al cargar productos canónicos:', e.message);
+    // No es crítico: parseProds sigue funcionando con nombre crudo
+  }
+}
+
+function _refrescarProductosCanonicosBg() {
+  setTimeout(async function() {
+    try {
+      var resp = await fetch(SUPABASE_URL + '/rest/v1/productos_canonicos?select=nombre,emoji,categoria,activo,sin_stock,aliases&order=orden.asc', {
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+      });
+      if (!resp.ok) return;
+      var productos = await resp.json();
+      _aplicarProductosCanonicos(productos);
+      try {
+        localStorage.setItem(PROD_CANON_CACHE_KEY, JSON.stringify({ ts: Date.now(), productos: productos }));
+      } catch(e) {}
+    } catch(e) {}
+  }, 200);
+}
+
+// Aplica un array de productos canónicos a los índices en memoria.
+function _aplicarProductosCanonicos(productos) {
+  _prodCanonicos = productos || [];
+  _prodCanonAliasMap = {};
+  _prodCanonNombreMap = {};
+  _prodCanonicos.forEach(function(p) {
+    var nombreNorm = _prodCanonNormalizar(p.nombre);
+    if (nombreNorm) _prodCanonNombreMap[nombreNorm] = p;
+    if (Array.isArray(p.aliases)) {
+      p.aliases.forEach(function(a) {
+        var aliasNorm = _prodCanonNormalizar(a);
+        if (aliasNorm) _prodCanonAliasMap[aliasNorm] = p;
+      });
+    }
+  });
+}
+
+// Función principal. Recibe un nombre crudo, devuelve el objeto canónico
+// si matchea (estrictamente: nombre o alias). Si no matchea, registra la
+// grafía en _prodSinCanonBuffer y devuelve null.
+//
+// IMPORTANTE: solo match estricto. Fuzzy matching se aplica solo en el
+// tab "Sin canonizar" para sugerir resoluciones (decisión N40b).
+function canonizarProducto(nombreCrudo) {
+  if (!nombreCrudo || !_prodCanonLoaded) return null;
+  var norm = _prodCanonNormalizar(nombreCrudo);
+  if (!norm) return null;
+
+  // 1. Match exacto contra nombre canónico
+  var match = _prodCanonNombreMap[norm];
+  if (match) return match;
+
+  // 2. Match exacto contra aliases
+  match = _prodCanonAliasMap[norm];
+  if (match) return match;
+
+  // 3. Sin match → registrar para revisión humana (background, no bloquea)
+  _registrarGrafiaSinCanonizar(nombreCrudo);
+  return null;
+}
+
+// Registra una grafía sin match en buffer, y dispara un flush diferido
+// (5 segundos) para hacer un único POST batch a Supabase.
+// Si la misma grafía aparece varias veces, solo se registra una vez.
+function _registrarGrafiaSinCanonizar(nombreCrudo) {
+  var key = _prodCanonNormalizar(nombreCrudo);
+  if (!key || _prodSinCanonBuffer[key]) return;
+  _prodSinCanonBuffer[key] = nombreCrudo;
+  if (_prodSinCanonFlushTimer) clearTimeout(_prodSinCanonFlushTimer);
+  _prodSinCanonFlushTimer = setTimeout(_flushGrafiasSinCanonizar, 5000);
+}
+
+// Manda el buffer de grafías sin canonizar a Supabase.
+// Usa upsert para sumar apariciones si ya existía la grafía.
+async function _flushGrafiasSinCanonizar() {
+  var keys = Object.keys(_prodSinCanonBuffer);
+  if (!keys.length) return;
+  var batch = keys.map(function(k) {
+    return { nombre_crudo: _prodSinCanonBuffer[k] };
+  });
+  _prodSinCanonBuffer = {};
+  try {
+    // 1. Intentar INSERT batch (los duplicados van a fallar por unique index — ok)
+    for (var i = 0; i < batch.length; i++) {
+      try {
+        await fetch(SUPABASE_URL + '/rest/v1/productos_sin_canonizar', {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': 'Bearer ' + SUPABASE_KEY,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal'
+          },
+          body: JSON.stringify(batch[i])
+        });
+      } catch(e) {
+        // si falla por duplicado (409), hacer PATCH para sumar apariciones
+        try {
+          var nombreCrudoEnc = encodeURIComponent(batch[i].nombre_crudo);
+          await fetch(SUPABASE_URL + '/rest/v1/productos_sin_canonizar?nombre_crudo=eq.' + nombreCrudoEnc + '&resuelto=eq.false', {
+            method: 'PATCH',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': 'Bearer ' + SUPABASE_KEY,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=minimal'
+            },
+            body: JSON.stringify({ ultimo_visto: new Date().toISOString() })
+          });
+        } catch(e2) {}
+      }
+    }
+  } catch(e) {
+    console.warn('[TCK ProdCanon] Error flush grafías:', e.message);
+  }
+}
 
 async function sbFetch(path, options = {}) {
   const url = SUPABASE_URL + '/rest/v1/' + path;
@@ -10932,6 +11241,267 @@ function _accDupCardHtml(a) {
 // Fin v9.0 admin — TAB ACCIONES DE DUPLICADOS
 // ═══════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════
+// v12.7.0 N40b — TAB PRODUCTOS SIN CANONIZAR
+// ═══════════════════════════════════════════════════════════════
+// Lee la tabla productos_sin_canonizar de Supabase y permite resolver
+// cada grafía nueva detectada por parseProds().
+// Resolver = agregar la grafía al array aliases[] del producto canónico
+// que corresponda. También se puede marcar como "ignorar" sin asignar.
+// ═══════════════════════════════════════════════════════════════
+
+var _pcanonPendientes = [];
+var _pcanonResueltas  = 0;
+
+async function pcanonRecargar() {
+  var lista = document.getElementById('pcanon-lista');
+  if (!lista) return;
+  lista.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text3);font-size:12px;font-style:italic;">Cargando...</div>';
+
+  try {
+    // Pendientes
+    var resp1 = await fetch(SUPABASE_URL + '/rest/v1/productos_sin_canonizar?resuelto=eq.false&order=ultimo_visto.desc&select=*', {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+    });
+    if (!resp1.ok) throw new Error('HTTP ' + resp1.status);
+    _pcanonPendientes = await resp1.json();
+
+    // Conteo de resueltas
+    var resp2 = await fetch(SUPABASE_URL + '/rest/v1/productos_sin_canonizar?resuelto=eq.true&select=id', {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Prefer': 'count=exact' }
+    });
+    var cntHeader = resp2.headers.get('content-range');
+    if (cntHeader) {
+      var m = cntHeader.match(/\/(\d+)$/);
+      _pcanonResueltas = m ? parseInt(m[1]) : 0;
+    }
+
+    pcanonRender();
+    pcanonActualizarBadge();
+  } catch(e) {
+    lista.innerHTML = '<div style="text-align:center;padding:24px;color:var(--red);font-size:12px;">Error: ' + e.message + '</div>';
+  }
+}
+
+function pcanonRender() {
+  var lista = document.getElementById('pcanon-lista');
+  var statPend = document.getElementById('pcanon-stat-pendientes');
+  var statRes  = document.getElementById('pcanon-stat-resueltas');
+  if (statPend) statPend.textContent = _pcanonPendientes.length;
+  if (statRes)  statRes.textContent  = _pcanonResueltas;
+
+  if (!lista) return;
+
+  if (!_pcanonPendientes.length) {
+    lista.innerHTML = '<div style="text-align:center;padding:32px;color:var(--green2);font-size:14px;">✅ Todo canonizado. No hay grafías pendientes.</div>';
+    return;
+  }
+
+  // Para cada pendiente, calcular sugerencias fuzzy contra productos_canonicos
+  var html = '';
+  _pcanonPendientes.forEach(function(p) {
+    var sugerencias = _pcanonSugerencias(p.nombre_crudo);
+    html += '<div class="pcanon-card" style="background:#fff;border-radius:12px;padding:12px 14px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.04);border-left:4px solid #EF6C00;">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px;">';
+    html += '<div style="flex:1;min-width:0;">';
+    html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:var(--text);line-height:1.1;">' + _esc(p.nombre_crudo) + '</div>';
+    html += '<div style="font-size:11px;color:var(--text3);margin-top:3px;">Visto desde ' + _formateoFecha(p.primer_visto) + ' · última ' + _formateoFecha(p.ultimo_visto) + '</div>';
+    html += '</div>';
+    html += '<button onclick="pcanonIgnorar(' + p.id + ')" style="background:#F5F5F5;border:1px solid #E0E0E0;border-radius:8px;padding:5px 10px;font-size:11px;cursor:pointer;color:#666;flex-shrink:0;">Ignorar</button>';
+    html += '</div>';
+
+    // Sugerencias
+    if (sugerencias.length > 0) {
+      html += '<div style="font-size:11px;color:var(--text3);margin-bottom:6px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;">Sugerencias:</div>';
+      html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">';
+      sugerencias.forEach(function(s) {
+        var conf = Math.round(s.score * 100);
+        var bgClass = conf >= 80 ? '#E8F5E9' : conf >= 60 ? '#FFFDE7' : '#F5F5F5';
+        var fgClass = conf >= 80 ? '#2E7D32' : conf >= 60 ? '#F57F17' : '#666';
+        html += '<button onclick="pcanonResolver(' + p.id + ', \'' + _escAttr(s.canon.nombre) + '\', \'' + _escAttr(p.nombre_crudo) + '\')" '
+              + 'style="background:' + bgClass + ';border:1px solid ' + fgClass + ';color:' + fgClass + ';border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer;font-weight:700;">'
+              + '→ ' + _esc(s.canon.nombre) + ' <span style="opacity:.6;font-weight:400;">(' + conf + '%)</span>'
+              + '</button>';
+      });
+      html += '</div>';
+    }
+
+    // Selector manual de canónico (siempre disponible)
+    html += '<details style="margin-top:6px;">';
+    html += '<summary style="font-size:11px;color:var(--text3);cursor:pointer;">Otro canónico…</summary>';
+    html += '<div style="display:flex;gap:6px;margin-top:6px;">';
+    html += '<select id="pcanon-sel-' + p.id + '" style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid #E0E0E0;font-size:13px;">';
+    html += '<option value="">— Elegir canónico —</option>';
+    _prodCanonicos.forEach(function(pc) {
+      html += '<option value="' + _escAttr(pc.nombre) + '">' + _esc(pc.nombre) + (pc.activo === false ? ' (inactivo)' : '') + '</option>';
+    });
+    html += '</select>';
+    html += '<button onclick="pcanonResolverManual(' + p.id + ', \'' + _escAttr(p.nombre_crudo) + '\')" '
+          + 'style="background:#1565C0;color:#fff;border:none;border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer;font-weight:700;">Asignar</button>';
+    html += '</div>';
+    html += '</details>';
+
+    html += '</div>';
+  });
+
+  lista.innerHTML = html;
+}
+
+// Levenshtein normalizado entre 2 strings (ya normalizadas con _prodCanonNormalizar)
+function _pcanonLevenshtein(a, b) {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  var matrix = [];
+  for (var i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (var j = 0; j <= a.length; j++) matrix[0][j] = j;
+  for (var i = 1; i <= b.length; i++) {
+    for (var j = 1; j <= a.length; j++) {
+      matrix[i][j] = b[i-1] === a[j-1]
+        ? matrix[i-1][j-1]
+        : 1 + Math.min(matrix[i-1][j-1], matrix[i-1][j], matrix[i][j-1]);
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
+// Devuelve hasta 3 sugerencias de canónico para una grafía cruda.
+// Score = 1 - (distancia / max(longitudes)).
+function _pcanonSugerencias(nombreCrudo) {
+  var norm = _prodCanonNormalizar(nombreCrudo);
+  if (!norm || !_prodCanonicos.length) return [];
+  var sugerencias = [];
+  _prodCanonicos.forEach(function(pc) {
+    var nombreNorm = _prodCanonNormalizar(pc.nombre);
+    var bestDist = _pcanonLevenshtein(norm, nombreNorm);
+    var bestStr  = pc.nombre;
+    if (Array.isArray(pc.aliases)) {
+      pc.aliases.forEach(function(a) {
+        var aNorm = _prodCanonNormalizar(a);
+        var d = _pcanonLevenshtein(norm, aNorm);
+        if (d < bestDist) { bestDist = d; bestStr = a; }
+      });
+    }
+    var maxLen = Math.max(norm.length, nombreNorm.length);
+    var score = maxLen > 0 ? 1 - (bestDist / maxLen) : 0;
+    if (score >= 0.4) {
+      sugerencias.push({ canon: pc, score: score, matched: bestStr });
+    }
+  });
+  sugerencias.sort(function(a, b) { return b.score - a.score; });
+  return sugerencias.slice(0, 3);
+}
+
+// Resolver: asignar grafía cruda como alias del canónico.
+async function pcanonResolver(idPendiente, nombreCanonico, nombreCrudo) {
+  if (!confirm('Agregar "' + nombreCrudo + '" como alias de "' + nombreCanonico + '"?')) return;
+  try {
+    // 1. Leer aliases actuales del canónico
+    var resp = await fetch(SUPABASE_URL + '/rest/v1/productos_canonicos?nombre=eq.' + encodeURIComponent(nombreCanonico) + '&select=id,aliases', {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+    });
+    var arr = await resp.json();
+    if (!arr.length) { alert('Canónico no encontrado'); return; }
+    var canon = arr[0];
+    var aliases = Array.isArray(canon.aliases) ? canon.aliases.slice() : [];
+    var nuevoAlias = nombreCrudo.toLowerCase().trim();
+    if (aliases.indexOf(nuevoAlias) < 0) aliases.push(nuevoAlias);
+
+    // 2. PATCH del canónico
+    await fetch(SUPABASE_URL + '/rest/v1/productos_canonicos?id=eq.' + canon.id, {
+      method: 'PATCH',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({ aliases: aliases, actualizado_at: new Date().toISOString() })
+    });
+
+    // 3. Marcar pendiente como resuelto
+    await fetch(SUPABASE_URL + '/rest/v1/productos_sin_canonizar?id=eq.' + idPendiente, {
+      method: 'PATCH',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({ resuelto: true, resuelto_a: nombreCanonico, resuelto_at: new Date().toISOString() })
+    });
+
+    // 4. Refrescar cache local de productos_canonicos (forzar recarga)
+    try { localStorage.removeItem(PROD_CANON_CACHE_KEY); } catch(e) {}
+    await cargarProductosCanonicos();
+
+    pcanonRecargar();
+  } catch(e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+// Variante: tomar el canónico del select del details
+function pcanonResolverManual(idPendiente, nombreCrudo) {
+  var sel = document.getElementById('pcanon-sel-' + idPendiente);
+  var canonico = sel ? sel.value : '';
+  if (!canonico) { alert('Elegí un canónico del listado'); return; }
+  pcanonResolver(idPendiente, canonico, nombreCrudo);
+}
+
+// Marcar como ignorado: resuelto=true, resuelto_a=null
+async function pcanonIgnorar(idPendiente) {
+  if (!confirm('Ignorar esta grafía sin asignar a ningún canónico?')) return;
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/productos_sin_canonizar?id=eq.' + idPendiente, {
+      method: 'PATCH',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({ resuelto: true, resuelto_a: null, resuelto_at: new Date().toISOString() })
+    });
+    pcanonRecargar();
+  } catch(e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+// Badge en el menú "Más" indicando cuántas grafías hay sin resolver.
+function pcanonActualizarBadge() {
+  var badge = document.getElementById('menu-mas-pcanon-badge');
+  if (!badge) return;
+  if (_pcanonPendientes.length > 0) {
+    badge.textContent = _pcanonPendientes.length > 99 ? '99+' : _pcanonPendientes.length;
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+// Helpers de escape
+function _esc(s) {
+  return String(s || '').replace(/[&<>"']/g, function(c) {
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+function _escAttr(s) {
+  return String(s || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+function _formateoFecha(iso) {
+  if (!iso) return '—';
+  try {
+    var d = new Date(iso);
+    return d.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+  } catch(e) { return iso; }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Fin v12.7.0 N40b — TAB PRODUCTOS SIN CANONIZAR
+// ═══════════════════════════════════════════════════════════════
+
 // GPS state
 var _gpsVendedorId  = null;
 var _gpsCheckinActivo = null;
@@ -11137,6 +11707,8 @@ function login(nombre) {
   cargarAsignaciones();
   mostrarTabs();
   mostrarBotonesManual();
+  // v12.7.0 N40b: cargar productos canónicos en background (no bloquea login)
+  cargarProductosCanonicos();
   // v12.5.0: removido checkPrimeraVez() — el manual ya no se abre solo al inicio.
   // Sigue accesible vía botón 📖 en el header. Razón: nadie lo miraba y molestaba.
   // Iniciar tracking GPS continuo (solo vendedores, no Admin)
@@ -13025,8 +13597,14 @@ function parseProds(detalle) {
     var qty = qtyMatch ? parseInt(qtyMatch[1]) : 1;
     var emojiMatch = seg.match(/^(\S+)\s/);
     var emoji = emojiMatch && emojiMatch[1].length <= 3 ? emojiMatch[1] : '';
-    var shortName = name;  // nombre completo sin truncar
-    prods.push({ emoji: emoji, name: shortName, qty: qty });
+    // v12.7.0 N40b: canonizar nombre si hay match contra productos_canonicos
+    // Si no matchea: usar nombre crudo (la grafía queda registrada en
+    // productos_sin_canonizar para revisión humana posterior).
+    // El emoji canónico tiene precedencia sobre el del WA si lo hay.
+    var canon = canonizarProducto(name);
+    var shortName = canon ? canon.nombre : name;
+    if (canon && canon.emoji) emoji = canon.emoji;
+    prods.push({ emoji: emoji, name: shortName, qty: qty, _canon: !!canon });
   });
   return prods;
 }
@@ -13078,7 +13656,7 @@ function cambiarTab(tab) {
   _tabActual = tab;
 
   // Views — incluye logistica
-  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup'].forEach(function(t) {
+  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon'].forEach(function(t) {
     var v = document.getElementById('view-' + t);
     var b = document.getElementById('tab-btn-' + t);
     if (v) v.classList.toggle('active', t === tab);
@@ -13087,7 +13665,7 @@ function cambiarTab(tab) {
 
   // El botón "Más" se marca activo si estás en un tab oculto (gps/visitas, clientes, rendiciones, acc-dup)
   var btnMas = document.getElementById('tab-btn-mas');
-  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes' || tab === 'rendiciones' || tab === 'acc-dup');
+  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes' || tab === 'rendiciones' || tab === 'acc-dup' || tab === 'prod-canon');
 
   // Logística — renderizar DESPUÉS de activar el view
   if (tab === 'logistica') {
@@ -13139,6 +13717,10 @@ function cambiarTab(tab) {
     if (typeof accDupCargar === 'function') accDupCargar();
     var v = document.getElementById('view-acc-dup'); if (v) v.scrollTop = 0;
   }
+  if (tab === 'prod-canon') {
+    if (typeof pcanonRecargar === 'function') pcanonRecargar();
+    var v = document.getElementById('view-prod-canon'); if (v) v.scrollTop = 0;
+  }
 }
 
 function mostrarTabs() {
@@ -13157,9 +13739,14 @@ function mostrarTabs() {
   var tabMapa = document.getElementById('tab-btn-mapa');
   if (tabMapa) tabMapa.style.display = esAdmin ? '' : 'none';
 
+  // v12.7.0 N40b: Item "Sin canonizar" del menú Más — solo Admin
+  var menuPC = document.getElementById('menu-mas-prod-canon');
+  if (menuPC) menuPC.style.display = esAdmin ? '' : 'none';
+
   // Si el tab activo quedó oculto, ir a Pedidos
   if (_tabActual === 'gps' && !esCampo && !esAdmin) cambiarTab('pedidos');
   if (_tabActual === 'mapa' && !esAdmin) cambiarTab('pedidos');
+  if (_tabActual === 'prod-canon' && !esAdmin) cambiarTab('pedidos');
 }
 
 function ocultarTabs() {
