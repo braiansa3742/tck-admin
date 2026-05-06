@@ -1,5 +1,36 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v12.6.0 — 06/05/2026
+     ──────────────────────────────────────────────────────────────────────
+     LOGÍSTICA — Detalle del viaje: stats reales + cancelados ocultos
+
+     Cambios v12.6.0 (sobre v12.5.0):
+
+       1. lzPedidosDeViaje filtra pedidos cancelados.
+          El viaje_id queda intacto en BD por auditoría histórica;
+          la UI los oculta (no se muestran ni se suman al total).
+
+       2. lzCiudadesEnViaje aplica el mismo filtro (consistencia).
+
+       3. Header del viaje rediseñado con stats bar:
+          - ✅ Confirmados: cantidad + monto
+          - ⚠️ Pendientes: cantidad + monto (color destacado)
+          - Total al camión: suma confirmados + pendientes (banner negro)
+          Antes: el total mezclaba cancelados → mentía al admin.
+
+       4. Sección "📦 Pedidos del viaje" simplificada:
+          eliminado el contador redundante (ahora vive en el header).
+
+     Sin cambios:
+       - BD / Apps Script / triggers Supabase
+       - Planillas de carga y veterinaria (tienen filtros propios)
+       - Botón "Cerrar viaje" + warning de pendientes (ya funcionaba bien)
+
+     Caso testigo Sáb 2 May (Viaje TL Tarde):
+       Antes: "6 · $1.071k" (sumando 3 cancelados Logotetti)
+       Ahora: "2 confirmados $581k · 1 pendiente $48k · Total $629k"
+
+     ═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v12.2 — 02/05/2026
      ──────────────────────────────────────────────────────────────────────
      PLANILLAS: BUGS A + B + C + D corregidos
@@ -6752,6 +6783,54 @@ input[type="date"] {
   border-radius: 8px;
   font-size: 11px;
   display: inline-block;
+}
+
+/* v12.6.0 — STATS BAR DEL VIAJE (confirmados / pendientes / total) */
+.v-stats-bar {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+.v-stat {
+  background: rgba(255,255,255,.12);
+  border-radius: 10px;
+  padding: 7px 10px;
+}
+.v-stat-lbl {
+  font-size: 10px;
+  opacity: .9;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+.v-stat.warn .v-stat-lbl { color: #FFD580; }
+.v-stat-val {
+  font-size: 14px;
+  font-weight: 800;
+  font-family: 'Barlow Condensed', sans-serif;
+}
+.v-total-camion {
+  margin-top: 10px;
+  background: rgba(0,0,0,.18);
+  border: 1px solid rgba(255,255,255,.2);
+  border-radius: 10px;
+  padding: 9px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.v-total-camion-lbl {
+  font-size: 12px;
+  font-weight: 700;
+  opacity: .95;
+}
+.v-total-camion-val {
+  font-size: 18px;
+  font-weight: 900;
+  color: #FFE082;
+  font-family: 'Barlow Condensed', sans-serif;
 }
 
 .v-banner-info,
@@ -17407,10 +17486,11 @@ function lzFmtMoneda(n) {
 }
 
 function lzCiudadesEnViaje(viajeId) {
-  // Cuenta ciudades únicas en pedidos asociados al viaje
+  // Cuenta ciudades únicas en pedidos asociados al viaje.
+  // v12.6.0: excluye cancelados (consistencia con lzPedidosDeViaje).
   const set = new Set();
   _lzPedidosZona.forEach(p => {
-    if (p.viaje_id === viajeId && p.localidad_canonica) {
+    if (p.viaje_id === viajeId && p.estado !== 'Cancelado' && p.localidad_canonica) {
       set.add(p.localidad_canonica);
     }
   });
@@ -17418,7 +17498,9 @@ function lzCiudadesEnViaje(viajeId) {
 }
 
 function lzPedidosDeViaje(viajeId) {
-  return _lzPedidosZona.filter(p => p.viaje_id === viajeId);
+  // v12.6.0: filtra cancelados — no se muestran ni se suman al viaje.
+  // El viaje_id queda intacto en BD por auditoría histórica, pero la UI los oculta.
+  return _lzPedidosZona.filter(p => p.viaje_id === viajeId && p.estado !== 'Cancelado');
 }
 
 function lzPendientesEnViaje(viajeId) {
@@ -17850,6 +17932,32 @@ function lzRenderDetalleViaje() {
     html += '    <div class="v-detalle-reagendado">📅 Reagendado' +
             (v.motivo_reagendo ? ': ' + lzEsc(v.motivo_reagendo) : '') + '</div>';
   }
+  // ── STATS BAR (v12.6.0) ──────────────────────────────────
+  // Confirmados + Pendientes separados, total al camión destacado.
+  // Cancelados ya están filtrados upstream en lzPedidosDeViaje.
+  if (pedidos.length > 0) {
+    const _montoConf = pedidos
+      .filter(p => p.estado !== 'Pendiente')
+      .reduce((s, p) => s + (Number(p.total) || 0), 0);
+    const _montoPend = pedidos
+      .filter(p => p.estado === 'Pendiente')
+      .reduce((s, p) => s + (Number(p.total) || 0), 0);
+    const _totalCamion = _montoConf + _montoPend;
+    html += '    <div class="v-stats-bar">';
+    html += '      <div class="v-stat">';
+    html += '        <div class="v-stat-lbl">✅ Confirmados</div>';
+    html += '        <div class="v-stat-val">' + confirmados + ' · ' + lzFmtMoneda(_montoConf) + '</div>';
+    html += '      </div>';
+    html += '      <div class="v-stat warn">';
+    html += '        <div class="v-stat-lbl">⚠️ Pendientes</div>';
+    html += '        <div class="v-stat-val">' + pendientes + ' · ' + lzFmtMoneda(_montoPend) + '</div>';
+    html += '      </div>';
+    html += '    </div>';
+    html += '    <div class="v-total-camion">';
+    html += '      <span class="v-total-camion-lbl">Total al camión</span>';
+    html += '      <span class="v-total-camion-val">' + lzFmtMoneda(_totalCamion) + '</span>';
+    html += '    </div>';
+  }
   html += '  </div>';
 
   // ── BANNER de estado ─────────────────────────────────────
@@ -17909,11 +18017,11 @@ function lzRenderDetalleViaje() {
   html += '  </div>';
 
   // ── PEDIDOS DEL VIAJE ────────────────────────────────────
-  const totalMonto = pedidos.reduce((s, p) => s + (Number(p.total) || 0), 0);
+  // v12.6.0: el conteo y total ahora viven en la stats bar del header.
+  // Acá solo listamos. Cancelados ya filtrados upstream.
   html += '  <div class="v-detalle-section">';
   html += '    <div class="v-detalle-section-hdr">';
   html += '      <div class="v-detalle-titulo-mini">📦 Pedidos del viaje</div>';
-  html += '      <div class="v-detalle-cnt">' + pedidos.length + ' · ' + lzFmtMoneda(totalMonto) + '</div>';
   html += '    </div>';
 
   if (pedidos.length === 0) {
