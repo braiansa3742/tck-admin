@@ -1,5 +1,49 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v12.8.1 — 06/05/2026
+     ──────────────────────────────────────────────────────────────────────
+     N41 — CIUDADES CANÓNICAS — Limpieza de RUTA_FIJA hardcoded
+
+     Cambios v12.8.1 (sobre v12.8.0):
+
+       1. Eliminada la constante `RUTA_FIJA` que contenía hardcoded:
+            ['Trenque Lauquen','Pehuajó','Henderson','Carlos Casares',
+             'Daireaux','Pellegrini','Salliqueló','Tres Lomas',
+             'Guaminí','30 de Agosto','Lincoln','Quemú Quemú']
+          Esa lista incluía 3 ciudades que NO están en `rutas` (Carlos
+          Casares, Lincoln, Quemú Quemú) — TCK no entrega ahí.
+
+       2. Reemplazada por funciones que leen de la tabla `rutas`:
+            - cargarRutasOrden() — fetch a Supabase con cache 1h
+            - normalizarCiudadOrd(s) — lowercase + sin tildes
+            - ordenDeCiudad(c) — devuelve orden 0-27 o 999
+
+          Mismo patrón que ya tiene tck-ventas v14.8+ desde N31.
+
+       3. Lugares actualizados (planillas veterinaria + carga por PDF):
+            - vetGenerar (línea ~20054)
+            - vetGenerarPDF segunda planilla (línea ~20218)
+          Antes de cada sort se llama `await cargarRutasOrden()` para
+          asegurar cache cargada (admin no la pre-cargaba).
+
+       4. Beneficio: el orden de ciudades en planillas refleja la
+          tabla `rutas` REAL (28 ciudades, columna `orden`). Si Braian
+          agrega una ciudad nueva o cambia el orden de la ruta, las
+          planillas se ajustan automáticamente sin tocar código.
+
+     DEPLOY v12.8.1:
+       1. Subir este archivo al repo tck-admin como index.html
+       2. Hard refresh (Ctrl+Shift+R)
+       3. Smoke test: imprimir una planilla veterinaria y verificar que
+          el orden de ciudades sea el mismo que tabla `rutas` (TL primero,
+          después zona 1, zona AmFortín, zona 2 — al final, por `orden`).
+
+     PRESERVADO desde v12.8.0:
+       - Tab "🏙️ Ciudades sin canonizar" (N41 paso 4)
+       - Tab "🔧 Productos sin canonizar" (N40b)
+       - Toda la lógica de logística, mapa, reportes, clientes, duplicados
+═════════════════════════════════════════════════════════════════════════ -->
+<!-- ═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v12.8.0 — 06/05/2026
      ──────────────────────────────────────────────────────────────────────
      N41 — CIUDADES CANÓNICAS — Tab "Sin canonizar — Ciudades" en menú Más
@@ -17967,11 +18011,70 @@ async function tomadorConfirmarFinal() {
 //  ASIGNACIÓN CHOFERES + PLANILLA DE CARGA
 // ════════════════════════════════════════════════════════════════
 
-const RUTA_FIJA = [
-  'Trenque Lauquen','Pehuajó','Henderson','Carlos Casares',
-  'Daireaux','Pellegrini','Salliqueló','Tres Lomas',
-  'Guaminí','30 de Agosto','Lincoln','Quemú Quemú'
-];
+// v12.8.1 N41 — Orden de ciudades desde tabla `rutas` (Supabase)
+// Reemplaza la const RUTA_FIJA hardcoded que vivía acá. Patrón replicado
+// de tck-ventas v14.8+. Cache 1h para no consultar Supabase en cada render.
+let _admRutasOrdenCache = null;
+let _admRutasOrdenLoadedAt = null;
+const ADM_RUTAS_ORDEN_TTL_MS = 60 * 60 * 1000; // 1 hora
+
+// Helper: normalizar nombre de ciudad para match (lowercase, sin tildes)
+function normalizarCiudadOrd(s) {
+  if (!s) return '';
+  return String(s).toLowerCase().trim()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+// Carga el mapa { 'ciudad_normalizada': orden_int } desde rutas.
+// Devuelve {} si la query falla (graceful fallback: orden alfabético).
+async function cargarRutasOrden() {
+  if (_admRutasOrdenCache && _admRutasOrdenLoadedAt &&
+      (Date.now() - _admRutasOrdenLoadedAt.getTime()) < ADM_RUTAS_ORDEN_TTL_MS) {
+    return _admRutasOrdenCache;
+  }
+  try {
+    const resp = await fetch(SUPABASE_URL + '/rest/v1/rutas?select=ciudad,orden,zona,aliases&activo=eq.true&order=orden.asc', {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+    });
+    if (!resp.ok) throw new Error('rutas HTTP ' + resp.status);
+    const data = await resp.json();
+    const map = {};
+    if (Array.isArray(data)) {
+      data.forEach(function(r) {
+        if (r && r.ciudad && typeof r.orden === 'number') {
+          map[normalizarCiudadOrd(r.ciudad)] = { orden: r.orden, ciudadOriginal: r.ciudad, zona: r.zona };
+          if (Array.isArray(r.aliases)) {
+            r.aliases.forEach(function(a) {
+              const k = normalizarCiudadOrd(a);
+              if (k && !map[k]) map[k] = { orden: r.orden, ciudadOriginal: r.ciudad, zona: r.zona };
+            });
+          }
+        }
+      });
+    }
+    _admRutasOrdenCache = map;
+    _admRutasOrdenLoadedAt = new Date();
+    return _admRutasOrdenCache;
+  } catch(err) {
+    console.warn('cargarRutasOrden falló:', err);
+    return {};
+  }
+}
+
+// Devuelve el orden (0-27) de una ciudad según rutas. 999 si no la encuentra.
+// Hace match exacto, después por includes (ej: "Trenque Lauquen — Centro" → matchea TL).
+function ordenDeCiudad(ciudad) {
+  if (!_admRutasOrdenCache) return 999;
+  const key = normalizarCiudadOrd(ciudad);
+  if (_admRutasOrdenCache[key]) return _admRutasOrdenCache[key].orden;
+  const keys = Object.keys(_admRutasOrdenCache);
+  for (let i = 0; i < keys.length; i++) {
+    if (key.includes(keys[i]) || keys[i].includes(key)) {
+      return _admRutasOrdenCache[keys[i]].orden;
+    }
+  }
+  return 999;
+}
 
 // ══════════════════════════════════════════════════════════════
 // PROVEEDORES Y MAPEO PRODUCTO → PROVEEDOR
@@ -20367,6 +20470,10 @@ function vetActualizarVehiculo() {
 }
 
 function vetGenerar(opts) {
+  return _vetGenerarAsync(opts);
+}
+
+async function _vetGenerarAsync(opts) {
   // v12.2: Acepta opts opcional con { chofer, vehiculo, viaje_id }
   //        Si no, lee de los selectores del modal vet (modo viejo)
   let chofer, vehiculo, viajeId = null;
@@ -20436,11 +20543,13 @@ function vetGenerar(opts) {
     });
   });
 
-  // Ordenar ciudades por ruta fija
+  // v12.8.1 N41: ordenar por rutas.orden de Supabase (cache 1h)
+  await cargarRutasOrden();
   const ciudades = Object.keys(porCiudad).sort(function(a, b) {
-    const ia = RUTA_FIJA.findIndex(c => a.toLowerCase().includes(c.toLowerCase()));
-    const ib = RUTA_FIJA.findIndex(c => b.toLowerCase().includes(c.toLowerCase()));
-    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+    const oa = ordenDeCiudad(a);
+    const ob = ordenDeCiudad(b);
+    if (oa !== ob) return oa - ob;
+    return a.localeCompare(b);
   });
 
   const hoy     = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' });
@@ -20600,13 +20709,15 @@ async function descargarPlanillaCarga(choferParam) {
       });
     });
 
+    // v12.8.1 N41: ordenar por rutas.orden, INVERSO (último en cargar al camión = primero en descargar)
+    await cargarRutasOrden();
     const todasCiudades = Object.keys(porCiudadProds);
     todasCiudades.sort(function(a, b) {
-      const ia = RUTA_FIJA.findIndex(c => a.toLowerCase().includes(c.toLowerCase()));
-      const ib = RUTA_FIJA.findIndex(c => b.toLowerCase().includes(c.toLowerCase()));
-      const ra = ia === -1 ? 999 : ia;
-      const rb = ib === -1 ? 999 : ib;
-      return rb - ra;
+      const oa = ordenDeCiudad(a);
+      const ob = ordenDeCiudad(b);
+      // Inverso a propósito: la planilla de carga se llena en orden inverso a la ruta
+      if (oa !== ob) return ob - oa;
+      return b.localeCompare(a);
     });
 
     // ── PDF ──
