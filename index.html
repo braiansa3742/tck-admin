@@ -1,5 +1,50 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v12.10.0 — 07/05/2026
+     ──────────────────────────────────────────────────────────────────────
+     N42 FIX — Bandeja "No entregados pendientes" con modelo correcto
+
+     Cambio sobre v12.9.0:
+       El drawer "No Entregados" tenía 3 acciones (Reagendar/Cancelar/
+       Entregado) que no encajaban con el modelo nuevo:
+         · "Reagendar" daba autonomía indebida al admin sobre logística
+         · "Cancelar" no era claro (¿cancela qué? ¿la factura?)
+         · El motivo del chofer no era visible
+
+     Modelo nuevo (validado con Braian 07/05):
+       Cada card del drawer muestra:
+         · Cliente, ciudad, comercio, monto, fecha del reporte
+         · Chofer que reportó
+         · 🟧 Motivo del chofer (cliente_cerrado / rechazo / otro)
+         · Texto libre del chofer si aplica
+
+       Acciones del admin:
+         📄 Xubio       → abre Xubio en pestaña nueva (para nota de crédito)
+         💬 WhatsApp    → abre chat con el cliente (si hay teléfono)
+         ✓ Marcar resuelto → estado=resuelto_admin (sale de la bandeja)
+         ↩ Corregir: sí se entregó → estado=entregado (corrección manual)
+
+       NO existe "Reagendar" porque el principio operativo es:
+       "Confirmado = sale en camión. Vuelve con destino: entregado o
+       no_entregado con motivo. Si después se vuelve a vender al cliente,
+       es un pedido nuevo (nuevo presupuesto Xubio)".
+
+     SQL aplicado en Supabase (07/05/2026):
+       ALTER TABLE entregas
+         ADD COLUMN motivo_no_entrega text,
+         ADD COLUMN motivo_detalle text;
+       CREATE INDEX idx_entregas_no_entregado
+         ON entregas(estado) WHERE estado = 'no_entregado';
+
+     PRESERVADO desde v12.9.0:
+       - FIX C: lee entregas reales (no viajes.monto_cobrado)
+       - Click cards "En Curso" abre detalle
+       - Orden desc en En Curso
+
+═════════════════════════════════════════════════════════════════════════ -->
+
+<!DOCTYPE html>
+<!-- ═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v12.9.0 — 07/05/2026
      ──────────────────────────────────────────────────────────────────────
      N42 FIX C: Admin lee entregas reales en lugar de denormalización en viajes
@@ -6417,6 +6462,92 @@ input[type="date"] {
   background: #FAFBFF; border-radius: 8px; padding: 9px 11px;
   margin-bottom: 6px; border: 1px solid var(--cream3);
 }
+
+/* ═══ FIX N42 (07/05/2026): Card de "No Entregado pendiente" ═══════ */
+.lz-noent-card {
+  background: #fff;
+  border: 1.5px solid #FFD180;
+  border-left: 4px solid #FB8C00;
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  box-shadow: 0 1px 4px rgba(251,140,0,.08);
+}
+.lz-noent-card-hdr {
+  display: flex; justify-content: space-between; gap: 10px;
+  align-items: flex-start; margin-bottom: 6px;
+}
+.lz-noent-cliente {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 16px;
+  font-weight: 800; color: var(--text); line-height: 1.2; flex: 1;
+}
+.lz-noent-monto {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 16px;
+  font-weight: 900; color: #C62828; flex-shrink: 0;
+}
+.lz-noent-meta {
+  font-size: 12px; color: var(--text2);
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  margin-bottom: 10px;
+}
+.lz-noent-chofer {
+  display: inline-block; padding: 1px 8px;
+  background: #E8F5E9; border-radius: 10px;
+  font-size: 11px; font-weight: 700; color: #1B5E20;
+}
+.lz-noent-chofer.luis { background: #FFF3E0; color: #E65100; }
+.lz-noent-chofer.juampi, .lz-noent-chofer.juan-pablo {
+  background: #E3F2FD; color: #0D47A1;
+}
+.lz-noent-fecha {
+  margin-left: auto; font-size: 11px; color: var(--text3);
+}
+.lz-noent-motivo-box {
+  background: #FFF8E1; border: 1px solid #FFD54F;
+  border-radius: 8px; padding: 8px 10px;
+  margin-bottom: 10px;
+}
+.lz-noent-motivo-label {
+  font-size: 10px; text-transform: uppercase;
+  letter-spacing: .5px; color: #F57F17; font-weight: 700;
+  margin-bottom: 2px;
+}
+.lz-noent-motivo-txt {
+  font-size: 13px; font-weight: 700; color: #E65100;
+}
+.lz-noent-detalle {
+  font-size: 12px; color: var(--text2); font-style: italic;
+  margin-top: 4px; line-height: 1.3;
+}
+.lz-noent-acciones {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.lz-noent-btn {
+  padding: 9px 4px; border-radius: 8px;
+  font-size: 11px; font-weight: 700;
+  border: 1.5px solid; cursor: pointer;
+  text-align: center; line-height: 1.1;
+  display: flex; align-items: center; justify-content: center;
+}
+.lz-noent-btn:active { transform: scale(0.96); }
+.lz-noent-btn.xubio    { background: #E0F2F1; border-color: #26A69A; color: #00695C; }
+.lz-noent-btn.wa       { background: #E8F5E9; border-color: #66BB6A; color: #1B5E20; }
+.lz-noent-btn.resolver { background: #E3F2FD; border-color: #42A5F5; color: #0D47A1; }
+.lz-noent-acciones-secundarias {
+  display: flex; justify-content: flex-end;
+}
+.lz-noent-btn-mini {
+  padding: 5px 10px; border-radius: 6px;
+  font-size: 10px; font-weight: 600;
+  border: 1px solid var(--cream3);
+  background: transparent; color: var(--text3);
+  cursor: pointer;
+}
+.lz-noent-btn-mini:hover { color: var(--text); }
+/* ═══ FIN FIX N42 ════════════════════════════════════════════════════ */
 .lz-pedido:last-child { margin-bottom: 0; }
 .lz-pedido.lz-pendiente { opacity: .58; background: #F9F7F4; }
 .lz-pedido.lz-oculto { display: none; }
@@ -19095,7 +19226,14 @@ async function lzRenderEnCurso(el) {
   }
 
   // Filtrar solo en_ruta
-  const enRuta = _lzViajes.filter(v => v.estado === 'en_ruta');
+  // FIX (07/05/2026): ordenar descendente — viaje más reciente arriba
+  const enRuta = _lzViajes
+    .filter(v => v.estado === 'en_ruta')
+    .sort((a, b) => {
+      const fA = a.fecha_salida || '';
+      const fB = b.fecha_salida || '';
+      return fB.localeCompare(fA);
+    });
 
   let html = '';
 
@@ -19143,7 +19281,7 @@ async function lzRenderEnCurso(el) {
     const fecha = lzFechaCard(v.fecha_salida);
     const zonaNombre = lzZonaNombreFromKey(v.zona);
 
-    html += '<div class="lz-encurso-card" style="' + cardStyle + '">';
+    html += '<div class="lz-encurso-card" style="' + cardStyle + '; cursor:pointer;" onclick="lzAbrirDetalleViaje(\'' + v.id + '\')">';
     html += '  <div class="lz-encurso-card-top">';
     html += '    <div class="lz-encurso-avatar' + colorClase + '">' + avatar + '</div>';
     html += '    <div class="lz-encurso-info">';
@@ -20055,8 +20193,10 @@ let _lzSzPedidoSel  = null; // pedido_id seleccionado para asignar ciudad
 async function lzCargarDrawers() {
   // No Entregados: leer de tabla entregas
   // v11.5: subido limit de 200 a 1000 (la tabla ya tiene 432+)
+  // FIX N42 (07/05/2026): traer también cliente, ciudad, monto, fecha,
+  // motivo_no_entrega, motivo_detalle, viaje_id (para link a Xubio)
   try {
-    const todas = await sbFetch('entregas?select=id,pedido_id,chofer,estado,fecha_asignacion&limit=1000&order=fecha_asignacion.desc');
+    const todas = await sbFetch('entregas?select=id,pedido_id,chofer,estado,fecha_asignacion,fecha_entrega,cliente,ciudad,comercio,monto,motivo_no_entrega,motivo_detalle,viaje_id,telefono&limit=1000&order=fecha_entrega.desc.nullslast');
     if (Array.isArray(todas) && todas.length > 0) {
       // v11.5: actualizar también el cache de estados para todos los pedidos
       todas.forEach(e => {
@@ -20131,43 +20271,125 @@ async function lzAbrirNoEntregados() {
 function lzRenderPedidoNoEnt(e) {
   const eid = lzEsc(e.id || e.pedido_id);
   const monto = typeof e.monto === 'number' ? e.monto : parseInt((e.monto||'0').toString().replace(/[^0-9]/g,'')) || 0;
+  const montoReal = (monto > 0 && monto < 1000) ? monto * 1000 : monto;
   const chofer = e.chofer || '?';
   const chClass = chofer.toLowerCase();
-  return '<div class="lz-pedido" style="margin-bottom:8px;">'
-    + '<div class="lz-pedido-hdr">'
-      + '<div style="flex:1;min-width:0;">'
-        + '<div class="lz-pedido-cliente">' + lzEsc(e.cliente || '—') + '</div>'
-      + '</div>'
-      + '<div class="lz-pedido-total">' + LZ_FMT_MONEY(monto) + '</div>'
-    + '</div>'
-    + '<div class="lz-pedido-foot" style="margin-bottom:8px;">'
-      + '<span class="lz-chip lz-chip-pend">' + lzEsc(e.ciudad || '?') + '</span>'
-      + '<span class="lz-badge-chofer ' + chClass + '">🚚 ' + chofer + '</span>'
-    + '</div>'
-    + '<div style="display:flex;gap:6px;">'
-      + '<button class="lz-btn-pedido" style="flex:1;background:var(--blue2);color:var(--blue);border-color:#90CAF9;" '
-        + 'onclick="lzNoEntAccion(\'' + eid + '\',\'reagendar\')">📅 Reagendar</button>'
-      + '<button class="lz-btn-pedido" style="flex:1;background:#FFEBEE;color:#C62828;border-color:#EF9A9A;" '
-        + 'onclick="lzNoEntAccion(\'' + eid + '\',\'cancelar\')">✕ Cancelar</button>'
-      + '<button class="lz-btn-pedido" style="flex:1;background:var(--green3);color:var(--green);border-color:#A5D6A7;" '
-        + 'onclick="lzNoEntAccion(\'' + eid + '\',\'entregado\')">✓ Entregado</button>'
-    + '</div>'
-  + '</div>';
+
+  // FIX N42 (07/05/2026): mostrar motivo del chofer + texto libre si aplica
+  const motivoLabels = {
+    'cliente_cerrado': '🚪 Cliente cerrado / no estaba',
+    'rechazo':         '🤔 Rechazó mercadería',
+    'otro':            '❓ Otro motivo'
+  };
+  const motivoTxt = motivoLabels[e.motivo_no_entrega] || (e.motivo_no_entrega || '— Sin motivo (legacy) —');
+
+  // Fecha del reporte
+  let fechaTxt = '';
+  if (e.fecha_entrega) {
+    try {
+      const d = new Date(e.fecha_entrega);
+      fechaTxt = d.toLocaleDateString('es-AR', { day: '2-digit', month: 'short' }) +
+                 ' ' + d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+    } catch(_) {}
+  }
+
+  let html = '<div class="lz-noent-card">';
+  html += '  <div class="lz-noent-card-hdr">';
+  html += '    <div class="lz-noent-cliente">' + lzEsc(e.cliente || '—') + '</div>';
+  html += '    <div class="lz-noent-monto">' + LZ_FMT_MONEY(montoReal) + '</div>';
+  html += '  </div>';
+
+  // Línea de meta: ciudad · comercio (opcional) · chofer
+  html += '  <div class="lz-noent-meta">';
+  html += '    📍 ' + lzEsc(e.ciudad || '?');
+  if (e.comercio) html += ' · 🏪 ' + lzEsc(e.comercio);
+  html += '    <span class="lz-noent-chofer ' + chClass + '">🚚 ' + lzEsc(chofer) + '</span>';
+  if (fechaTxt) html += '<span class="lz-noent-fecha">' + fechaTxt + '</span>';
+  html += '  </div>';
+
+  // Bloque de motivo (lo que reportó el chofer)
+  html += '  <div class="lz-noent-motivo-box">';
+  html += '    <div class="lz-noent-motivo-label">Motivo:</div>';
+  html += '    <div class="lz-noent-motivo-txt">' + lzEsc(motivoTxt) + '</div>';
+  if (e.motivo_detalle) {
+    html += '    <div class="lz-noent-detalle">"' + lzEsc(e.motivo_detalle) + '"</div>';
+  }
+  html += '  </div>';
+
+  // Botones de acción del admin
+  html += '  <div class="lz-noent-acciones">';
+  // 1. Link a presupuesto Xubio (si tenemos el id de xubio del pedido)
+  // El presupuesto se identifica por el id de Xubio que está en pedidos_zona o
+  // hoja "Pedidos". Como acá tenemos pedido_id (TCK-...), abrimos Xubio en
+  // búsqueda. Es el mejor compromiso sin guardar xubio_id en entregas.
+  html += '    <button class="lz-noent-btn xubio" onclick="lzNoEntAbrirXubio(\'' +
+          lzEsc(e.cliente || '') + '\')" title="Abrir Xubio para hacer nota de crédito">';
+  html += '      📄 Xubio';
+  html += '    </button>';
+
+  // 2. WhatsApp al cliente (si hay teléfono)
+  if (e.telefono) {
+    const tel = String(e.telefono).replace(/[^0-9]/g, '');
+    if (tel.length >= 8) {
+      const telWA = tel.startsWith('549') ? tel : (tel.length === 10 ? '549' + tel : tel);
+      const msg = encodeURIComponent('Hola ' + (e.cliente || '') + ', te escribo de TCK por tu pedido del ' + (fechaTxt || 'último viaje') + '.');
+      html += '    <button class="lz-noent-btn wa" onclick="window.open(\'https://wa.me/' + telWA + '?text=' + msg + '\',\'_blank\')">';
+      html += '      💬 WhatsApp';
+      html += '    </button>';
+    }
+  }
+
+  // 3. Marcar resuelto (admin terminó de procesarlo)
+  html += '    <button class="lz-noent-btn resolver" onclick="lzNoEntAccion(\'' + eid + '\',\'resuelto\')" title="Marcar como resuelto (después de hacer nota de crédito o llamar)">';
+  html += '      ✓ Marcar resuelto';
+  html += '    </button>';
+  html += '  </div>';
+
+  // 4. Acciones secundarias (correcciones manuales)
+  html += '  <div class="lz-noent-acciones-secundarias">';
+  html += '    <button class="lz-noent-btn-mini" onclick="lzNoEntAccion(\'' + eid + '\',\'entregado\')" title="Corregir: en realidad sí se entregó">';
+  html += '      ↩ Corregir: sí se entregó';
+  html += '    </button>';
+  html += '  </div>';
+
+  html += '</div>';
+  return html;
+}
+
+// FIX N42: abrir Xubio en pestaña nueva con búsqueda del cliente
+function lzNoEntAbrirXubio(nombreCliente) {
+  // Xubio no tiene URL directa de búsqueda por cliente. Mejor abrir el dashboard
+  // y que Francisco/Gastón busquen ahí. Mostramos el nombre como fallback.
+  const url = 'https://www.xubio.com/app/index.html#/comprobantes';
+  window.open(url, '_blank');
+  toast('📋 Cliente: ' + nombreCliente + ' (copialo para buscar en Xubio)', 'ok');
 }
 
 async function lzNoEntAccion(entregaId, accion) {
+  // FIX N42 (07/05/2026): nuevo modelo de acciones del admin
+  //   'resuelto'  → admin terminó de procesarlo (nota de crédito en Xubio,
+  //                 llamó al cliente, etc.). Marca como 'resuelto_admin'.
+  //                 Sale de la bandeja.
+  //   'entregado' → corrección manual: en realidad sí se entregó
+  //                 (chofer se equivocó al reportar)
   const mapEstado = {
-    'reagendar': 'pendiente',  // vuelve a la cola del chofer
-    'cancelar':  'cancelado',
+    'resuelto':  'resuelto_admin',
     'entregado': 'entregado'
   };
   const nuevoEstado = mapEstado[accion];
   if (!nuevoEstado) return;
 
+  // Confirmaciones según acción
+  if (accion === 'resuelto') {
+    if (!confirm('¿Marcar como RESUELTO?\n\nEsto saca el pedido de la bandeja. Confirma que ya hiciste lo que correspondía (nota de crédito, llamar al cliente, etc.).')) return;
+  } else if (accion === 'entregado') {
+    if (!confirm('¿Corregir: en realidad SÍ se entregó?\n\nEsto cambia el estado a Entregado. Usalo solo si el chofer reportó mal.')) return;
+  }
+
   try {
     const body = { estado: nuevoEstado };
-    if (accion === 'reagendar') {
-      body.fecha_asignacion = new Date().toISOString();
+    if (accion === 'resuelto') {
+      body.resultado_final = 'resuelto_admin';
     }
     await sbFetch('entregas?id=eq.' + encodeURIComponent(entregaId), {
       method: 'PATCH',
@@ -20184,7 +20406,7 @@ async function lzNoEntAccion(entregaId, accion) {
     } else {
       cont.innerHTML = _lzNoEntregados.map(e => lzRenderPedidoNoEnt(e)).join('');
     }
-    const lbl = { 'reagendar': '📅 Reagendado', 'cancelar': '✕ Cancelado', 'entregado': '✓ Entregado' }[accion];
+    const lbl = { 'resuelto': '✓ Resuelto', 'entregado': '↩ Corregido a entregado' }[accion];
     toast(lbl, 'ok');
     // Refrescar barra (cambia el count del chip ⚠️)
     const bar = document.getElementById('lz-zona-bar');
