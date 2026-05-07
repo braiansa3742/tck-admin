@@ -1,5 +1,67 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v12.7.1 — 06/05/2026
+     ──────────────────────────────────────────────────────────────────────
+     N40b — PRODUCTOS CANÓNICOS — Fix de encabezados y prefijos de promo
+
+     Cambios v12.7.1 (sobre v12.7.0):
+
+       1. parseProds() ahora filtra encabezados conocidos del WA que
+          NO son productos (eran falsos positivos):
+            - "PROMOS 50% OFF"
+            - "OFERTAS — COMBOS"
+            - "OFERTAS 1+1 — COMPRÁS 1 LLEVÁS 2"
+            - etc.
+          Lista en _PARSEPRODS_ENCABEZADOS, matching case+tildes
+          insensitive. Si la línea matchea con un encabezado, se
+          ignora directamente (no canoniza ni registra como pendiente).
+
+       2. parseProds() limpia prefijos de promo antes de canonizar:
+            - "50% OFF: Arándano x500" → "Arándano x500"
+              → matchea con alias de "Arándanos Solimeno".
+            - "PROMO 1+1: Cebolla x500" → "Cebolla x500"
+              → matchea con "Cebolla".
+            - "1+1 Medallón Arroz" → "Medallón Arroz"
+              → matchea (o cae en pendiente si no hay alias).
+          Esto es importante porque las promos son metadata del precio,
+          no del producto. Lo que está en oferta es el producto base.
+
+       3. NOTA HISTÓRICA: el modelo "1+1" está deprecado desde N29 (no
+          se cargan promos nuevas en ese formato). Pero hay pedidos
+          viejos en el histórico con esas líneas que necesitan
+          tratamiento. Por eso el regex incluye PROMO 1+1 y 1+1.
+
+     PRESERVADO desde v12.7.0:
+       - Bloque productos_canonicos completo (cargarProductosCanonicos,
+         canonizarProducto, _flushGrafiasSinCanonizar, etc.)
+       - Tab "🔧 Sin canonizar" en menú Más (solo Admin)
+       - Sistema de sugerencias fuzzy en el tab
+
+     DEPLOY:
+       1. Subir este archivo al repo tck-admin como index.html.
+       2. Hard refresh.
+       3. Ir a Más → Sin canonizar:
+          - Los encabezados "PROMOS 50% OFF" y "OFERTAS 1+1..." ya
+            NO deberían aparecer (filtrados).
+          - "50% OFF: ARÁNDANO X500" debería resolverse solo (matchea
+            con alias de "Arándanos Solimeno" después de quitar el
+            prefijo). Si no aparece, perfecto: ya canoniza solo.
+          - "PROMO 1+1: Cebolla x500" debería resolverse solo (matchea
+            con "Cebolla").
+          - "CRUJIENTE" sigue pendiente — lo resolvés manualmente.
+       4. Las grafías que YA estaban registradas en
+          productos_sin_canonizar de antes del fix siguen ahí.
+          Las podés "Ignorar" en lote si querés (botón Ignorar de cada
+          tarjeta). Las nuevas grafías ya van a entrar limpias.
+
+     LIMITACIONES CONOCIDAS:
+       - Las grafías ya guardadas no se borran automáticamente. Hay
+         que ignorarlas a mano si molestan. (Si querés, en próxima
+         sesión agregamos un botón "Limpiar pendientes obsoletos" que
+         re-procesa cada grafía con el filtro nuevo y borra las que
+         ahora resuelven solas.)
+═════════════════════════════════════════════════════════════════════════ -->
+<!-- ═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v12.7.0 — 06/05/2026
      ──────────────────────────────────────────────────────────────────────
      N40b — PRODUCTOS CANÓNICOS (canonización en parseProds)
@@ -13582,6 +13644,65 @@ function toast(msg, tipo) {
 }
 
 // ── PRODUCT CHIPS EN HEADER DE CARD ──────────────────────────────
+
+// v12.7.1 N40b: encabezados conocidos del WA que NO son productos.
+// parseProds los detecta como falsos positivos porque vienen entre
+// asteriscos en el formato del mensaje. Los filtramos por matching
+// normalizado (case + tildes insensitive).
+//
+// IMPORTANTE: estos strings se PRE-NORMALIZAN con _prodCanonNormalizar
+// al cargar el script (ver _PARSEPRODS_ENCABEZADOS_NORM más abajo),
+// así el matching funciona aunque el normalizador remueva caracteres
+// como "+" o "—".
+var _PARSEPRODS_ENCABEZADOS_RAW = [
+  'PROMOS 50% OFF',
+  'OFERTAS — COMBOS',
+  'OFERTAS - COMBOS',
+  'OFERTAS COMBOS',
+  'OFERTAS 1+1',
+  'OFERTAS 1+1 — COMPRÁS 1 LLEVÁS 2',
+  'OFERTAS 1+1 - COMPRÁS 1 LLEVÁS 2',
+  'OFERTAS 1+1 - COMPRAS 1 LLEVAS 2',
+  'COMBOS',
+  'PRODUCTOS',
+  'PEDIDO TCK',
+  'MI PEDIDO'
+];
+// Set normalizado para lookup O(1)
+var _PARSEPRODS_ENCABEZADOS_NORM = {};
+_PARSEPRODS_ENCABEZADOS_RAW.forEach(function(h) {
+  var n = _prodCanonNormalizar(h);
+  if (n) _PARSEPRODS_ENCABEZADOS_NORM[n] = true;
+});
+
+// v12.7.1 N40b: prefijos de promo que se limpian del nombre ANTES de
+// intentar canonizar. La promo es metadata del precio, no del producto.
+// Ejemplo: "50% OFF: ARÁNDANO X500" → se limpia → "ARÁNDANO X500"
+//          y "ARÁNDANO X500" matchea con alias de "Arándanos Solimeno".
+//
+// IMPORTANTE: el modelo "1+1" está deprecado desde N29 (no se usan más
+// estas promos). Pero como hay pedidos viejos en histórico con esas
+// líneas, las limpiamos igual para que matcheen con el producto base.
+function _parseProdsLimpiarPrefijoPromo(name) {
+  if (!name) return name;
+  var clean = name;
+  // Quitar emoji 🎁 inicial si quedó dentro del nombre
+  clean = clean.replace(/^🎁\s*/, '');
+  // Patrones de prefijo a remover (orden importa: más específico primero)
+  var prefijos = [
+    /^50\s*%?\s*off\s*[:\-—–]\s*/i,    // "50% OFF:" o "50% OFF -"
+    /^promo\s+1\s*\+\s*1\s*[:\-—–]\s*/i, // "PROMO 1+1:"
+    /^1\s*\+\s*1\s+/i                    // "1+1 " (al inicio)
+  ];
+  for (var i = 0; i < prefijos.length; i++) {
+    if (prefijos[i].test(clean)) {
+      clean = clean.replace(prefijos[i], '').trim();
+      break;
+    }
+  }
+  return clean;
+}
+
 function parseProds(detalle) {
   if (!detalle) return [];
   var prods = [];
@@ -13592,16 +13713,23 @@ function parseProds(detalle) {
     var nameMatch = seg.match(/\*([^*]+)\*/);
     var name = nameMatch ? nameMatch[1] : '';
     if (!name) return;
+    // v12.7.1 N40b: filtrar encabezados (no son productos)
+    var nameNormChk = _prodCanonNormalizar(name);
+    if (_PARSEPRODS_ENCABEZADOS_NORM[nameNormChk]) return;
     var afterName = seg.slice(seg.indexOf('*', seg.indexOf('*')+1)+1).trim();
     var qtyMatch = afterName.match(/^(\d+)/);
     var qty = qtyMatch ? parseInt(qtyMatch[1]) : 1;
     var emojiMatch = seg.match(/^(\S+)\s/);
     var emoji = emojiMatch && emojiMatch[1].length <= 3 ? emojiMatch[1] : '';
-    // v12.7.0 N40b: canonizar nombre si hay match contra productos_canonicos
+    // v12.7.1 N40b: limpiar prefijos de promo antes de canonizar.
+    // "50% OFF: Arándano x500" → "Arándano x500" → matchea con Arándanos Solimeno.
+    // "PROMO 1+1: Cebolla x500" → "Cebolla x500" → matchea con Cebolla.
+    var nameForCanon = _parseProdsLimpiarPrefijoPromo(name);
+    // v12.7.0 N40b: canonizar nombre si hay match contra productos_canonicos.
     // Si no matchea: usar nombre crudo (la grafía queda registrada en
     // productos_sin_canonizar para revisión humana posterior).
     // El emoji canónico tiene precedencia sobre el del WA si lo hay.
-    var canon = canonizarProducto(name);
+    var canon = canonizarProducto(nameForCanon);
     var shortName = canon ? canon.nombre : name;
     if (canon && canon.emoji) emoji = canon.emoji;
     prods.push({ emoji: emoji, name: shortName, qty: qty, _canon: !!canon });
