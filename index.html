@@ -1,5 +1,49 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v12.9.0 — 07/05/2026
+     ──────────────────────────────────────────────────────────────────────
+     N42 FIX C: Admin lee entregas reales en lugar de denormalización en viajes
+
+     Bug reportado por Francisco (07/05/2026):
+       "En logística → En curso me aparecen los viajes con todos los
+        pedidos pendientes. Ninguno aparece como entregado."
+
+     Causa raíz:
+       Apps Script `_viajeRecalcularTotales` solo se llama al asociar
+       pedidos al viaje o al cerrarlo. NO se llama cuando un chofer
+       confirma una entrega. Resultado: `viajes.monto_cobrado` queda
+       en 0 aunque haya entregas marcadas en la tabla `entregas`.
+
+       Verificación SQL al cierre N42:
+         · 7 viajes en_ruta
+         · TODOS con monto_cobrado = $0 según `viajes`
+         · 128 entregas marcadas como entregadas en `entregas`
+         · ~$23M reales cobrados en esos viajes (invisibles en admin)
+
+     Solución (FIX C — leer source of truth):
+       1. Función nueva `lzCargarEntregasIndex()` carga índice
+          { pedido_id → estado } de la tabla `entregas` (limit 2000,
+          últimas en estado entregado/no_encontrado).
+       2. `lzPedidosDeViaje(viajeId)` ahora sobreescribe estado
+          'Confirmado' por 'Entregado' si la entrega está marcada.
+       3. `lzRenderEnCurso` hecho async + carga `lzCargarEntregasDeViajes`
+          antes de renderizar. Cache 30s por viaje_id.
+       4. Stats bar del modal de detalle ahora muestra columna
+          "📦 Entregados" además de Confirmados y Pendientes.
+       5. Auto-refresh cada 30s también dispara `lzCargarEntregasIndex`.
+
+     PRESERVADO desde v12.8.1:
+       - N41 ciudades canónicas (matar RUTA_FIJA, tab Ciudades sin canonizar)
+       - Toda la lógica de viajes, asignación, rendición, devoluciones
+
+     ⚠️ PENDIENTE EN OTRA SESIÓN:
+       - Apps Script v25.12.0: que `_viajeRecalcularTotales` se llame
+         también al confirmar entrega (no solo asociar/cerrar).
+         Esto eliminaría definitivamente la denormalización.
+═════════════════════════════════════════════════════════════════════════ -->
+
+<!DOCTYPE html>
+<!-- ═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v12.8.1 — 06/05/2026
      ──────────────────────────────────────────────────────────────────────
      N41 — CIUDADES CANÓNICAS — Limpieza de RUTA_FIJA hardcoded
@@ -18344,6 +18388,12 @@ async function lzCargarDatos() {
     const rutas = await sbFetch('rutas?select=*&order=orden.asc');
     _lzRutas = Array.isArray(rutas) ? rutas : [];
 
+    // FIX N42-C (07/05/2026): cargar índice de entregas reales
+    // para que lzPedidosDeViaje pueda sobreescribir el estado
+    // de pedidos_zona con el estado real de entregas.
+    // No bloqueante: si falla, se sigue mostrando sin entregas.
+    lzCargarEntregasIndex();
+
     _lzDataLoaded = true;
 
     // v11.5: Debug solo bajo flag
@@ -18705,7 +18755,39 @@ function lzCiudadesEnViaje(viajeId) {
 function lzPedidosDeViaje(viajeId) {
   // v12.6.0: filtra cancelados — no se muestran ni se suman al viaje.
   // El viaje_id queda intacto en BD por auditoría histórica, pero la UI los oculta.
-  return _lzPedidosZona.filter(p => p.viaje_id === viajeId && p.estado !== 'Cancelado');
+  // FIX N42-C (07/05/2026): si la entrega está marcada como 'entregado' en
+  // tabla `entregas`, mostrarlo como 'Entregado' aquí también, aunque
+  // pedidos_zona.estado siga en 'Confirmado' (no se sincronizan automáticamente).
+  return _lzPedidosZona
+    .filter(p => p.viaje_id === viajeId && p.estado !== 'Cancelado')
+    .map(p => {
+      // Sobreescribir estado si hay entrega marcada como entregada
+      const entregaInfo = _lzEntregasIndexPorPedidoId[p.pedido_id];
+      if (entregaInfo && entregaInfo.estado === 'entregado') {
+        return Object.assign({}, p, { estado: 'Entregado' });
+      }
+      return p;
+    });
+}
+
+// FIX N42-C: índice de entregas por pedido_id para lookup rápido en lzPedidosDeViaje
+let _lzEntregasIndexPorPedidoId = {};
+
+async function lzCargarEntregasIndex() {
+  // Cargar entregas en estados finales (entregado / no_encontrado) para los viajes en curso/cerrados recientes
+  // Limit para no traer toda la historia.
+  try {
+    const rows = await sbFetch('entregas?estado=in.(entregado,no_encontrado)&select=pedido_id,estado,fecha_entrega&order=fecha_entrega.desc&limit=2000');
+    const idx = {};
+    (rows || []).forEach(e => {
+      if (e.pedido_id && !idx[e.pedido_id]) {
+        idx[e.pedido_id] = { estado: e.estado, fecha_entrega: e.fecha_entrega };
+      }
+    });
+    _lzEntregasIndexPorPedidoId = idx;
+  } catch(err) {
+    console.warn('[lz N42-C] Error cargando índice entregas:', err);
+  }
 }
 
 function lzPendientesEnViaje(viajeId) {
@@ -18956,7 +19038,57 @@ function lzRenderViajeCard(v) {
 // ───────────────────────────────────────────────────────────────
 // VISTA: VIAJES EN CURSO (tiempo real)
 // ───────────────────────────────────────────────────────────────
-function lzRenderEnCurso(el) {
+// ── FIX N42-C (07/05/2026): cache de entregas reales por viaje ──
+// El campo viajes.monto_cobrado se desactualiza cuando el chofer marca
+// entregas (porque Apps Script solo recalcula al asociar/cerrar viaje).
+// Solución: leer directo de tabla `entregas` filtrando por viaje_id.
+let _lzEntregasPorViaje = {}; // { viaje_id: { totalEntregadas, montoCobrado, loadedAt } }
+
+async function lzCargarEntregasDeViajes(viajesIds) {
+  if (!viajesIds || !viajesIds.length) return;
+  // Filtrar IDs que ya estén en cache "fresca" (<30s)
+  const ahora = Date.now();
+  const idsACargar = viajesIds.filter(id => {
+    const cached = _lzEntregasPorViaje[id];
+    return !cached || (ahora - cached.loadedAt) > 30000;
+  });
+  if (!idsACargar.length) return;
+
+  try {
+    // Query batch: traer todas las entregas de los viajes en una sola request
+    const idsList = idsACargar.map(id => '"' + id + '"').join(',');
+    const url = 'entregas?viaje_id=in.(' + idsACargar.map(encodeURIComponent).join(',') +
+      ')&select=viaje_id,estado,monto';
+    const rows = await sbFetch(url);
+
+    // Agrupar por viaje_id
+    const acc = {};
+    idsACargar.forEach(id => { acc[id] = { entregadas: 0, cobrado: 0 }; });
+    (rows || []).forEach(e => {
+      if (!e.viaje_id || !acc[e.viaje_id]) return;
+      if (e.estado === 'entregado') {
+        acc[e.viaje_id].entregadas += 1;
+        let m = Number(e.monto) || 0;
+        // Compatibilidad bug histórico: montos guardados como /1000
+        if (m > 0 && m < 1000) m = m * 1000;
+        acc[e.viaje_id].cobrado += m;
+      }
+    });
+    // Persistir en cache
+    Object.keys(acc).forEach(id => {
+      _lzEntregasPorViaje[id] = {
+        totalEntregadas: acc[id].entregadas,
+        montoCobrado:    acc[id].cobrado,
+        loadedAt:        ahora
+      };
+    });
+  } catch(err) {
+    console.warn('[lz N42-C] Error cargando entregas reales:', err);
+  }
+}
+// ── FIN FIX N42-C ────────────────────────────────────────────────
+
+async function lzRenderEnCurso(el) {
   // Cargar/refrescar viajes
   if (!_lzViajesLoadedAt || (new Date() - _lzViajesLoadedAt) > 30000) {
     lzCargarViajes();
@@ -18977,6 +19109,9 @@ function lzRenderEnCurso(el) {
     return;
   }
 
+  // FIX N42-C: cargar entregas reales de los viajes en_ruta antes de renderizar
+  await lzCargarEntregasDeViajes(enRuta.map(v => v.id));
+
   enRuta.forEach(v => {
     const choferKey = String(v.chofer || '').toLowerCase();
     // v12.4.0: chequear 'juan pablo' antes que 'joan' por si en algún caso
@@ -18992,14 +19127,18 @@ function lzRenderEnCurso(el) {
           ? 'border-left-color:#1565C0;background:linear-gradient(135deg,#fff,#E3F2FD);'
           : '');
 
-    const cobrado = Number(v.monto_cobrado) || 0;
+    // FIX N42-C: usar entregas reales de Supabase en vez de viajes.monto_cobrado
+    // (que está roto porque Apps Script no lo recalcula al confirmar entrega).
+    const entregasReales = _lzEntregasPorViaje[v.id];
+    const cobrado = entregasReales ? entregasReales.montoCobrado : (Number(v.monto_cobrado) || 0);
     const total = Number(v.monto_total) || 1;
     const pct = Math.min(100, Math.round((cobrado / total) * 100));
 
     const totalPedidos = v.total_pedidos || 0;
-    // Aproximación: entregadas = cobrado/total * pedidos
-    const entregadas = Math.round((cobrado / total) * totalPedidos);
-    const pendientes = totalPedidos - entregadas;
+    // Conteo REAL de entregadas (en vez de la aproximación cobrado/total*pedidos)
+    const entregadas = entregasReales ? entregasReales.totalEntregadas
+                                      : Math.round((cobrado / total) * totalPedidos);
+    const pendientes = Math.max(0, totalPedidos - entregadas);
 
     const fecha = lzFechaCard(v.fecha_salida);
     const zonaNombre = lzZonaNombreFromKey(v.zona);
@@ -19056,6 +19195,11 @@ setInterval(() => {
   if (typeof _tabActual !== 'undefined' && _tabActual === 'logistica') {
     if (_logTab === 'viajes' || _logTab === 'encurso') {
       lzCargarViajes();
+      // FIX N42-C: refrescar también índice de entregas para que
+      // pedidos marcados como entregados aparezcan correctamente.
+      if (typeof lzCargarEntregasIndex === 'function') {
+        lzCargarEntregasIndex();
+      }
     }
   }
 }, 30000);
@@ -19123,6 +19267,8 @@ function lzRenderDetalleViaje() {
   const pedidos = lzPedidosDeViaje(v.id);
   const pendientes = pedidos.filter(p => p.estado === 'Pendiente').length;
   const confirmados = pedidos.filter(p => p.estado === 'Confirmado').length;
+  // FIX N42-C: contar también entregadas (estado sobreescrito por entregas reales)
+  const entregadas = pedidos.filter(p => p.estado === 'Entregado').length;
   const tieneChofer = v.chofer && v.chofer !== '—' && v.chofer !== '-';
 
   let html = '<div class="v-detalle-sheet">';
@@ -19137,18 +19283,27 @@ function lzRenderDetalleViaje() {
     html += '    <div class="v-detalle-reagendado">📅 Reagendado' +
             (v.motivo_reagendo ? ': ' + lzEsc(v.motivo_reagendo) : '') + '</div>';
   }
-  // ── STATS BAR (v12.6.0) ──────────────────────────────────
-  // Confirmados + Pendientes separados, total al camión destacado.
+  // ── STATS BAR (v12.6.0 + FIX N42-C) ──────────────────────────
+  // Pendientes + Confirmados (= aún no entregados) + Entregados.
   // Cancelados ya están filtrados upstream en lzPedidosDeViaje.
   if (pedidos.length > 0) {
     const _montoConf = pedidos
-      .filter(p => p.estado !== 'Pendiente')
+      .filter(p => p.estado === 'Confirmado')
       .reduce((s, p) => s + (Number(p.total) || 0), 0);
     const _montoPend = pedidos
       .filter(p => p.estado === 'Pendiente')
       .reduce((s, p) => s + (Number(p.total) || 0), 0);
-    const _totalCamion = _montoConf + _montoPend;
+    const _montoEnt = pedidos
+      .filter(p => p.estado === 'Entregado')
+      .reduce((s, p) => s + (Number(p.total) || 0), 0);
+    const _totalCamion = _montoConf + _montoPend + _montoEnt;
     html += '    <div class="v-stats-bar">';
+    if (entregadas > 0) {
+      html += '      <div class="v-stat" style="background:#E8F5E9;border-color:#A5D6A7;">';
+      html += '        <div class="v-stat-lbl" style="color:#2E7D32;">📦 Entregados</div>';
+      html += '        <div class="v-stat-val" style="color:#1B5E20;">' + entregadas + ' · ' + lzFmtMoneda(_montoEnt) + '</div>';
+      html += '      </div>';
+    }
     html += '      <div class="v-stat">';
     html += '        <div class="v-stat-lbl">✅ Confirmados</div>';
     html += '        <div class="v-stat-val">' + confirmados + ' · ' + lzFmtMoneda(_montoConf) + '</div>';
