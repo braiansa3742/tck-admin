@@ -1,5 +1,41 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v12.10.1 — 07/05/2026
+     ──────────────────────────────────────────────────────────────────────
+     N42 — Bandeja "No entregados pendientes" simplificada
+
+     Modelo definitivo (validado con Braian 07/05):
+       Cada card del drawer muestra:
+         · Cliente, ciudad, comercio, monto, fecha del reporte
+         · Chofer que reportó
+         · 🟧 Motivo del chofer (cliente_cerrado / rechazo / otro)
+         · Texto libre del chofer si aplica
+
+       Acciones del admin (solo 2 principales + 1 corrección):
+         💬 WhatsApp al cliente (si hay teléfono)
+         ✓ Marcar resuelto → estado=resuelto_admin (sale de bandeja)
+         ↩ Corregir: sí se entregó → estado=entregado (corrección manual)
+
+       Razón por la que NO está el botón "Xubio":
+         · Las notas de crédito las hacen Gastón/Ricardo (contadores)
+         · Francisco solo registra que el caso cerró administrativamente
+         · "resuelto_admin" excluye al pedido de reportes de ventas/comisión
+         · Cuando integremos stock con Xubio, Xubio = source of truth
+           contable y la nota de crédito repondrá stock automáticamente
+
+       Razón por la que NO existe "Reagendar":
+         · Confirmado = sale en camión = entregado o no_entregado con motivo
+         · Si después se vuelve a vender, es pedido NUEVO (presupuesto nuevo)
+
+     Reportes (PENDIENTE para próxima sesión):
+       Filtrar entregas con estado='resuelto_admin' o 'no_entregado' del
+       cálculo de ventas y comisiones de vendedores. No suman a la venta
+       real.
+
+═════════════════════════════════════════════════════════════════════════ -->
+
+<!DOCTYPE html>
+<!-- ═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v12.10.0 — 07/05/2026
      ──────────────────────────────────────────────────────────────────────
      N42 FIX — Bandeja "No entregados pendientes" con modelo correcto
@@ -6521,21 +6557,22 @@ input[type="date"] {
 }
 .lz-noent-acciones {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 6px;
   margin-bottom: 6px;
 }
 .lz-noent-btn {
-  padding: 9px 4px; border-radius: 8px;
-  font-size: 11px; font-weight: 700;
+  padding: 11px 8px; border-radius: 8px;
+  font-size: 13px; font-weight: 700;
   border: 1.5px solid; cursor: pointer;
   text-align: center; line-height: 1.1;
   display: flex; align-items: center; justify-content: center;
 }
 .lz-noent-btn:active { transform: scale(0.96); }
-.lz-noent-btn.xubio    { background: #E0F2F1; border-color: #26A69A; color: #00695C; }
 .lz-noent-btn.wa       { background: #E8F5E9; border-color: #66BB6A; color: #1B5E20; }
 .lz-noent-btn.resolver { background: #E3F2FD; border-color: #42A5F5; color: #0D47A1; }
+/* Si no hay teléfono, "Marcar resuelto" ocupa toda la fila */
+.lz-noent-acciones:has(.lz-noent-btn:only-child) .lz-noent-btn { grid-column: span 2; }
 .lz-noent-acciones-secundarias {
   display: flex; justify-content: flex-end;
 }
@@ -20317,17 +20354,13 @@ function lzRenderPedidoNoEnt(e) {
   html += '  </div>';
 
   // Botones de acción del admin
+  // FIX N42 (07/05/2026): NO incluimos botón Xubio porque las notas de
+  // crédito las hacen Gastón/Ricardo (contadores), no Francisco.
+  // El admin solo registra que el caso se cerró ('resuelto_admin'),
+  // ese estado luego excluye al pedido de reportes de ventas.
   html += '  <div class="lz-noent-acciones">';
-  // 1. Link a presupuesto Xubio (si tenemos el id de xubio del pedido)
-  // El presupuesto se identifica por el id de Xubio que está en pedidos_zona o
-  // hoja "Pedidos". Como acá tenemos pedido_id (TCK-...), abrimos Xubio en
-  // búsqueda. Es el mejor compromiso sin guardar xubio_id en entregas.
-  html += '    <button class="lz-noent-btn xubio" onclick="lzNoEntAbrirXubio(\'' +
-          lzEsc(e.cliente || '') + '\')" title="Abrir Xubio para hacer nota de crédito">';
-  html += '      📄 Xubio';
-  html += '    </button>';
 
-  // 2. WhatsApp al cliente (si hay teléfono)
+  // 1. WhatsApp al cliente (si hay teléfono)
   if (e.telefono) {
     const tel = String(e.telefono).replace(/[^0-9]/g, '');
     if (tel.length >= 8) {
@@ -20339,13 +20372,13 @@ function lzRenderPedidoNoEnt(e) {
     }
   }
 
-  // 3. Marcar resuelto (admin terminó de procesarlo)
-  html += '    <button class="lz-noent-btn resolver" onclick="lzNoEntAccion(\'' + eid + '\',\'resuelto\')" title="Marcar como resuelto (después de hacer nota de crédito o llamar)">';
+  // 2. Marcar resuelto (admin terminó de procesarlo)
+  html += '    <button class="lz-noent-btn resolver" onclick="lzNoEntAccion(\'' + eid + '\',\'resuelto\')" title="Marcar como cerrado administrativamente. La venta no contará en reportes.">';
   html += '      ✓ Marcar resuelto';
   html += '    </button>';
   html += '  </div>';
 
-  // 4. Acciones secundarias (correcciones manuales)
+  // 3. Acción secundaria: corrección manual
   html += '  <div class="lz-noent-acciones-secundarias">';
   html += '    <button class="lz-noent-btn-mini" onclick="lzNoEntAccion(\'' + eid + '\',\'entregado\')" title="Corregir: en realidad sí se entregó">';
   html += '      ↩ Corregir: sí se entregó';
@@ -20354,15 +20387,6 @@ function lzRenderPedidoNoEnt(e) {
 
   html += '</div>';
   return html;
-}
-
-// FIX N42: abrir Xubio en pestaña nueva con búsqueda del cliente
-function lzNoEntAbrirXubio(nombreCliente) {
-  // Xubio no tiene URL directa de búsqueda por cliente. Mejor abrir el dashboard
-  // y que Francisco/Gastón busquen ahí. Mostramos el nombre como fallback.
-  const url = 'https://www.xubio.com/app/index.html#/comprobantes';
-  window.open(url, '_blank');
-  toast('📋 Cliente: ' + nombreCliente + ' (copialo para buscar en Xubio)', 'ok');
 }
 
 async function lzNoEntAccion(entregaId, accion) {
