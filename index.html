@@ -1,5 +1,55 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v12.8.0 — 06/05/2026
+     ──────────────────────────────────────────────────────────────────────
+     N41 — CIUDADES CANÓNICAS — Tab "Sin canonizar — Ciudades" en menú Más
+
+     Cambios v12.8.0 (sobre v12.7.1):
+
+       1. Nuevo tab "🏙️ Sin canonizar — Ciudades" en menú Más (solo Admin).
+          Lee tabla `ciudades_sin_canonizar` de Supabase y permite resolver
+          cada grafía huérfana con 2 acciones:
+            a) Asignar como alias de una ciudad de `rutas`
+            b) Ignorar (clientes Xubio históricos, ciudades fuera de ruta)
+
+       2. Backend Supabase (aplicado fuera de este archivo):
+            - 28 ciudades en `rutas` con aliases extendidos (case/tilde/snake_case)
+            - Funciones SQL: `_ciudad_normalizar(s)`, `canonizar_ciudad(grafia)`
+            - Tabla `ciudades_sin_canonizar` con UNIQUE INDEX en _ciudad_normalizar
+            - Backfill: 41 entregas viejas con grafías sucias canonizadas
+            - 24 grafías huérfanas (Lincoln, Olavarría, Bragado, etc.) populadas
+              en `ciudades_sin_canonizar` para revisión humana
+
+       3. Patrón replicado del tab "🔧 Sin canonizar" (productos, N40b):
+            - Mismas funciones (recargar, render, resolver, ignorar)
+            - Misma UX (cards con sugerencias fuzzy + acción manual)
+            - Mismo control de visibilidad (admin only)
+            - Mismo badge en menú Más con conteo de pendientes
+
+       4. PENDIENTE para próximas iteraciones (NO en esta versión):
+            - Eliminar RUTA_FIJA hardcoded (línea ~17583) — sustituirlo por
+              lectura de tabla `rutas`. Lo hago en v12.8.1 para no mezclar
+              cambios.
+            - Apps Script: registrar grafías huérfanas que entren en futuro
+              (cuando entra una localidad rara en pedidos_zona). Lo hace
+              v25.11.0 del Apps Script.
+
+     DEPLOY v12.8.0:
+       1. Verificar Supabase tiene:
+            - Función `canonizar_ciudad` (test: SELECT canonizar_ciudad('PEHUAJO'))
+            - Tabla `ciudades_sin_canonizar` con filas
+       2. Subir este archivo al repo tck-admin como index.html
+       3. Hard refresh (Ctrl+Shift+R)
+       4. Login como Admin → Menú Más → "Sin canonizar — Ciudades"
+       5. Deberían aparecer ~24 grafías (Lincoln, Olavarría, etc.)
+       6. Smoke test: ignorar una (botón "Ignorar"). Recargar. Debe desaparecer.
+
+     PRESERVADO desde v12.7.1:
+       - Tab "🔧 Sin canonizar" (productos)
+       - Bloque productos_canonicos completo
+       - Toda la lógica de logística, mapa, reportes, clientes, duplicados
+═════════════════════════════════════════════════════════════════════════ -->
+<!-- ═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v12.7.1 — 06/05/2026
      ──────────────────────────────────────────────────────────────────────
      N40b — PRODUCTOS CANÓNICOS — Fix de encabezados y prefijos de promo
@@ -9845,6 +9895,38 @@ input[type="date"] {
     </div>
   </div>
 
+  <!-- v12.8.0 N41 — TAB CIUDADES SIN CANONIZAR -->
+  <div class="view" id="view-ccanon">
+    <div style="padding:12px 14px;padding-bottom:80px;">
+
+      <div style="background:linear-gradient(135deg,#0D47A1,#1565C0);border-radius:12px;padding:14px 16px;margin-bottom:14px;color:#fff;display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:22px;line-height:1;">🏙️ Ciudades sin canonizar</div>
+          <div style="font-size:11px;color:rgba(255,255,255,.75);margin-top:3px;">Grafías de ciudad que no matchean con rutas</div>
+        </div>
+        <button onclick="ccanonRecargar()" style="background:rgba(255,255,255,.2);border:none;border-radius:50%;width:34px;height:34px;color:#fff;cursor:pointer;font-size:16px;">🔄</button>
+      </div>
+
+      <!-- Mini-stats -->
+      <div id="ccanon-stats" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:14px;">
+        <div style="background:#fff;border-radius:10px;padding:10px 12px;text-align:center;">
+          <div id="ccanon-stat-pendientes" style="font-family:'Barlow Condensed',sans-serif;font-size:24px;font-weight:900;color:#EF6C00;">—</div>
+          <div style="font-size:11px;color:var(--text3);">Pendientes</div>
+        </div>
+        <div style="background:#fff;border-radius:10px;padding:10px 12px;text-align:center;">
+          <div id="ccanon-stat-resueltas" style="font-family:'Barlow Condensed',sans-serif;font-size:24px;font-weight:900;color:#2E7D32;">—</div>
+          <div style="font-size:11px;color:var(--text3);">Resueltas</div>
+        </div>
+      </div>
+
+      <!-- Lista de pendientes -->
+      <div id="ccanon-lista">
+        <div style="text-align:center;padding:24px;color:var(--text3);font-size:12px;font-style:italic;">Cargando...</div>
+      </div>
+
+    </div>
+  </div>
+
 </div>
 <nav class="tab-nav" id="tab-nav">
   <button class="tab-btn" id="tab-btn-logistica" onclick="cambiarTab('logistica')">
@@ -9889,6 +9971,10 @@ input[type="date"] {
     <span class="tab-icon">🔧</span>
     <span class="tab-label">Sin canon.</span>
   </button>
+  <button class="tab-btn" id="tab-btn-ccanon" onclick="cambiarTab('ccanon')" style="display:none !important;">
+    <span class="tab-icon">🏙️</span>
+    <span class="tab-label">Ciudades</span>
+  </button>
 </nav>
 
 <!-- MENÚ "MÁS" (sheet inferior) — solo Clientes + Visitas -->
@@ -9918,6 +10004,11 @@ input[type="date"] {
         <div class="menu-mas-icon">🔧</div>
         <div class="menu-mas-lbl">Sin canonizar</div>
         <div class="menu-mas-badge" id="menu-mas-pcanon-badge" style="display:none;background:#EF6C00;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;margin-top:3px;">0</div>
+      </button>
+      <button class="menu-mas-item" id="menu-mas-ccanon" onclick="cambiarTab('ccanon');cerrarMenuMas()" style="display:none;">
+        <div class="menu-mas-icon">🏙️</div>
+        <div class="menu-mas-lbl">Ciudades</div>
+        <div class="menu-mas-badge" id="menu-mas-ccanon-badge" style="display:none;background:#EF6C00;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;margin-top:3px;">0</div>
       </button>
     </div>
     <button class="menu-mas-cerrar" onclick="cerrarMenuMas()">Cerrar</button>
@@ -11562,6 +11653,293 @@ function _formateoFecha(iso) {
 
 // ═══════════════════════════════════════════════════════════════
 // Fin v12.7.0 N40b — TAB PRODUCTOS SIN CANONIZAR
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
+// v12.8.0 N41 — TAB CIUDADES SIN CANONIZAR
+// ═══════════════════════════════════════════════════════════════
+// Lee la tabla `ciudades_sin_canonizar` de Supabase y permite resolver
+// cada grafía huérfana de ciudad detectada por el sistema.
+// Resolver = agregar la grafía al array `aliases[]` de la fila de
+// `rutas` que corresponda. También se puede marcar como "ignorar"
+// sin asignar (caso típico: clientes Xubio históricos en ciudades
+// que no entregamos — Lincoln, Olavarría, Bragado, etc.).
+//
+// Patrón replicado del módulo pcanon (productos sin canonizar) — N40b.
+// Diferencia clave: el "canónico" en este caso es una ciudad de `rutas`
+// (no de productos_canonicos), y el alias se agrega a `rutas.aliases`.
+// ═══════════════════════════════════════════════════════════════
+
+var _ccanonPendientes = [];
+var _ccanonResueltas  = 0;
+var _ccanonRutas      = []; // cache de ciudades de `rutas` para sugerencias y selector
+
+async function ccanonRecargar() {
+  var lista = document.getElementById('ccanon-lista');
+  if (!lista) return;
+  lista.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text3);font-size:12px;font-style:italic;">Cargando...</div>';
+
+  try {
+    // 1. Cargar ciudades de rutas (para sugerencias y selector manual)
+    if (!_ccanonRutas.length) {
+      var respR = await fetch(SUPABASE_URL + '/rest/v1/rutas?select=ciudad,zona,aliases&order=ciudad.asc', {
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+      });
+      if (!respR.ok) throw new Error('rutas HTTP ' + respR.status);
+      _ccanonRutas = await respR.json();
+    }
+
+    // 2. Pendientes
+    var resp1 = await fetch(SUPABASE_URL + '/rest/v1/ciudades_sin_canonizar?resuelto=eq.false&order=apariciones.desc,nombre_crudo.asc&select=*', {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+    });
+    if (!resp1.ok) throw new Error('pendientes HTTP ' + resp1.status);
+    _ccanonPendientes = await resp1.json();
+
+    // 3. Conteo de resueltas
+    var resp2 = await fetch(SUPABASE_URL + '/rest/v1/ciudades_sin_canonizar?resuelto=eq.true&select=id', {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Prefer': 'count=exact' }
+    });
+    var cntHeader = resp2.headers.get('content-range');
+    if (cntHeader) {
+      var m = cntHeader.match(/\/(\d+)$/);
+      _ccanonResueltas = m ? parseInt(m[1]) : 0;
+    }
+
+    ccanonRender();
+    ccanonActualizarBadge();
+  } catch(e) {
+    lista.innerHTML = '<div style="text-align:center;padding:24px;color:var(--red);font-size:12px;">Error: ' + e.message + '</div>';
+  }
+}
+
+// Normaliza igual que la función SQL `_ciudad_normalizar` (lowercase, sin tildes)
+function _ccanonNormalizar(s) {
+  if (!s) return '';
+  return String(s).trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Distancia de Levenshtein (idéntica a la del módulo pcanon)
+function _ccanonLevenshtein(a, b) {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  var matrix = [];
+  for (var i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (var j = 0; j <= a.length; j++) matrix[0][j] = j;
+  for (var i = 1; i <= b.length; i++) {
+    for (var j = 1; j <= a.length; j++) {
+      if (b.charAt(i-1) === a.charAt(j-1)) matrix[i][j] = matrix[i-1][j-1];
+      else matrix[i][j] = Math.min(matrix[i-1][j-1] + 1, matrix[i][j-1] + 1, matrix[i-1][j] + 1);
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
+// Sugerencias fuzzy: top 3 ciudades de rutas más parecidas a la grafía cruda
+function _ccanonSugerencias(nombreCrudo) {
+  var norm = _ccanonNormalizar(nombreCrudo);
+  if (!norm) return [];
+  var sugerencias = [];
+  _ccanonRutas.forEach(function(r) {
+    var nombreNorm = _ccanonNormalizar(r.ciudad);
+    var bestDist = _ccanonLevenshtein(norm, nombreNorm);
+    var bestStr = r.ciudad;
+    if (Array.isArray(r.aliases)) {
+      r.aliases.forEach(function(a) {
+        var aNorm = _ccanonNormalizar(a);
+        var d = _ccanonLevenshtein(norm, aNorm);
+        if (d < bestDist) { bestDist = d; bestStr = a; }
+      });
+    }
+    var maxLen = Math.max(norm.length, nombreNorm.length);
+    var score = maxLen > 0 ? 1 - (bestDist / maxLen) : 0;
+    if (score >= 0.4) {
+      sugerencias.push({ canon: r, score: score, matched: bestStr });
+    }
+  });
+  sugerencias.sort(function(a, b) { return b.score - a.score; });
+  return sugerencias.slice(0, 3);
+}
+
+function ccanonRender() {
+  var lista = document.getElementById('ccanon-lista');
+  var statPend = document.getElementById('ccanon-stat-pendientes');
+  var statRes  = document.getElementById('ccanon-stat-resueltas');
+  if (statPend) statPend.textContent = _ccanonPendientes.length;
+  if (statRes)  statRes.textContent  = _ccanonResueltas;
+
+  if (!lista) return;
+
+  if (!_ccanonPendientes.length) {
+    lista.innerHTML = '<div style="text-align:center;padding:32px;color:var(--green2);font-size:14px;">✅ Todo canonizado. No hay grafías pendientes.</div>';
+    return;
+  }
+
+  var html = '';
+  _ccanonPendientes.forEach(function(p) {
+    var sugerencias = _ccanonSugerencias(p.nombre_crudo);
+    html += '<div class="ccanon-card" style="background:#fff;border-radius:12px;padding:12px 14px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.04);border-left:4px solid #1565C0;">';
+
+    // Header: nombre + meta + botón Ignorar
+    html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px;">';
+    html += '<div style="flex:1;min-width:0;">';
+    html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:var(--text);line-height:1.1;">' + _esc(p.nombre_crudo) + '</div>';
+    var meta = (p.apariciones || 1) + ' ' + ((p.apariciones || 1) === 1 ? 'aparición' : 'apariciones');
+    if (p.ejemplo_fuente) meta += ' · ' + _esc(p.ejemplo_fuente);
+    if (p.ejemplo_pedido) meta += ' · ej. ' + _esc(p.ejemplo_pedido);
+    html += '<div style="font-size:11px;color:var(--text3);margin-top:3px;">' + meta + '</div>';
+    html += '<div style="font-size:10px;color:var(--text3);margin-top:2px;opacity:.7;">Visto desde ' + _formateoFecha(p.primer_visto) + '</div>';
+    html += '</div>';
+    html += '<button onclick="ccanonIgnorar(' + p.id + ')" style="background:#F5F5F5;border:1px solid #E0E0E0;border-radius:8px;padding:5px 10px;font-size:11px;cursor:pointer;color:#666;flex-shrink:0;">Ignorar</button>';
+    html += '</div>';
+
+    // Sugerencias fuzzy
+    if (sugerencias.length > 0) {
+      html += '<div style="font-size:11px;color:var(--text3);margin-bottom:6px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;">Sugerencias:</div>';
+      html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">';
+      sugerencias.forEach(function(s) {
+        var conf = Math.round(s.score * 100);
+        var bgClass = conf >= 80 ? '#E8F5E9' : conf >= 60 ? '#FFFDE7' : '#F5F5F5';
+        var fgClass = conf >= 80 ? '#2E7D32' : conf >= 60 ? '#F57F17' : '#666';
+        html += '<button onclick="ccanonResolver(' + p.id + ', \'' + _escAttr(s.canon.ciudad) + '\', \'' + _escAttr(p.nombre_crudo) + '\')" '
+              + 'style="background:' + bgClass + ';border:1px solid ' + fgClass + ';color:' + fgClass + ';border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer;font-weight:700;">'
+              + '→ ' + _esc(s.canon.ciudad) + ' <span style="opacity:.6;font-weight:400;">(' + conf + '%)</span>'
+              + '</button>';
+      });
+      html += '</div>';
+    }
+
+    // Selector manual de ciudad (siempre disponible)
+    html += '<details style="margin-top:6px;">';
+    html += '<summary style="font-size:11px;color:var(--text3);cursor:pointer;">Otra ciudad…</summary>';
+    html += '<div style="display:flex;gap:6px;margin-top:6px;">';
+    html += '<select id="ccanon-sel-' + p.id + '" style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid #E0E0E0;font-size:13px;">';
+    html += '<option value="">— Elegir ciudad de rutas —</option>';
+    _ccanonRutas.forEach(function(r) {
+      html += '<option value="' + _escAttr(r.ciudad) + '">' + _esc(r.ciudad) + '</option>';
+    });
+    html += '</select>';
+    html += '<button onclick="ccanonResolverManual(' + p.id + ', \'' + _escAttr(p.nombre_crudo) + '\')" '
+          + 'style="background:#1565C0;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;font-weight:700;">Asignar</button>';
+    html += '</div>';
+    html += '</details>';
+
+    html += '</div>';
+  });
+  lista.innerHTML = html;
+}
+
+// Resolver: asignar grafía cruda como alias de la ciudad de rutas.
+async function ccanonResolver(idPendiente, nombreCiudad, nombreCrudo) {
+  if (!confirm('Agregar "' + nombreCrudo + '" como alias de "' + nombreCiudad + '"?')) return;
+  try {
+    // 1. Leer aliases actuales de la ciudad
+    var resp = await fetch(SUPABASE_URL + '/rest/v1/rutas?ciudad=eq.' + encodeURIComponent(nombreCiudad) + '&select=ciudad,aliases', {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+    });
+    var arr = await resp.json();
+    if (!arr.length) { alert('Ciudad no encontrada en rutas'); return; }
+    var canon = arr[0];
+    var aliases = Array.isArray(canon.aliases) ? canon.aliases.slice() : [];
+    // Normalizar contra duplicados sin tilde/case
+    var crudoTrim = String(nombreCrudo).trim();
+    var crudoNorm = _ccanonNormalizar(crudoTrim);
+    var yaExiste = aliases.some(function(a) { return _ccanonNormalizar(a) === crudoNorm; });
+    if (!yaExiste) aliases.push(crudoTrim);
+
+    // 2. PATCH de rutas
+    var respP = await fetch(SUPABASE_URL + '/rest/v1/rutas?ciudad=eq.' + encodeURIComponent(nombreCiudad), {
+      method: 'PATCH',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({ aliases: aliases })
+    });
+    if (!respP.ok) throw new Error('PATCH rutas HTTP ' + respP.status);
+
+    // 3. Marcar pendiente como resuelto
+    await fetch(SUPABASE_URL + '/rest/v1/ciudades_sin_canonizar?id=eq.' + idPendiente, {
+      method: 'PATCH',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({
+        resuelto: true,
+        resuelto_a: nombreCiudad,
+        resuelto_accion: 'alias',
+        resuelto_at: new Date().toISOString(),
+        resuelto_por: vendedorActual || 'Admin'
+      })
+    });
+
+    // 4. Refrescar cache local de rutas (se va a recargar al próximo recargar)
+    _ccanonRutas = [];
+
+    ccanonRecargar();
+  } catch(e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+// Variante: tomar la ciudad del select del details
+function ccanonResolverManual(idPendiente, nombreCrudo) {
+  var sel = document.getElementById('ccanon-sel-' + idPendiente);
+  var ciudad = sel ? sel.value : '';
+  if (!ciudad) { alert('Elegí una ciudad del listado'); return; }
+  ccanonResolver(idPendiente, ciudad, nombreCrudo);
+}
+
+// Marcar como ignorado: resuelto=true, resuelto_a=null, resuelto_accion='ignorado'
+async function ccanonIgnorar(idPendiente) {
+  if (!confirm('Ignorar esta grafía sin asignar a ninguna ciudad?\n\nÚsalo cuando es una ciudad donde NO entregamos (Lincoln, Olavarría, Bragado, etc.).')) return;
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/ciudades_sin_canonizar?id=eq.' + idPendiente, {
+      method: 'PATCH',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({
+        resuelto: true,
+        resuelto_a: null,
+        resuelto_accion: 'ignorado',
+        resuelto_at: new Date().toISOString(),
+        resuelto_por: vendedorActual || 'Admin'
+      })
+    });
+    ccanonRecargar();
+  } catch(e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+// Badge en el menú "Más" indicando cuántas grafías hay sin resolver.
+function ccanonActualizarBadge() {
+  var badge = document.getElementById('menu-mas-ccanon-badge');
+  if (!badge) return;
+  if (_ccanonPendientes.length > 0) {
+    badge.textContent = _ccanonPendientes.length > 99 ? '99+' : _ccanonPendientes.length;
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Fin v12.8.0 N41 — TAB CIUDADES SIN CANONIZAR
 // ═══════════════════════════════════════════════════════════════
 
 // GPS state
@@ -13784,7 +14162,7 @@ function cambiarTab(tab) {
   _tabActual = tab;
 
   // Views — incluye logistica
-  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon'].forEach(function(t) {
+  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon'].forEach(function(t) {
     var v = document.getElementById('view-' + t);
     var b = document.getElementById('tab-btn-' + t);
     if (v) v.classList.toggle('active', t === tab);
@@ -13793,7 +14171,7 @@ function cambiarTab(tab) {
 
   // El botón "Más" se marca activo si estás en un tab oculto (gps/visitas, clientes, rendiciones, acc-dup)
   var btnMas = document.getElementById('tab-btn-mas');
-  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes' || tab === 'rendiciones' || tab === 'acc-dup' || tab === 'prod-canon');
+  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes' || tab === 'rendiciones' || tab === 'acc-dup' || tab === 'prod-canon' || tab === 'ccanon');
 
   // Logística — renderizar DESPUÉS de activar el view
   if (tab === 'logistica') {
@@ -13849,6 +14227,10 @@ function cambiarTab(tab) {
     if (typeof pcanonRecargar === 'function') pcanonRecargar();
     var v = document.getElementById('view-prod-canon'); if (v) v.scrollTop = 0;
   }
+  if (tab === 'ccanon') {
+    if (typeof ccanonRecargar === 'function') ccanonRecargar();
+    var v = document.getElementById('view-ccanon'); if (v) v.scrollTop = 0;
+  }
 }
 
 function mostrarTabs() {
@@ -13871,10 +14253,15 @@ function mostrarTabs() {
   var menuPC = document.getElementById('menu-mas-prod-canon');
   if (menuPC) menuPC.style.display = esAdmin ? '' : 'none';
 
+  // v12.8.0 N41: Item "Ciudades sin canonizar" del menú Más — solo Admin
+  var menuCC = document.getElementById('menu-mas-ccanon');
+  if (menuCC) menuCC.style.display = esAdmin ? '' : 'none';
+
   // Si el tab activo quedó oculto, ir a Pedidos
   if (_tabActual === 'gps' && !esCampo && !esAdmin) cambiarTab('pedidos');
   if (_tabActual === 'mapa' && !esAdmin) cambiarTab('pedidos');
   if (_tabActual === 'prod-canon' && !esAdmin) cambiarTab('pedidos');
+  if (_tabActual === 'ccanon' && !esAdmin) cambiarTab('pedidos');
 }
 
 function ocultarTabs() {
