@@ -1,5 +1,65 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v12.14 — 09/05/2026
+     ──────────────────────────────────────────────────────────────────────
+     CANONIZACIÓN DE CIUDADES — Single source of truth en cliente JS
+
+     CONTEXTO:
+       Análisis de reportes detectó que los reportes que leen del Sheet
+       NO canonizan localidades. El vendedor escribe libremente:
+         · "Trenque", "TL", "trenque lauquen", "TRENQUE_LAUQUEN", etc.
+       Esto genera filas duplicadas en rankings y datos incorrectos.
+
+       Fuentes de datos investigadas:
+         · pedidos_zona.localidad_canonica  → ✅ Limpio (N41)
+         · entregas.ciudad                  → ✅ Limpio
+         · clientes_xubio.localidad         → 🟡 OK
+         · clientes_activos.localidad       → 🔴 ROTO (3 formatos mezclados)
+         · Sheet Pedidos col 5              → 🔴 CRUDO (libre del vendedor)
+
+       Reportes afectados (todos leen del Sheet o de clientes_activos):
+         · Reportes → Hoy / Período / Inteligencia (ranking ciudades)
+         · Mapa → Cobertura (tenía CIUDAD_ALIAS hardcoded de 3 entradas)
+         · Mi Ronda (sort y display de localidad)
+         · Hoja veterinaria + hoja de carga del camión (agrupamientos)
+         · Filtro de localidad en Reportes (tenía fuzzy matching propio)
+
+     CAMBIOS v12.14 sobre v12.13:
+
+       1. NUEVO MÓDULO _ciudadCanonizar()
+          · Lee la tabla "rutas" de Supabase (misma que usa Apps Script)
+          · 27 ciudades + ~150 aliases
+          · Cache localStorage 24h
+          · Normalización idéntica al server: trim+lowercase+sin tildes+a-z0-9
+          · Si no hay match, devuelve el raw trimeado (no rompe data)
+
+       2. APLICADO en 6 puntos críticos:
+          · cobertura (reemplazo CIUDAD_ALIAS hardcoded)
+          · Reportes Hoy → ranking ciudades
+          · Reportes Período → ranking ciudades
+          · Hoja veterinaria por ciudad
+          · Hoja de carga del camión
+          · Filtro de localidad en Reportes (eliminado fuzzy matching propio)
+          · Mi Ronda → sort y display
+
+       3. ELIMINADOS:
+          · CIUDAD_ALIAS hardcoded (3 entradas, obsoleto)
+          · Fuzzy matching con Levenshtein en filtro localidad
+            (la canonización oficial es más confiable y rápida)
+
+       4. cargarCiudadesCanonicas() se llama al login junto con
+          cargarProductosCanonicos() — no bloquea, background.
+
+     LO QUE NO ESTÁ EN ESTA ENTREGA:
+       · Limpiar clientes_activos.localidad (TRENQUE_LAUQUEN → Trenque
+         Lauquen). Decisión: encontrar primero qué proceso escribe esos
+         valores antes de hacer UPDATE masivo, sino lo vuelve a romper.
+         Sesión propia futura.
+       · Aplicar canonización en otros reportes que aún no se tocaron
+         (display puro de localidad en pedido detail, etc).
+
+═══════════════════════════════════════════════════════════════════════ -->
+<!-- ═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v12.13 — 09/05/2026
      ──────────────────────────────────────────────────────────────────────
      CANALIZACIÓN DE CLIENTES — Pieza 4 Entrega 2 (Vendedores + Reasignar)
@@ -11667,6 +11727,165 @@ const SUPABASE_URL  = 'https://frhevcgxcuqkkakwnmrw.supabase.co';
 const SUPABASE_KEY  = 'sb_publishable_rRuseS1OttY_jisrsBc3qg_JBCE8vkH';
 
 // ═══════════════════════════════════════════════════════════════════
+// v12.14.0 — CIUDADES CANÓNICAS (canonización en cliente)
+// ═══════════════════════════════════════════════════════════════════
+// Lee la tabla "rutas" de Supabase (single source of truth, misma que
+// usa el Apps Script en _zonaCargarMapeoLocalidades). Construye un
+// índice en memoria para canonizar grafías de ciudades en los reportes.
+//
+// Uso:
+//   _ciudadCanonizar('TRENQUE_LAUQUEN') → 'Trenque Lauquen'
+//   _ciudadCanonizar('tl')              → 'Trenque Lauquen'
+//   _ciudadCanonizar('Trenque')         → 'Trenque Lauquen'
+//   _ciudadCanonizar('Quilmes')         → 'Quilmes' (sin match → devuelve crudo)
+//
+// Variables globales:
+//   _ciudadIndex: mapa { normalizada → canonica }
+//   _ciudadLoaded: bool si terminó la carga
+//   _ciudadZonaIndex: mapa { normalizada → 'tl'/'zona1'/'zona2'/'america_fortin' }
+//
+// Cache localStorage: 24h (no cambian seguido). El Apps Script tiene
+// cache 30min server-side. Si Braian agrega aliases nuevos en la tabla
+// rutas, hay que limpiar el cache local con `_ciudadLimpiarCache()`.
+// ═══════════════════════════════════════════════════════════════════
+
+var _ciudadIndex     = {};
+var _ciudadZonaIndex = {};
+var _ciudadLoaded    = false;
+
+const CIUDAD_CANON_CACHE_KEY = 'tck_ciudad_canon_v1';
+const CIUDAD_CANON_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
+
+// Normalización idéntica al Apps Script (_zonaNormalizarLocalidad):
+// trim → lowercase → quitar tildes → solo a-z0-9 espacios → un espacio
+function _ciudadNormalizar(s) {
+  if (!s) return '';
+  return String(s).trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// La función principal: canonizar un texto crudo a la ciudad oficial.
+// Si no hay match, devuelve el texto trimeado tal cual (no rompe nada).
+function _ciudadCanonizar(raw) {
+  if (!raw) return '';
+  var norm = _ciudadNormalizar(raw);
+  if (!norm) return '';
+  if (_ciudadIndex[norm]) return _ciudadIndex[norm];
+  // Sin match → devolver el original trimeado (mejor que perder data)
+  return String(raw).trim();
+}
+
+// Devuelve la zona TCK ('tl'/'zona1'/'zona2'/'america_fortin') o null
+function _ciudadZona(raw) {
+  if (!raw) return null;
+  var norm = _ciudadNormalizar(raw);
+  return _ciudadZonaIndex[norm] || null;
+}
+
+async function cargarCiudadesCanonicas() {
+  // 1. Intentar cache local
+  try {
+    var cached = localStorage.getItem(CIUDAD_CANON_CACHE_KEY);
+    if (cached) {
+      var data = JSON.parse(cached);
+      if (data && data.ts && (Date.now() - data.ts) < CIUDAD_CANON_CACHE_TTL &&
+          data.index && data.zonaIndex) {
+        _ciudadIndex = data.index;
+        _ciudadZonaIndex = data.zonaIndex;
+        _ciudadLoaded = true;
+        console.log('[ciudades] Canonización cargada desde cache:',
+                    Object.keys(_ciudadIndex).length, 'aliases');
+        return;
+      }
+    }
+  } catch(e) { /* cache corrupto, refetch */ }
+
+  // 2. Fetch desde Supabase
+  try {
+    var url = SUPABASE_URL + '/rest/v1/rutas?select=ciudad,zona,aliases';
+    var resp = await fetch(url, {
+      headers: {
+        'apikey':        SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY
+      }
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var filas = await resp.json();
+    if (!Array.isArray(filas)) throw new Error('Respuesta no es array');
+
+    var idx = {};
+    var zidx = {};
+
+    // Mapeo de zona texto → zona key (igual al Apps Script)
+    function _zonaKeyFromTexto(t) {
+      if (!t) return null;
+      var n = String(t).trim().toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      if (n === 'zona 1' || n === 'zona1') return 'zona1';
+      if (n === 'zona 2' || n === 'zona2') return 'zona2';
+      if (n.indexOf('america') >= 0 && n.indexOf('fortin') >= 0) return 'america_fortin';
+      if (n === 'venta local' || n === 'tl' || n.indexOf('trenque') >= 0) return 'tl';
+      return null;
+    }
+
+    filas.forEach(function(fila) {
+      if (!fila.ciudad) return;
+      var canonica = fila.ciudad;
+      var zonaKey = _zonaKeyFromTexto(fila.zona);
+
+      // Indexar por la propia ciudad canónica
+      var nNorm = _ciudadNormalizar(canonica);
+      idx[nNorm] = canonica;
+      if (zonaKey) zidx[nNorm] = zonaKey;
+
+      // Indexar por cada alias
+      if (Array.isArray(fila.aliases)) {
+        fila.aliases.forEach(function(alias) {
+          if (!alias) return;
+          var aNorm = _ciudadNormalizar(alias);
+          if (aNorm) {
+            idx[aNorm] = canonica;
+            if (zonaKey) zidx[aNorm] = zonaKey;
+          }
+        });
+      }
+    });
+
+    _ciudadIndex = idx;
+    _ciudadZonaIndex = zidx;
+    _ciudadLoaded = true;
+
+    // Cachear
+    try {
+      localStorage.setItem(CIUDAD_CANON_CACHE_KEY, JSON.stringify({
+        ts: Date.now(),
+        index: idx,
+        zonaIndex: zidx
+      }));
+    } catch(e) { /* no bloquea */ }
+
+    console.log('[ciudades] Canonización cargada:',
+                filas.length, 'ciudades,',
+                Object.keys(idx).length, 'aliases totales');
+  } catch(err) {
+    console.error('[ciudades] Error cargando canonización:', err);
+    // Fallback: dejar índices vacíos. _ciudadCanonizar devolverá el crudo.
+    _ciudadLoaded = true; // marca como "intentado" para no reintentar en loop
+  }
+}
+
+function _ciudadLimpiarCache() {
+  try { localStorage.removeItem(CIUDAD_CANON_CACHE_KEY); } catch(e) {}
+  _ciudadIndex = {};
+  _ciudadZonaIndex = {};
+  _ciudadLoaded = false;
+  console.log('[ciudades] Cache limpiado, próxima carga será fresh');
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // v12.7.0 — PRODUCTOS CANÓNICOS (N40b)
 // ═══════════════════════════════════════════════════════════════════
 // Lee la tabla productos_canonicos de Supabase y construye un índice
@@ -13592,6 +13811,8 @@ function login(nombre) {
   mostrarBotonesManual();
   // v12.7.0 N40b: cargar productos canónicos en background (no bloquea login)
   cargarProductosCanonicos();
+  // v12.14.0: cargar ciudades canónicas en background (mismo patrón)
+  cargarCiudadesCanonicas();
   // v12.5.0: removido checkPrimeraVez() — el manual ya no se abre solo al inicio.
   // Sigue accesible vía botón 📖 en el header. Razón: nadie lo miraba y molestaba.
   // Iniciar tracking GPS continuo (solo vendedores, no Admin)
@@ -17337,7 +17558,9 @@ function renderLocalidadesHoy(pedidosHoy) {
 
   var locMap = {};
   pedidosHoy.forEach(function(p) {
-    var loc = (p.localidad||'?').trim();
+    // v12.14.0: canonizar para que "TL", "trenque", "Trenque Lauquen" cuenten juntos
+    var rawLoc = (p.localidad||'').trim();
+    var loc = rawLoc ? _ciudadCanonizar(rawLoc) : '?';
     if (!locMap[loc]) locMap[loc] = { monto: 0, pedidos: 0 };
     locMap[loc].pedidos += 1;
     locMap[loc].monto += parseInt((p.total||'').replace(/[^\d]/g,''))||0;
@@ -17449,7 +17672,9 @@ function renderLocalidades(datos) {
 
   var locMap = {};
   datos.forEach(function(p) {
-    var loc = (p.localidad || '?').trim();
+    // v12.14.0: canonizar para que aliases agrupen correctamente
+    var rawLoc = (p.localidad || '').trim();
+    var loc = rawLoc ? _ciudadCanonizar(rawLoc) : '?';
     if (!locMap[loc]) locMap[loc] = { monto: 0, pedidos: 0, clientes: new Set() };
     locMap[loc].monto   += parseInt((p.total||'').replace(/[^\d]/g,''))||0;
     locMap[loc].pedidos += 1;
@@ -17636,60 +17861,39 @@ function poblarFiltroLoc() {
   if (!sel) return;
   while (sel.options.length > 1) sel.remove(1);
 
-  // 1. Recolectar todas las variantes con frecuencia
-  var variantes = {};
+  // v12.14.0: usar canonización oficial en lugar de fuzzy matching propio.
+  // Antes: levenshtein agrupaba variantes parecidas pero podía fallar
+  // (ej. "Pehuajo" y "Pellegrini" tienen distancia >LOC_FUZZY_MAX).
+  // Ahora: agrupamos por nombre canónico de la tabla rutas (single source).
+
+  // 1. Recolectar variantes agrupadas por canónico
+  var grupos = {};   // canonico → { canonical, count, variantes:[{raw, freq}] }
   todosLosPedidos.forEach(function(p) {
     if (!p.localidad) return;
     var raw = p.localidad.trim();
     if (!raw) return;
-    variantes[raw] = (variantes[raw] || 0) + 1;
-  });
-
-  // 2. Agrupar con fuzzy matching
-  // Para cada variante, buscar si ya existe un grupo "cercano"
-  var grupos = []; // [{canonical, keyNorm, count, variantes:[]}]
-
-  Object.keys(variantes).forEach(function(raw) {
-    var normRaw = normalizarLoc(raw);
-    var freq    = variantes[raw];
-
-    // Buscar grupo existente con distancia ≤ LOC_FUZZY_MAX
-    var encontrado = null;
-    for (var i = 0; i < grupos.length; i++) {
-      if (levenshtein(normRaw, grupos[i].keyNorm) <= LOC_FUZZY_MAX) {
-        encontrado = grupos[i];
-        break;
-      }
+    var canon = _ciudadCanonizar(raw);   // la oficial o el raw si no matchea
+    if (!grupos[canon]) {
+      grupos[canon] = { canonical: canon, count: 0, variantes: {} };
     }
-
-    if (encontrado) {
-      encontrado.count += freq;
-      encontrado.variantes.push({ raw: raw, freq: freq });
-      // Si esta variante es más frecuente, usarla como canonical
-      if (freq > encontrado.topFreq) {
-        encontrado.canonical = raw;
-        encontrado.topFreq   = freq;
-      }
-    } else {
-      grupos.push({
-        canonical: raw,
-        keyNorm:   normRaw,
-        count:     freq,
-        topFreq:   freq,
-        variantes: [{ raw: raw, freq: freq }]
-      });
-    }
+    grupos[canon].count += 1;
+    grupos[canon].variantes[raw] = (grupos[canon].variantes[raw] || 0) + 1;
   });
 
-  // 3. Ordenar grupos alfabéticamente por canonical
-  grupos.sort(function(a,b) {
-    return normalizarLoc(a.canonical).localeCompare(normalizarLoc(b.canonical));
+  // 2. Convertir a array y ordenar alfabéticamente
+  var arr = Object.values(grupos).map(function(g) {
+    var vArr = Object.keys(g.variantes).map(function(raw) {
+      return { raw: raw, freq: g.variantes[raw] };
+    });
+    return { canonical: g.canonical, count: g.count, variantes: vArr };
+  });
+  arr.sort(function(a, b) {
+    return a.canonical.localeCompare(b.canonical, 'es', { sensitivity: 'base' });
   });
 
-  // 4. Construir select — value = todas las variantes del grupo (para filtrar)
-  grupos.forEach(function(g) {
+  // 3. Construir select — value = todas las variantes raw del grupo (para filtrar)
+  arr.forEach(function(g) {
     var opt = document.createElement('option');
-    // Guardamos las variantes en data-variantes para usarlas al filtrar
     opt.value = g.variantes.map(function(v){ return v.raw; }).join('|||');
     opt.textContent = g.canonical + (g.variantes.length > 1 ? ' (' + g.count + ')' : '');
     sel.appendChild(opt);
@@ -23033,7 +23237,10 @@ async function _vetGenerarAsync(opts) {
   pedidos.forEach(function(p) {
     const ciudadRaw = (p.localidad || '').trim();
     const FALSAS = ['campo', 'campo tck', 'catalogo web tck', ''];
-    const ciudad = FALSAS.includes(ciudadRaw.toLowerCase()) ? '⚠️ Sin localidad' : ciudadRaw;
+    // v12.14.0: canonizar antes de agrupar (Trenque + tl + TL → Trenque Lauquen)
+    const ciudad = FALSAS.includes(ciudadRaw.toLowerCase())
+      ? '⚠️ Sin localidad'
+      : _ciudadCanonizar(ciudadRaw);
     if (!porCiudad[ciudad]) porCiudad[ciudad] = {};
 
     const prods = parsearProductos(p.detalle || p.resumen || '');
@@ -23205,7 +23412,10 @@ async function descargarPlanillaCarga(choferParam) {
     pedidos.forEach(function(p) {
       const ciudadRaw = (p.localidad || '').trim();
       const FALSAS = ['campo', 'campo tck', 'catalogo web tck', ''];
-      const ciudad = FALSAS.includes(ciudadRaw.toLowerCase()) ? 'Sin localidad' : ciudadRaw;
+      // v12.14.0: canonizar para que aliases agrupen correctamente
+      const ciudad = FALSAS.includes(ciudadRaw.toLowerCase())
+        ? 'Sin localidad'
+        : _ciudadCanonizar(ciudadRaw);
       if (!porCiudadProds[ciudad]) porCiudadProds[ciudad] = {};
       parsearProductos(p.detalle || p.resumen || '').forEach(function(pr) {
         const mapeo = vetBuscarMapeo(pr.nombre);
@@ -25096,11 +25306,10 @@ const VENDEDOR_COLORES = {
 };
 
 // Ciudades que son pedidos de oficina — renombrar para claridad
-const CIUDAD_ALIAS = {
-  'Campo':               'TL — Pedidos de oficina',
-  'Campo Trenque Lauquen': 'TL — Pedidos de oficina',
-  'Trenque Lauquen':     'Trenque Lauquen',
-};
+// v12.14.0: CIUDAD_ALIAS ELIMINADO. Ahora usamos _ciudadCanonizar() que lee
+// la tabla rutas de Supabase (single source of truth con ~150 aliases).
+// Si alguien necesita el comportamiento "Campo → TL — Pedidos de oficina",
+// hay que agregar 'Campo' / 'Campo Trenque Lauquen' como aliases en rutas.
 
 async function coberturaRender() {
   const el = document.getElementById('cob-contenido');
@@ -25132,8 +25341,10 @@ async function coberturaRender() {
       if ((cols[10]||'').trim() === 'Cancelado') continue;
 
       const fecha    = new Date((cols[1]||'').replace(' ','T'));
-      const rawCiudad = (cols[5]||'Sin ciudad').trim();
-      const ciudad   = CIUDAD_ALIAS[rawCiudad] || rawCiudad;
+      const rawCiudad = (cols[5]||'').trim();
+      // v12.14.0: canonizar via _ciudadCanonizar (single source: tabla rutas)
+      // Antes usaba CIUDAD_ALIAS hardcoded (3 entradas). Ahora 27 ciudades + ~150 aliases.
+      const ciudad   = rawCiudad ? _ciudadCanonizar(rawCiudad) : 'Sin ciudad';
       const vendedor = (cols[2]||'').trim();
       const cliente  = (cols[3]||'').trim();
       const monto    = parseMonto(cols[6]);
@@ -25878,10 +26089,12 @@ function adminMiRondaAbrirModal(vendedor, rutaKey) {
   var gestionados = d.clientes.filter(function(c){ return c._amr_estado === 'gestionada'; });
 
   // Ordenar cada uno por localidad + nombre
+  // v12.14.0: canonizar primero para que "TRENQUE_LAUQUEN" y "Trenque Lauquen"
+  // se ordenen juntas (no separadas por mayúsculas).
   function ord(arr){
     arr.sort(function(a,b){
-      var la = (a.localidad || 'zzz').toUpperCase();
-      var lb = (b.localidad || 'zzz').toUpperCase();
+      var la = (a.localidad ? _ciudadCanonizar(a.localidad) : 'zzz').toUpperCase();
+      var lb = (b.localidad ? _ciudadCanonizar(b.localidad) : 'zzz').toUpperCase();
       if (la !== lb) return la < lb ? -1 : 1;
       return (a.nombre || '').localeCompare(b.nombre || '');
     });
@@ -25913,7 +26126,8 @@ function adminMiRondaAbrirModal(vendedor, rutaKey) {
 
 function amrRenderClienteCard(c, tipo) {
   var nombre = escapeHtml(c.nombre || '—');
-  var loc = escapeHtml(c.localidad || 'Sin ciudad');
+  // v12.14.0: mostrar la canónica linda (Trenque Lauquen) en vez de TRENQUE_LAUQUEN
+  var loc = escapeHtml(c.localidad ? _ciudadCanonizar(c.localidad) : 'Sin ciudad');
   var dias = c.dias_desde_ult_pedido;
   var ultTxt = c.ultimo_pedido
     ? 'Últ. hace ' + (dias != null ? dias : '?') + 'd'
