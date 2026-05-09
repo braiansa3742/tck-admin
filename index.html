@@ -1,5 +1,33 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v12.11.1 — 08/05/2026
+     ──────────────────────────────────────────────────────────────────────
+     CANALIZACIÓN DE CLIENTES — Pieza 4 Entrega 1.1 (UX fixes mobile)
+
+     CAMBIOS v12.11.1 sobre v12.11:
+
+       Feedback de uso real en mobile (Braian, captura del 08/05 noche):
+         · Cards apiladas verticalmente en lugar de grid 2x2 limpio.
+         · Inputs date "Desde" y "Hasta" aparecían vacíos sin valor por
+           defecto cuando el usuario entraba directo al sub-tab Canales
+           sin pasar por la sección Export.
+         · Botón "Descargar CSV" se veía sin estilo prominente en mobile.
+
+       FIXES:
+         1. Cards: agregado overflow:hidden + text-overflow:ellipsis +
+            font-size adaptativo (22px en mobile, 26px en >=480px).
+            Padding reducido en mobile para que entren mejor.
+            min-width:0 para que el grid no fuerce columna única.
+         2. canalesInicExportFechas() se llama también desde
+            canalesEntrarSubTab() (no solo desde canalesSelSeccion('exp')),
+            así las fechas siempre están pre-pobladas.
+         3. Botón Descargar: width:100%, font-size:17px, uppercase,
+            box-shadow más fuerte, padding:16px (tap-friendly mobile).
+         4. Inputs date: min-height:44px (tap target Apple HIG),
+            font-family Barlow Condensed bold, focus con shadow.
+
+═══════════════════════════════════════════════════════════════════════ -->
+<!-- ═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v12.11 — 08/05/2026
      ──────────────────────────────────────────────────────────────────────
      CANALIZACIÓN DE CLIENTES — Pieza 4 Entrega 1 (Dashboard + Export CSV)
@@ -9406,32 +9434,46 @@ input[type="date"] {
   margin-bottom: 14px;
 }
 @media (max-width: 720px) {
-  .canales-cards { grid-template-columns: repeat(2, 1fr); }
+  .canales-cards {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
 }
 .canales-card {
   background: #fff;
   border-radius: 12px;
-  padding: 14px 12px;
+  padding: 12px 8px;
   text-align: center;
   box-shadow: 0 1px 3px rgba(0,0,0,.05);
   border: 1px solid var(--cream3);
+  min-width: 0; /* permite que el contenido se trunque sin romper grid */
 }
 .canales-card-num {
   font-family: 'Barlow Condensed', sans-serif;
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 900;
   color: var(--text);
-  line-height: 1;
+  line-height: 1.05;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (min-width: 480px) {
+  .canales-card-num { font-size: 26px; }
 }
 .canales-card-num.verde  { color: #2E7D32; }
 .canales-card-num.orange { color: #E65100; }
 .canales-card-num.red    { color: var(--red); }
 .canales-card-lbl {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text3);
-  margin-top: 6px;
+  margin-top: 5px;
   text-transform: uppercase;
   letter-spacing: .3px;
+  line-height: 1.2;
+}
+@media (min-width: 480px) {
+  .canales-card-lbl { font-size: 11px; }
 }
 
 /* Tabla de canales */
@@ -9533,33 +9575,46 @@ input[type="date"] {
   letter-spacing: .3px;
 }
 .canales-exp-input {
-  padding: 10px 12px;
+  padding: 12px 14px;
   border: 1.5px solid var(--cream3);
   border-radius: 10px;
   font-family: inherit;
-  font-size: 14px;
+  font-size: 15px;
   background: #fff;
   color: var(--text);
+  width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  min-height: 44px; /* tap target friendly mobile */
 }
 .canales-exp-input:focus {
   outline: none;
   border-color: #8B0000;
+  box-shadow: 0 0 0 3px rgba(139,0,0,.1);
+}
+input.canales-exp-input[type="date"] {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
 }
 .canales-exp-btn {
-  margin-top: 6px;
-  padding: 14px;
+  margin-top: 10px;
+  padding: 16px 14px;
   background: linear-gradient(135deg, #8B0000, #B71C1C);
   color: #fff;
   border: none;
   border-radius: 12px;
   font-family: 'Barlow Condensed', sans-serif;
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 900;
   cursor: pointer;
-  letter-spacing: .3px;
+  letter-spacing: .5px;
+  text-transform: uppercase;
   touch-action: manipulation;
+  box-shadow: 0 3px 10px rgba(139,0,0,.25);
+  width: 100%;
+  display: block;
 }
-.canales-exp-btn:active { transform: scale(0.98); }
+.canales-exp-btn:active { transform: scale(0.98); box-shadow: 0 1px 3px rgba(139,0,0,.2); }
 .canales-exp-btn:disabled {
   opacity: .5;
   cursor: not-allowed;
@@ -15136,6 +15191,8 @@ function canalesSelSeccion(s) {
 
 // Llamado desde repSelSubTab cuando el usuario clickea el sub-tab Canales
 function canalesEntrarSubTab() {
+  // v12.11.1: siempre poblar fechas del export al entrar (aunque no toques esa pestaña aún)
+  canalesInicExportFechas();
   // Cargar dashboard si no hay datos cacheados o si el cache expiró
   if (!CANAL_DASH_CACHE || (Date.now() - CANAL_DASH_CACHE_TS) > CANAL_DASH_CACHE_TTL_MS) {
     canalesCargarDash();
