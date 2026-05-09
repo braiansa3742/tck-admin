@@ -1,5 +1,49 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v12.12.1 — 09/05/2026
+     ──────────────────────────────────────────────────────────────────────
+     HOTFIX CSS — Bloque huérfano rompía parsing del resto del CSS
+
+     CONTEXTO:
+       v12.12 deployada 8/5 con 4 mejoras UX para Dashboard de Canales.
+       Reportado por Braian: las cards seguían apiladas verticalmente
+       como texto plano en mobile e incógnito.
+
+     INVESTIGACIÓN:
+       Comando ejecutado en DevTools del usuario:
+         getMatchedCSSRules(.canales-cards) → SOLO matcheaba `*`
+         getComputedStyle(.canales-cards).display → "block"
+
+       Eso significaba que MI CSS .canales-cards { display: flex }
+       NO estaba siendo parseado por el browser.
+
+       Análisis del archivo: detectado bloque CSS HUÉRFANO en líneas
+       2438-2448 (selector .info-no-unir cerraba en 2437, después había
+       10 propiedades CSS sin selector + un } solitario).
+
+       Eso desbalanceaba el parsing CSS. depth final del CSS llegaba a 1
+       en lugar de 0. Todo CSS posterior al bloque huérfano se interpretaba
+       como propiedades dentro de una regla anterior, no como reglas nuevas.
+
+       Bug PRE-EXISTENTE (no introducido en v12.11/v12.12). Probablemente
+       venía de un copy-paste mal cerrado en alguna versión anterior.
+
+     FIX (v12.12.1):
+       1) Eliminadas 10 líneas de propiedades huérfanas + el } solitario
+          en línea 2438-2448 (después de regla .info-no-unir).
+       2) Cerrada regla .xubio-sync-overlay-sub que se abría en línea
+          9135 con { y NUNCA se cerraba antes de .xubio-calibre-intro.
+
+       depth CSS ahora cierra en 0 correctamente.
+       Mi CSS .canales-cards { display: flex; ... } ahora SÍ se parsea.
+
+     QUE DEBE PASAR DESPUÉS DEL DEPLOY:
+       Las cards aparecen en fila horizontal scrolleable.
+       Los demás bloques CSS (loader, stale banner, scroll snap)
+       también empiezan a aplicar correctamente.
+
+═══════════════════════════════════════════════════════════════════════ -->
+<!-- ═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v12.12 — 09/05/2026
      ──────────────────────────────────────────────────────────────────────
      CANALIZACIÓN DE CLIENTES — Pieza 4 Entrega 1.2 (UX performance)
@@ -2435,17 +2479,11 @@ body {
   color: #5D4037;
   line-height: 1.4;
 }
-  background: linear-gradient(135deg, #E8F5E9, #F1F8E9);
-  border: 1.5px solid #A5D6A7;
-  border-radius: 12px;
-  padding: 14px;
-  margin-bottom: 14px;
-  text-align: center;
-  color: #1B5E20;
-  font-family: 'Barlow Condensed', sans-serif;
-  font-weight: 700;
-  font-size: 14px;
-}
+
+/* v12.12.1: bloque CSS huérfano eliminado.
+   Había 10 propiedades + un } solitario sin selector que rompían
+   el parsing del resto del archivo. Detectado al investigar por qué
+   .canales-cards no aplicaba display:flex. */
 
 .stat-card {
   background: #fff;
@@ -9100,6 +9138,7 @@ input[type="date"] {
 }
 .xubio-sync-overlay-sub {
   font-size: 12.5px;
+}
 
 .xubio-calibre-intro {
   font-size: 13px; color: #666; line-height: 1.5;
