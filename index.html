@@ -1,5 +1,54 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v12.12 — 09/05/2026
+     ──────────────────────────────────────────────────────────────────────
+     CANALIZACIÓN DE CLIENTES — Pieza 4 Entrega 1.2 (UX performance)
+
+     CAMBIOS v12.12 sobre v12.11.1:
+
+       Feedback usuario (08/05 noche):
+         · Cards seguían apiladas en mobile (grid 2x2 colapsaba a 1col).
+         · Carga del dashboard tarda 3-8s sin feedback visual al usuario.
+
+       4 MEJORAS APLICADAS:
+
+         A. CARDS EN SCROLL HORIZONTAL (mobile)
+            En mobile las 4 cards ahora son scrolleables horizontalmente
+            (flex + overflow-x:auto + scroll-snap). Cada card 130px ancho.
+            Hint "← deslizá para ver más →" debajo.
+            En desktop (>=720px) vuelve a grid 4 columnas estático.
+
+         B. LOADER VISIBLE DURANTE FETCH
+            Spinner animado + texto "Cargando datos..." + hint sobre cache.
+            Reemplaza el "Cargando..." plano que era invisible al primer vistazo.
+
+         C. CACHE 30 MIN EN APPS SCRIPT (server-side)
+            (Esto se aplica deployando Apps Script v25.15.3 — hotfix server.
+            Ver app-script-v25.15.3.gs en outputs.)
+            Cambio: CacheService.put('canal_lookup_v1', json, 1800) en lugar de 300.
+            Resultado: 2da request del día = instantánea.
+
+         D. STALE-WHILE-REVALIDATE EN CLIENTE (localStorage)
+            Al entrar al sub-tab Canales, lee el último JSON guardado en
+            localStorage y lo muestra YA. En paralelo lanza fetch fresco.
+            Cuando llega, actualiza silenciosamente.
+            Banner discreto "🔄 Mostrando última versión guardada · Actualizando..."
+            mientras refresca en background.
+            Resultado: percepción de carga instantánea desde la 2da apertura.
+            TTL localStorage: 24h (después de eso se trata como primer fetch).
+
+       NUEVAS FUNCIONES:
+         · _canalesLeerLS() / _canalesGuardarLS() — persistencia local
+         · _canalesShowLoader(on) / _canalesShowStaleBanner(on) — UI states
+         · canalesCargarDash recibe segundo parámetro `enBackground` (true =
+           no muestra loader pleno, solo banner discreto)
+         · _canalesPintarDashboard recibe segundo parámetro `esStale`
+
+       ARCHIVO PARALELO:
+         · app-script-v25.15.3.gs en outputs (hotfix cache 5min → 30min)
+
+═══════════════════════════════════════════════════════════════════════ -->
+<!-- ═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v12.11.1 — 08/05/2026
      ──────────────────────────────────────────────────────────────────────
      CANALIZACIÓN DE CLIENTES — Pieza 4 Entrega 1.1 (UX fixes mobile)
@@ -9427,30 +9476,47 @@ input[type="date"] {
 }
 
 /* Cards de KPIs */
-.canales-cards {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  margin-bottom: 14px;
+/* v12.12: scroll horizontal en mobile, grid en desktop */
+.canales-cards-wrap {
+  margin-bottom: 4px;
 }
-@media (max-width: 720px) {
+.canales-cards {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;          /* Firefox */
+  scroll-snap-type: x mandatory;
+  padding: 2px 0 6px 0;
+}
+.canales-cards::-webkit-scrollbar { display: none; } /* Chrome/Safari */
+@media (min-width: 720px) {
+  /* Desktop: vuelve a grid 4 columnas estático */
   .canales-cards {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 6px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    overflow: visible;
+    scroll-snap-type: none;
   }
 }
 .canales-card {
+  flex: 0 0 130px;                 /* mobile: ancho fijo, scrolleable */
   background: #fff;
   border-radius: 12px;
-  padding: 12px 8px;
+  padding: 12px 10px;
   text-align: center;
   box-shadow: 0 1px 3px rgba(0,0,0,.05);
   border: 1px solid var(--cream3);
-  min-width: 0; /* permite que el contenido se trunque sin romper grid */
+  scroll-snap-align: start;
+  min-width: 0;
+}
+@media (min-width: 720px) {
+  .canales-card { flex: initial; }
 }
 .canales-card-num {
   font-family: 'Barlow Condensed', sans-serif;
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 900;
   color: var(--text);
   line-height: 1.05;
@@ -9467,13 +9533,23 @@ input[type="date"] {
 .canales-card-lbl {
   font-size: 10px;
   color: var(--text3);
-  margin-top: 5px;
+  margin-top: 6px;
   text-transform: uppercase;
   letter-spacing: .3px;
   line-height: 1.2;
 }
 @media (min-width: 480px) {
   .canales-card-lbl { font-size: 11px; }
+}
+.canales-cards-hint {
+  font-size: 9px;
+  color: var(--text3);
+  text-align: center;
+  margin: -2px 0 10px 0;
+  font-style: italic;
+}
+@media (min-width: 720px) {
+  .canales-cards-hint { display: none; }
 }
 
 /* Tabla de canales */
@@ -9548,6 +9624,56 @@ input[type="date"] {
   display: inline-block;
   margin-right: 6px;
 }
+
+/* v12.12: Loader visible durante fetch */
+.canales-loader {
+  display: none;
+  text-align: center;
+  padding: 24px 16px;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid var(--cream3);
+  margin-bottom: 12px;
+}
+.canales-loader.on { display: block; }
+.canales-loader-spinner {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  border: 2.5px solid var(--cream3);
+  border-top-color: #8B0000;
+  border-radius: 50%;
+  animation: canalesSpin 0.8s linear infinite;
+}
+.canales-loader-text {
+  font-size: 12px;
+  color: #6D4C2D;
+  margin-top: 8px;
+  font-weight: 600;
+}
+.canales-loader-hint {
+  font-size: 10px;
+  color: var(--text3);
+  margin-top: 4px;
+  font-style: italic;
+}
+@keyframes canalesSpin { to { transform: rotate(360deg); } }
+
+/* v12.12: cards con state "stale" mientras refresca en background */
+.canales-cards.stale { opacity: 0.55; transition: opacity 0.2s; }
+.canales-tabla.stale tbody { opacity: 0.55; transition: opacity 0.2s; }
+.canales-stale-banner {
+  display: none;
+  font-size: 11px;
+  color: #6D4C2D;
+  text-align: center;
+  padding: 6px 10px;
+  background: #FFF8E1;
+  border-radius: 6px;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+.canales-stale-banner.on { display: block; }
 
 /* Sección Export */
 .canales-exp-desc {
@@ -10345,24 +10471,39 @@ input.canales-exp-input[type="date"] {
 
           <div class="canales-rango-info" id="canales-rango-info"></div>
 
-          <!-- Cards principales -->
-          <div class="canales-cards">
-            <div class="canales-card">
-              <div class="canales-card-num" id="canales-card-clientes">—</div>
-              <div class="canales-card-lbl">Clientes totales</div>
+          <!-- v12.12: banner que avisa "datos antiguos, refrescando..." -->
+          <div class="canales-stale-banner" id="canales-stale-banner">
+            🔄 Mostrando última versión guardada · Actualizando datos...
+          </div>
+
+          <!-- v12.12: loader spinner visible durante fetch -->
+          <div class="canales-loader" id="canales-loader">
+            <div class="canales-loader-spinner"></div>
+            <div class="canales-loader-text">Cargando datos...</div>
+            <div class="canales-loader-hint">⚡ Caché 30 min: 2da carga = instantánea</div>
+          </div>
+
+          <!-- Cards principales (v12.12: scroll horizontal en mobile) -->
+          <div class="canales-cards-wrap">
+            <div class="canales-cards">
+              <div class="canales-card">
+                <div class="canales-card-num" id="canales-card-clientes">—</div>
+                <div class="canales-card-lbl">Clientes totales</div>
+              </div>
+              <div class="canales-card">
+                <div class="canales-card-num verde" id="canales-card-canalizado">—</div>
+                <div class="canales-card-lbl">% Canalizado</div>
+              </div>
+              <div class="canales-card">
+                <div class="canales-card-num orange" id="canales-card-facturado">—</div>
+                <div class="canales-card-lbl">Facturado período</div>
+              </div>
+              <div class="canales-card">
+                <div class="canales-card-num" id="canales-card-ticket">—</div>
+                <div class="canales-card-lbl">Ticket promedio</div>
+              </div>
             </div>
-            <div class="canales-card">
-              <div class="canales-card-num verde" id="canales-card-canalizado">—</div>
-              <div class="canales-card-lbl">% Canalizado</div>
-            </div>
-            <div class="canales-card">
-              <div class="canales-card-num orange" id="canales-card-facturado">—</div>
-              <div class="canales-card-lbl">Facturado período</div>
-            </div>
-            <div class="canales-card">
-              <div class="canales-card-num" id="canales-card-ticket">—</div>
-              <div class="canales-card-lbl">Ticket promedio</div>
-            </div>
+            <div class="canales-cards-hint">← deslizá para ver más →</div>
           </div>
 
           <!-- Tabla por canal -->
@@ -15155,9 +15296,11 @@ function repSelSubTab(tab) {
 // ═══════════════════════════════════════════════════════════════
 
 var CANAL_DASH_PERIODO = 'mes';      // default: 30 días
-var CANAL_DASH_CACHE = null;         // último response cacheado
+var CANAL_DASH_CACHE = null;         // último response cacheado en memoria
 var CANAL_DASH_CACHE_TS = 0;
-var CANAL_DASH_CACHE_TTL_MS = 5 * 60 * 1000; // 5min
+var CANAL_DASH_CACHE_TTL_MS = 5 * 60 * 1000; // 5min memoria
+var CANAL_DASH_LS_KEY = 'tck_canales_dash_v1'; // localStorage key
+var CANAL_DASH_LS_TTL_MS = 24 * 60 * 60 * 1000; // 24h localStorage
 
 // Emojis y orden visual canónico (mismo que tck-ventas y Apps Script)
 var CANAL_DASH_EMOJI = {
@@ -15189,15 +15332,52 @@ function canalesSelSeccion(s) {
   }
 }
 
+// v12.12: leer último JSON guardado en localStorage
+function _canalesLeerLS() {
+  try {
+    var raw = localStorage.getItem(CANAL_DASH_LS_KEY);
+    if (!raw) return null;
+    var obj = JSON.parse(raw);
+    if (!obj || !obj.data || !obj.ts) return null;
+    if ((Date.now() - obj.ts) > CANAL_DASH_LS_TTL_MS) return null;
+    return obj;
+  } catch(e) { return null; }
+}
+
+// v12.12: guardar JSON en localStorage para reaperturas instantáneas
+function _canalesGuardarLS(data, periodo) {
+  try {
+    localStorage.setItem(CANAL_DASH_LS_KEY, JSON.stringify({
+      data: data,
+      periodo: periodo,
+      ts: Date.now()
+    }));
+  } catch(e) { /* localStorage lleno o privado: no bloquea */ }
+}
+
 // Llamado desde repSelSubTab cuando el usuario clickea el sub-tab Canales
 function canalesEntrarSubTab() {
-  // v12.11.1: siempre poblar fechas del export al entrar (aunque no toques esa pestaña aún)
+  // v12.11.1: siempre poblar fechas del export al entrar
   canalesInicExportFechas();
-  // Cargar dashboard si no hay datos cacheados o si el cache expiró
-  if (!CANAL_DASH_CACHE || (Date.now() - CANAL_DASH_CACHE_TS) > CANAL_DASH_CACHE_TTL_MS) {
-    canalesCargarDash();
-  } else {
+
+  // Si tenemos cache en memoria reciente y vigente → mostrar y listo
+  if (CANAL_DASH_CACHE && (Date.now() - CANAL_DASH_CACHE_TS) <= CANAL_DASH_CACHE_TTL_MS) {
     _canalesPintarDashboard(CANAL_DASH_CACHE);
+    return;
+  }
+
+  // v12.12: stale-while-revalidate
+  // 1. Si hay data en localStorage del MISMO período, mostrarla YA (gris/stale)
+  // 2. En paralelo, lanzar fetch fresco
+  // 3. Cuando llega el fetch, pintar y limpiar el flag stale
+  var ls = _canalesLeerLS();
+  if (ls && ls.periodo === CANAL_DASH_PERIODO) {
+    // Mostrar instantáneamente la versión guardada (con visual stale)
+    _canalesPintarDashboard(ls.data, true);
+    canalesCargarDash(true, true); // forzar fetch + flag "background"
+  } else {
+    // Sin LS o período distinto: cargar normal con loader
+    canalesCargarDash();
   }
 }
 
@@ -15207,11 +15387,19 @@ function canalesSetPeriodo(periodo, btn) {
   // Activar visualmente el botón
   document.querySelectorAll('.canales-per-btn[data-per]').forEach(function(b){ b.classList.remove('on'); });
   if (btn) btn.classList.add('on');
-  canalesCargarDash(true); // forzar fetch
+
+  // v12.12: si cambia el período, intentar mostrar LS de ese período si existe
+  var ls = _canalesLeerLS();
+  if (ls && ls.periodo === periodo) {
+    _canalesPintarDashboard(ls.data, true);
+    canalesCargarDash(true, true);
+  } else {
+    canalesCargarDash(true);
+  }
 }
 
 function canalesRefrescarDash() {
-  CANAL_DASH_CACHE = null; // invalidar cache
+  CANAL_DASH_CACHE = null; // invalidar cache memoria
   CANAL_DASH_CACHE_TS = 0;
   canalesCargarDash(true);
 }
@@ -15245,13 +15433,25 @@ function _canalesFmtFecha(d) {
   return y + '-' + m + '-' + dd;
 }
 
-// ─── Fetch al endpoint del Apps Script ─────────────────────────
-async function canalesCargarDash(forzar) {
-  var rango = _canalesResolverRango(CANAL_DASH_PERIODO);
+// v12.12: mostrar/ocultar loader y banner stale
+function _canalesShowLoader(on) {
+  var el = document.getElementById('canales-loader');
+  if (el) el.classList.toggle('on', !!on);
+}
+function _canalesShowStaleBanner(on) {
+  var b = document.getElementById('canales-stale-banner');
+  if (b) b.classList.toggle('on', !!on);
+  var cards = document.querySelector('.canales-cards');
+  if (cards) cards.classList.toggle('stale', !!on);
+  var tabla = document.querySelector('.canales-tabla');
+  if (tabla) tabla.classList.toggle('stale', !!on);
+}
 
-  // Mostrar loading
-  var tbody = document.getElementById('canales-tabla-body');
-  if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="canales-loading">Cargando...</td></tr>';
+// ─── Fetch al endpoint del Apps Script ─────────────────────────
+// v12.12: parámetro `enBackground` — si true, NO mostramos loader (la pantalla
+// ya tiene data del LS) sino el banner discreto de "actualizando".
+async function canalesCargarDash(forzar, enBackground) {
+  var rango = _canalesResolverRango(CANAL_DASH_PERIODO);
 
   // Cache key incluye rango
   var key = rango.desde + '_' + rango.hasta;
@@ -15259,6 +15459,18 @@ async function canalesCargarDash(forzar) {
       (Date.now() - CANAL_DASH_CACHE_TS) < CANAL_DASH_CACHE_TTL_MS) {
     _canalesPintarDashboard(CANAL_DASH_CACHE);
     return;
+  }
+
+  // Mostrar UI de carga
+  if (enBackground) {
+    _canalesShowStaleBanner(true);
+    _canalesShowLoader(false);
+  } else {
+    _canalesShowLoader(true);
+    _canalesShowStaleBanner(false);
+    // Limpiar tabla mientras carga
+    var tbody = document.getElementById('canales-tabla-body');
+    if (tbody) tbody.innerHTML = '';
   }
 
   try {
@@ -15272,18 +15484,30 @@ async function canalesCargarDash(forzar) {
     data._key = key;
     CANAL_DASH_CACHE = data;
     CANAL_DASH_CACHE_TS = Date.now();
+    _canalesGuardarLS(data, CANAL_DASH_PERIODO); // v12.12: persist
     _canalesPintarDashboard(data);
+    _canalesShowLoader(false);
+    _canalesShowStaleBanner(false);
   } catch(err) {
     console.error('[canales] Error cargando dashboard:', err);
-    if (tbody) {
-      tbody.innerHTML = '<tr><td colspan="6" class="canales-loading" style="color:#c62828;">⚠️ Error: ' +
-        _canalesEscapeHtml(err.message || String(err)) + '</td></tr>';
+    _canalesShowLoader(false);
+    _canalesShowStaleBanner(false);
+    // Si NO hay nada en pantalla (fetch fallido sin LS previo), mostrar error
+    if (!enBackground) {
+      var tbody = document.getElementById('canales-tabla-body');
+      if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="6" class="canales-loading" style="color:#c62828;">⚠️ Error: ' +
+          _canalesEscapeHtml(err.message || String(err)) + '</td></tr>';
+      }
     }
+    // Si está en background, dejar la versión LS visible y no molestar.
+    // El próximo intento (cambio de período / refresh) reintentará.
   }
 }
 
 // ─── Pintar dashboard ──────────────────────────────────────────
-function _canalesPintarDashboard(data) {
+// v12.12: parámetro `esStale` — si true, marca visualmente que es la versión vieja
+function _canalesPintarDashboard(data, esStale) {
   // Cards superiores
   var totalClientes = data.total_clientes || 0;
   var sinClasif = data.sin_clasificar || 0;
