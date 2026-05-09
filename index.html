@@ -1,5 +1,56 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v12.11 — 08/05/2026
+     ──────────────────────────────────────────────────────────────────────
+     CANALIZACIÓN DE CLIENTES — Pieza 4 Entrega 1 (Dashboard + Export CSV)
+
+     Sesión: canalización N1 (continuación).
+     Pieza 1 SQL Supabase: aplicada 08/05.
+     Pieza 2 modal vendedor: tck-ventas v14.13.6 deployada.
+     Pieza 3 endpoints Apps Script: v25.15.2 deployada y funcionando.
+     Pieza 4 Entrega 1 (este archivo): Dashboard + Export CSV.
+     Pieza 4 Entrega 2 (próxima sesión): Sin clasificar + Reasignar.
+
+     CAMBIOS v12.11 sobre v12.10.1:
+
+       1. NUEVO sub-tab "🏷️ Canales" dentro de Reportes.
+          Ubicación: 5to sub-tab después de Mi Ronda.
+
+       2. Sub-tab tiene 2 secciones internas (botones tipo pills):
+          · 📊 Dashboard (default al entrar)
+          · 📥 Export CSV
+
+       3. Dashboard:
+          · 4 cards arriba: total clientes, % canalizado, facturado período,
+            ticket promedio.
+          · Selector de período (reusa los presets existentes: hoy, semana,
+            mes, etc).
+          · Tabla 13 filas con métricas por canal (clientes, pedidos,
+            facturado, ticket).
+          · Fila final "Sin clasificar" en distinto color para destacar.
+          · Llama a endpoint ?accion=reporteCanales del Apps Script v25.15.2.
+
+       4. Export CSV:
+          · Selector de fechas (inputs date).
+          · Filtro opcional por canal (dropdown 13 categorías + "Todos").
+          · Botón "📥 Descargar CSV" → abre URL endpoint exportPedidosCSV
+            en nueva pestaña (el browser baja el archivo solo).
+
+       5. Cache local en cliente (5min) para no machacar el endpoint.
+          Botón "🔄 Refrescar" para forzar re-fetch.
+
+     PRÓXIMA ENTREGA (v12.12):
+       · Sin clasificar (lista de clientes con canal=NULL + filtros).
+       · Reasignar (búsqueda + cambio + quitar canal).
+       · Módulo _canalCliente adaptado del de tck-ventas v14.13.6.
+
+     PRESERVADO desde v12.10.1:
+       · Bandeja "No entregados pendientes" simplificada (N42).
+       · Toda la lógica de logística, mapa, reportes, clientes, duplicados.
+       · Tab Reportes con sub-tabs Hoy/Período/Inteligencia/Mi Ronda.
+
+═══════════════════════════════════════════════════════════════════════ -->
+<!-- ═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v12.10.1 — 07/05/2026
      ──────────────────────────────────────────────────────────────────────
      N42 — Bandeja "No entregados pendientes" simplificada
@@ -9259,6 +9310,268 @@ input[type="date"] {
   font-weight: 700;
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   v12.11 — MÓDULO CANALES (Dashboard + Export CSV)
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Pills internas (Dashboard / Export) */
+.canales-pills {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 4px;
+  background: var(--cream2);
+  border-radius: 12px;
+}
+.canales-pill {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text2);
+  cursor: pointer;
+  transition: all .15s;
+  touch-action: manipulation;
+}
+.canales-pill:active { transform: scale(0.97); }
+.canales-pill.sel {
+  background: linear-gradient(135deg, #8B0000, #B71C1C);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(139,0,0,.25);
+}
+
+.canales-seccion { display: none; }
+.canales-seccion.on { display: block; }
+
+/* Selector de período */
+.canales-periodo-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  background: var(--cream2);
+  border-radius: 12px;
+}
+.canales-periodo-lbl {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text2);
+  margin-right: 4px;
+}
+.canales-per-btn {
+  background: #fff;
+  border: 1.5px solid var(--cream3);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  cursor: pointer;
+  transition: all .15s;
+  touch-action: manipulation;
+}
+.canales-per-btn:active { transform: scale(0.95); }
+.canales-per-btn.on {
+  background: linear-gradient(135deg, #8B0000, #B71C1C);
+  color: #fff;
+  border-color: #8B0000;
+}
+.canales-per-refresh {
+  margin-left: auto;
+  font-size: 14px;
+  padding: 6px 10px;
+}
+
+.canales-rango-info {
+  font-size: 11px;
+  color: var(--text3);
+  margin-bottom: 12px;
+  padding: 0 4px;
+  font-style: italic;
+}
+
+/* Cards de KPIs */
+.canales-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+@media (max-width: 720px) {
+  .canales-cards { grid-template-columns: repeat(2, 1fr); }
+}
+.canales-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 14px 12px;
+  text-align: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,.05);
+  border: 1px solid var(--cream3);
+}
+.canales-card-num {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 26px;
+  font-weight: 900;
+  color: var(--text);
+  line-height: 1;
+}
+.canales-card-num.verde  { color: #2E7D32; }
+.canales-card-num.orange { color: #E65100; }
+.canales-card-num.red    { color: var(--red); }
+.canales-card-lbl {
+  font-size: 11px;
+  color: var(--text3);
+  margin-top: 6px;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+}
+
+/* Tabla de canales */
+.canales-card-tabla {
+  background: #fff;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,.05);
+  border: 1px solid var(--cream3);
+}
+.canales-card-tabla-hdr {
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #4A0000, #8B0000);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.canales-card-titulo {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 16px;
+  font-weight: 900;
+}
+.canales-card-sub {
+  font-size: 11px;
+  opacity: .85;
+}
+.canales-card-tabla-body { padding: 0; }
+.canales-tabla-wrap { overflow-x: auto; }
+.canales-tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.canales-tabla th {
+  background: var(--cream2);
+  color: var(--text2);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 10px 12px;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+  border-bottom: 1.5px solid var(--cream3);
+}
+.canales-tabla th.num { text-align: right; }
+.canales-tabla td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--cream2);
+  color: var(--text);
+}
+.canales-tabla td.num {
+  text-align: right;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+}
+.canales-tabla tbody tr:hover { background: var(--cream2); }
+.canales-tabla tbody tr.sin-clasif {
+  background: #FFF8E1;
+  font-weight: 600;
+}
+.canales-tabla tbody tr.sin-clasif td { color: #6D4C2D; }
+.canales-tabla tbody tr.sin-clasif:hover { background: #FFF0CC; }
+.canales-tabla .canales-loading {
+  text-align: center;
+  padding: 30px 12px;
+  color: var(--text3);
+  font-style: italic;
+}
+.canales-tabla .canales-canal-emoji {
+  display: inline-block;
+  margin-right: 6px;
+}
+
+/* Sección Export */
+.canales-exp-desc {
+  font-size: 13px;
+  color: var(--text2);
+  line-height: 1.5;
+  margin: 0 0 16px 0;
+}
+.canales-exp-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.canales-exp-fld {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.canales-exp-lbl {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: .3px;
+}
+.canales-exp-input {
+  padding: 10px 12px;
+  border: 1.5px solid var(--cream3);
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 14px;
+  background: #fff;
+  color: var(--text);
+}
+.canales-exp-input:focus {
+  outline: none;
+  border-color: #8B0000;
+}
+.canales-exp-btn {
+  margin-top: 6px;
+  padding: 14px;
+  background: linear-gradient(135deg, #8B0000, #B71C1C);
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 16px;
+  font-weight: 900;
+  cursor: pointer;
+  letter-spacing: .3px;
+  touch-action: manipulation;
+}
+.canales-exp-btn:active { transform: scale(0.98); }
+.canales-exp-btn:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+.canales-exp-info {
+  font-size: 12px;
+  color: var(--text3);
+  text-align: center;
+  margin-top: 4px;
+  min-height: 16px;
+}
+
 </style>
 </head>
 <body>
@@ -9668,6 +9981,7 @@ input[type="date"] {
         <button class="rep-subtab-btn"     id="rep-subtab-periodo" onclick="repSelSubTab('periodo')">📈 Período</button>
         <button class="rep-subtab-btn"     id="rep-subtab-inteligencia" onclick="repSelSubTab('inteligencia')">🧠 Inteligencia</button>
         <button class="rep-subtab-btn"     id="rep-subtab-mironda" onclick="repSelSubTab('mironda')">🎯 Mi Ronda</button>
+        <button class="rep-subtab-btn"     id="rep-subtab-canales" onclick="repSelSubTab('canales')">🏷️ Canales</button>
       </div>
 
       <!-- ════ SUB-TAB: HOY ════ -->
@@ -9944,6 +10258,147 @@ input[type="date"] {
         </div>
 
       </div><!-- /rep-subtab-content-mironda -->
+
+      <!-- ════════════════════════════════════════════════════════════════
+           SUB-TAB: CANALES (v12.11 — Dashboard + Export CSV)
+           ════════════════════════════════════════════════════════════════
+           Estructura:
+             1. Pills internas: Dashboard / Export CSV
+             2. Dashboard: cards + selector período + tabla canales
+             3. Export: form de fechas + canal + botón descarga
+      -->
+      <div class="rep-subtab-content" id="rep-subtab-content-canales">
+
+        <!-- Pills de sección (Dashboard / Export) -->
+        <div class="canales-pills">
+          <button class="canales-pill sel" id="canales-pill-dash" onclick="canalesSelSeccion('dash')">📊 Dashboard</button>
+          <button class="canales-pill"     id="canales-pill-exp"  onclick="canalesSelSeccion('exp')">📥 Export CSV</button>
+        </div>
+
+        <!-- ────────── SECCIÓN DASHBOARD ────────── -->
+        <div class="canales-seccion on" id="canales-sec-dash">
+
+          <!-- Selector de período + refrescar -->
+          <div class="canales-periodo-bar">
+            <span class="canales-periodo-lbl">Período:</span>
+            <button class="canales-per-btn"     data-per="hoy"     onclick="canalesSetPeriodo('hoy', this)">Hoy</button>
+            <button class="canales-per-btn"     data-per="semana"  onclick="canalesSetPeriodo('semana', this)">Semana</button>
+            <button class="canales-per-btn on"  data-per="mes"     onclick="canalesSetPeriodo('mes', this)">30 días</button>
+            <button class="canales-per-btn"     data-per="anio"    onclick="canalesSetPeriodo('anio', this)">Año</button>
+            <button class="canales-per-btn canales-per-refresh" onclick="canalesRefrescarDash()" title="Refrescar">🔄</button>
+          </div>
+
+          <div class="canales-rango-info" id="canales-rango-info"></div>
+
+          <!-- Cards principales -->
+          <div class="canales-cards">
+            <div class="canales-card">
+              <div class="canales-card-num" id="canales-card-clientes">—</div>
+              <div class="canales-card-lbl">Clientes totales</div>
+            </div>
+            <div class="canales-card">
+              <div class="canales-card-num verde" id="canales-card-canalizado">—</div>
+              <div class="canales-card-lbl">% Canalizado</div>
+            </div>
+            <div class="canales-card">
+              <div class="canales-card-num orange" id="canales-card-facturado">—</div>
+              <div class="canales-card-lbl">Facturado período</div>
+            </div>
+            <div class="canales-card">
+              <div class="canales-card-num" id="canales-card-ticket">—</div>
+              <div class="canales-card-lbl">Ticket promedio</div>
+            </div>
+          </div>
+
+          <!-- Tabla por canal -->
+          <div class="canales-card-tabla">
+            <div class="canales-card-tabla-hdr">
+              <div class="canales-card-titulo">📋 Detalle por canal</div>
+              <div class="canales-card-sub" id="canales-card-sub">—</div>
+            </div>
+            <div class="canales-card-tabla-body">
+              <div class="canales-tabla-wrap">
+                <table class="canales-tabla">
+                  <thead>
+                    <tr>
+                      <th>Canal</th>
+                      <th class="num">Clientes</th>
+                      <th class="num">Pidieron</th>
+                      <th class="num">Pedidos</th>
+                      <th class="num">Facturado</th>
+                      <th class="num">Ticket</th>
+                    </tr>
+                  </thead>
+                  <tbody id="canales-tabla-body">
+                    <tr><td colspan="6" class="canales-loading">Cargando...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /canales-sec-dash -->
+
+        <!-- ────────── SECCIÓN EXPORT CSV ────────── -->
+        <div class="canales-seccion" id="canales-sec-exp">
+
+          <div class="canales-card-tabla">
+            <div class="canales-card-tabla-hdr">
+              <div class="canales-card-titulo">📥 Exportar pedidos a CSV</div>
+            </div>
+            <div class="canales-card-tabla-body" style="padding:14px 16px;">
+
+              <p class="canales-exp-desc">
+                Descargá un CSV con todos los pedidos del rango elegido,
+                incluyendo el canal y los días de visita de cada cliente.
+                Útil para Ariel/Lucas o análisis externo en Excel.
+              </p>
+
+              <div class="canales-exp-form">
+
+                <div class="canales-exp-fld">
+                  <label class="canales-exp-lbl">Desde:</label>
+                  <input type="date" id="canales-exp-desde" class="canales-exp-input">
+                </div>
+
+                <div class="canales-exp-fld">
+                  <label class="canales-exp-lbl">Hasta:</label>
+                  <input type="date" id="canales-exp-hasta" class="canales-exp-input">
+                </div>
+
+                <div class="canales-exp-fld">
+                  <label class="canales-exp-lbl">Canal (opcional):</label>
+                  <select id="canales-exp-canal" class="canales-exp-input">
+                    <option value="">Todos los canales</option>
+                    <option value="granja">🐔 Granja</option>
+                    <option value="carniceria">🥩 Carnicería</option>
+                    <option value="almacen_autoservicio">🛒 Almacén/Autoservicio</option>
+                    <option value="pescaderia">🐟 Pescadería</option>
+                    <option value="fiambreria">🧀 Fiambrería</option>
+                    <option value="roticeria_casa_comida">🍱 Rotisería/Casa de comida</option>
+                    <option value="restaurante_parrilla">🍴 Restaurante/Parrilla</option>
+                    <option value="pizzeria_hamburgueseria">🍕 Pizzería/Hamburguesería</option>
+                    <option value="parripollo">🔥 Parripollo</option>
+                    <option value="catering_eventos">🎉 Catering/Eventos</option>
+                    <option value="comedor_institucional">🏫 Comedor institucional</option>
+                    <option value="cliente_particular">🏠 Cliente particular</option>
+                    <option value="otros">📦 Otros</option>
+                  </select>
+                </div>
+
+                <button class="canales-exp-btn" id="canales-exp-btn" onclick="canalesDescargarCSV()">
+                  📥 Descargar CSV
+                </button>
+
+                <div class="canales-exp-info" id="canales-exp-info"></div>
+
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /canales-sec-exp -->
+
+      </div><!-- /rep-subtab-content-canales -->
 
     </div>
   </div>
@@ -14609,7 +15064,8 @@ function repSelSubTab(tab) {
   if (_repSubTab === tab) return;
   _repSubTab = tab;
   // Activar botón correspondiente
-  ['hoy','periodo','inteligencia','mironda'].forEach(function(t) {
+  // v12.11: agregado 'canales' al array
+  ['hoy','periodo','inteligencia','mironda','canales'].forEach(function(t) {
     var btn = document.getElementById('rep-subtab-' + t);
     var content = document.getElementById('rep-subtab-content-' + t);
     if (btn)     btn.classList.toggle('sel', t === tab);
@@ -14622,7 +15078,292 @@ function repSelSubTab(tab) {
   if (tab === 'mironda' && typeof adminMiRondaCargar === 'function') {
     adminMiRondaCargar();
   }
+  // v12.11: cargar dashboard de canales al entrar
+  if (tab === 'canales' && typeof canalesEntrarSubTab === 'function') {
+    canalesEntrarSubTab();
+  }
 }
+
+// ═══════════════════════════════════════════════════════════════
+// v12.11 — MÓDULO CANALES (Dashboard + Export CSV)
+// ═══════════════════════════════════════════════════════════════
+// Funciones expuestas al HTML (onclick):
+//   · canalesSelSeccion(s)  — switch entre Dashboard y Export
+//   · canalesSetPeriodo(p)  — cambia rango de fechas del dashboard
+//   · canalesRefrescarDash() — fuerza re-fetch (limpia cache local)
+//   · canalesDescargarCSV() — abre URL de exportPedidosCSV
+//
+// Internal:
+//   · canalesEntrarSubTab() — llamado desde repSelSubTab al activar
+//   · _canalesFetchReporte(rango) — fetch al endpoint reporteCanales
+//   · _canalesPintarDashboard(data) — render de cards + tabla
+// ═══════════════════════════════════════════════════════════════
+
+var CANAL_DASH_PERIODO = 'mes';      // default: 30 días
+var CANAL_DASH_CACHE = null;         // último response cacheado
+var CANAL_DASH_CACHE_TS = 0;
+var CANAL_DASH_CACHE_TTL_MS = 5 * 60 * 1000; // 5min
+
+// Emojis y orden visual canónico (mismo que tck-ventas y Apps Script)
+var CANAL_DASH_EMOJI = {
+  granja: '🐔', carniceria: '🥩', almacen_autoservicio: '🛒',
+  pescaderia: '🐟', fiambreria: '🧀', roticeria_casa_comida: '🍱',
+  restaurante_parrilla: '🍴', pizzeria_hamburgueseria: '🍕',
+  parripollo: '🔥', catering_eventos: '🎉',
+  comedor_institucional: '🏫', cliente_particular: '🏠',
+  otros: '📦'
+};
+
+// ─── Switch entre Dashboard y Export ───────────────────────────
+function canalesSelSeccion(s) {
+  document.querySelectorAll('.canales-pill').forEach(function(b){ b.classList.remove('sel'); });
+  document.querySelectorAll('.canales-seccion').forEach(function(c){ c.classList.remove('on'); });
+
+  if (s === 'dash') {
+    var p = document.getElementById('canales-pill-dash');
+    var c = document.getElementById('canales-sec-dash');
+    if (p) p.classList.add('sel');
+    if (c) c.classList.add('on');
+  } else if (s === 'exp') {
+    var p2 = document.getElementById('canales-pill-exp');
+    var c2 = document.getElementById('canales-sec-exp');
+    if (p2) p2.classList.add('sel');
+    if (c2) c2.classList.add('on');
+    // Inicializar fechas del export al entrar (default: últimos 30 días)
+    canalesInicExportFechas();
+  }
+}
+
+// Llamado desde repSelSubTab cuando el usuario clickea el sub-tab Canales
+function canalesEntrarSubTab() {
+  // Cargar dashboard si no hay datos cacheados o si el cache expiró
+  if (!CANAL_DASH_CACHE || (Date.now() - CANAL_DASH_CACHE_TS) > CANAL_DASH_CACHE_TTL_MS) {
+    canalesCargarDash();
+  } else {
+    _canalesPintarDashboard(CANAL_DASH_CACHE);
+  }
+}
+
+// ─── Cambiar período ───────────────────────────────────────────
+function canalesSetPeriodo(periodo, btn) {
+  CANAL_DASH_PERIODO = periodo;
+  // Activar visualmente el botón
+  document.querySelectorAll('.canales-per-btn[data-per]').forEach(function(b){ b.classList.remove('on'); });
+  if (btn) btn.classList.add('on');
+  canalesCargarDash(true); // forzar fetch
+}
+
+function canalesRefrescarDash() {
+  CANAL_DASH_CACHE = null; // invalidar cache
+  CANAL_DASH_CACHE_TS = 0;
+  canalesCargarDash(true);
+}
+
+// ─── Resolver rango según período seleccionado ─────────────────
+function _canalesResolverRango(periodo) {
+  var hoy = new Date();
+  hoy.setHours(0,0,0,0);
+  var desde = new Date(hoy.getTime());
+
+  if (periodo === 'hoy') {
+    // desde = hoy
+  } else if (periodo === 'semana') {
+    desde.setDate(desde.getDate() - 6); // últimos 7 días incluyendo hoy
+  } else if (periodo === 'mes') {
+    desde.setDate(desde.getDate() - 29); // últimos 30 días incluyendo hoy
+  } else if (periodo === 'anio') {
+    desde.setDate(desde.getDate() - 364); // últimos 365 días
+  }
+
+  return {
+    desde: _canalesFmtFecha(desde),
+    hasta: _canalesFmtFecha(hoy)
+  };
+}
+
+function _canalesFmtFecha(d) {
+  var y = d.getFullYear();
+  var m = String(d.getMonth() + 1).padStart(2, '0');
+  var dd = String(d.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + dd;
+}
+
+// ─── Fetch al endpoint del Apps Script ─────────────────────────
+async function canalesCargarDash(forzar) {
+  var rango = _canalesResolverRango(CANAL_DASH_PERIODO);
+
+  // Mostrar loading
+  var tbody = document.getElementById('canales-tabla-body');
+  if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="canales-loading">Cargando...</td></tr>';
+
+  // Cache key incluye rango
+  var key = rango.desde + '_' + rango.hasta;
+  if (!forzar && CANAL_DASH_CACHE && CANAL_DASH_CACHE._key === key &&
+      (Date.now() - CANAL_DASH_CACHE_TS) < CANAL_DASH_CACHE_TTL_MS) {
+    _canalesPintarDashboard(CANAL_DASH_CACHE);
+    return;
+  }
+
+  try {
+    var url = APPS_SCRIPT_URL +
+              '?accion=reporteCanales&desde=' + rango.desde + '&hasta=' + rango.hasta;
+    var resp = await fetch(url);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var data = await resp.json();
+    if (!data || !data.ok) throw new Error(data && data.error ? data.error : 'Error desconocido');
+
+    data._key = key;
+    CANAL_DASH_CACHE = data;
+    CANAL_DASH_CACHE_TS = Date.now();
+    _canalesPintarDashboard(data);
+  } catch(err) {
+    console.error('[canales] Error cargando dashboard:', err);
+    if (tbody) {
+      tbody.innerHTML = '<tr><td colspan="6" class="canales-loading" style="color:#c62828;">⚠️ Error: ' +
+        _canalesEscapeHtml(err.message || String(err)) + '</td></tr>';
+    }
+  }
+}
+
+// ─── Pintar dashboard ──────────────────────────────────────────
+function _canalesPintarDashboard(data) {
+  // Cards superiores
+  var totalClientes = data.total_clientes || 0;
+  var sinClasif = data.sin_clasificar || 0;
+  var canalizados = totalClientes - sinClasif;
+  var pctCanal = totalClientes > 0 ? Math.round((canalizados / totalClientes) * 100) : 0;
+  var facturado = (data.totales_periodo && data.totales_periodo.facturado) || 0;
+  var pedidos = (data.totales_periodo && data.totales_periodo.pedidos) || 0;
+  var ticket = pedidos > 0 ? Math.round(facturado / pedidos) : 0;
+
+  document.getElementById('canales-card-clientes').textContent = totalClientes.toLocaleString('es-AR');
+  document.getElementById('canales-card-canalizado').textContent = pctCanal + '%';
+  document.getElementById('canales-card-facturado').textContent = '$' + _canalesFmtMonto(facturado);
+  document.getElementById('canales-card-ticket').textContent = '$' + ticket.toLocaleString('es-AR');
+
+  // Info de rango
+  var info = document.getElementById('canales-rango-info');
+  if (info) {
+    info.textContent = '📅 Período: ' + data.rango.desde + ' al ' + data.rango.hasta +
+                       ' · ' + canalizados.toLocaleString('es-AR') + ' canalizados / ' +
+                       sinClasif.toLocaleString('es-AR') + ' sin clasificar';
+  }
+
+  // Subtítulo de la tabla
+  var sub = document.getElementById('canales-card-sub');
+  if (sub) sub.textContent = pedidos.toLocaleString('es-AR') + ' pedidos · $' + _canalesFmtMonto(facturado);
+
+  // Tabla por canal (incluye fila final "Sin clasificar")
+  var tbody = document.getElementById('canales-tabla-body');
+  if (!tbody) return;
+
+  var rows = [];
+  var canales = data.canales || [];
+  // Solo mostrar canales con al menos 1 cliente o con pedidos en el período
+  // (los que están totalmente vacíos no aportan nada visualmente)
+  var conActividad = canales.filter(function(c){
+    return c.clientes_total > 0 || c.pedidos_periodo > 0;
+  });
+
+  // Si NO hay canales con datos todavía (canalización recién empieza),
+  // mostrar todos los canales en gris.
+  var canalesAMostrar = conActividad.length > 0 ? conActividad : canales;
+
+  canalesAMostrar.forEach(function(c){
+    var emoji = CANAL_DASH_EMOJI[c.canal] || '•';
+    rows.push(
+      '<tr>' +
+        '<td><span class="canales-canal-emoji">' + emoji + '</span>' +
+          _canalesEscapeHtml(c.label) + '</td>' +
+        '<td class="num">' + (c.clientes_total || 0).toLocaleString('es-AR') + '</td>' +
+        '<td class="num">' + (c.clientes_con_pedido_periodo || 0).toLocaleString('es-AR') + '</td>' +
+        '<td class="num">' + (c.pedidos_periodo || 0).toLocaleString('es-AR') + '</td>' +
+        '<td class="num">$' + _canalesFmtMonto(c.facturado_periodo || 0) + '</td>' +
+        '<td class="num">' + (c.ticket_promedio > 0 ? '$' + _canalesFmtMonto(c.ticket_promedio) : '—') + '</td>' +
+      '</tr>'
+    );
+  });
+
+  // Fila final destacada: Sin clasificar
+  var sinPed = data.sin_clasificar_pedidos_periodo || 0;
+  var sinFac = data.sin_clasificar_facturado_periodo || 0;
+  var sinTick = sinPed > 0 ? Math.round(sinFac / sinPed) : 0;
+  rows.push(
+    '<tr class="sin-clasif">' +
+      '<td><span class="canales-canal-emoji">⚠️</span>Sin clasificar</td>' +
+      '<td class="num">' + sinClasif.toLocaleString('es-AR') + '</td>' +
+      '<td class="num">—</td>' +
+      '<td class="num">' + sinPed.toLocaleString('es-AR') + '</td>' +
+      '<td class="num">$' + _canalesFmtMonto(sinFac) + '</td>' +
+      '<td class="num">' + (sinTick > 0 ? '$' + _canalesFmtMonto(sinTick) : '—') + '</td>' +
+    '</tr>'
+  );
+
+  tbody.innerHTML = rows.join('');
+}
+
+// Formatear monto en millones/miles para mejor lectura
+function _canalesFmtMonto(n) {
+  n = Number(n) || 0;
+  if (n >= 1000000) return (n / 1000000).toFixed(1).replace('.0','') + 'M';
+  if (n >= 1000)    return Math.round(n / 1000) + 'k';
+  return n.toLocaleString('es-AR');
+}
+
+function _canalesEscapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+// ─── EXPORT CSV ────────────────────────────────────────────────
+function canalesInicExportFechas() {
+  var desdeInp = document.getElementById('canales-exp-desde');
+  var hastaInp = document.getElementById('canales-exp-hasta');
+  if (!desdeInp || !hastaInp) return;
+  // Solo poblar si están vacíos
+  if (!desdeInp.value && !hastaInp.value) {
+    var hoy = new Date(); hoy.setHours(0,0,0,0);
+    var desde = new Date(hoy.getTime());
+    desde.setDate(desde.getDate() - 29);
+    desdeInp.value = _canalesFmtFecha(desde);
+    hastaInp.value = _canalesFmtFecha(hoy);
+  }
+}
+
+function canalesDescargarCSV() {
+  var desde = (document.getElementById('canales-exp-desde')||{}).value;
+  var hasta = (document.getElementById('canales-exp-hasta')||{}).value;
+  var canal = (document.getElementById('canales-exp-canal')||{}).value;
+  var info = document.getElementById('canales-exp-info');
+
+  if (!desde || !hasta) {
+    if (info) info.innerHTML = '<span style="color:#c62828;">⚠️ Elegí ambas fechas</span>';
+    return;
+  }
+  if (desde > hasta) {
+    if (info) info.innerHTML = '<span style="color:#c62828;">⚠️ La fecha "desde" debe ser anterior a "hasta"</span>';
+    return;
+  }
+
+  var url = APPS_SCRIPT_URL +
+            '?accion=exportPedidosCSV' +
+            '&desde=' + encodeURIComponent(desde) +
+            '&hasta=' + encodeURIComponent(hasta);
+  if (canal) url += '&canal=' + encodeURIComponent(canal);
+
+  // Abrir en nueva pestaña para que el browser baje el archivo
+  if (info) info.innerHTML = '⏳ Generando CSV... (puede tardar 5-10s, mirá tu carpeta de Descargas)';
+  window.open(url, '_blank');
+
+  setTimeout(function(){
+    if (info) info.innerHTML = '✅ Si no se descargó, revisá los popups bloqueados o probá de nuevo.';
+  }, 2500);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FIN MÓDULO CANALES
+// ═══════════════════════════════════════════════════════════════
 
 // Estado: _repPeriodo guarda el período activo. Puede ser uno de:
 // 'hoy' | 'ayer' | 'semana' | '15dias' | 'mes' | 'mespasado' | 'anio' | 'todos' | 'custom'
