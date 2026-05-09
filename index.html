@@ -1,5 +1,55 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v12.13 — 09/05/2026
+     ──────────────────────────────────────────────────────────────────────
+     CANALIZACIÓN DE CLIENTES — Pieza 4 Entrega 2 (Vendedores + Reasignar)
+
+     CONTEXTO:
+       Entrega 1 (v12.11/12.11.1/12.12/12.12.1): Dashboard + Export CSV.
+       v12.12.1 trajo el fix del CSS huérfano que rompía parsing.
+
+       Decisión clave de scope:
+         "Los vendedores son confiables, van a clasificar solos al
+         confirmar pedidos." → No incluir herramienta para que ADMIN
+         clasifique masivamente. Solo visibilidad y correcciones.
+
+     CAMBIOS v12.13 sobre v12.12.1:
+
+       1. NUEVA SECCIÓN "👥 Vendedores"
+          · Lista de todos los vendedores con: total clientes, canalizados,
+            % de avance, último pedido del grupo.
+          · Barra de progreso visual por vendedor (rojo<30, naranja<70, verde).
+          · Click en un vendedor → drawer con SUS clientes pendientes
+            ordenados por último pedido (más reciente primero).
+          · Cache 5min para no machacar Supabase.
+
+       2. NUEVA SECCIÓN "🔄 Reasignar"
+          · Búsqueda por nombre (mín. 3 chars, debounce 300ms).
+          · Resultados con badge de canal actual (verde si tiene, amarillo
+            si está sin clasificar).
+          · Click en cliente → ficha con canal actual + quién/cuándo lo
+            asignó + días de visita.
+          · Botón "Cambiar canal" abre picker de 13 canales (grid 2 cols
+            con emojis y labels).
+          · Botón "Quitar canal" (solo aparece si tiene canal) con confirm.
+          · PATCH directo a Supabase con canal_asignado_por='ADMIN'.
+
+       3. Pills del sub-tab Canales pasan de 2 a 4:
+          📊 Dashboard / 👥 Vendedores / 🔄 Reasignar / 📥 Export
+
+       4. Al cambiar canal o quitar canal, se invalidan los caches de
+          Dashboard y Vendedores → próxima visita muestra data fresca.
+
+     LO QUE NO ESTÁ (decisión consciente de scope):
+       · Modal completo de canalización (incluyendo días de visita) — los
+         vendedores ya lo tienen en tck-ventas v14.13.6.
+       · "Sin clasificar" como herramienta para clasificar masivamente
+         desde admin — los vendedores conocen a sus clientes, no vos.
+       · Tratamiento especial para MOSTRADOR/REVISAR_TRENQUE/MIGUEL_PROBABLE
+         (255 clientes edge case) — se decidió "luego vemos qué hacer".
+
+═══════════════════════════════════════════════════════════════════════ -->
+<!-- ═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v12.12.1 — 09/05/2026
      ──────────────────────────────────────────────────────────────────────
      HOTFIX CSS — Bloque huérfano rompía parsing del resto del CSS
@@ -9714,6 +9764,393 @@ input[type="date"] {
 }
 .canales-stale-banner.on { display: block; }
 
+/* ═══════════════════════════════════════════════════════════════
+   v12.13 — SECCIÓN VENDEDORES (avance por vendedor)
+   ═══════════════════════════════════════════════════════════════ */
+.canales-vend-intro {
+  font-size: 13px;
+  color: var(--text2);
+  line-height: 1.5;
+  margin: 14px 16px 12px;
+}
+.canales-vend-refresh {
+  background: rgba(255,255,255,0.18);
+  border: none;
+  color: #fff;
+  font-size: 14px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.canales-vend-lista {
+  display: flex;
+  flex-direction: column;
+}
+.canales-vend-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--cream2);
+  cursor: pointer;
+  transition: background .12s;
+  -webkit-tap-highlight-color: transparent;
+}
+.canales-vend-row:hover { background: var(--cream2); }
+.canales-vend-row:active { background: var(--cream3); }
+.canales-vend-row:last-child { border-bottom: none; }
+.canales-vend-info {
+  flex: 1;
+  min-width: 0;
+}
+.canales-vend-nombre {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--text);
+  text-transform: capitalize;
+}
+.canales-vend-meta {
+  font-size: 11px;
+  color: var(--text3);
+  margin-top: 3px;
+}
+.canales-vend-progreso {
+  flex: 0 0 100px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.canales-vend-pct {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 18px;
+  font-weight: 900;
+}
+.canales-vend-pct.bajo  { color: #C62828; }
+.canales-vend-pct.medio { color: #E65100; }
+.canales-vend-pct.alto  { color: #2E7D32; }
+.canales-vend-bar {
+  width: 90px;
+  height: 5px;
+  background: var(--cream3);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.canales-vend-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #8B0000, #B71C1C);
+  transition: width .25s;
+}
+.canales-vend-arrow {
+  font-size: 16px;
+  color: var(--text3);
+}
+
+/* Drawer / detalle de un vendedor */
+.canales-vend-detalle {
+  display: none;
+  margin-top: 10px;
+}
+.canales-vend-detalle.on { display: block; }
+.canales-vend-det-hdr {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  background: var(--cream2);
+  border-radius: 10px;
+}
+.canales-vend-back {
+  background: #fff;
+  border: 1.5px solid var(--cream3);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.canales-vend-back:active { transform: scale(0.96); }
+.canales-vend-det-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--text);
+  text-transform: capitalize;
+  flex: 1;
+}
+.canales-vend-det-stats {
+  font-size: 12px;
+  color: var(--text3);
+  padding: 0 12px 8px;
+  font-style: italic;
+}
+.canales-vend-det-lista {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid var(--cream3);
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.canales-vend-cli {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--cream2);
+}
+.canales-vend-cli:last-child { border-bottom: none; }
+.canales-vend-cli-nombre {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  text-transform: capitalize;
+}
+.canales-vend-cli-meta {
+  font-size: 11px;
+  color: var(--text3);
+  margin-top: 3px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   v12.13 — SECCIÓN REASIGNAR
+   ═══════════════════════════════════════════════════════════════ */
+.canales-rea-desc {
+  font-size: 13px;
+  color: var(--text2);
+  line-height: 1.5;
+  margin: 0 0 14px 0;
+}
+.canales-rea-search-wrap {
+  position: relative;
+  margin-bottom: 12px;
+}
+.canales-rea-search {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1.5px solid var(--cream3);
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 15px;
+  background: #fff;
+  color: var(--text);
+  -webkit-appearance: none;
+  appearance: none;
+  min-height: 44px;
+}
+.canales-rea-search:focus {
+  outline: none;
+  border-color: #8B0000;
+  box-shadow: 0 0 0 3px rgba(139,0,0,.1);
+}
+.canales-rea-results {
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid var(--cream3);
+  margin-bottom: 12px;
+  display: none;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.canales-rea-results.on { display: block; }
+.canales-rea-result {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--cream2);
+  cursor: pointer;
+  transition: background .12s;
+  -webkit-tap-highlight-color: transparent;
+}
+.canales-rea-result:hover { background: var(--cream2); }
+.canales-rea-result:active { background: var(--cream3); }
+.canales-rea-result:last-child { border-bottom: none; }
+.canales-rea-result-nombre {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  text-transform: capitalize;
+}
+.canales-rea-result-meta {
+  font-size: 11px;
+  color: var(--text3);
+  margin-top: 3px;
+}
+.canales-rea-result-canal {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--cream3);
+  color: var(--text2);
+  font-size: 10px;
+  font-weight: 700;
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+}
+.canales-rea-result-canal.con-canal {
+  background: #E8F5E9;
+  color: #1B5E20;
+}
+.canales-rea-result-canal.sin-canal {
+  background: #FFF8E1;
+  color: #6D4C2D;
+}
+
+/* Detalle del cliente seleccionado */
+.canales-rea-detalle {
+  display: none;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid var(--cream3);
+  padding: 14px 16px;
+}
+.canales-rea-detalle.on { display: block; }
+.canales-rea-det-nombre {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 17px;
+  font-weight: 900;
+  color: var(--text);
+  text-transform: capitalize;
+  margin-bottom: 4px;
+}
+.canales-rea-det-meta {
+  font-size: 12px;
+  color: var(--text3);
+  margin-bottom: 12px;
+}
+.canales-rea-det-actual {
+  padding: 10px 12px;
+  background: var(--cream2);
+  border-radius: 10px;
+  margin-bottom: 12px;
+}
+.canales-rea-det-lbl {
+  font-size: 10px;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: .3px;
+  font-weight: 700;
+}
+.canales-rea-det-val {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  margin-top: 2px;
+}
+.canales-rea-det-val.vacio { color: var(--text3); font-style: italic; }
+.canales-rea-det-acciones {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.canales-rea-btn {
+  padding: 12px 14px;
+  border: none;
+  border-radius: 10px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 900;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  -webkit-tap-highlight-color: transparent;
+  min-height: 44px;
+}
+.canales-rea-btn:active { transform: scale(0.98); }
+.canales-rea-btn-cambiar {
+  background: linear-gradient(135deg, #1565C0, #1976D2);
+  color: #fff;
+}
+.canales-rea-btn-quitar {
+  background: #fff;
+  color: #C62828;
+  border: 1.5px solid #C62828;
+}
+
+/* Selector de canal (cuando se elige nuevo) */
+.canales-rea-picker {
+  display: none;
+  margin-top: 12px;
+}
+.canales-rea-picker.on { display: block; }
+.canales-rea-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.canales-rea-canal-opt {
+  padding: 10px 8px;
+  background: #fff;
+  border: 1.5px solid var(--cream3);
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  cursor: pointer;
+  text-align: center;
+  -webkit-tap-highlight-color: transparent;
+  min-height: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.canales-rea-canal-opt:active { transform: scale(0.97); }
+.canales-rea-canal-opt.sel {
+  border-color: #8B0000;
+  background: linear-gradient(135deg, #8B0000, #B71C1C);
+  color: #fff;
+}
+.canales-rea-picker-acc {
+  display: flex;
+  gap: 8px;
+}
+.canales-rea-picker-acc button {
+  flex: 1;
+  padding: 11px;
+  border-radius: 10px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 900;
+  cursor: pointer;
+  border: none;
+  -webkit-tap-highlight-color: transparent;
+  min-height: 44px;
+}
+.canales-rea-picker-cancel {
+  background: #fff;
+  color: var(--text2);
+  border: 1.5px solid var(--cream3) !important;
+}
+.canales-rea-picker-ok {
+  background: linear-gradient(135deg, #2E7D32, #388E3C);
+  color: #fff;
+}
+.canales-rea-picker-ok:disabled {
+  background: var(--cream3) !important;
+  color: var(--text3) !important;
+  cursor: not-allowed;
+}
+
+/* Mensaje de éxito tras cambio */
+.canales-rea-mensaje {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  text-align: center;
+  font-weight: 700;
+  display: none;
+}
+.canales-rea-mensaje.on { display: block; }
+.canales-rea-mensaje.ok { background: #E8F5E9; color: #1B5E20; }
+.canales-rea-mensaje.err { background: #FFEBEE; color: #C62828; }
+
 /* Sección Export */
 .canales-exp-desc {
   font-size: 13px;
@@ -10489,10 +10926,12 @@ input.canales-exp-input[type="date"] {
       -->
       <div class="rep-subtab-content" id="rep-subtab-content-canales">
 
-        <!-- Pills de sección (Dashboard / Export) -->
+        <!-- Pills de sección (Dashboard / Vendedores / Reasignar / Export) -->
         <div class="canales-pills">
           <button class="canales-pill sel" id="canales-pill-dash" onclick="canalesSelSeccion('dash')">📊 Dashboard</button>
-          <button class="canales-pill"     id="canales-pill-exp"  onclick="canalesSelSeccion('exp')">📥 Export CSV</button>
+          <button class="canales-pill"     id="canales-pill-vend" onclick="canalesSelSeccion('vend')">👥 Vendedores</button>
+          <button class="canales-pill"     id="canales-pill-rea"  onclick="canalesSelSeccion('rea')">🔄 Reasignar</button>
+          <button class="canales-pill"     id="canales-pill-exp"  onclick="canalesSelSeccion('exp')">📥 Export</button>
         </div>
 
         <!-- ────────── SECCIÓN DASHBOARD ────────── -->
@@ -10573,6 +11012,64 @@ input.canales-exp-input[type="date"] {
           </div>
 
         </div><!-- /canales-sec-dash -->
+
+        <!-- ────────── SECCIÓN VENDEDORES (v12.13) ────────── -->
+        <div class="canales-seccion" id="canales-sec-vend">
+
+          <div class="canales-card-tabla">
+            <div class="canales-card-tabla-hdr">
+              <div class="canales-card-titulo">👥 Avance por vendedor</div>
+              <button class="canales-vend-refresh" onclick="canalesVendCargar(true)" title="Refrescar">🔄</button>
+            </div>
+            <div class="canales-card-tabla-body">
+              <p class="canales-vend-intro" id="canales-vend-intro">
+                Cargando...
+              </p>
+              <div class="canales-vend-lista" id="canales-vend-lista"></div>
+            </div>
+          </div>
+
+          <!-- Drawer/detalle de un vendedor (oculto hasta click) -->
+          <div class="canales-vend-detalle" id="canales-vend-detalle">
+            <div class="canales-vend-det-hdr">
+              <button class="canales-vend-back" onclick="canalesVendCerrarDetalle()">← Volver</button>
+              <div class="canales-vend-det-title" id="canales-vend-det-title">—</div>
+            </div>
+            <div class="canales-vend-det-stats" id="canales-vend-det-stats">—</div>
+            <div class="canales-vend-det-lista" id="canales-vend-det-lista">
+              <div class="canales-loading">Cargando clientes pendientes...</div>
+            </div>
+          </div>
+
+        </div><!-- /canales-sec-vend -->
+
+        <!-- ────────── SECCIÓN REASIGNAR (v12.13) ────────── -->
+        <div class="canales-seccion" id="canales-sec-rea">
+
+          <div class="canales-card-tabla">
+            <div class="canales-card-tabla-hdr">
+              <div class="canales-card-titulo">🔄 Reasignar canal de un cliente</div>
+            </div>
+            <div class="canales-card-tabla-body" style="padding:14px 16px;">
+
+              <p class="canales-rea-desc">
+                Buscá un cliente por nombre. Vas a poder ver su canal actual,
+                cambiarlo o quitarlo.
+              </p>
+
+              <div class="canales-rea-search-wrap">
+                <input type="text" id="canales-rea-search" class="canales-rea-search"
+                       placeholder="Nombre del cliente (mín. 3 letras)"
+                       oninput="canalesReaBuscar()" autocomplete="off">
+              </div>
+
+              <div class="canales-rea-results" id="canales-rea-results"></div>
+              <div class="canales-rea-detalle" id="canales-rea-detalle"></div>
+
+            </div>
+          </div>
+
+        </div><!-- /canales-sec-rea -->
 
         <!-- ────────── SECCIÓN EXPORT CSV ────────── -->
         <div class="canales-seccion" id="canales-sec-exp">
@@ -15351,7 +15848,7 @@ var CANAL_DASH_EMOJI = {
   otros: '📦'
 };
 
-// ─── Switch entre Dashboard y Export ───────────────────────────
+// ─── Switch entre Dashboard / Vendedores / Reasignar / Export ──
 function canalesSelSeccion(s) {
   document.querySelectorAll('.canales-pill').forEach(function(b){ b.classList.remove('sel'); });
   document.querySelectorAll('.canales-seccion').forEach(function(c){ c.classList.remove('on'); });
@@ -15361,12 +15858,26 @@ function canalesSelSeccion(s) {
     var c = document.getElementById('canales-sec-dash');
     if (p) p.classList.add('sel');
     if (c) c.classList.add('on');
+  } else if (s === 'vend') {
+    var pv = document.getElementById('canales-pill-vend');
+    var cv = document.getElementById('canales-sec-vend');
+    if (pv) pv.classList.add('sel');
+    if (cv) cv.classList.add('on');
+    // Cargar lista de vendedores al entrar (con cache 5min)
+    canalesVendCargar(false);
+  } else if (s === 'rea') {
+    var pr = document.getElementById('canales-pill-rea');
+    var cr = document.getElementById('canales-sec-rea');
+    if (pr) pr.classList.add('sel');
+    if (cr) cr.classList.add('on');
+    // Limpiar resultados previos al entrar
+    var inp = document.getElementById('canales-rea-search');
+    if (inp) inp.focus();
   } else if (s === 'exp') {
     var p2 = document.getElementById('canales-pill-exp');
     var c2 = document.getElementById('canales-sec-exp');
     if (p2) p2.classList.add('sel');
     if (c2) c2.classList.add('on');
-    // Inicializar fechas del export al entrar (default: últimos 30 días)
     canalesInicExportFechas();
   }
 }
@@ -15679,6 +16190,540 @@ function canalesDescargarCSV() {
   setTimeout(function(){
     if (info) info.innerHTML = '✅ Si no se descargó, revisá los popups bloqueados o probá de nuevo.';
   }, 2500);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// v12.13 — SECCIÓN VENDEDORES (avance de canalización por vendedor)
+// ═══════════════════════════════════════════════════════════════
+
+var CANAL_VEND_CACHE = null;
+var CANAL_VEND_CACHE_TS = 0;
+var CANAL_VEND_TTL_MS = 5 * 60 * 1000; // 5min
+
+async function canalesVendCargar(forzar) {
+  var lista = document.getElementById('canales-vend-lista');
+  var intro = document.getElementById('canales-vend-intro');
+
+  // Cache check
+  if (!forzar && CANAL_VEND_CACHE && (Date.now() - CANAL_VEND_CACHE_TS) < CANAL_VEND_TTL_MS) {
+    _canalesVendPintar(CANAL_VEND_CACHE);
+    return;
+  }
+
+  if (intro) intro.textContent = 'Cargando...';
+  if (lista) lista.innerHTML = '';
+
+  try {
+    // Traer todos los clientes activos paginado (mismo patrón que Apps Script)
+    // Solo necesitamos: vendedor, canal, ultimo_pedido para ordenar prioridades
+    var todos = [];
+    var pageSize = 1000;
+    var offset = 0;
+    var safety = 0;
+    while (safety < 20) {
+      safety++;
+      var url = SUPABASE_URL + '/rest/v1/clientes_activos' +
+                '?select=vendedor,canal,ultimo_pedido' +
+                '&limit=' + pageSize +
+                '&offset=' + offset +
+                '&order=nombre.asc';
+      var resp = await fetch(url, {
+        headers: {
+          'apikey':        SUPABASE_KEY,
+          'Authorization': 'Bearer ' + SUPABASE_KEY
+        }
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      var arr = await resp.json();
+      if (!Array.isArray(arr) || arr.length === 0) break;
+      todos = todos.concat(arr);
+      if (arr.length < pageSize) break;
+      offset += pageSize;
+    }
+
+    // Agrupar por vendedor
+    var grupos = {};
+    todos.forEach(function(c) {
+      var v = c.vendedor || '(sin asignar)';
+      if (!grupos[v]) grupos[v] = { total: 0, canalizados: 0, ultimo_pedido: null };
+      grupos[v].total += 1;
+      if (c.canal) grupos[v].canalizados += 1;
+      // Tracking del último pedido más reciente del grupo
+      if (c.ultimo_pedido) {
+        if (!grupos[v].ultimo_pedido || c.ultimo_pedido > grupos[v].ultimo_pedido) {
+          grupos[v].ultimo_pedido = c.ultimo_pedido;
+        }
+      }
+    });
+
+    // Convertir a array ordenado: primero los reales con más clientes
+    var arr = Object.keys(grupos).map(function(v){
+      return Object.assign({ vendedor: v }, grupos[v]);
+    });
+    arr.sort(function(a, b){ return b.total - a.total; });
+
+    CANAL_VEND_CACHE = arr;
+    CANAL_VEND_CACHE_TS = Date.now();
+    _canalesVendPintar(arr);
+  } catch(err) {
+    console.error('[canales-vend] Error:', err);
+    if (intro) intro.innerHTML = '<span style="color:#c62828;">⚠️ Error: ' + _canalesEscapeHtml(err.message) + '</span>';
+  }
+}
+
+function _canalesVendPintar(arr) {
+  var intro = document.getElementById('canales-vend-intro');
+  var lista = document.getElementById('canales-vend-lista');
+
+  var totalGlobal = arr.reduce(function(s, v){ return s + v.total; }, 0);
+  var canalGlobal = arr.reduce(function(s, v){ return s + v.canalizados; }, 0);
+  var pctGlobal = totalGlobal > 0 ? Math.round(100 * canalGlobal / totalGlobal) : 0;
+
+  if (intro) {
+    intro.innerHTML = 'Total: <strong>' + canalGlobal.toLocaleString('es-AR') + '</strong> de <strong>' +
+                      totalGlobal.toLocaleString('es-AR') + '</strong> clientes canalizados (<strong>' +
+                      pctGlobal + '%</strong>). Tocá un vendedor para ver sus pendientes.';
+  }
+
+  if (!lista) return;
+
+  var rows = arr.map(function(v) {
+    var pct = v.total > 0 ? Math.round(100 * v.canalizados / v.total) : 0;
+    var pctClass = pct < 30 ? 'bajo' : (pct < 70 ? 'medio' : 'alto');
+    var nombreFmt = v.vendedor.toLowerCase().replace(/_/g,' ');
+    var ultPed = v.ultimo_pedido ? ('Últ. pedido: ' + v.ultimo_pedido.substring(0, 10)) : 'Sin pedidos';
+
+    return '<div class="canales-vend-row" onclick="canalesVendAbrir(' +
+           "'" + v.vendedor.replace(/'/g, "\\'") + "'" + ')">' +
+             '<div class="canales-vend-info">' +
+               '<div class="canales-vend-nombre">' + _canalesEscapeHtml(nombreFmt) + '</div>' +
+               '<div class="canales-vend-meta">' +
+                 v.total.toLocaleString('es-AR') + ' clientes · ' +
+                 v.canalizados.toLocaleString('es-AR') + ' canalizados · ' +
+                 _canalesEscapeHtml(ultPed) +
+               '</div>' +
+             '</div>' +
+             '<div class="canales-vend-progreso">' +
+               '<div class="canales-vend-pct ' + pctClass + '">' + pct + '%</div>' +
+               '<div class="canales-vend-bar"><div class="canales-vend-bar-fill" style="width:' + pct + '%"></div></div>' +
+             '</div>' +
+             '<div class="canales-vend-arrow">›</div>' +
+           '</div>';
+  }).join('');
+
+  lista.innerHTML = rows;
+}
+
+// Abrir detalle de un vendedor: lista de sus clientes pendientes
+async function canalesVendAbrir(vendedor) {
+  var det = document.getElementById('canales-vend-detalle');
+  var listaPpal = document.getElementById('canales-vend-lista');
+  var intro = document.getElementById('canales-vend-intro');
+  var title = document.getElementById('canales-vend-det-title');
+  var stats = document.getElementById('canales-vend-det-stats');
+  var lista = document.getElementById('canales-vend-det-lista');
+
+  // Ocultar lista principal y mostrar detalle
+  if (listaPpal) listaPpal.style.display = 'none';
+  if (intro) intro.style.display = 'none';
+  if (det) det.classList.add('on');
+
+  if (title) title.textContent = vendedor.toLowerCase().replace(/_/g,' ');
+  if (stats) stats.textContent = 'Cargando pendientes...';
+  if (lista) lista.innerHTML = '<div class="canales-loading" style="padding:24px;">Cargando...</div>';
+
+  try {
+    // Traer SOLO los clientes de este vendedor SIN canal, ordenados por último pedido
+    var url = SUPABASE_URL + '/rest/v1/clientes_activos' +
+              '?select=nombre,localidad,ultimo_pedido,n_pedidos_78d' +
+              '&vendedor=eq.' + encodeURIComponent(vendedor) +
+              '&canal=is.null' +
+              '&order=ultimo_pedido.desc.nullslast' +
+              '&limit=500';
+    var resp = await fetch(url, {
+      headers: {
+        'apikey':        SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY
+      }
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var pend = await resp.json();
+
+    if (stats) {
+      stats.textContent = pend.length.toLocaleString('es-AR') + ' clientes pendientes de canalizar';
+    }
+
+    if (pend.length === 0) {
+      if (lista) lista.innerHTML = '<div class="canales-loading" style="padding:24px;color:#2E7D32;">✅ Todos los clientes de este vendedor están canalizados</div>';
+      return;
+    }
+
+    var rows = pend.map(function(c) {
+      var ult = c.ultimo_pedido ? c.ultimo_pedido.substring(0, 10) : '—';
+      var loc = c.localidad || '—';
+      var nped = c.n_pedidos_78d || 0;
+      return '<div class="canales-vend-cli">' +
+               '<div class="canales-vend-cli-nombre">' + _canalesEscapeHtml(c.nombre) + '</div>' +
+               '<div class="canales-vend-cli-meta">' +
+                 _canalesEscapeHtml(loc) + ' · Últ. pedido: ' + ult +
+                 (nped > 0 ? ' · ' + nped + ' ped/78d' : '') +
+               '</div>' +
+             '</div>';
+    }).join('');
+
+    if (lista) lista.innerHTML = rows;
+  } catch(err) {
+    console.error('[canales-vend] Error detalle:', err);
+    if (lista) {
+      lista.innerHTML = '<div class="canales-loading" style="color:#c62828;padding:24px;">⚠️ Error: ' +
+        _canalesEscapeHtml(err.message) + '</div>';
+    }
+  }
+}
+
+function canalesVendCerrarDetalle() {
+  var det = document.getElementById('canales-vend-detalle');
+  var listaPpal = document.getElementById('canales-vend-lista');
+  var intro = document.getElementById('canales-vend-intro');
+
+  if (det) det.classList.remove('on');
+  if (listaPpal) listaPpal.style.display = '';
+  if (intro) intro.style.display = '';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// v12.13 — SECCIÓN REASIGNAR (búsqueda + cambiar/quitar canal)
+// ═══════════════════════════════════════════════════════════════
+
+var CANAL_REA_TIMEOUT = null;
+var CANAL_REA_CLIENTE_SEL = null; // cliente seleccionado actualmente
+var CANAL_REA_CANAL_NUEVO = null; // canal nuevo elegido en el picker
+
+function canalesReaBuscar() {
+  var inp = document.getElementById('canales-rea-search');
+  var q = (inp ? inp.value : '').trim();
+  var results = document.getElementById('canales-rea-results');
+  var det = document.getElementById('canales-rea-detalle');
+
+  // Esconder detalle al cambiar búsqueda
+  if (det) det.classList.remove('on');
+
+  if (q.length < 3) {
+    if (results) {
+      results.classList.remove('on');
+      results.innerHTML = '';
+    }
+    return;
+  }
+
+  // Debounce 300ms
+  if (CANAL_REA_TIMEOUT) clearTimeout(CANAL_REA_TIMEOUT);
+  CANAL_REA_TIMEOUT = setTimeout(function() {
+    _canalesReaEjecutarBusqueda(q);
+  }, 300);
+}
+
+async function _canalesReaEjecutarBusqueda(q) {
+  var results = document.getElementById('canales-rea-results');
+  if (!results) return;
+
+  results.classList.add('on');
+  results.innerHTML = '<div class="canales-loading" style="padding:14px;">Buscando...</div>';
+
+  try {
+    var url = SUPABASE_URL + '/rest/v1/clientes_activos' +
+              '?select=id,nombre,vendedor,localidad,canal,canal_asignado_por,canal_asignado_at,dias_visita' +
+              '&nombre=ilike.*' + encodeURIComponent(q) + '*' +
+              '&order=nombre.asc&limit=20';
+    var resp = await fetch(url, {
+      headers: {
+        'apikey':        SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY
+      }
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var arr = await resp.json();
+
+    if (arr.length === 0) {
+      results.innerHTML = '<div class="canales-loading" style="padding:14px;">No se encontraron clientes con "' +
+                          _canalesEscapeHtml(q) + '"</div>';
+      return;
+    }
+
+    var rows = arr.map(function(c, idx) {
+      var canalLbl = '';
+      if (c.canal) {
+        var labels = {
+          granja:'Granja', carniceria:'Carnicería', almacen_autoservicio:'Almacén',
+          pescaderia:'Pescadería', fiambreria:'Fiambrería', roticeria_casa_comida:'Rotisería',
+          restaurante_parrilla:'Restaurante', pizzeria_hamburgueseria:'Pizzería',
+          parripollo:'Parripollo', catering_eventos:'Catering',
+          comedor_institucional:'Comedor', cliente_particular:'Particular', otros:'Otros'
+        };
+        canalLbl = '<div class="canales-rea-result-canal con-canal">✓ ' + (labels[c.canal] || c.canal) + '</div>';
+      } else {
+        canalLbl = '<div class="canales-rea-result-canal sin-canal">Sin canal</div>';
+      }
+      var loc = c.localidad || '—';
+      var vend = (c.vendedor || '—').toLowerCase().replace(/_/g,' ');
+      // Guardar el cliente entero en window para callback
+      window['_canalReaCli_' + idx] = c;
+      return '<div class="canales-rea-result" onclick="canalesReaSeleccionar(' + idx + ')">' +
+               '<div class="canales-rea-result-nombre">' + _canalesEscapeHtml(c.nombre) + '</div>' +
+               '<div class="canales-rea-result-meta">' + _canalesEscapeHtml(loc) + ' · ' + _canalesEscapeHtml(vend) + '</div>' +
+               canalLbl +
+             '</div>';
+    }).join('');
+
+    results.innerHTML = rows;
+  } catch(err) {
+    console.error('[canales-rea] Error:', err);
+    results.innerHTML = '<div class="canales-loading" style="color:#c62828;padding:14px;">⚠️ Error: ' +
+      _canalesEscapeHtml(err.message) + '</div>';
+  }
+}
+
+function canalesReaSeleccionar(idx) {
+  var c = window['_canalReaCli_' + idx];
+  if (!c) return;
+  CANAL_REA_CLIENTE_SEL = c;
+  CANAL_REA_CANAL_NUEVO = null;
+
+  // Esconder resultados, mostrar detalle
+  var results = document.getElementById('canales-rea-results');
+  var det = document.getElementById('canales-rea-detalle');
+  if (results) results.classList.remove('on');
+  if (!det) return;
+
+  var labels = {
+    granja:'🐔 Granja', carniceria:'🥩 Carnicería', almacen_autoservicio:'🛒 Almacén/Autoservicio',
+    pescaderia:'🐟 Pescadería', fiambreria:'🧀 Fiambrería', roticeria_casa_comida:'🍱 Rotisería/Casa de comida',
+    restaurante_parrilla:'🍴 Restaurante/Parrilla', pizzeria_hamburgueseria:'🍕 Pizzería/Hamburguesería',
+    parripollo:'🔥 Parripollo', catering_eventos:'🎉 Catering/Eventos',
+    comedor_institucional:'🏫 Comedor institucional', cliente_particular:'🏠 Cliente particular',
+    otros:'📦 Otros'
+  };
+
+  var canalActualHtml;
+  if (c.canal) {
+    var por = c.canal_asignado_por ? (' · por ' + c.canal_asignado_por) : '';
+    var fecha = c.canal_asignado_at ? (' · ' + c.canal_asignado_at.substring(0, 10)) : '';
+    canalActualHtml = '<div class="canales-rea-det-val">' + (labels[c.canal] || c.canal) + por + fecha + '</div>';
+  } else {
+    canalActualHtml = '<div class="canales-rea-det-val vacio">— Sin canal asignado —</div>';
+  }
+
+  var diasHtml = '';
+  if (Array.isArray(c.dias_visita) && c.dias_visita.length > 0) {
+    diasHtml = '<div class="canales-rea-det-actual" style="margin-top:8px;">' +
+                 '<div class="canales-rea-det-lbl">Días de visita</div>' +
+                 '<div class="canales-rea-det-val">' + c.dias_visita.join(', ') + '</div>' +
+               '</div>';
+  }
+
+  // Botón quitar solo si tiene canal asignado
+  var botonQuitar = c.canal
+    ? '<button class="canales-rea-btn canales-rea-btn-quitar" onclick="canalesReaQuitar()">🗑️ Quitar canal</button>'
+    : '';
+
+  var loc = c.localidad || '—';
+  var vend = (c.vendedor || '—').toLowerCase().replace(/_/g,' ');
+
+  det.innerHTML =
+    '<div class="canales-rea-det-nombre">' + _canalesEscapeHtml(c.nombre) + '</div>' +
+    '<div class="canales-rea-det-meta">' + _canalesEscapeHtml(loc) + ' · ' + _canalesEscapeHtml(vend) + '</div>' +
+    '<div class="canales-rea-det-actual">' +
+      '<div class="canales-rea-det-lbl">Canal actual</div>' +
+      canalActualHtml +
+    '</div>' +
+    diasHtml +
+    '<div class="canales-rea-det-acciones">' +
+      '<button class="canales-rea-btn canales-rea-btn-cambiar" onclick="canalesReaAbrirPicker()">✏️ ' +
+        (c.canal ? 'Cambiar canal' : 'Asignar canal') +
+      '</button>' +
+      botonQuitar +
+    '</div>' +
+    '<div class="canales-rea-picker" id="canales-rea-picker">' +
+      '<div class="canales-rea-det-lbl" style="margin-bottom:8px;">Elegí el nuevo canal:</div>' +
+      '<div class="canales-rea-picker-grid" id="canales-rea-picker-grid"></div>' +
+      '<div class="canales-rea-picker-acc">' +
+        '<button class="canales-rea-picker-cancel" onclick="canalesReaCerrarPicker()">Cancelar</button>' +
+        '<button class="canales-rea-picker-ok" id="canales-rea-picker-ok" onclick="canalesReaConfirmar()" disabled>Confirmar</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="canales-rea-mensaje" id="canales-rea-mensaje"></div>';
+
+  det.classList.add('on');
+}
+
+function canalesReaAbrirPicker() {
+  var picker = document.getElementById('canales-rea-picker');
+  var grid = document.getElementById('canales-rea-picker-grid');
+  if (!picker || !grid) return;
+
+  var canales = [
+    { id: 'granja', emoji: '🐔', label: 'Granja' },
+    { id: 'carniceria', emoji: '🥩', label: 'Carnicería' },
+    { id: 'almacen_autoservicio', emoji: '🛒', label: 'Almacén' },
+    { id: 'pescaderia', emoji: '🐟', label: 'Pescadería' },
+    { id: 'fiambreria', emoji: '🧀', label: 'Fiambrería' },
+    { id: 'roticeria_casa_comida', emoji: '🍱', label: 'Rotisería' },
+    { id: 'restaurante_parrilla', emoji: '🍴', label: 'Restaurante' },
+    { id: 'pizzeria_hamburgueseria', emoji: '🍕', label: 'Pizzería' },
+    { id: 'parripollo', emoji: '🔥', label: 'Parripollo' },
+    { id: 'catering_eventos', emoji: '🎉', label: 'Catering' },
+    { id: 'comedor_institucional', emoji: '🏫', label: 'Comedor' },
+    { id: 'cliente_particular', emoji: '🏠', label: 'Particular' },
+    { id: 'otros', emoji: '📦', label: 'Otros' }
+  ];
+
+  var actual = (CANAL_REA_CLIENTE_SEL && CANAL_REA_CLIENTE_SEL.canal) || '';
+  grid.innerHTML = canales.map(function(c) {
+    var sel = (c.id === actual) ? ' sel' : '';
+    return '<button class="canales-rea-canal-opt' + sel + '" data-canal="' + c.id + '" onclick="canalesReaPickerSelect(\'' + c.id + '\')">' +
+             '<span style="font-size:20px;">' + c.emoji + '</span>' +
+             '<span>' + c.label + '</span>' +
+           '</button>';
+  }).join('');
+
+  CANAL_REA_CANAL_NUEVO = actual || null;
+  _canalesReaActualizarOk();
+  picker.classList.add('on');
+}
+
+function canalesReaPickerSelect(canalId) {
+  CANAL_REA_CANAL_NUEVO = canalId;
+  document.querySelectorAll('.canales-rea-canal-opt').forEach(function(b){ b.classList.remove('sel'); });
+  var btn = document.querySelector('.canales-rea-canal-opt[data-canal="' + canalId + '"]');
+  if (btn) btn.classList.add('sel');
+  _canalesReaActualizarOk();
+}
+
+function _canalesReaActualizarOk() {
+  var ok = document.getElementById('canales-rea-picker-ok');
+  if (!ok) return;
+  var actual = (CANAL_REA_CLIENTE_SEL && CANAL_REA_CLIENTE_SEL.canal) || null;
+  // Habilitar solo si eligió algo y es distinto al actual
+  ok.disabled = !CANAL_REA_CANAL_NUEVO || CANAL_REA_CANAL_NUEVO === actual;
+}
+
+function canalesReaCerrarPicker() {
+  var picker = document.getElementById('canales-rea-picker');
+  if (picker) picker.classList.remove('on');
+  CANAL_REA_CANAL_NUEVO = null;
+}
+
+async function canalesReaConfirmar() {
+  if (!CANAL_REA_CLIENTE_SEL || !CANAL_REA_CANAL_NUEVO) return;
+  var c = CANAL_REA_CLIENTE_SEL;
+  var canal = CANAL_REA_CANAL_NUEVO;
+  var msg = document.getElementById('canales-rea-mensaje');
+  var ok = document.getElementById('canales-rea-picker-ok');
+
+  if (ok) { ok.disabled = true; ok.textContent = 'Guardando...'; }
+
+  try {
+    var resp = await fetch(SUPABASE_URL + '/rest/v1/clientes_activos?id=eq.' + c.id, {
+      method: 'PATCH',
+      headers: {
+        'apikey':        SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type':  'application/json',
+        'Prefer':        'return=minimal'
+      },
+      body: JSON.stringify({
+        canal: canal,
+        canal_asignado_por: 'ADMIN',
+        canal_asignado_at: new Date().toISOString()
+      })
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status + ' — ' + (await resp.text()));
+
+    // Actualizar el objeto local y refrescar la vista
+    c.canal = canal;
+    c.canal_asignado_por = 'ADMIN';
+    c.canal_asignado_at = new Date().toISOString();
+
+    if (msg) {
+      msg.className = 'canales-rea-mensaje on ok';
+      msg.textContent = '✅ Canal actualizado correctamente';
+    }
+    canalesReaCerrarPicker();
+    // Re-renderizar el detalle con data fresca
+    setTimeout(function() {
+      canalesReaSeleccionar(_canalesReaIdxActual());
+    }, 1200);
+
+    // Invalidar cache de Vendedores y Dashboard
+    CANAL_VEND_CACHE = null;
+    CANAL_DASH_CACHE = null;
+  } catch(err) {
+    console.error('[canales-rea] Error guardando:', err);
+    if (msg) {
+      msg.className = 'canales-rea-mensaje on err';
+      msg.textContent = '⚠️ Error: ' + (err.message || String(err));
+    }
+    if (ok) { ok.disabled = false; ok.textContent = 'Confirmar'; }
+  }
+}
+
+async function canalesReaQuitar() {
+  if (!CANAL_REA_CLIENTE_SEL) return;
+  if (!confirm('¿Seguro que querés quitar el canal de este cliente?\n\nEl cliente vuelve a estado "Sin clasificar".')) return;
+
+  var c = CANAL_REA_CLIENTE_SEL;
+  var msg = document.getElementById('canales-rea-mensaje');
+
+  try {
+    var resp = await fetch(SUPABASE_URL + '/rest/v1/clientes_activos?id=eq.' + c.id, {
+      method: 'PATCH',
+      headers: {
+        'apikey':        SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type':  'application/json',
+        'Prefer':        'return=minimal'
+      },
+      body: JSON.stringify({
+        canal: null,
+        canal_asignado_por: null,
+        canal_asignado_at: null
+      })
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status + ' — ' + (await resp.text()));
+
+    c.canal = null;
+    c.canal_asignado_por = null;
+    c.canal_asignado_at = null;
+
+    if (msg) {
+      msg.className = 'canales-rea-mensaje on ok';
+      msg.textContent = '✅ Canal quitado correctamente';
+    }
+    setTimeout(function() {
+      canalesReaSeleccionar(_canalesReaIdxActual());
+    }, 1200);
+
+    // Invalidar caches
+    CANAL_VEND_CACHE = null;
+    CANAL_DASH_CACHE = null;
+  } catch(err) {
+    console.error('[canales-rea] Error quitando:', err);
+    if (msg) {
+      msg.className = 'canales-rea-mensaje on err';
+      msg.textContent = '⚠️ Error: ' + (err.message || String(err));
+    }
+  }
+}
+
+// Helper para encontrar el índice del cliente actual en window
+function _canalesReaIdxActual() {
+  if (!CANAL_REA_CLIENTE_SEL) return -1;
+  for (var i = 0; i < 50; i++) {
+    if (window['_canalReaCli_' + i] === CANAL_REA_CLIENTE_SEL) return i;
+  }
+  // Si no lo encontró por referencia, registrarlo nuevamente
+  window['_canalReaCli_99'] = CANAL_REA_CLIENTE_SEL;
+  return 99;
 }
 
 // ═══════════════════════════════════════════════════════════════
