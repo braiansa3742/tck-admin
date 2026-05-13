@@ -1,5 +1,30 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v12.16.0 — 13/05/2026
+     ──────────────────────────────────────────────────────────────────────
+     UI/UX UPGRADE — Tab Stock — Fase 5 del módulo
+
+     CONTEXTO:
+       v12.15.0 entregó la tab Stock funcionando. v12.16.0 mejora UI/UX
+       para que sea más rápida operativamente para Francisco.
+
+     CAMBIOS:
+       1. Banner crítico arriba si hay sobreventas para próximo viaje.
+       2. Cards más compactas (35% menos altura).
+       3. "FALTAN X" en grande para sobreventas (vs "-X disponible").
+       4. Filtros por categoría (chips horizontales: Pollos, Trozados,
+          Rebozados, Huevos, Verduras, Pastas, Papas).
+       5. Top 5 ventas semana — análisis para planificar compras.
+       6. Botón "✅ Cargué factura compra en Xubio" — dispara
+          stockSyncManual del Apps Script (sync inmediato).
+       7. Sección "Sin stock" colapsable (default colapsada).
+
+     PRE-REQUISITOS:
+       · Apps Script v25.22.0 deployado (accion=stockSyncManual)
+       · vw_stock_visible vista activa
+     ══════════════════════════════════════════════════════════════════════ -->
+
+<!-- ═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v12.15.0 — 13/05/2026
      ──────────────────────────────────────────────────────────────────────
      FEATURE: Tab Stock — Fase 3 del módulo de stock
@@ -11491,49 +11516,81 @@ input.canales-exp-input[type="date"] {
     </div>
   </div>
 
-  <!-- v12.15.0 — TAB STOCK ───────────────────────────────────────── -->
+  <!-- v12.16.0 — TAB STOCK MEJORADO ─────────────────────────────── -->
   <div class="view" id="view-stock">
-    <div style="padding:12px 14px;padding-bottom:80px;">
+    <div style="padding:10px 12px;padding-bottom:80px;">
 
       <!-- Header -->
-      <div style="background:linear-gradient(135deg,#1B5E20,#2E7D32);border-radius:12px;padding:14px 16px;margin-bottom:12px;color:#fff;">
-        <div style="display:flex;justify-content:space-between;align-items:start;">
-          <div>
-            <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:22px;line-height:1;">📦 Stock</div>
-            <div style="font-size:11px;color:rgba(255,255,255,.75);margin-top:3px;" id="stock-header-sync">Cargando...</div>
+      <div style="background:linear-gradient(135deg,#1B5E20,#2E7D32);border-radius:10px;padding:10px 12px;margin-bottom:8px;color:#fff;">
+        <div style="display:flex;justify-content:space-between;align-items:start;gap:8px;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:20px;line-height:1;">📦 Stock</div>
+            <div style="font-size:10px;color:rgba(255,255,255,.75);margin-top:2px;" id="stock-header-sync">Cargando...</div>
           </div>
-          <button onclick="cargarStockVisible()" style="background:rgba(255,255,255,.2);border:none;border-radius:50%;width:34px;height:34px;color:#fff;cursor:pointer;font-size:16px;flex-shrink:0;" title="Refrescar">🔄</button>
+          <button onclick="cargarStockVisible()" style="background:rgba(255,255,255,.2);border:none;border-radius:50%;width:30px;height:30px;color:#fff;cursor:pointer;font-size:14px;flex-shrink:0;" title="Refrescar vista">🔄</button>
         </div>
       </div>
 
+      <!-- v12.16.0 — Banner crítico (solo si hay sobreventas) -->
+      <div id="stock-banner-critico" style="display:none;background:#FFEBEE;border-left:3px solid #C62828;border-radius:0 8px 8px 0;padding:8px 10px;margin-bottom:8px;">
+        <div style="font-size:11px;font-weight:900;color:#791F1F;margin-bottom:2px;" id="stock-banner-titulo">🚨 Atención</div>
+        <div style="font-size:10px;color:#501313;line-height:1.4;" id="stock-banner-detalle"></div>
+      </div>
+
+      <!-- v12.16.0 — Botón "Se cargó factura" -->
+      <button onclick="stockSyncManualAdmin()" id="stock-sync-manual-btn" style="width:100%;background:linear-gradient(135deg,#1565C0,#0D47A1);color:#fff;border:none;border-radius:8px;padding:8px 12px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;letter-spacing:.3px;cursor:pointer;margin-bottom:8px;">
+        ✅ Cargué factura compra en Xubio · Sincronizar ahora
+      </button>
+
       <!-- Mini-stats -->
-      <div id="stock-stats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:14px;">
-        <div style="background:#fff;border-radius:10px;padding:10px 6px;text-align:center;border:1.5px solid rgba(198,40,40,.15);">
-          <div id="stock-stat-sobreventa" style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:900;color:#C62828;line-height:1;">—</div>
-          <div style="font-size:10px;color:var(--text3);margin-top:2px;">Sobreventa</div>
+      <div id="stock-stats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:8px;">
+        <div style="background:#FCEBEB;border-radius:8px;padding:6px 4px;text-align:center;">
+          <div id="stock-stat-sobreventa" style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:900;color:#C62828;line-height:1;">—</div>
+          <div style="font-size:9px;color:#791F1F;margin-top:1px;font-weight:700;">Sobreventa</div>
         </div>
-        <div style="background:#fff;border-radius:10px;padding:10px 6px;text-align:center;border:1.5px solid rgba(239,108,0,.15);">
-          <div id="stock-stat-sinstock" style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:900;color:#EF6C00;line-height:1;">—</div>
-          <div style="font-size:10px;color:var(--text3);margin-top:2px;">Sin stock</div>
+        <div style="background:#FAECE7;border-radius:8px;padding:6px 4px;text-align:center;">
+          <div id="stock-stat-sinstock" style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:900;color:#D85A30;line-height:1;">—</div>
+          <div style="font-size:9px;color:#712B13;margin-top:1px;font-weight:700;">Sin stock</div>
         </div>
-        <div style="background:#fff;border-radius:10px;padding:10px 6px;text-align:center;border:1.5px solid rgba(245,127,23,.15);">
-          <div id="stock-stat-queda-poco" style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:900;color:#F57F17;line-height:1;">—</div>
-          <div style="font-size:10px;color:var(--text3);margin-top:2px;">Queda poco</div>
+        <div style="background:#FFFDE7;border-radius:8px;padding:6px 4px;text-align:center;">
+          <div id="stock-stat-queda-poco" style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:900;color:#F57F17;line-height:1;">—</div>
+          <div style="font-size:9px;color:#633806;margin-top:1px;font-weight:700;">Queda poco</div>
         </div>
-        <div style="background:#fff;border-radius:10px;padding:10px 6px;text-align:center;border:1.5px solid rgba(46,125,50,.15);">
-          <div id="stock-stat-ok" style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:900;color:#2E7D32;line-height:1;">—</div>
-          <div style="font-size:10px;color:var(--text3);margin-top:2px;">OK</div>
+        <div style="background:#E8F5E9;border-radius:8px;padding:6px 4px;text-align:center;">
+          <div id="stock-stat-ok" style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:900;color:#2E7D32;line-height:1;">—</div>
+          <div style="font-size:9px;color:#173404;margin-top:1px;font-weight:700;">OK</div>
         </div>
+      </div>
+
+      <!-- v12.16.0 — Filtros por categoría -->
+      <div id="stock-filtros-cat" style="display:flex;gap:4px;overflow-x:auto;padding-bottom:4px;margin-bottom:8px;-webkit-overflow-scrolling:touch;">
+        <button class="stock-cat-chip sel" data-cat="todas" onclick="stockFiltrarCat('todas')" style="background:#1B5E20;color:#fff;border:none;border-radius:14px;padding:5px 12px;font-size:11px;font-weight:700;white-space:nowrap;cursor:pointer;">Todas</button>
+        <button class="stock-cat-chip" data-cat="POLLOS CONGELADOS" onclick="stockFiltrarCat('POLLOS CONGELADOS')" style="background:#fff;color:#444441;border:0.5px solid #D3D1C7;border-radius:14px;padding:5px 12px;font-size:11px;white-space:nowrap;cursor:pointer;">🐔 Pollos</button>
+        <button class="stock-cat-chip" data-cat="TROZADOS" onclick="stockFiltrarCat('TROZADOS')" style="background:#fff;color:#444441;border:0.5px solid #D3D1C7;border-radius:14px;padding:5px 12px;font-size:11px;white-space:nowrap;cursor:pointer;">🍗 Trozados</button>
+        <button class="stock-cat-chip" data-cat="REBOZADOS" onclick="stockFiltrarCat('REBOZADOS')" style="background:#fff;color:#444441;border:0.5px solid #D3D1C7;border-radius:14px;padding:5px 12px;font-size:11px;white-space:nowrap;cursor:pointer;">🥟 Rebozados</button>
+        <button class="stock-cat-chip" data-cat="HUEVOS" onclick="stockFiltrarCat('HUEVOS')" style="background:#fff;color:#444441;border:0.5px solid #D3D1C7;border-radius:14px;padding:5px 12px;font-size:11px;white-space:nowrap;cursor:pointer;">🥚 Huevos</button>
+        <button class="stock-cat-chip" data-cat="VERDURAS CONGELADAS" onclick="stockFiltrarCat('VERDURAS CONGELADAS')" style="background:#fff;color:#444441;border:0.5px solid #D3D1C7;border-radius:14px;padding:5px 12px;font-size:11px;white-space:nowrap;cursor:pointer;">🥬 Verduras</button>
+        <button class="stock-cat-chip" data-cat="PASTAS" onclick="stockFiltrarCat('PASTAS')" style="background:#fff;color:#444441;border:0.5px solid #D3D1C7;border-radius:14px;padding:5px 12px;font-size:11px;white-space:nowrap;cursor:pointer;">🍝 Pastas</button>
+        <button class="stock-cat-chip" data-cat="MILANESAS Y HAMBURGUESAS" onclick="stockFiltrarCat('MILANESAS Y HAMBURGUESAS')" style="background:#fff;color:#444441;border:0.5px solid #D3D1C7;border-radius:14px;padding:5px 12px;font-size:11px;white-space:nowrap;cursor:pointer;">🍔 Milanesas</button>
+        <button class="stock-cat-chip" data-cat="McCAIN & BALCARCE" onclick="stockFiltrarCat('McCAIN & BALCARCE')" style="background:#fff;color:#444441;border:0.5px solid #D3D1C7;border-radius:14px;padding:5px 12px;font-size:11px;white-space:nowrap;cursor:pointer;">🥔 Papas</button>
       </div>
 
       <!-- Buscador -->
       <input type="text" id="stock-buscador" placeholder="🔍 Buscar producto..."
              oninput="stockFiltrar(this.value)"
-             style="width:100%;padding:10px 14px;border:1.5px solid var(--cream3);border-radius:10px;font-family:'Barlow',sans-serif;font-size:14px;outline:none;box-sizing:border-box;margin-bottom:12px;background:#fff;">
+             style="width:100%;padding:8px 12px;border:1px solid #D3D1C7;border-radius:8px;font-family:'Barlow',sans-serif;font-size:13px;outline:none;box-sizing:border-box;margin-bottom:10px;background:#fff;">
 
       <!-- Listado -->
       <div id="stock-lista">
         <div style="text-align:center;padding:32px 16px;color:var(--text3);font-size:12px;font-style:italic;">Cargando stock...</div>
+      </div>
+
+      <!-- v12.16.0 — Top 5 ventas semana (al final) -->
+      <div id="stock-top-ventas" style="background:#fff;border:0.5px solid #D3D1C7;border-radius:8px;padding:10px 12px;margin-top:12px;">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:900;color:#2C2C2A;margin-bottom:8px;">📊 Top ventas — últimos 7 días</div>
+        <div id="stock-top-ventas-lista" style="font-size:12px;">
+          <div style="text-align:center;padding:8px;color:var(--text3);font-style:italic;font-size:11px;">Cargando...</div>
+        </div>
       </div>
 
     </div>
@@ -27702,14 +27759,70 @@ async function dupMarcarDistintos() {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// v12.15.0 — TAB STOCK
+// v12.16.0 — TAB STOCK (UI mejorada)
 // ══════════════════════════════════════════════════════════════════
 
-let _stockDataCache = [];  // Cache de la vista vw_stock_visible
+let _stockDataCache = [];        // Cache de la vista vw_stock_visible
+let _stockCatActual = 'todas';   // Filtro de categoría actual
+let _stockBusquedaActual = '';   // Filtro de búsqueda actual
+
+// v12.16.0 — Mapeo producto_tck_nombre → categoría TOMADOR_CAT (para filtros)
+// Se construye lazy una vez. Replica las categorías del catálogo de ventas.
+let _stockCategoriaPorProducto = null;
+function _stockObtenerCategoria(productoTckNombre) {
+  if (!_stockCategoriaPorProducto) {
+    _stockCategoriaPorProducto = {
+      // Pollos
+      'Pollo Ginosa': 'POLLOS CONGELADOS', 'Pollo A': 'POLLOS CONGELADOS',
+      'Pollo A x6': 'POLLOS CONGELADOS', 'Pollo A x7': 'POLLOS CONGELADOS',
+      'Pollo Optimo': 'POLLOS CONGELADOS', 'Pollo B': 'POLLOS CONGELADOS',
+      'Pollo B x6 Congelado': 'POLLOS CONGELADOS', 'Pollo B x6 Fresco': 'POLLOS CONGELADOS',
+      'Pollo B x7 Fresco': 'POLLOS CONGELADOS', 'Pollo B x8': 'POLLOS CONGELADOS', 'Pollo B x9': 'POLLOS CONGELADOS',
+      'Suprema': 'POLLOS CONGELADOS', 'Suprema IQF': 'POLLOS CONGELADOS', 'Suprema B IQF': 'POLLOS CONGELADOS',
+      // Trozados
+      'Alita Congelada Granel': 'TROZADOS', 'MDM - Carne Molida de Pollo': 'TROZADOS',
+      'Cuarto Trasero IQF': 'TROZADOS', 'Fino de Ave Cocida': 'TROZADOS',
+      'Pata Muslo SH': 'TROZADOS',
+      // Rebozados (Shaddai + otros)
+      'Medallon de Pollo Clasico': 'REBOZADOS', 'Medallon Pollo c/Cheddar': 'REBOZADOS',
+      'Medallon Pollo JyQ': 'REBOZADOS', 'Medallon Pollo y Espinaca': 'REBOZADOS',
+      'Formita Clasica': 'REBOZADOS', 'Formitas Pollo JyQ': 'REBOZADOS',
+      'Nuggets de Pollo Crocante': 'REBOZADOS', 'Bocadito de Papa y Jamon': 'REBOZADOS',
+      'Pechuguitas al Verdeo': 'REBOZADOS', 'Filet Merluza Finas Hierbas': 'REBOZADOS',
+      'Filet de Merluza Rebozado': 'REBOZADOS', 'Filet Merluza a Granel': 'REBOZADOS',
+      'Milanesa de Soja a Granel': 'REBOZADOS', 'Milanesa de Soja y Espinaca': 'REBOZADOS',
+      'Bocadito Clasico': 'REBOZADOS',
+      // Milanesas y hamburguesas
+      'Milanesa de Nalga': 'MILANESAS Y HAMBURGUESAS', 'Milanesa de Pollo': 'MILANESAS Y HAMBURGUESAS',
+      'Hamburguesa 100% Carne': 'MILANESAS Y HAMBURGUESAS', 'Hamburguesa de Pollo': 'MILANESAS Y HAMBURGUESAS',
+      'Hamburguesa de Garbanzos': 'MILANESAS Y HAMBURGUESAS', 'Hamburguesa de Lentejas': 'MILANESAS Y HAMBURGUESAS',
+      'Hamburguesa de Quinoa': 'MILANESAS Y HAMBURGUESAS', 'Hamburguesa de Espinaca': 'MILANESAS Y HAMBURGUESAS',
+      // Papas
+      'Papa Baston Balcarce': 'McCAIN & BALCARCE', 'Papas Baston McCain 2.5kg': 'McCAIN & BALCARCE',
+      'Papas Noisette': 'McCAIN & BALCARCE', 'Papas Smile McCain 1.5kg': 'McCAIN & BALCARCE',
+      'Pulpa de Palta': 'McCAIN & BALCARCE',
+      // Huevos
+      'Maple N° 1': 'HUEVOS', 'Maple N° 2': 'HUEVOS', 'Maple N° 3': 'HUEVOS',
+      'Cajita 1/2 Docena N° 1': 'HUEVOS', 'Cajita 1/2 Docena N° 2': 'HUEVOS', 'Cajita 1/2 Docena N° 3': 'HUEVOS',
+      // Verduras
+      'Arándanos Solimeno': 'VERDURAS CONGELADAS', 'Brocoli': 'VERDURAS CONGELADAS',
+      'Espinacas': 'VERDURAS CONGELADAS', 'Morron': 'VERDURAS CONGELADAS',
+      'Primavera': 'VERDURAS CONGELADAS', 'Frutos Rojos': 'VERDURAS CONGELADAS',
+      'Cebolla': 'VERDURAS CONGELADAS', 'Choclo': 'VERDURAS CONGELADAS', 'Arveja': 'VERDURAS CONGELADAS',
+      // Pastas
+      'Ravioles de Calabaza': 'PASTAS', 'Raviolones Espinaca y Mozz': 'PASTAS',
+      'Gnoquis de Papa': 'PASTAS', 'Gnoquis de Espinaca': 'PASTAS',
+      'Sorrentinos Jamon y Queso': 'PASTAS', 'Sorrentinos Ricota 4 Quesos': 'PASTAS',
+      'Ravioles Ricota Espinaca': 'PASTAS', 'Ravioles Ricota Jamon': 'PASTAS',
+      'Ñoqui x400 Tía Tere': 'PASTAS'
+    };
+  }
+  return _stockCategoriaPorProducto[productoTckNombre] || 'OTROS';
+}
 
 /**
- * v12.15.0 — Carga stock desde Supabase vista vw_stock_visible
- * y renderiza en la tab Stock.
+ * v12.16.0 — Carga stock desde Supabase vista vw_stock_visible.
+ * También dispara la carga del top 5 de ventas.
  */
 async function cargarStockVisible() {
   const lista = document.getElementById('stock-lista');
@@ -27722,18 +27835,19 @@ async function cargarStockVisible() {
   try {
     const url = SUPABASE_URL + '/rest/v1/vw_stock_visible?select=*';
     const resp = await fetch(url, {
-      headers: {
-        'apikey':        SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY
-      }
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
     if (!Array.isArray(data)) throw new Error('Respuesta no es array');
 
     _stockDataCache = data;
-    _stockRenderizar(data);
+    _stockRenderizar();
     _stockActualizarHeader(data);
+    _stockActualizarBannerCritico(data);
+
+    // Cargar top ventas en paralelo (no bloquea)
+    cargarTopVentasStock();
 
   } catch (err) {
     console.error('[stock] Error cargando:', err);
@@ -27743,104 +27857,216 @@ async function cargarStockVisible() {
 }
 
 /**
- * v12.15.0 — Renderiza la lista de stock agrupada por estado.
+ * v12.16.0 — Renderiza la lista agrupada por estado, aplicando filtros.
  */
-function _stockRenderizar(data) {
+function _stockRenderizar() {
   const lista = document.getElementById('stock-lista');
   if (!lista) return;
 
+  // Aplicar filtros (categoría + búsqueda) sobre cache
+  const q = _stockBusquedaActual.toLowerCase().trim();
+  const data = _stockDataCache.filter(function(p) {
+    if (_stockCatActual !== 'todas') {
+      if (_stockObtenerCategoria(p.producto_tck_nombre) !== _stockCatActual) return false;
+    }
+    if (q) {
+      const nom = (p.producto_tck_nombre || '').toLowerCase();
+      const xub = (p.xubio_nombre || '').toLowerCase();
+      if (nom.indexOf(q) === -1 && xub.indexOf(q) === -1) return false;
+    }
+    return true;
+  });
+
   // Agrupar por estado
-  const grupos = {
-    sobreventa: [],
-    sin_stock: [],
-    queda_poco: [],
-    ok: []
-  };
+  const grupos = { sobreventa: [], sin_stock: [], queda_poco: [], ok: [] };
   data.forEach(function(p) {
     if (grupos[p.estado]) grupos[p.estado].push(p);
   });
 
-  // Actualizar mini-stats
-  _setText('stock-stat-sobreventa', grupos.sobreventa.length);
-  _setText('stock-stat-sinstock', grupos.sin_stock.length);
-  _setText('stock-stat-queda-poco', grupos.queda_poco.length);
-  _setText('stock-stat-ok', grupos.ok.length);
+  // Actualizar mini-stats (siempre con TOTAL del cache, no del filtro)
+  const gruposTotales = { sobreventa: 0, sin_stock: 0, queda_poco: 0, ok: 0 };
+  _stockDataCache.forEach(function(p) {
+    if (gruposTotales[p.estado] !== undefined) gruposTotales[p.estado]++;
+  });
+  _setText('stock-stat-sobreventa', gruposTotales.sobreventa);
+  _setText('stock-stat-sinstock', gruposTotales.sin_stock);
+  _setText('stock-stat-queda-poco', gruposTotales.queda_poco);
+  _setText('stock-stat-ok', gruposTotales.ok);
 
-  // Badge en menú "Más" si hay sobreventa
+  // Badge rojo en botón "Más"
   const badgeMenu = document.getElementById('menu-mas-stock-badge');
   if (badgeMenu) {
-    if (grupos.sobreventa.length > 0) {
-      badgeMenu.textContent = grupos.sobreventa.length;
+    if (gruposTotales.sobreventa > 0) {
+      badgeMenu.textContent = gruposTotales.sobreventa;
       badgeMenu.style.display = 'inline-block';
     } else {
       badgeMenu.style.display = 'none';
     }
   }
 
-  // Construir HTML
+  // HTML por sección
   let html = '';
-  html += _stockRenderSeccion('🚨 Sobreventa', grupos.sobreventa, '#C62828', '#FFEBEE', 'rgba(198,40,40,.2)');
-  html += _stockRenderSeccion('🔴 Sin stock', grupos.sin_stock, '#EF6C00', '#FFF3E0', 'rgba(239,108,0,.2)');
-  html += _stockRenderSeccion('🟡 Queda poco', grupos.queda_poco, '#F57F17', '#FFFDE7', 'rgba(245,127,23,.25)');
-  html += _stockRenderSeccion('🟢 Stock OK', grupos.ok, '#2E7D32', '#E8F5E9', 'rgba(46,125,50,.2)');
+  html += _stockRenderSeccion('🚨 Sobreventa', grupos.sobreventa, 'sobreventa');
+  html += _stockRenderSeccion('🔴 Sin stock', grupos.sin_stock, 'sin_stock');
+  html += _stockRenderSeccion('🟡 Queda poco', grupos.queda_poco, 'queda_poco');
+  html += _stockRenderSeccion('🟢 Stock OK', grupos.ok, 'ok');
 
   if (!html) {
-    html = '<div style="text-align:center;padding:32px 16px;color:var(--text3);font-size:13px;">No hay productos para mostrar</div>';
+    html = '<div style="text-align:center;padding:32px 16px;color:var(--text3);font-size:13px;">Sin resultados para el filtro actual</div>';
   }
 
   lista.innerHTML = html;
 }
 
 /**
- * v12.15.0 — Render de una sección por estado.
+ * v12.16.0 — Render compacto de una sección.
+ * Sobreventa muestra "FALTAN X" en grande. Sin stock va colapsada por default.
  */
-function _stockRenderSeccion(titulo, items, colorTexto, colorFondo, colorBorde) {
+function _stockRenderSeccion(titulo, items, estadoKey) {
   if (!items || items.length === 0) return '';
 
+  const colores = {
+    sobreventa: { texto: '#C62828', fondo: '#FFEBEE', borde: 'rgba(198,40,40,.2)' },
+    sin_stock:  { texto: '#D85A30', fondo: '#FAECE7', borde: 'rgba(216,90,48,.25)' },
+    queda_poco: { texto: '#F57F17', fondo: '#FFFDE7', borde: 'rgba(245,127,23,.3)' },
+    ok:         { texto: '#2E7D32', fondo: '#E8F5E9', borde: 'rgba(46,125,50,.2)' }
+  };
+  const c = colores[estadoKey] || colores.ok;
+
+  // Sin stock va colapsada (default) — ver el toggle más abajo
+  const colapsablePorDefault = (estadoKey === 'sin_stock' || estadoKey === 'ok');
+  const idSeccion = 'stock-sec-' + estadoKey;
+
   let html = '';
-  html += '<div style="margin-bottom:18px;">';
-  html += '  <div style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:900;color:' + colorTexto + ';text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;padding:0 4px;">' + titulo + ' (' + items.length + ')</div>';
+  html += '<div style="margin-bottom:14px;">';
+  html += '  <div onclick="stockToggleSeccion(\'' + estadoKey + '\')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;font-family:\'Barlow Condensed\',sans-serif;font-size:12px;font-weight:900;color:' + c.texto + ';text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;padding:4px;">';
+  html += '    <span>' + titulo + ' (' + items.length + ')</span>';
+  if (colapsablePorDefault) {
+    html += '    <span id="' + idSeccion + '-chevron" style="font-size:12px;">▶</span>';
+  }
+  html += '  </div>';
+  html += '  <div id="' + idSeccion + '-body" style="' + (colapsablePorDefault ? 'display:none;' : '') + '">';
 
   items.forEach(function(p) {
     const tckNombre = (p.producto_tck_nombre || '—').replace(/</g,'&lt;');
     const xubioNombre = (p.xubio_nombre || '').replace(/</g,'&lt;');
     const visible = Number(p.stock_visible || 0);
     const xubio = Number(p.stock_xubio || 0);
-    const comprometido = Number(p.comprometido || 0);
-    const minimo = Number(p.stock_minimo || 0);
+    const comp = Number(p.comprometido || 0);
 
-    // Línea principal: nombre + valor grande
-    html += '<div class="stock-item" data-nombre="' + tckNombre.toLowerCase() + '" style="background:' + colorFondo + ';border:1.5px solid ' + colorBorde + ';border-radius:10px;padding:10px 12px;margin-bottom:6px;">';
-    html +=   '<div style="display:flex;justify-content:space-between;align-items:start;gap:10px;">';
-    html +=     '<div style="flex:1;min-width:0;">';
-    html +=       '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:15px;font-weight:800;color:var(--text);line-height:1.1;">' + tckNombre + '</div>';
-    if (xubioNombre && xubioNombre !== tckNombre) {
-      html +=     '<div style="font-size:10px;color:var(--text3);margin-top:2px;font-style:italic;">' + xubioNombre + '</div>';
-    }
-    html +=     '</div>';
-    html +=     '<div style="text-align:right;flex-shrink:0;">';
-    html +=       '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:24px;font-weight:900;color:' + colorTexto + ';line-height:1;">' + visible + '</div>';
-    html +=       '<div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-top:1px;">disponible</div>';
-    html +=     '</div>';
-    html +=   '</div>';
+    html += '<div class="stock-item" data-nombre="' + tckNombre.toLowerCase() + '" style="background:' + c.fondo + ';border:0.5px solid ' + c.borde + ';border-radius:8px;padding:8px 10px;margin-bottom:4px;">';
 
-    // Detalle: Xubio + comprometido
-    html +=   '<div style="display:flex;gap:12px;margin-top:8px;padding-top:8px;border-top:1px dashed ' + colorBorde + ';font-size:11px;color:var(--text2);">';
-    html +=     '<div><span style="color:var(--text3);">Xubio:</span> <b>' + xubio + '</b></div>';
-    html +=     '<div><span style="color:var(--text3);">Comprometido:</span> <b>' + comprometido + '</b></div>';
-    if (minimo > 0) {
-      html +=   '<div><span style="color:var(--text3);">Mín:</span> <b>' + minimo + '</b></div>';
+    if (estadoKey === 'sobreventa') {
+      // Render especial: "FALTAN X" en grande
+      html +=   '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">';
+      html +=     '<div style="flex:1;min-width:0;">';
+      html +=       '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:14px;font-weight:800;color:#2C2C2A;line-height:1.1;">' + tckNombre + '</div>';
+      html +=       '<div style="font-size:10px;color:#5F5E5A;margin-top:2px;">Xubio: <b>' + xubio + '</b> · Comprometido: <b>' + comp + '</b></div>';
+      html +=     '</div>';
+      html +=     '<div style="text-align:right;flex-shrink:0;background:#fff;padding:4px 10px;border-radius:6px;">';
+      html +=       '<div style="font-size:9px;color:' + c.texto + ';font-weight:700;text-transform:uppercase;letter-spacing:.5px;">Faltan</div>';
+      html +=       '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:22px;font-weight:900;color:' + c.texto + ';line-height:1;">' + Math.abs(visible) + '</div>';
+      html +=     '</div>';
+      html +=   '</div>';
+    } else {
+      // Render normal
+      html +=   '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">';
+      html +=     '<div style="flex:1;min-width:0;">';
+      html +=       '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:700;color:#2C2C2A;line-height:1.1;">' + tckNombre + '</div>';
+      if (xubioNombre && xubioNombre !== tckNombre) {
+        html +=     '<div style="font-size:10px;color:#888780;margin-top:1px;">' + xubioNombre + '</div>';
+      }
+      html +=     '</div>';
+      html +=     '<div style="text-align:right;flex-shrink:0;">';
+      html +=       '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:18px;font-weight:900;color:' + c.texto + ';line-height:1;">' + visible + '</div>';
+      if (comp > 0 || xubio !== visible) {
+        html +=     '<div style="font-size:9px;color:#888780;margin-top:1px;">Xub ' + xubio + ' · C ' + comp + '</div>';
+      }
+      html +=     '</div>';
+      html +=   '</div>';
     }
-    html +=   '</div>';
     html += '</div>';
   });
-
+  html += '  </div>';
   html += '</div>';
   return html;
 }
 
 /**
- * v12.15.0 — Actualiza el header con timestamp de última sync.
+ * v12.16.0 — Toggle de sección colapsable.
+ */
+function stockToggleSeccion(estadoKey) {
+  const body = document.getElementById('stock-sec-' + estadoKey + '-body');
+  const chev = document.getElementById('stock-sec-' + estadoKey + '-chevron');
+  if (!body) return;
+  const isOpen = body.style.display !== 'none';
+  body.style.display = isOpen ? 'none' : '';
+  if (chev) chev.textContent = isOpen ? '▶' : '▼';
+}
+
+/**
+ * v12.16.0 — Filtro por categoría (chip clickeado).
+ */
+function stockFiltrarCat(cat) {
+  _stockCatActual = cat;
+  // Actualizar UI chips
+  document.querySelectorAll('.stock-cat-chip').forEach(function(btn) {
+    const isSel = btn.getAttribute('data-cat') === cat;
+    if (isSel) {
+      btn.style.background = '#1B5E20';
+      btn.style.color = '#fff';
+      btn.style.border = 'none';
+      btn.style.fontWeight = '700';
+    } else {
+      btn.style.background = '#fff';
+      btn.style.color = '#444441';
+      btn.style.border = '0.5px solid #D3D1C7';
+      btn.style.fontWeight = '400';
+    }
+  });
+  _stockRenderizar();
+}
+
+/**
+ * v12.16.0 — Filtro de búsqueda.
+ */
+function stockFiltrar(query) {
+  _stockBusquedaActual = query || '';
+  _stockRenderizar();
+}
+
+/**
+ * v12.16.0 — Banner crítico arriba con resumen de sobreventas.
+ */
+function _stockActualizarBannerCritico(data) {
+  const banner = document.getElementById('stock-banner-critico');
+  const titulo = document.getElementById('stock-banner-titulo');
+  const detalle = document.getElementById('stock-banner-detalle');
+  if (!banner) return;
+
+  const sobreventas = data.filter(function(p) { return p.estado === 'sobreventa'; });
+  // Filtrar las que tienen comprometido > 0 (ignoramos Cajita -52 que es ruido histórico)
+  const reales = sobreventas.filter(function(p) { return Number(p.comprometido) > 0; });
+
+  if (reales.length === 0) {
+    banner.style.display = 'none';
+    return;
+  }
+
+  banner.style.display = 'block';
+  if (titulo) titulo.textContent = '🚨 ' + reales.length + ' producto' + (reales.length > 1 ? 's' : '') + ' en sobreventa';
+
+  if (detalle) {
+    let totalFaltan = 0;
+    reales.forEach(function(p) { totalFaltan += Math.abs(Number(p.stock_visible) || 0); });
+    const nombres = reales.slice(0, 3).map(function(p) { return p.producto_tck_nombre + ' (-' + Math.abs(Number(p.stock_visible)) + ')'; }).join(', ');
+    const masTexto = reales.length > 3 ? ' + ' + (reales.length - 3) + ' más' : '';
+    detalle.textContent = 'Faltan ' + totalFaltan + ' unidades en total: ' + nombres + masTexto + '. Hay que comprar o avisar a clientes.';
+  }
+}
+
+/**
+ * v12.16.0 — Header con timestamp de última sync.
  */
 function _stockActualizarHeader(data) {
   const headerSync = document.getElementById('stock-header-sync');
@@ -27870,24 +28096,104 @@ function _stockActualizarHeader(data) {
   headerSync.textContent = texto + ' · ' + data.length + ' productos';
 }
 
-/**
- * v12.15.0 — Helper: setea textContent si elemento existe.
- */
 function _setText(id, val) {
   const el = document.getElementById(id);
   if (el) el.textContent = val;
 }
 
 /**
- * v12.15.0 — Filtro del buscador.
+ * v12.16.0 — Top 5 productos más vendidos últimos 7 días (desde pedidos_items).
  */
-function stockFiltrar(query) {
-  const q = (query || '').toLowerCase().trim();
-  const items = document.querySelectorAll('#stock-lista .stock-item');
-  items.forEach(function(el) {
-    const nombre = el.getAttribute('data-nombre') || '';
-    el.style.display = (!q || nombre.indexOf(q) !== -1) ? '' : 'none';
-  });
+async function cargarTopVentasStock() {
+  const cont = document.getElementById('stock-top-ventas-lista');
+  if (!cont) return;
+  try {
+    // Lee pedidos_items últimos 7 días, agrupado por producto
+    const url = SUPABASE_URL + '/rest/v1/pedidos_items?select=producto_tck_nombre,cantidad,creado_at&creado_at=gte.' + new Date(Date.now() - 7*24*60*60*1000).toISOString();
+    const resp = await fetch(url, {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const items = await resp.json();
+    if (!Array.isArray(items)) throw new Error('Resp no array');
+
+    // Agrupar por producto
+    const acum = {};
+    items.forEach(function(it) {
+      const nom = it.producto_tck_nombre || '—';
+      acum[nom] = (acum[nom] || 0) + Number(it.cantidad || 0);
+    });
+
+    const top = Object.keys(acum)
+      .map(function(k) { return { nombre: k, unidades: acum[k] }; })
+      .sort(function(a, b) { return b.unidades - a.unidades; })
+      .slice(0, 5);
+
+    if (top.length === 0) {
+      cont.innerHTML = '<div style="text-align:center;padding:8px;color:var(--text3);font-style:italic;font-size:11px;">Sin datos de los últimos 7 días</div>';
+      return;
+    }
+
+    cont.innerHTML = top.map(function(t) {
+      const nom = (t.nombre || '').replace(/</g,'&lt;');
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:0.5px solid #F1EFE8;">' +
+             '<span style="color:#2C2C2A;font-size:12px;">' + nom + '</span>' +
+             '<span style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;color:#2C2C2A;font-size:13px;">' + Math.round(t.unidades) + ' ud</span>' +
+             '</div>';
+    }).join('');
+
+  } catch (err) {
+    console.warn('[stock top-ventas] error:', err);
+    cont.innerHTML = '<div style="text-align:center;padding:8px;color:var(--text3);font-style:italic;font-size:11px;">No se pudo cargar el ranking</div>';
+  }
+}
+
+/**
+ * v12.16.0 — Botón "✅ Cargué factura compra en Xubio".
+ * Dispara accion=stockSyncManual en Apps Script (sync inmediato).
+ * Tarda ~30-60s. Bloquea botón durante ejecución.
+ */
+async function stockSyncManualAdmin() {
+  const btn = document.getElementById('stock-sync-manual-btn');
+  if (!btn) return;
+  if (!confirm('Esto va a sincronizar el stock con Xubio inmediatamente.\n\nTarda ~30-60 segundos.\n\n¿Confirmás que ya cargaste la factura de compra en Xubio?')) {
+    return;
+  }
+
+  const textoOriginal = btn.innerHTML;
+  btn.disabled = true;
+  btn.style.opacity = '0.7';
+  btn.style.cursor = 'not-allowed';
+  btn.innerHTML = '⏳ Sincronizando con Xubio... (puede tardar 1 min)';
+
+  try {
+    const url = APPS_SCRIPT_URL + '?accion=stockSyncManual';
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const result = await resp.json();
+
+    if (result && result.actualizados !== undefined) {
+      btn.innerHTML = '✅ Sincronizado: ' + result.actualizados + ' productos actualizados';
+      toast('✅ Stock sincronizado: ' + result.actualizados + ' productos', 'ok');
+      // Recargar vista para reflejar cambios
+      setTimeout(function() {
+        cargarStockVisible();
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+        btn.innerHTML = textoOriginal;
+      }, 1500);
+    } else {
+      throw new Error('Respuesta inesperada del servidor');
+    }
+  } catch (err) {
+    console.error('[stock sync manual] error:', err);
+    toast('⚠️ Error sincronizando: ' + err.message, 'err');
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.style.cursor = 'pointer';
+    btn.innerHTML = textoOriginal;
+  }
 }
 </script>
 
