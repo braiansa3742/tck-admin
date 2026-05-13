@@ -1,5 +1,62 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v12.17.0 — 13/05/2026
+     ──────────────────────────────────────────────────────────────────────
+     N43: VIAJES ESPECIALES — Francisco crea refuerzos manualmente
+
+     CONTEXTO:
+       Hasta hoy los viajes a zonas grandes (Zona 1, Zona 2, América/Fortín)
+       solo se creaban automáticamente al entrar pedidos, siguiendo el
+       calendario semanal (Z1 lunes, Z2 jueves, AF martes). Cuando hay
+       demanda extra ("pedido grande en Pehuajó martes") no había forma de
+       planificar un refuerzo entre semana.
+
+       Esta versión agrega un botón "+ Viaje especial" en tab Logística →
+       Viajes, que abre un modal con zona / fecha / motivo. Al confirmar,
+       crea un viaje en estado 'planificado' marcado como es_especial=true.
+       Después se le asigna chofer/vehículo con el flujo existente.
+
+       En ventas (v14.17.0+), cuando un vendedor carga un pedido para una
+       zona que tiene >1 viaje planificado, aparece un modal selector que
+       le permite elegir entre el viaje normal y el/los especiales.
+
+     CAMBIOS v12.17.0 sobre v12.16.0:
+
+       1. Botón "+ Viaje especial" en header del tab Logística → Viajes.
+          Color violeta para diferenciar visualmente.
+
+       2. Modal nuevo `viajeEspCrearModal` con 3 campos:
+          · Zona (select: Zona 1 / Zona 2 / América+Fortín)
+          · Fecha de salida (date picker, default mañana)
+          · Motivo / nombre (text opcional, max 200 chars)
+
+       3. Estilos viaje especial en lista de viajes:
+          · Card con borde izquierdo violeta (en vez de azul)
+          · Background violeta tenue (linear-gradient con #F3E5F5)
+          · Badge "⭐ ESPECIAL" inline en el título
+          · Si tiene motivo, se muestra como subtítulo
+
+       4. Botón "🗑️ Eliminar viaje" en el modal de detalle del viaje
+          (solo visible si es especial + planificado + 0 pedidos).
+
+       5. Endpoint nuevo `viajeEliminarVacio` en Apps Script v25.23.0.
+
+     PRE-REQUISITOS:
+       · SQL ALTER en `viajes` deployado (es_especial, motivo, creado_por)
+       · Apps Script v25.23.0 con endpoints viajeCrearEspecial,
+         viajeEliminarVacio, viajesPlanificadosZona
+       · tck-ventas v14.17.0 deployado (para que vendedores puedan
+         elegir entre viajes disponibles)
+
+     SIN IMPACTO en:
+       · Tab Stock (Fase 5)
+       · Tab En Curso / Histórico / Cheques / Devoluciones
+       · Tab Pedidos / Mapa / Reportes
+       · Flujo de asignación de chofer existente (sigue igual)
+       · Generación de planillas (veterinaria, carga)
+     ══════════════════════════════════════════════════════════════════════ -->
+
+<!-- ═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v12.16.0 — 13/05/2026
      ──────────────────────────────────────────────────────────────────────
      UI/UX UPGRADE — Tab Stock — Fase 5 del módulo
@@ -7307,6 +7364,40 @@ input[type="date"] {
   background: linear-gradient(135deg, #fff, #FFFDE7);
 }
 
+/* ═══════════ v12.17.0 (N43): Viajes especiales ═══════════ */
+.lz-viaje-card.lz-viaje-especial {
+  border-left: 4px solid #7E57C2 !important;
+  background: linear-gradient(135deg, #fff, #F3E5F5) !important;
+}
+.lz-viaje-card.lz-viaje-especial.en_ruta {
+  background: linear-gradient(135deg, #F3E5F5, #E8D5F0) !important;
+}
+.lz-viaje-badge-especial {
+  display: inline-block;
+  background: #7E57C2;
+  color: #fff;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 7px;
+  border-radius: 8px;
+  margin-left: 4px;
+  letter-spacing: .3px;
+  vertical-align: middle;
+}
+.viaje-esp-input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1.5px solid var(--cream3);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  background: #fff;
+  box-sizing: border-box;
+}
+/* ═══════════ FIN N43 ═══════════ */
+
 .lz-viaje-card-top {
   padding: 12px 14px;
   display: flex;
@@ -11291,7 +11382,8 @@ input.canales-exp-input[type="date"] {
           <div class="planilla-hdr-title">🚚 Logística</div>
           <div class="planilla-hdr-sub" id="planilla-fecha"></div>
         </div>
-        
+        <!-- v12.17.0 (N43): Botón crear viaje especial -->
+        <button id="btn-viaje-esp-crear" onclick="viajeEspAdminAbrirModal()" style="background:#7E57C2;color:#fff;border:none;padding:9px 14px;border-radius:22px;font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 2px 8px rgba(126,87,194,.3);">+ Viaje especial</button>
       </div>
 
       <!-- v12.0: Tabs simplificados — Viajes | En Curso | Histórico | Cheques | Devoluciones -->
@@ -21644,6 +21736,7 @@ function lzRenderViajeCard(v) {
   const estado = String(v.estado || 'planificado').toLowerCase();
   const ciudades = lzCiudadesEnViaje(v.id);
   const pendientes = lzPendientesEnViaje(v.id);
+  const esEspecial = !!v.es_especial; // v12.17.0 (N43)
 
   // Estado pill text
   const estadoText = {
@@ -21667,7 +21760,9 @@ function lzRenderViajeCard(v) {
       + ' ' + lzEsc(v.chofer) + vehCorto + '</span>';
   }
 
-  let html = '<div class="lz-viaje-card ' + estado + '" onclick="lzAbrirDetalleViaje(\'' + v.id + '\')">';
+  // v12.17.0 (N43): clase extra y badge para viaje especial
+  const cardClsExtra = esEspecial ? ' lz-viaje-especial' : '';
+  let html = '<div class="lz-viaje-card ' + estado + cardClsExtra + '" onclick="lzAbrirDetalleViaje(\'' + v.id + '\')">';
 
   // Top: fecha + info + estado
   html += '  <div class="lz-viaje-card-top">';
@@ -21681,11 +21776,18 @@ function lzRenderViajeCard(v) {
   let titulo = (v.chofer && v.chofer !== '—')
     ? 'Viaje #' + (v.id ? v.id.substring(0,4) : '????')
     : 'Próximo viaje';
-  html += '      <div class="lz-viaje-titulo">' + lzEsc(titulo) + ' ' + choferBadge + '</div>';
+  // v12.17.0 (N43): badge ESPECIAL al lado del título
+  const badgeEspecial = esEspecial
+    ? ' <span class="lz-viaje-badge-especial">⭐ ESPECIAL</span>'
+    : '';
+  html += '      <div class="lz-viaje-titulo">' + lzEsc(titulo) + badgeEspecial + ' ' + choferBadge + '</div>';
 
   // Sub texto
   let sub = '';
-  if (v.chofer === '—' || !v.chofer) {
+  // v12.17.0 (N43): si es especial y tiene motivo, mostrar como subtitulo
+  if (esEspecial && v.motivo) {
+    sub = '"' + lzEsc(v.motivo) + '"';
+  } else if (v.chofer === '—' || !v.chofer) {
     sub = 'Sin chofer asignado · click para configurar';
   } else if (estado === 'planificado' || estado === 'preparando') {
     sub = 'click para configurar';
@@ -21919,6 +22021,214 @@ const VEHICULOS_DISPONIBLES = [
   'Renault Kangoo AE244GL'   // v12.4.0 (2/5/2026): nuevo vehículo Juan Pablo
 ];
 
+// ═══════════════════════════════════════════════════════════════════════
+// v12.17.0 (N43) — VIAJES ESPECIALES — admin crea refuerzos manuales
+// ═══════════════════════════════════════════════════════════════════════
+//
+// Francisco puede crear viajes especiales (refuerzos fuera del calendario
+// semanal) desde el botón "+ Viaje especial" en el header del tab
+// Logística → Viajes.
+//
+// Modal pide: zona / fecha / motivo. Al confirmar, llama a Apps Script
+// `viajeCrearEspecial` que inserta en `viajes` con es_especial=true.
+//
+// Validaciones:
+//   · Zona: solo zona1 / zona2 / america_fortin (las 3 grandes)
+//   · Fecha: no permite pasadas
+//   · Motivo: opcional, max 200 chars
+//   · Si la fecha cae en un día normal de esa zona, pide confirmación
+//     extra (puede haber 2 viajes el mismo día — refuerzo del normal).
+
+const VIAJE_ESP_ZONAS = [
+  { key: 'zona1',          label: 'Zona 1', desc: 'Pehuajó / Henderson / Bolívar / Daireaux / ...', dias_normales: [1] },          // lunes
+  { key: 'zona2',          label: 'Zona 2', desc: 'Pellegrini / Tres Lomas / Salliqueló / Guaminí / ...', dias_normales: [4] },     // jueves
+  { key: 'america_fortin', label: 'América + Fortín', desc: 'América / Fortín Olavarría',          dias_normales: [2] }            // martes
+];
+
+/**
+ * Abre el modal de creación de viaje especial.
+ */
+function viajeEspAdminAbrirModal() {
+  // Cerrar modal previo si existe
+  const prev = document.getElementById('viaje-esp-admin-modal');
+  if (prev) prev.remove();
+
+  // Fecha default = mañana
+  const manana = new Date();
+  manana.setDate(manana.getDate() + 1);
+  const fechaDefault = manana.getFullYear() + '-' +
+                       String(manana.getMonth()+1).padStart(2,'0') + '-' +
+                       String(manana.getDate()).padStart(2,'0');
+  const fechaMin = new Date().getFullYear() + '-' +
+                   String(new Date().getMonth()+1).padStart(2,'0') + '-' +
+                   String(new Date().getDate()).padStart(2,'0');
+
+  let opcionesZona = '<option value="">— Elegir zona —</option>';
+  VIAJE_ESP_ZONAS.forEach(z => {
+    opcionesZona += '<option value="' + z.key + '">' + z.label + ' (' + z.desc + ')</option>';
+  });
+
+  const modal = document.createElement('div');
+  modal.id = 'viaje-esp-admin-modal';
+  modal.className = 'modal-overlay show';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  modal.innerHTML =
+    '<div class="modal-box" style="background:#fff;border-radius:18px;max-width:440px;width:100%;padding:22px;box-shadow:0 10px 40px rgba(0,0,0,.25);">' +
+      '<div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;margin-bottom:4px;">⭐ Crear viaje especial</div>' +
+      '<div style="font-size:13px;color:#6B6B6B;margin-bottom:18px;">Refuerzo fuera del calendario habitual</div>' +
+
+      '<div style="margin-bottom:14px;">' +
+        '<label style="display:block;font-size:12px;font-weight:700;color:#6B6B6B;margin-bottom:5px;">Zona</label>' +
+        '<select id="viaje-esp-zona" class="viaje-esp-input" onchange="viajeEspValidarFecha()">' + opcionesZona + '</select>' +
+      '</div>' +
+
+      '<div style="margin-bottom:14px;">' +
+        '<label style="display:block;font-size:12px;font-weight:700;color:#6B6B6B;margin-bottom:5px;">Fecha de salida</label>' +
+        '<input id="viaje-esp-fecha" type="date" class="viaje-esp-input" value="' + fechaDefault + '" min="' + fechaMin + '" onchange="viajeEspValidarFecha()">' +
+        '<div id="viaje-esp-fecha-warn" style="font-size:11px;color:#E65100;margin-top:4px;min-height:14px;"></div>' +
+      '</div>' +
+
+      '<div style="margin-bottom:14px;">' +
+        '<label style="display:block;font-size:12px;font-weight:700;color:#6B6B6B;margin-bottom:5px;">Motivo / nombre (opcional)</label>' +
+        '<input id="viaje-esp-motivo" type="text" class="viaje-esp-input" placeholder="Ej: Refuerzo Pehuajó" maxlength="200">' +
+      '</div>' +
+
+      '<div style="background:#E3F2FD;border-left:3px solid #1976D2;padding:10px 12px;border-radius:8px;margin-bottom:14px;font-size:12px;color:#0D47A1;">' +
+        '💡 Los vendedores van a poder sumar pedidos a este viaje hasta que lo cierres. Después de crear, asignále chofer y vehículo desde la card del viaje.' +
+      '</div>' +
+
+      '<div style="display:flex;gap:10px;margin-top:16px;">' +
+        '<button id="viaje-esp-cancel-btn" style="flex:1;padding:11px;background:#F5EDD9;color:#2D2D2D;border:none;border-radius:11px;font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:800;cursor:pointer;">Cancelar</button>' +
+        '<button id="viaje-esp-confirm-btn" style="flex:2;padding:11px;background:#7E57C2;color:#fff;border:none;border-radius:11px;font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:800;cursor:pointer;">Crear viaje</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(modal);
+
+  document.getElementById('viaje-esp-cancel-btn').onclick = function() { modal.remove(); };
+  document.getElementById('viaje-esp-confirm-btn').onclick = viajeEspAdminConfirmar;
+}
+
+/**
+ * Avisa si la fecha elegida cae en un día normal del calendario de esa zona.
+ * No bloquea, solo informa para que admin sepa que va a haber 2 viajes
+ * el mismo día.
+ */
+function viajeEspValidarFecha() {
+  const zonaKey = document.getElementById('viaje-esp-zona').value;
+  const fechaStr = document.getElementById('viaje-esp-fecha').value;
+  const warnEl = document.getElementById('viaje-esp-fecha-warn');
+  if (!warnEl) return;
+  warnEl.textContent = '';
+
+  if (!zonaKey || !fechaStr) return;
+  const zonaCfg = VIAJE_ESP_ZONAS.find(z => z.key === zonaKey);
+  if (!zonaCfg) return;
+
+  const partes = fechaStr.split('-');
+  if (partes.length !== 3) return;
+  const fecha = new Date(+partes[0], +partes[1]-1, +partes[2]);
+  const dow = fecha.getDay();
+
+  if (zonaCfg.dias_normales.indexOf(dow) >= 0) {
+    const nombreDia = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'][dow];
+    warnEl.textContent = '⚠️ Esta fecha cae en ' + nombreDia + ' (día normal de ' + zonaCfg.label + '). Va a haber 2 viajes ese día.';
+  }
+}
+
+/**
+ * Envía a Apps Script `viajeCrearEspecial`.
+ */
+async function viajeEspAdminConfirmar() {
+  const zona = document.getElementById('viaje-esp-zona').value;
+  const fecha = document.getElementById('viaje-esp-fecha').value;
+  const motivo = (document.getElementById('viaje-esp-motivo').value || '').trim();
+
+  if (!zona) { toast('Elegí una zona', 'err'); return; }
+  if (!fecha) { toast('Elegí una fecha', 'err'); return; }
+
+  // Validar fecha no pasada (defensa cliente, el server también lo valida)
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  const partes = fecha.split('-');
+  const fechaObj = new Date(+partes[0], +partes[1]-1, +partes[2]);
+  if (fechaObj < hoy) {
+    toast('No se puede crear un viaje para una fecha pasada', 'err');
+    return;
+  }
+
+  const btn = document.getElementById('viaje-esp-confirm-btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Creando...';
+    btn.style.opacity = '0.6';
+  }
+
+  try {
+    const params = new URLSearchParams({
+      accion: 'viajeCrearEspecial',
+      zona: zona,
+      fecha_salida: fecha,
+      creado_por: (typeof ADMIN_NOMBRE !== 'undefined' ? ADMIN_NOMBRE : 'Francisco')
+    });
+    if (motivo) params.append('motivo', motivo);
+
+    const resp = await fetch(APPS_SCRIPT_URL + '?' + params.toString());
+    const data = await resp.json();
+    if (data.status === 'ok') {
+      toast('✅ Viaje especial creado', 'ok');
+      // Cerrar modal
+      const modal = document.getElementById('viaje-esp-admin-modal');
+      if (modal) modal.remove();
+      // Recargar viajes
+      _lzViajesLoadedAt = null; // forzar reload
+      lzCargarViajes();
+    } else {
+      toast('❌ ' + (data.message || 'No se pudo crear'), 'err');
+      if (btn) { btn.disabled = false; btn.textContent = 'Crear viaje'; btn.style.opacity = ''; }
+    }
+  } catch(err) {
+    console.error('[viajeEspAdminConfirmar]', err);
+    toast('❌ Error de conexión', 'err');
+    if (btn) { btn.disabled = false; btn.textContent = 'Crear viaje'; btn.style.opacity = ''; }
+  }
+}
+
+/**
+ * Elimina un viaje especial vacío. Solo se llama desde el detalle del viaje.
+ * El Apps Script valida que esté en estado 'planificado' y tenga 0 pedidos.
+ */
+async function viajeEspAdminEliminar(viajeId) {
+  if (!viajeId) return;
+  if (!confirm('¿Eliminar este viaje especial?\n\n' +
+               'Solo se puede eliminar si está vacío (0 pedidos) y en estado planificado.\n\n' +
+               'Esta acción no se puede deshacer.')) return;
+
+  try {
+    const url = APPS_SCRIPT_URL +
+                '?accion=viajeEliminarVacio' +
+                '&viaje_id=' + encodeURIComponent(viajeId);
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (data.status === 'ok') {
+      toast('✅ Viaje eliminado', 'ok');
+      // Cerrar modal detalle si está abierto
+      const overlay = document.getElementById('v-detalle-overlay');
+      if (overlay) overlay.remove();
+      // Recargar viajes
+      _lzViajesLoadedAt = null;
+      lzCargarViajes();
+    } else {
+      toast('❌ ' + (data.message || 'No se pudo eliminar'), 'err');
+    }
+  } catch(err) {
+    console.error('[viajeEspAdminEliminar]', err);
+    toast('❌ Error de conexión', 'err');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// FIN N43
+// ═══════════════════════════════════════════════════════════════════════
+
 let _vDetalleId = null;       // ID del viaje abierto
 let _vDetalleData = null;     // Datos del viaje en memoria
 
@@ -21974,12 +22284,22 @@ function lzRenderDetalleViaje() {
 
   let html = '<div class="v-detalle-sheet">';
 
+  // v12.17.0 (N43): badge ESPECIAL si aplica
+  const _esEspecial = !!v.es_especial;
+  const _badgeEspDet = _esEspecial
+    ? ' <span class="lz-viaje-badge-especial" style="font-size:12px;vertical-align:middle;">⭐ ESPECIAL</span>'
+    : '';
+
   // ── HEADER ───────────────────────────────────────────────
   html += '  <div class="v-detalle-hdr">';
   html += '    <button class="v-detalle-back" onclick="lzCerrarDetalleViaje()">← Volver</button>';
-  html += '    <div class="v-detalle-titulo">🚛 Viaje ' + lzEsc(zonaNombre) + '</div>';
+  html += '    <div class="v-detalle-titulo">🚛 Viaje ' + lzEsc(zonaNombre) + _badgeEspDet + '</div>';
   html += '    <div class="v-detalle-sub">Salida: ' + fecha.diaCompleto + ' ' + fecha.dia +
           ' · Estado: <strong>' + estado.charAt(0).toUpperCase() + estado.slice(1) + '</strong></div>';
+  // v12.17.0 (N43): mostrar motivo del viaje especial debajo del header
+  if (_esEspecial && v.motivo) {
+    html += '    <div class="v-detalle-sub" style="margin-top:4px;color:#7E57C2;font-style:italic;">"' + lzEsc(v.motivo) + '"</div>';
+  }
   if (v.reagendado) {
     html += '    <div class="v-detalle-reagendado">📅 Reagendado' +
             (v.motivo_reagendo ? ': ' + lzEsc(v.motivo_reagendo) : '') + '</div>';
@@ -22126,6 +22446,14 @@ function lzRenderDetalleViaje() {
             ' onclick="lzCerrarViajeBtn()">';
     html += '      🏁 Cerrar viaje e imprimir planillas';
     html += '    </button>';
+
+    // v12.17.0 (N43): botón eliminar viaje especial vacío
+    if (_esEspecial && estado === 'planificado' && sinPedidos) {
+      html += '    <button class="v-btn-grande" style="background:#FFEBEE;color:#C62828;border:2px solid #EF9A9A;margin-top:8px;" ' +
+              'onclick="viajeEspAdminEliminar(\'' + lzEsc(v.id) + '\')">';
+      html += '      🗑️ Eliminar viaje especial';
+      html += '    </button>';
+    }
 
     if (pendientes > 0) {
       html += '    <div class="v-warn-pendientes">';
