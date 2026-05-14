@@ -1,8 +1,76 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v12.17.0 — 13/05/2026
+     TCK ADMIN — v12.18.0 — 16/05/2026
      ──────────────────────────────────────────────────────────────────────
-     N43: VIAJES ESPECIALES — Francisco crea refuerzos manualmente
+     N50: TAB 🛒 COMPRAS — Sugerencias + pedidos informales
+
+     CONTEXTO:
+       Hasta hoy Francisco mantenía el stock viendo el tab Stock (visible
+       en tiempo real desde Xubio) y se acordaba mentalmente cuándo pedir
+       a cada proveedor. Cuando pedía algo, era por WhatsApp directo al
+       proveedor y el sistema no se enteraba — entonces seguía sugiriendo
+       comprar lo mismo, y los vendedores no sabían que venía mercadería.
+
+       Esta versión agrega un tab Compras (dentro del menú Más) que:
+       · Muestra una lista compacta de productos ordenada por urgencia,
+         leída de vw_sugerencias_compra_v2 (motor de sugerencias ya
+         existente en Supabase, basado en stock + velocidad + lead time).
+       · Al tocar un producto se abre un detail full-screen con TODA la
+         info para decidir: stock + cobertura, velocidad por día de
+         semana (chart L-M-X-J-V-S-D), última compra, OCs en tránsito,
+         margen estimado, slider para ajustar la cantidad, multi-prov.
+       · 3 acciones: Marcar pedido informal (queda registrado, deja de
+         sugerir, vendedores avisados cuando se carga fecha), Copiar
+         para Xubio (drawer con texto pre-armado para pegar manual
+         hasta integrar POST /ordenCompraBean), Cargar fecha llegada.
+
+       Backend: tabla compras_pedidos_informales + 4 vistas Supabase
+       creadas en sesión 15/5. Apps Script v25.29.0 con 7 endpoints
+       nuevos. Match automático factura↔pedido en trigger horario.
+
+     CAMBIOS v12.18.0 sobre v12.17.0:
+
+       1. Botón "🛒 Compras" agregado al menú Más con badge para
+          contador de urgencia (CRÍTICO + SIN_STOCK + SOBREVENTA).
+
+       2. View nuevo `view-compras` con UI v2B (mockup aprobado 15/5):
+          · KPI strip arriba: 5 contadores por nivel de urgencia.
+          · Toggle "Por urgencia / Por proveedor" para alternar vistas.
+          · Lista compacta: 1 línea por producto (nombre, stock, vel,
+            proveedor, monto, cantidad sugerida). Marker color izq por
+            urgencia.
+          · Detail overlay full-screen al tocar un producto, con:
+              · Stock + velocidad + tendencia + cobertura
+              · Chart L-M-X-J-V-S-D leído de vw_velocidad_por_dia_semana
+              · Última compra (fecha + cant + precio)
+              · OCs en tránsito (compras_xubio_ordenes sin factura)
+              · Margen estimado si hay precio_venta cargado
+              · Multi-proveedor selector (si el producto tiene >1)
+              · Slider con +/- y input numérico para cantidad
+              · Preview tiempo real: costo total, cobertura post-compra
+              · Footer fijo: Marcar pedido / Copiar p/Xubio / Fecha
+
+       3. Banner de pedidos informales activos en tab Compras
+          (lista de "tenés X pedidos en camino" con su fecha estimada).
+
+     PRE-REQUISITOS:
+       · SQL Fase 3 ejecutado (compras_pedidos_informales + 4 vistas)
+       · Apps Script v25.29.0 con endpoints:
+           pedidoInformalCrear / Actualizar / Cancelar / Listar
+           sugerenciasComprasV2 / detalleCompraProducto
+           velocidadDiaSemana
+       · Vistas Supabase: vw_sugerencias_compra_v2,
+         vw_detalle_compra_producto, vw_pedidos_informales_activos,
+         vw_velocidad_por_dia_semana
+
+     DEPLOY:
+       1. Apps Script v25.29.0 ya debe estar deployado
+       2. Subir este archivo al repo tck-admin como index.html
+       3. Hard refresh en navegador Francisco (Cmd+Shift+R)
+       4. Validar: menú Más → 🛒 Compras → debe abrir lista con
+          sugerencias reales de Supabase.
+     ──────────────────────────────────────────────────────────────────────
+     CAMBIOS v12.17.0 sobre v12.16.0:
 
      CONTEXTO:
        Hasta hoy los viajes a zonas grandes (Zona 1, Zona 2, América/Fortín)
@@ -11688,6 +11756,102 @@ input.canales-exp-input[type="date"] {
     </div>
   </div>
 
+  <!-- v12.18.0 — TAB COMPRAS ──────────────────────────────────────── -->
+  <div class="view" id="view-compras">
+    <div style="padding-bottom:80px;">
+
+      <!-- Header -->
+      <div style="background:linear-gradient(135deg,#1B5E20,#2E7D32);color:#fff;padding:11px 14px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:21px;line-height:1;text-transform:uppercase;letter-spacing:0.4px;">🛒 Compras</div>
+            <div style="font-size:11px;opacity:.9;margin-top:2px;" id="compras-sync-info">Sugerencias en base a stock + velocidad</div>
+          </div>
+          <button onclick="comprasRecargar()" style="background:rgba(255,255,255,.2);border:none;border-radius:50%;width:30px;height:30px;color:#fff;cursor:pointer;font-size:14px;flex-shrink:0;" title="Refrescar">🔄</button>
+        </div>
+        <!-- Toggle vista -->
+        <div style="display:flex;gap:4px;margin-top:10px;">
+          <button id="compras-vista-urg" onclick="comprasSwitchVista('urgencia')" style="flex:1;padding:7px;background:#fff;color:#1B5E20;border:none;border-radius:7px;font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:0.4px;cursor:pointer;">📊 Por urgencia</button>
+          <button id="compras-vista-prov" onclick="comprasSwitchVista('proveedor')" style="flex:1;padding:7px;background:rgba(255,255,255,.15);color:#fff;border:none;border-radius:7px;font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:0.4px;cursor:pointer;">📦 Por proveedor</button>
+        </div>
+      </div>
+
+      <!-- KPIs strip -->
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;padding:8px;background:#F4ECD8;" id="compras-kpis">
+        <div class="cpr-kpi" data-urg="SOBREVENTA" style="text-align:center;padding:5px 3px;background:#fff;border-radius:6px;border-left:3px solid #6A1B9A;">
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:21px;font-weight:900;line-height:1;" id="cpr-kpi-sob">0</div>
+          <div style="font-size:8.5px;text-transform:uppercase;color:#8B7B5F;font-weight:700;margin-top:2px;">Sobre</div>
+        </div>
+        <div class="cpr-kpi" data-urg="SIN_STOCK" style="text-align:center;padding:5px 3px;background:#fff;border-radius:6px;border-left:3px solid #E53935;">
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:21px;font-weight:900;line-height:1;" id="cpr-kpi-sin">0</div>
+          <div style="font-size:8.5px;text-transform:uppercase;color:#8B7B5F;font-weight:700;margin-top:2px;">Sin stock</div>
+        </div>
+        <div class="cpr-kpi" data-urg="CRITICO" style="text-align:center;padding:5px 3px;background:#fff;border-radius:6px;border-left:3px solid #C62828;">
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:21px;font-weight:900;line-height:1;" id="cpr-kpi-cri">0</div>
+          <div style="font-size:8.5px;text-transform:uppercase;color:#8B7B5F;font-weight:700;margin-top:2px;">Crítico</div>
+        </div>
+        <div class="cpr-kpi" data-urg="REPONER" style="text-align:center;padding:5px 3px;background:#fff;border-radius:6px;border-left:3px solid #F57F17;">
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:21px;font-weight:900;line-height:1;" id="cpr-kpi-rep">0</div>
+          <div style="font-size:8.5px;text-transform:uppercase;color:#8B7B5F;font-weight:700;margin-top:2px;">Reponer</div>
+        </div>
+        <div class="cpr-kpi" data-urg="OK" style="text-align:center;padding:5px 3px;background:#fff;border-radius:6px;border-left:3px solid #66BB6A;">
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:21px;font-weight:900;line-height:1;" id="cpr-kpi-ok">0</div>
+          <div style="font-size:8.5px;text-transform:uppercase;color:#8B7B5F;font-weight:700;margin-top:2px;">OK</div>
+        </div>
+      </div>
+
+      <!-- Banner pedidos informales activos -->
+      <div id="compras-pedidos-activos-banner" style="display:none;margin:8px 10px;background:#E3F2FD;border-left:3px solid #1565C0;border-radius:0 8px 8px 0;padding:9px 11px;">
+        <div style="font-size:11px;font-weight:800;color:#0D47A1;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">📦 Pedidos en camino</div>
+        <div id="compras-pedidos-activos-lista" style="font-size:12px;color:#0D47A1;"></div>
+      </div>
+
+      <!-- Lista de productos (vista activa) -->
+      <div id="compras-lista-container" style="padding:4px 0 20px;">
+        <div style="text-align:center;padding:30px;color:var(--text3);font-style:italic;font-size:12.5px;">Cargando sugerencias...</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- v12.18.0 — DETAIL FULL-SCREEN COMPRAS ─────────────────────────── -->
+  <div id="compras-detail-overlay" style="position:fixed;inset:0;background:#FBF7EF;z-index:550;overflow-y:auto;transform:translateY(100%);transition:transform .25s ease;">
+    <!-- Header sticky -->
+    <div style="position:sticky;top:0;background:#fff;z-index:10;padding:11px 14px;border-bottom:1px solid #E8DCC0;display:flex;align-items:center;gap:10px;box-shadow:0 2px 8px rgba(0,0,0,.08);">
+      <button onclick="comprasDetailCerrar()" style="width:34px;height:34px;background:#F4ECD8;border:none;border-radius:50%;font-size:18px;font-weight:800;cursor:pointer;color:#2C2416;flex-shrink:0;">◀</button>
+      <div style="flex:1;min-width:0;">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-size:17px;font-weight:900;color:#2C2416;line-height:1.15;" id="cpr-det-titulo">—</div>
+        <div style="font-size:11px;color:#8B7B5F;margin-top:2px;font-weight:700;text-transform:uppercase;" id="cpr-det-subtitulo">—</div>
+      </div>
+      <span id="cpr-det-badge" style="background:#C62828;color:#fff;padding:4px 9px;border-radius:6px;font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:900;text-transform:uppercase;flex-shrink:0;">—</span>
+    </div>
+
+    <!-- Body -->
+    <div style="padding:12px;padding-bottom:90px;" id="cpr-det-body">
+      <div style="text-align:center;padding:40px;color:var(--text3);">Cargando...</div>
+    </div>
+
+    <!-- Footer fijo -->
+    <div id="cpr-det-footer" style="position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1.5px solid #E8DCC0;padding:10px;display:flex;gap:6px;box-shadow:0 -2px 12px rgba(0,0,0,.08);">
+      <button id="cpr-det-btn-marcar" onclick="comprasDetailMarcarPedido()" style="flex:1;padding:11px 8px;background:#1B5E20;color:#fff;border:none;border-radius:9px;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:0.4px;cursor:pointer;">📋 Marcar</button>
+      <button id="cpr-det-btn-copiar" onclick="comprasDetailCopiarXubio()" style="flex:1;padding:11px 8px;background:#1976D2;color:#fff;border:none;border-radius:9px;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:0.4px;cursor:pointer;">📋 Copiar</button>
+      <button id="cpr-det-btn-fecha" onclick="comprasDetailCargarFecha()" style="flex:1;padding:11px 8px;background:#fff;color:#1B5E20;border:1.5px solid #2E7D32;border-radius:9px;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:0.4px;cursor:pointer;">📅 Fecha</button>
+    </div>
+  </div>
+
+  <!-- v12.18.0 — DRAWER COPIAR XUBIO ─────────────────────────────── -->
+  <div id="cpr-copy-overlay" onclick="cprCopyCerrarFondo(event)" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:600;align-items:flex-end;justify-content:center;">
+    <div onclick="event.stopPropagation()" style="background:#fff;width:100%;max-width:480px;border-radius:16px 16px 0 0;max-height:80vh;overflow-y:auto;padding:16px;">
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:900;text-transform:uppercase;letter-spacing:0.4px;color:#2C2416;margin-bottom:6px;">📋 Texto para Xubio</div>
+      <div style="font-size:12px;color:#5C4F3A;margin-bottom:12px;">Copialo, abrí Xubio web, pegalo en OC nueva.</div>
+      <textarea id="cpr-copy-textarea" readonly style="width:100%;min-height:200px;padding:11px;border:1.5px solid #E8DCC0;border-radius:8px;background:#FBF7EF;font-family:'Courier New',monospace;font-size:12.5px;line-height:1.5;color:#2C2416;resize:vertical;"></textarea>
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <button onclick="cprCopyAlClipboard()" style="flex:1;padding:11px;background:#1976D2;color:#fff;border:none;border-radius:9px;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:0.4px;cursor:pointer;">📋 Copiar</button>
+        <button onclick="cprCopyCerrar()" style="flex:1;padding:11px;background:#fff;color:#1B5E20;border:1.5px solid #2E7D32;border-radius:9px;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:0.4px;cursor:pointer;">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
 </div>
 <nav class="tab-nav" id="tab-nav">
   <button class="tab-btn" id="tab-btn-logistica" onclick="cambiarTab('logistica')">
@@ -11748,6 +11912,12 @@ input.canales-exp-input[type="date"] {
         <div class="menu-mas-icon">📦</div>
         <div class="menu-mas-lbl">Stock</div>
         <div class="menu-mas-badge" id="menu-mas-stock-badge" style="display:none;background:#C62828;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;margin-top:3px;">0</div>
+      </button>
+      <!-- v12.18.0 — Tab Compras -->
+      <button class="menu-mas-item" id="menu-mas-compras" onclick="cambiarTab('compras');cerrarMenuMas()">
+        <div class="menu-mas-icon">🛒</div>
+        <div class="menu-mas-lbl">Compras</div>
+        <div class="menu-mas-badge" id="menu-mas-compras-badge" style="display:none;background:#C62828;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;margin-top:3px;">0</div>
       </button>
       <button class="menu-mas-item" onclick="cambiarTab('clientes');cerrarMenuMas()">
         <div class="menu-mas-icon">⭐</div>
@@ -16128,17 +16298,17 @@ function cambiarTab(tab) {
   if (_tabActual === tab) return;
   _tabActual = tab;
 
-  // Views — incluye logistica + stock (v12.15.0)
-  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock'].forEach(function(t) {
+  // Views — incluye logistica + stock (v12.15.0) + compras (v12.18.0)
+  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock','compras'].forEach(function(t) {
     var v = document.getElementById('view-' + t);
     var b = document.getElementById('tab-btn-' + t);
     if (v) v.classList.toggle('active', t === tab);
     if (b) b.classList.toggle('active', t === tab);
   });
 
-  // El botón "Más" se marca activo si estás en un tab oculto (gps/visitas, clientes, rendiciones, acc-dup, stock)
+  // El botón "Más" se marca activo si estás en un tab oculto
   var btnMas = document.getElementById('tab-btn-mas');
-  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes' || tab === 'rendiciones' || tab === 'acc-dup' || tab === 'prod-canon' || tab === 'ccanon' || tab === 'stock');
+  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes' || tab === 'rendiciones' || tab === 'acc-dup' || tab === 'prod-canon' || tab === 'ccanon' || tab === 'stock' || tab === 'compras');
 
   // Logística — renderizar DESPUÉS de activar el view
   if (tab === 'logistica') {
@@ -16202,6 +16372,11 @@ function cambiarTab(tab) {
   if (tab === 'stock') {
     if (typeof cargarStockVisible === 'function') cargarStockVisible();
     var v = document.getElementById('view-stock'); if (v) v.scrollTop = 0;
+  }
+  // v12.18.0 — tab Compras
+  if (tab === 'compras') {
+    if (typeof comprasInit === 'function') comprasInit();
+    var v = document.getElementById('view-compras'); if (v) v.scrollTop = 0;
   }
 }
 
@@ -28523,6 +28698,762 @@ async function stockSyncManualAdmin() {
     btn.innerHTML = textoOriginal;
   }
 }
+
+
+// ════════════════════════════════════════════════════════════════════════════
+//  v12.18.0 — MÓDULO TAB COMPRAS
+//  Sugerencias de compra + pedidos informales (Fase 3)
+// ════════════════════════════════════════════════════════════════════════════
+
+// Estado del módulo
+var _comprasVista = 'urgencia';           // 'urgencia' | 'proveedor'
+var _comprasSugerencias = [];             // array de productos sugeridos
+var _comprasPedidosActivos = [];          // pedidos informales activos
+var _comprasDetailProducto = null;        // detalle full-screen abierto
+var _comprasDetailFilas = [];             // filas (puede ser multi-proveedor)
+var _comprasDetailProveedorSel = null;    // proveedor_id elegido en multi
+var _comprasDetailCantidad = 0;           // cantidad actual del slider
+var _comprasDetailVelDias = [];           // chart velocidad x día semana
+var _comprasInitDone = false;
+
+// Helper: nombre del usuario logueado en formato para pedido_por
+function _comprasUsuarioActual() {
+  var v = (typeof vendedorActual !== 'undefined') ? vendedorActual : '';
+  if (v === 'ADMIN') return 'Francisco López';
+  if (v === 'Braian') return 'Braian Savy';
+  if (v) return v;
+  return 'admin';
+}
+
+// Helper: formato monto $ corto ($1.94M / $905k / $2.345)
+function _comprasFmtMonto(n) {
+  n = Number(n) || 0;
+  if (n >= 1000000) return '$' + (n/1000000).toFixed(2).replace(/\.?0+$/, '') + 'M';
+  if (n >= 10000)   return '$' + Math.round(n/1000) + 'k';
+  return '$' + Math.round(n).toLocaleString('es-AR');
+}
+function _comprasFmtMontoFull(n) {
+  return '$' + Math.round(Number(n)||0).toLocaleString('es-AR');
+}
+
+// Helper: clase de marker por urgencia
+function _comprasMarkerCls(urg) {
+  switch (urg) {
+    case 'SOBREVENTA': return { color:'#6A1B9A', emoji:'🟣', label:'Sobreventa' };
+    case 'SIN_STOCK':  return { color:'#E53935', emoji:'🔴', label:'Sin stock' };
+    case 'CRITICO':    return { color:'#C62828', emoji:'🟠', label:'Crítico' };
+    case 'REPONER':    return { color:'#F57F17', emoji:'🟡', label:'Reponer' };
+    case 'OK':         return { color:'#66BB6A', emoji:'✅', label:'OK' };
+    default:           return { color:'#9E9E9E', emoji:'⚪', label:urg || '—' };
+  }
+}
+
+// Helper: color por estado de cobertura
+function _comprasColorCobertura(dias) {
+  if (dias === null || dias === undefined) return '#9E9E9E';
+  if (dias < 0) return '#6A1B9A';
+  if (dias <= 2) return '#C62828';
+  if (dias <= 5) return '#F57F17';
+  return '#1B5E20';
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// INIT del tab — se llama desde cambiarTab
+// ─────────────────────────────────────────────────────────────────────────
+async function comprasInit() {
+  if (!_comprasInitDone) {
+    _comprasInitDone = true;
+  }
+  await comprasRecargar();
+}
+
+async function comprasRecargar() {
+  var cont = document.getElementById('compras-lista-container');
+  if (cont) cont.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text3);font-style:italic;font-size:12.5px;">Cargando sugerencias...</div>';
+
+  try {
+    var [sug, ped] = await Promise.all([
+      _comprasFetchSugerencias(),
+      _comprasFetchPedidosActivos()
+    ]);
+    _comprasSugerencias = sug || [];
+    _comprasPedidosActivos = ped || [];
+    _comprasRenderKPIs();
+    _comprasRenderPedidosActivos();
+    _comprasRender();
+    _comprasUpdateBadgeMenuMas();
+  } catch (e) {
+    console.error('[compras] Error recargar:', e);
+    if (cont) cont.innerHTML = '<div style="text-align:center;padding:30px;color:#C62828;font-size:12.5px;">Error al cargar: ' + (e.message || e) + '</div>';
+  }
+}
+
+async function _comprasFetchSugerencias() {
+  var r = await appsScriptFetch({ accion:'sugerenciasComprasV2' }, { silent:true, timeout: 20000 });
+  if (!r || !r.ok || !r.data) return [];
+  return r.data.productos || [];
+}
+
+async function _comprasFetchPedidosActivos() {
+  var r = await appsScriptFetch({ accion:'pedidoInformalListar' }, { silent:true, timeout: 15000 });
+  if (!r || !r.ok || !r.data) return [];
+  return r.data.pedidos || [];
+}
+
+function _comprasRenderKPIs() {
+  var cnt = { SOBREVENTA:0, SIN_STOCK:0, CRITICO:0, REPONER:0, OK:0 };
+  _comprasSugerencias.forEach(function(p) {
+    var u = (p.urgencia || '').toUpperCase();
+    if (cnt[u] !== undefined) cnt[u]++;
+  });
+  var set = function(id, v) { var e = document.getElementById(id); if (e) e.textContent = v; };
+  set('cpr-kpi-sob', cnt.SOBREVENTA);
+  set('cpr-kpi-sin', cnt.SIN_STOCK);
+  set('cpr-kpi-cri', cnt.CRITICO);
+  set('cpr-kpi-rep', cnt.REPONER);
+  set('cpr-kpi-ok',  cnt.OK);
+}
+
+function _comprasUpdateBadgeMenuMas() {
+  var urgentes = 0;
+  _comprasSugerencias.forEach(function(p) {
+    var u = (p.urgencia || '').toUpperCase();
+    if (u === 'SOBREVENTA' || u === 'SIN_STOCK' || u === 'CRITICO') urgentes++;
+  });
+  var badge = document.getElementById('menu-mas-compras-badge');
+  if (badge) {
+    if (urgentes > 0) {
+      badge.style.display = 'inline-block';
+      badge.textContent = urgentes;
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+}
+
+function _comprasRenderPedidosActivos() {
+  var banner = document.getElementById('compras-pedidos-activos-banner');
+  var lista  = document.getElementById('compras-pedidos-activos-lista');
+  if (!banner || !lista) return;
+  if (!_comprasPedidosActivos.length) {
+    banner.style.display = 'none';
+    return;
+  }
+  banner.style.display = 'block';
+  var html = _comprasPedidosActivos.slice(0, 4).map(function(p) {
+    var fecha = p.fecha_estimada_llegada
+      ? 'llega ' + p.fecha_estimada_llegada
+      : 'sin fecha';
+    return '<div style="padding:3px 0;">' +
+      '<b>' + (p.producto_tck_nombre || '—') + '</b> · ' +
+      (p.cantidad || 0) + ' ' + (p.unidad_compra || 'u') + ' · ' +
+      '<span style="opacity:.8;">' + fecha + '</span></div>';
+  }).join('');
+  if (_comprasPedidosActivos.length > 4) {
+    html += '<div style="padding:3px 0;opacity:.7;font-style:italic;">+ ' + (_comprasPedidosActivos.length - 4) + ' más</div>';
+  }
+  lista.innerHTML = html;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// SWITCH vista urgencia/proveedor
+// ─────────────────────────────────────────────────────────────────────────
+function comprasSwitchVista(vista) {
+  _comprasVista = vista;
+  var btnUrg = document.getElementById('compras-vista-urg');
+  var btnPro = document.getElementById('compras-vista-prov');
+  if (vista === 'urgencia') {
+    if (btnUrg) { btnUrg.style.background = '#fff'; btnUrg.style.color = '#1B5E20'; }
+    if (btnPro) { btnPro.style.background = 'rgba(255,255,255,.15)'; btnPro.style.color = '#fff'; }
+  } else {
+    if (btnUrg) { btnUrg.style.background = 'rgba(255,255,255,.15)'; btnUrg.style.color = '#fff'; }
+    if (btnPro) { btnPro.style.background = '#fff'; btnPro.style.color = '#1B5E20'; }
+  }
+  _comprasRender();
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// RENDER lista
+// ─────────────────────────────────────────────────────────────────────────
+function _comprasRender() {
+  if (_comprasVista === 'urgencia') return _comprasRenderUrgencia();
+  return _comprasRenderProveedor();
+}
+
+function _comprasRenderUrgencia() {
+  var cont = document.getElementById('compras-lista-container');
+  if (!cont) return;
+  if (!_comprasSugerencias.length) {
+    cont.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text3);font-style:italic;font-size:12.5px;">Sin sugerencias.</div>';
+    return;
+  }
+
+  // Agrupar por urgencia respetando orden lógico
+  var orden = ['SOBREVENTA','SIN_STOCK','CRITICO','REPONER','OK'];
+  var grupos = {};
+  orden.forEach(function(o){ grupos[o] = []; });
+  _comprasSugerencias.forEach(function(p) {
+    var u = (p.urgencia || 'OK').toUpperCase();
+    if (!grupos[u]) grupos[u] = [];
+    grupos[u].push(p);
+  });
+
+  var html = '';
+  orden.forEach(function(urg) {
+    var arr = grupos[urg];
+    if (!arr.length) return;
+    var meta = _comprasMarkerCls(urg);
+    html += '<div style="padding:12px 12px 4px;font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;color:#5C4F3A;display:flex;justify-content:space-between;">' +
+      meta.emoji + ' ' + meta.label +
+      '<span style="font-weight:700;color:#8B7B5F;">' + arr.length + '</span></div>';
+    html += '<div style="background:#fff;margin:0 8px;border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08);">';
+    arr.forEach(function(p, ix) {
+      html += _comprasItemHTML(p, ix === arr.length - 1);
+    });
+    html += '</div>';
+  });
+  cont.innerHTML = html;
+}
+
+function _comprasItemHTML(p, esUltimo) {
+  var meta = _comprasMarkerCls(p.urgencia);
+  var bordeFin = esUltimo ? 'none' : '1px solid #F4ECD8';
+  var stock = (p.stock_visible !== null && p.stock_visible !== undefined) ? p.stock_visible : '?';
+  var dias = (p.dias_cobertura_actual !== null && p.dias_cobertura_actual !== undefined) ? p.dias_cobertura_actual : null;
+  var diasStr = dias !== null ? (dias.toFixed ? dias.toFixed(1) : dias) + 'd' : '—';
+  var diasColor = _comprasColorCobertura(dias);
+  var vel = p.velocidad_dia ? p.velocidad_dia.toFixed(1) : '0';
+  var prov = p.proveedor_nombre || '—';
+  var prodNombre = p.nombre_canonico || p.producto_tck_nombre || '—';
+  var prodEsc = _comprasEscapeAttr(prodNombre);
+
+  var montoHTML;
+  if (p.proveedor_id && p.sugerencia_cantidad > 0) {
+    montoHTML = '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:14px;font-weight:900;color:#1B5E20;line-height:1;">' + _comprasFmtMonto(p.costo_estimado || 0) + '</div>' +
+                '<div style="font-size:10px;color:#8B7B5F;font-weight:700;margin-top:2px;text-transform:uppercase;">' + p.sugerencia_cantidad + ' ' + (p.unidad_compra || 'u') + '</div>';
+  } else {
+    montoHTML = '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:900;color:#6A1B9A;">SIN PROV</div>';
+  }
+
+  return '<div onclick="comprasDetailAbrir(\'' + prodEsc + '\')" style="display:flex;align-items:center;padding:11px 12px;gap:10px;border-bottom:' + bordeFin + ';cursor:pointer;">' +
+    '<div style="width:5px;height:38px;border-radius:3px;background:' + meta.color + ';flex-shrink:0;"></div>' +
+    '<div style="flex:1;min-width:0;">' +
+      '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:14.5px;font-weight:800;color:#2C2416;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + prodNombre + '</div>' +
+      '<div style="font-size:11px;color:#5C4F3A;margin-top:2px;">' +
+        '<span style="color:' + diasColor + ';font-weight:700;">' + stock + ' · ' + diasStr + '</span>' +
+        ' <span style="opacity:.6;">·</span> ' + vel + '/día' +
+        ' <span style="opacity:.6;">·</span> ' + prov +
+      '</div>' +
+    '</div>' +
+    '<div style="text-align:right;flex-shrink:0;">' + montoHTML + '</div>' +
+    '<div style="color:#8B7B5F;font-size:14px;font-weight:700;margin-left:4px;">›</div>' +
+  '</div>';
+}
+
+function _comprasRenderProveedor() {
+  var cont = document.getElementById('compras-lista-container');
+  if (!cont) return;
+  if (!_comprasSugerencias.length) {
+    cont.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text3);font-style:italic;font-size:12.5px;">Sin sugerencias.</div>';
+    return;
+  }
+
+  // Agrupar por proveedor_nombre
+  var grupos = {};
+  _comprasSugerencias.forEach(function(p) {
+    if (!p.sugerencia_cantidad || p.sugerencia_cantidad === 0) return; // solo los que requieren compra
+    var k = p.proveedor_nombre || '(sin proveedor)';
+    if (!grupos[k]) grupos[k] = { items:[], total:0, dia_pedido:p.dia_pedido, plazo:p.plazo_pago_dias };
+    grupos[k].items.push(p);
+    grupos[k].total += (p.costo_estimado || 0);
+  });
+
+  var keys = Object.keys(grupos).sort(function(a, b) {
+    return grupos[b].total - grupos[a].total;
+  });
+
+  if (!keys.length) {
+    cont.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text3);font-style:italic;font-size:12.5px;">Sin pedidos sugeridos por proveedor.</div>';
+    return;
+  }
+
+  var html = '';
+  keys.forEach(function(provName) {
+    var g = grupos[provName];
+    var dia = g.dia_pedido || 'planificado';
+    var plazo = g.plazo ? 'pago ' + g.plazo + 'd' : '';
+    html += '<div style="margin:10px 8px;background:#fff;border-radius:11px;box-shadow:0 1px 3px rgba(0,0,0,.08);overflow:hidden;">';
+    html += '<div style="background:linear-gradient(135deg,#1B5E20,#2E7D32);color:#fff;padding:11px 13px;display:flex;justify-content:space-between;align-items:center;gap:10px;">';
+    html += '<div style="flex:1;min-width:0;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-size:17px;font-weight:900;text-transform:uppercase;letter-spacing:0.4px;">' + provName + '</div>';
+    html += '<div style="font-size:11px;opacity:.85;margin-top:2px;">Pedir ' + dia + (plazo ? ' · ' + plazo : '') + '</div></div>';
+    html += '<div style="text-align:right;flex-shrink:0;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-size:20px;font-weight:900;line-height:1;">' + _comprasFmtMonto(g.total) + '</div>';
+    html += '<div style="font-size:10px;opacity:.85;text-transform:uppercase;margin-top:3px;">Total</div></div></div>';
+
+    html += '<div>';
+    g.items.forEach(function(p, ix) {
+      var meta = _comprasMarkerCls(p.urgencia);
+      var dias = (p.dias_cobertura_actual !== null && p.dias_cobertura_actual !== undefined) ? p.dias_cobertura_actual : null;
+      var diasStr = dias !== null ? (dias.toFixed ? dias.toFixed(1) : dias) + 'd' : '—';
+      var prodNombre = p.nombre_canonico || p.producto_tck_nombre;
+      var prodEsc = _comprasEscapeAttr(prodNombre);
+      html += '<div onclick="comprasDetailAbrir(\'' + prodEsc + '\')" style="display:flex;align-items:center;gap:10px;padding:9px 13px;border-bottom:' + (ix === g.items.length-1 ? 'none' : '1px solid #F4ECD8') + ';cursor:pointer;">';
+      html += '<div style="width:10px;height:10px;border-radius:50%;background:' + meta.color + ';flex-shrink:0;"></div>';
+      html += '<div style="flex:1;min-width:0;font-family:\'Barlow Condensed\',sans-serif;font-size:14px;font-weight:700;color:#2C2416;">' + prodNombre + '</div>';
+      html += '<div style="font-size:11px;color:#8B7B5F;font-weight:700;text-transform:uppercase;min-width:30px;text-align:right;">' + diasStr + '</div>';
+      html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:15px;font-weight:900;color:#2C2416;min-width:50px;text-align:right;">' + p.sugerencia_cantidad + 'u</div>';
+      html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:13.5px;font-weight:700;color:#1B5E20;min-width:75px;text-align:right;">' + _comprasFmtMonto(p.costo_estimado) + '</div>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+  });
+  cont.innerHTML = html;
+}
+
+function _comprasEscapeAttr(s) {
+  return String(s || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// DETAIL FULL-SCREEN
+// ─────────────────────────────────────────────────────────────────────────
+async function comprasDetailAbrir(nombreProducto) {
+  var ov = document.getElementById('compras-detail-overlay');
+  if (!ov) return;
+
+  // Reset
+  _comprasDetailProducto = nombreProducto;
+  _comprasDetailFilas = [];
+  _comprasDetailProveedorSel = null;
+  _comprasDetailCantidad = 0;
+  _comprasDetailVelDias = [];
+
+  document.getElementById('cpr-det-titulo').textContent = nombreProducto;
+  document.getElementById('cpr-det-subtitulo').textContent = 'Cargando...';
+  document.getElementById('cpr-det-body').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);">Cargando...</div>';
+
+  ov.style.transform = 'translateY(0)';
+  document.body.style.overflow = 'hidden';
+
+  try {
+    var [detRes, velRes] = await Promise.all([
+      appsScriptFetch({ accion:'detalleCompraProducto', producto_tck_nombre:nombreProducto }, { silent:true, timeout: 20000 }),
+      appsScriptFetch({ accion:'velocidadDiaSemana', producto_tck_nombre:nombreProducto }, { silent:true, timeout: 15000 })
+    ]);
+    var filas = (detRes && detRes.ok && detRes.data && detRes.data.detalles) || [];
+    var dias  = (velRes && velRes.ok && velRes.data && velRes.data.dias) || [];
+
+    if (!filas.length) {
+      document.getElementById('cpr-det-body').innerHTML = '<div style="text-align:center;padding:40px;color:#C62828;">Sin datos para este producto.</div>';
+      return;
+    }
+
+    _comprasDetailFilas = filas;
+    _comprasDetailVelDias = dias;
+    // Seleccionar el primario por default, sino el primero
+    var primario = filas.find(function(f) { return f.es_proveedor_primario; });
+    _comprasDetailProveedorSel = (primario || filas[0]).proveedor_id;
+
+    // Sugerencia cantidad inicial: buscar en la lista de sugerencias
+    var sugItem = _comprasSugerencias.find(function(s) {
+      return (s.nombre_canonico === nombreProducto || s.producto_tck_nombre === nombreProducto)
+        && s.proveedor_id === _comprasDetailProveedorSel;
+    });
+    _comprasDetailCantidad = sugItem ? (sugItem.sugerencia_cantidad || 0) : 0;
+
+    _comprasDetailRender();
+  } catch (e) {
+    console.error('[compras detail] Error:', e);
+    document.getElementById('cpr-det-body').innerHTML = '<div style="text-align:center;padding:40px;color:#C62828;">Error: ' + (e.message || e) + '</div>';
+  }
+}
+
+function comprasDetailCerrar() {
+  var ov = document.getElementById('compras-detail-overlay');
+  if (ov) ov.style.transform = 'translateY(100%)';
+  document.body.style.overflow = '';
+}
+
+function _comprasDetailFilaSel() {
+  if (!_comprasDetailFilas.length) return null;
+  return _comprasDetailFilas.find(function(f) {
+    return f.proveedor_id === _comprasDetailProveedorSel;
+  }) || _comprasDetailFilas[0];
+}
+
+function _comprasDetailRender() {
+  var fila = _comprasDetailFilaSel();
+  if (!fila) return;
+
+  // Subtítulo
+  var subtitulo = (fila.categoria || '') + (fila.categoria ? ' · ' : '') + (fila.proveedor_nombre || '');
+  document.getElementById('cpr-det-subtitulo').textContent = subtitulo.toUpperCase();
+
+  // Badge urgencia (buscamos en sugerencias)
+  var sugItem = _comprasSugerencias.find(function(s) {
+    return s.nombre_canonico === _comprasDetailProducto && s.proveedor_id === fila.proveedor_id;
+  });
+  var urg = sugItem ? (sugItem.urgencia || 'OK') : 'OK';
+  var metaUrg = _comprasMarkerCls(urg);
+  var badge = document.getElementById('cpr-det-badge');
+  if (badge) {
+    badge.textContent = metaUrg.label;
+    badge.style.background = metaUrg.color;
+  }
+
+  // Body
+  var body = document.getElementById('cpr-det-body');
+  if (!body) return;
+
+  var stock = fila.stock_visible || 0;
+  var velDia = fila.velocidad_dia_30d || 0;
+  var velLunVie = fila.velocidad_dia_lun_a_vie || 0;
+  var cobertura = fila.dias_cobertura_actual;
+  var coberturaStr = cobertura !== null ? cobertura + ' días' : '—';
+  var coberturaCol = _comprasColorCobertura(cobertura);
+  var tendencia = fila.tendencia || '—';
+  var clientes = fila.clientes_distintos_30d || 0;
+  var ocTransito = Number(fila.oc_transito_monto || 0);
+
+  var html = '';
+
+  // Bloque 1: Situación
+  html += '<div style="background:#fff;border-radius:11px;padding:12px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.06);">';
+  html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;color:#8B7B5F;margin-bottom:8px;">📊 Situación actual</div>';
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">';
+
+  // Stock
+  html += '<div style="background:#FBF7EF;border-radius:8px;padding:8px 10px;">';
+  html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:19px;font-weight:900;color:' + (stock <= 0 ? '#C62828' : '#2C2416') + ';line-height:1;">' + stock + '</div>';
+  html += '<div style="font-size:10px;color:#8B7B5F;margin-top:4px;text-transform:uppercase;font-weight:700;">Stock</div>';
+  html += '<div style="font-size:11px;color:#5C4F3A;margin-top:3px;font-weight:600;">' + coberturaStr + ' cobertura</div>';
+  html += '</div>';
+
+  // Velocidad
+  html += '<div style="background:#FBF7EF;border-radius:8px;padding:8px 10px;">';
+  html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:19px;font-weight:900;color:#2C2416;line-height:1;">' + velDia.toFixed(1) + '</div>';
+  html += '<div style="font-size:10px;color:#8B7B5F;margin-top:4px;text-transform:uppercase;font-weight:700;">Vel/día 30d</div>';
+  html += '<div style="font-size:11px;color:#5C4F3A;margin-top:3px;font-weight:600;">L-V ' + velLunVie.toFixed(1) + ' · ' + tendencia + '</div>';
+  html += '</div>';
+
+  // OC en tránsito
+  html += '<div style="background:#FBF7EF;border-radius:8px;padding:8px 10px;">';
+  html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:19px;font-weight:900;color:' + (ocTransito > 0 ? '#1565C0' : '#2C2416') + ';line-height:1;">' + _comprasFmtMonto(ocTransito) + '</div>';
+  html += '<div style="font-size:10px;color:#8B7B5F;margin-top:4px;text-transform:uppercase;font-weight:700;">OC tránsito</div>';
+  html += '<div style="font-size:11px;color:#5C4F3A;margin-top:3px;font-weight:600;">' + (ocTransito > 0 ? 'sin facturar aún' : 'sin OCs activas') + '</div>';
+  html += '</div>';
+
+  // Clientes
+  html += '<div style="background:#FBF7EF;border-radius:8px;padding:8px 10px;">';
+  html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:19px;font-weight:900;color:#2C2416;line-height:1;">' + clientes + '</div>';
+  html += '<div style="font-size:10px;color:#8B7B5F;margin-top:4px;text-transform:uppercase;font-weight:700;">Clientes 30d</div>';
+  html += '<div style="font-size:11px;color:#5C4F3A;margin-top:3px;font-weight:600;">distintos</div>';
+  html += '</div>';
+
+  html += '</div></div>';
+
+  // Bloque 2: Chart velocidad por día semana
+  if (_comprasDetailVelDias.length) {
+    html += '<div style="background:#fff;border-radius:11px;padding:12px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.06);">';
+    html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;color:#8B7B5F;margin-bottom:8px;">📅 Ventas por día (últimos 30d)</div>';
+    var maxProm = Math.max.apply(null, _comprasDetailVelDias.map(function(d){ return d.prom_por_dia || 0; }));
+    if (maxProm > 0) {
+      html += '<div style="display:flex;align-items:flex-end;gap:5px;height:60px;padding-top:6px;">';
+      // Ordenar L-M-X-J-V-S-D (mapeo de DOW 1..6,0)
+      var ordenSemana = [1,2,3,4,5,6,0];
+      var mapDias = {};
+      _comprasDetailVelDias.forEach(function(d){ mapDias[d.dia_semana] = d; });
+      ordenSemana.forEach(function(dow) {
+        var d = mapDias[dow] || { dia_letra: ['D','L','M','X','J','V','S'][dow], prom_por_dia:0, unidades_total_30d:0 };
+        var hAlt = maxProm > 0 ? Math.round((d.prom_por_dia / maxProm) * 50) : 0;
+        var color = (dow === 0 || dow === 6) ? '#E8DCC0' : '#66BB6A';
+        html += '<div style="flex:1;display:flex;flex-direction:column;align-items:center;font-size:9.5px;color:#8B7B5F;font-weight:700;">';
+        html += '<div style="width:100%;background:' + color + ';border-radius:3px 3px 0 0;margin-bottom:3px;height:' + hAlt + 'px;"></div>';
+        html += d.dia_letra + '<br><b>' + (d.prom_por_dia ? d.prom_por_dia.toFixed(0) : '0') + '</b>';
+        html += '</div>';
+      });
+      html += '</div>';
+    } else {
+      html += '<div style="text-align:center;color:var(--text3);font-style:italic;font-size:11px;padding:10px;">Sin ventas en últimos 30 días</div>';
+    }
+    html += '</div>';
+  }
+
+  // Bloque 3: Última compra
+  if (fila.ultima_compra) {
+    var uc = fila.ultima_compra;
+    var totalLin = (uc.cantidad || 0) * (uc.precio_con_iva || 0);
+    html += '<div style="background:#fff;border-radius:11px;padding:12px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.06);">';
+    html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;color:#8B7B5F;margin-bottom:8px;">📦 Última compra a ' + fila.proveedor_nombre + '</div>';
+    html += '<div style="background:#FBF7EF;padding:9px 11px;border-radius:8px;font-size:12px;">';
+    html += '<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><b>' + uc.fecha + ' (hace ' + (uc.dias_atras || 0) + 'd)</b><span style="color:#8B7B5F;font-weight:600;font-size:11px;">' + (uc.numero_documento || '') + '</span></div>';
+    html += '<div style="color:#5C4F3A;">' + (uc.cantidad || 0) + ' × ' + _comprasFmtMontoFull(uc.precio_con_iva || 0) + ' = <b>' + _comprasFmtMontoFull(totalLin) + '</b></div>';
+    html += '</div></div>';
+  }
+
+  // Bloque 4: Multi-proveedor selector (si hay >1)
+  if (_comprasDetailFilas.length > 1) {
+    html += '<div style="background:#FFF8E1;border:1.5px solid #FFCC80;border-radius:11px;padding:10px;margin-bottom:10px;">';
+    html += '<div style="font-size:10.5px;text-transform:uppercase;font-weight:800;color:#E65100;letter-spacing:0.4px;margin-bottom:6px;">⚖ ' + _comprasDetailFilas.length + ' proveedores activos · elegí cuál</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(' + Math.min(_comprasDetailFilas.length, 2) + ', 1fr);gap:6px;">';
+    _comprasDetailFilas.forEach(function(f) {
+      var sel = f.proveedor_id === _comprasDetailProveedorSel;
+      html += '<div onclick="comprasDetailSwitchProveedor(' + f.proveedor_id + ')" style="background:' + (sel?'#E8F5E9':'#fff') + ';border:2px solid ' + (sel?'#2E7D32':'#E0E0E0') + ';border-radius:9px;padding:8px;cursor:pointer;">';
+      html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:800;color:#2C2416;">' + f.proveedor_nombre + (sel?' ★':'') + '</div>';
+      html += '<div style="font-size:11px;color:#5C4F3A;font-weight:700;margin-top:3px;">' + _comprasFmtMontoFull(f.costo_unitario_actual || 0) + '/' + (f.kg_por_unidad ? 'kg' : 'u') + '</div>';
+      html += '<div style="font-size:10px;color:#8B7B5F;margin-top:1px;">Pago ' + (f.plazo_pago_dias||'?') + 'd</div>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+  }
+
+  // Bloque 5: Sugerencia + slider
+  html += '<div style="background:linear-gradient(135deg,#F1F8E9,#E8F5E9);border:1.5px solid #66BB6A;border-radius:11px;padding:13px;">';
+  html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;color:#1B5E20;margin-bottom:9px;">💡 Sugerencia de compra</div>';
+
+  html += '<div style="display:flex;justify-content:space-between;margin-bottom:10px;align-items:flex-end;">';
+  html += '<div><div style="font-family:\'Barlow Condensed\',sans-serif;font-size:15px;font-weight:800;color:#1B5E20;">📦 ' + fila.proveedor_nombre + '</div>';
+  html += '<div style="font-size:11px;color:#5C4F3A;margin-top:2px;font-weight:600;">' + (fila.forma_pago || '') + (fila.plazo_pago_dias ? ' · pago ' + fila.plazo_pago_dias + 'd' : '') + ' · pedir ' + (fila.dia_pedido || 'planificado') + '</div></div>';
+  html += '<div style="text-align:right;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-size:15px;font-weight:800;">' + _comprasFmtMontoFull(fila.costo_unitario_actual || 0) + '</div>';
+  html += '<div style="font-size:10px;color:#8B7B5F;text-transform:uppercase;">por ' + (fila.unidad_compra || 'u') + '</div></div>';
+  html += '</div>';
+
+  // Slider
+  html += '<div style="background:#fff;border:none;border-radius:9px;padding:10px;">';
+  html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:11px;font-weight:800;color:#1B5E20;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:9px;">🎯 Cantidad a pedir</div>';
+  html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">';
+  html += '<button onclick="comprasDetailAjustar(-' + (fila.multiplo_compra || 1) + ')" style="width:38px;height:38px;border-radius:9px;background:#fff;border:1.5px solid #66BB6A;font-size:20px;font-weight:800;color:#1B5E20;cursor:pointer;">−</button>';
+  html += '<input type="number" id="cpr-cant-input" value="' + _comprasDetailCantidad + '" oninput="comprasDetailSetCantidad(this.value)" style="flex:1;text-align:center;font-family:\'Barlow Condensed\',sans-serif;font-size:28px;font-weight:900;color:#2C2416;border:1.5px solid #66BB6A;background:#fff;border-radius:9px;padding:4px;-moz-appearance:textfield;">';
+  html += '<button onclick="comprasDetailAjustar(' + (fila.multiplo_compra || 1) + ')" style="width:38px;height:38px;border-radius:9px;background:#fff;border:1.5px solid #66BB6A;font-size:20px;font-weight:800;color:#1B5E20;cursor:pointer;">+</button>';
+  html += '<span style="font-size:11px;color:#8B7B5F;font-weight:800;text-transform:uppercase;min-width:50px;">' + (fila.unidad_compra || 'u') + '</span>';
+  html += '</div>';
+
+  // Preview
+  html += '<div id="cpr-cant-preview">' + _comprasDetailPreviewHTML(fila) + '</div>';
+
+  html += '</div></div>';
+
+  body.innerHTML = html;
+}
+
+function _comprasDetailPreviewHTML(fila) {
+  var cant = _comprasDetailCantidad;
+  var costoUnit = fila.costo_unitario_actual || 0;
+  var total = cant * costoUnit;
+  var kgPorU = fila.kg_por_unidad;
+  var velDia = fila.velocidad_dia_30d || 0;
+  var stock = fila.stock_visible || 0;
+
+  // Cobertura post-compra
+  var coberturaPost = '—';
+  var coberturaColPost = '#2C2416';
+  if (velDia > 0) {
+    var d = (stock + cant) / velDia;
+    coberturaPost = d.toFixed(1) + ' días';
+    coberturaColPost = d > 7 ? '#1B5E20' : (d > 3 ? '#F57F17' : '#C62828');
+  }
+
+  // Margen
+  var margenHTML = '';
+  if (fila.precio_venta_kg && kgPorU && costoUnit > 0) {
+    var precioKgVenta = fila.precio_venta_kg;
+    var costoKg = costoUnit / kgPorU;
+    var margenPct = ((precioKgVenta - costoKg) / precioKgVenta * 100).toFixed(1);
+    var margenColor = margenPct > 15 ? '#1B5E20' : (margenPct > 5 ? '#F57F17' : '#C62828');
+    margenHTML = '<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12.5px;border-bottom:1px solid rgba(0,0,0,.05);"><span style="color:#5C4F3A;">Margen estimado:</span><span style="font-family:\'Barlow Condensed\',sans-serif;font-weight:800;color:' + margenColor + ';">' + margenPct + '%</span></div>';
+  } else if (fila.precio_venta && !kgPorU && costoUnit > 0) {
+    var margenPct2 = ((fila.precio_venta - costoUnit) / fila.precio_venta * 100).toFixed(1);
+    var margenColor2 = margenPct2 > 15 ? '#1B5E20' : (margenPct2 > 5 ? '#F57F17' : '#C62828');
+    margenHTML = '<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12.5px;border-bottom:1px solid rgba(0,0,0,.05);"><span style="color:#5C4F3A;">Margen estimado:</span><span style="font-family:\'Barlow Condensed\',sans-serif;font-weight:800;color:' + margenColor2 + ';">' + margenPct2 + '%</span></div>';
+  }
+
+  var html = '';
+  html += '<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12.5px;border-bottom:1px solid rgba(0,0,0,.05);"><span style="color:#5C4F3A;font-weight:700;">Costo total:</span><span style="font-family:\'Barlow Condensed\',sans-serif;font-size:19px;font-weight:900;color:#1B5E20;">' + _comprasFmtMontoFull(total) + '</span></div>';
+  html += '<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12.5px;border-bottom:1px solid rgba(0,0,0,.05);"><span style="color:#5C4F3A;">Cobertura post-compra:</span><span style="font-family:\'Barlow Condensed\',sans-serif;font-weight:800;color:' + coberturaColPost + ';">' + coberturaPost + '</span></div>';
+  html += margenHTML;
+  if (fila.plazo_pago_dias) {
+    var fechaPago = new Date();
+    fechaPago.setDate(fechaPago.getDate() + parseInt(fila.plazo_pago_dias, 10));
+    var fmt = fechaPago.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
+    html += '<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12.5px;"><span style="color:#5C4F3A;">Vence pago:</span><span style="font-family:\'Barlow Condensed\',sans-serif;font-weight:800;">' + fmt + '</span></div>';
+  }
+  return html;
+}
+
+function comprasDetailSwitchProveedor(provId) {
+  _comprasDetailProveedorSel = provId;
+  // Actualizar cantidad sugerida en base al nuevo proveedor
+  var sugItem = _comprasSugerencias.find(function(s) {
+    return (s.nombre_canonico === _comprasDetailProducto || s.producto_tck_nombre === _comprasDetailProducto)
+      && s.proveedor_id === provId;
+  });
+  _comprasDetailCantidad = sugItem ? (sugItem.sugerencia_cantidad || 0) : 0;
+  _comprasDetailRender();
+}
+
+function comprasDetailAjustar(delta) {
+  _comprasDetailCantidad = Math.max(0, parseInt(_comprasDetailCantidad, 10) + parseInt(delta, 10));
+  var input = document.getElementById('cpr-cant-input');
+  if (input) input.value = _comprasDetailCantidad;
+  var preview = document.getElementById('cpr-cant-preview');
+  var fila = _comprasDetailFilaSel();
+  if (preview && fila) preview.innerHTML = _comprasDetailPreviewHTML(fila);
+}
+
+function comprasDetailSetCantidad(v) {
+  var n = parseInt(v, 10);
+  if (isNaN(n) || n < 0) n = 0;
+  _comprasDetailCantidad = n;
+  var preview = document.getElementById('cpr-cant-preview');
+  var fila = _comprasDetailFilaSel();
+  if (preview && fila) preview.innerHTML = _comprasDetailPreviewHTML(fila);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// ACCIONES: Marcar pedido, Copiar, Fecha
+// ─────────────────────────────────────────────────────────────────────────
+async function comprasDetailMarcarPedido() {
+  var fila = _comprasDetailFilaSel();
+  if (!fila) return;
+  if (!_comprasDetailCantidad || _comprasDetailCantidad <= 0) {
+    alert('Ingresá una cantidad mayor a 0.');
+    return;
+  }
+
+  if (!confirm('¿Confirmás marcar pedido informal de ' + _comprasDetailCantidad + ' ' + (fila.unidad_compra || 'u') + ' de ' + _comprasDetailProducto + ' a ' + fila.proveedor_nombre + '?')) {
+    return;
+  }
+
+  var btn = document.getElementById('cpr-det-btn-marcar');
+  if (btn) { btn.disabled = true; btn.textContent = '...'; }
+
+  try {
+    var r = await appsScriptFetch({
+      accion: 'pedidoInformalCrear',
+      producto_tck_nombre: _comprasDetailProducto,
+      proveedor_id: fila.proveedor_id,
+      productos_proveedores_id: fila.pp_id,
+      cantidad: _comprasDetailCantidad,
+      unidad_compra: fila.unidad_compra || '',
+      costo_unitario_estimado: fila.costo_unitario_actual || 0,
+      pedido_por: _comprasUsuarioActual()
+    }, { timeout: 20000 });
+
+    if (r && r.ok && r.data && r.data.ok) {
+      alert('✅ Pedido informal marcado.');
+      comprasDetailCerrar();
+      await comprasRecargar();
+    } else {
+      var err = (r && r.data && r.data.error) || (r && r.error) || 'Error desconocido';
+      alert('No se pudo marcar el pedido: ' + err);
+    }
+  } catch (e) {
+    alert('Error: ' + (e.message || e));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📋 Marcar'; }
+  }
+}
+
+function comprasDetailCopiarXubio() {
+  var fila = _comprasDetailFilaSel();
+  if (!fila) return;
+  if (!_comprasDetailCantidad || _comprasDetailCantidad <= 0) {
+    alert('Ingresá una cantidad mayor a 0.');
+    return;
+  }
+
+  var costoUnit = fila.costo_unitario_actual || 0;
+  var total = _comprasDetailCantidad * costoUnit;
+  var hoy = new Date();
+  var fmtHoy = hoy.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
+
+  var texto = '';
+  texto += 'PROVEEDOR: ' + (fila.proveedor_nombre || '—') + '\n';
+  texto += 'FECHA: ' + fmtHoy + '\n';
+  texto += 'PRODUCTO TCK: ' + _comprasDetailProducto + '\n\n';
+  texto += 'DETALLE:\n';
+  texto += '— ' + (fila.xubio_nombre_compra || _comprasDetailProducto) + '\n';
+  texto += '  Cantidad: ' + _comprasDetailCantidad + ' ' + (fila.unidad_compra || 'u') + '\n';
+  texto += '  Precio unit (c/IVA): $' + Math.round(costoUnit).toLocaleString('es-AR') + '\n';
+  texto += '  Subtotal: $' + Math.round(total).toLocaleString('es-AR') + '\n\n';
+  texto += 'TOTAL: $' + Math.round(total).toLocaleString('es-AR') + '\n';
+  if (fila.forma_pago) texto += 'FORMA PAGO: ' + fila.forma_pago + '\n';
+  if (fila.plazo_pago_dias) texto += 'PLAZO PAGO: ' + fila.plazo_pago_dias + 'd\n';
+
+  var ta = document.getElementById('cpr-copy-textarea');
+  if (ta) ta.value = texto;
+  var ov = document.getElementById('cpr-copy-overlay');
+  if (ov) ov.style.display = 'flex';
+}
+
+function cprCopyCerrar() {
+  var ov = document.getElementById('cpr-copy-overlay');
+  if (ov) ov.style.display = 'none';
+}
+function cprCopyCerrarFondo(e) {
+  if (e.target.id === 'cpr-copy-overlay') cprCopyCerrar();
+}
+function cprCopyAlClipboard() {
+  var ta = document.getElementById('cpr-copy-textarea');
+  if (!ta) return;
+  ta.select();
+  try {
+    document.execCommand('copy');
+    alert('✅ Copiado al portapapeles.');
+  } catch (e) {
+    alert('No se pudo copiar. Seleccioná el texto y copialo manualmente.');
+  }
+}
+
+async function comprasDetailCargarFecha() {
+  var fila = _comprasDetailFilaSel();
+  if (!fila) return;
+
+  // Buscar si ya hay pedido informal activo
+  var pedidoActivo = _comprasPedidosActivos.find(function(p) {
+    return p.producto_tck_nombre === _comprasDetailProducto && p.proveedor_id === fila.proveedor_id;
+  });
+
+  if (!pedidoActivo) {
+    alert('Primero tenés que marcar el pedido. Después cargás la fecha estimada.');
+    return;
+  }
+
+  var hoy = new Date();
+  var hoyStr = hoy.toISOString().slice(0, 10);
+  var actualStr = pedidoActivo.fecha_estimada_llegada || '';
+  var nuevaFecha = prompt('Fecha estimada de llegada (YYYY-MM-DD, no anterior a hoy):', actualStr || hoyStr);
+  if (!nuevaFecha) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(nuevaFecha)) {
+    alert('Formato inválido. Usá YYYY-MM-DD.');
+    return;
+  }
+  if (nuevaFecha < hoyStr) {
+    alert('La fecha no puede ser anterior a hoy.');
+    return;
+  }
+
+  try {
+    var r = await appsScriptFetch({
+      accion: 'pedidoInformalActualizarFecha',
+      id: pedidoActivo.id,
+      fecha_estimada_llegada: nuevaFecha
+    }, { timeout: 15000 });
+
+    if (r && r.ok && r.data && r.data.ok) {
+      alert('✅ Fecha actualizada.');
+      await comprasRecargar();
+    } else {
+      var err = (r && r.data && r.data.error) || 'Error desconocido';
+      alert('No se pudo: ' + err);
+    }
+  } catch (e) {
+    alert('Error: ' + (e.message || e));
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  FIN MÓDULO COMPRAS v12.18.0
+// ════════════════════════════════════════════════════════════════════════════
 </script>
 
 <!-- ══ SHEET: MÁS PERÍODOS (Reportes) ══════════════════════════ -->
