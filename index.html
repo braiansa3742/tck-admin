@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v12.18.0 — 16/05/2026
+     TCK ADMIN — v12.18.1 — 16/05/2026
+     ──────────────────────────────────────────────────────────────────────
+     HOTFIX v12.18.1 sobre v12.18.0:
+       Reemplazado appsScriptFetch (no existe en tck-admin) por helper
+       local _comprasFetch que usa fetch nativo + parse JSON, alineado
+       con el patrón usado en el resto del admin (xubio, sync, etc).
+       Error original en console: "appsScriptFetch is not defined".
      ──────────────────────────────────────────────────────────────────────
      N50: TAB 🛒 COMPRAS — Sugerencias + pedidos informales
 
@@ -28788,14 +28794,37 @@ async function comprasRecargar() {
   }
 }
 
+// Helper local: fetch al Apps Script + parse JSON con timeout
+// Patrón del admin (no usa appsScriptFetch como tck-ventas)
+async function _comprasFetch(paramsObj, timeoutMs) {
+  timeoutMs = timeoutMs || 20000;
+  var params = new URLSearchParams();
+  Object.keys(paramsObj || {}).forEach(function(k) {
+    var v = paramsObj[k];
+    if (v !== undefined && v !== null) params.append(k, String(v));
+  });
+  var ctrl = new AbortController();
+  var timer = setTimeout(function(){ ctrl.abort(); }, timeoutMs);
+  try {
+    var resp = await fetch(APPS_SCRIPT_URL + '?' + params.toString(), { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (!resp.ok) return { ok: false, error: 'HTTP ' + resp.status };
+    var data = await resp.json();
+    return { ok: true, data: data };
+  } catch (e) {
+    clearTimeout(timer);
+    return { ok: false, error: (e && e.name === 'AbortError') ? 'timeout' : (e.message || String(e)) };
+  }
+}
+
 async function _comprasFetchSugerencias() {
-  var r = await appsScriptFetch({ accion:'sugerenciasComprasV2' }, { silent:true, timeout: 20000 });
+  var r = await _comprasFetch({ accion:'sugerenciasComprasV2' }, 20000);
   if (!r || !r.ok || !r.data) return [];
   return r.data.productos || [];
 }
 
 async function _comprasFetchPedidosActivos() {
-  var r = await appsScriptFetch({ accion:'pedidoInformalListar' }, { silent:true, timeout: 15000 });
+  var r = await _comprasFetch({ accion:'pedidoInformalListar' }, 15000);
   if (!r || !r.ok || !r.data) return [];
   return r.data.pedidos || [];
 }
@@ -29036,8 +29065,8 @@ async function comprasDetailAbrir(nombreProducto) {
 
   try {
     var [detRes, velRes] = await Promise.all([
-      appsScriptFetch({ accion:'detalleCompraProducto', producto_tck_nombre:nombreProducto }, { silent:true, timeout: 20000 }),
-      appsScriptFetch({ accion:'velocidadDiaSemana', producto_tck_nombre:nombreProducto }, { silent:true, timeout: 15000 })
+      _comprasFetch({ accion:'detalleCompraProducto', producto_tck_nombre:nombreProducto }, 20000),
+      _comprasFetch({ accion:'velocidadDiaSemana', producto_tck_nombre:nombreProducto }, 15000)
     ]);
     var filas = (detRes && detRes.ok && detRes.data && detRes.data.detalles) || [];
     var dias  = (velRes && velRes.ok && velRes.data && velRes.data.dias) || [];
@@ -29327,7 +29356,7 @@ async function comprasDetailMarcarPedido() {
   if (btn) { btn.disabled = true; btn.textContent = '...'; }
 
   try {
-    var r = await appsScriptFetch({
+    var r = await _comprasFetch({
       accion: 'pedidoInformalCrear',
       producto_tck_nombre: _comprasDetailProducto,
       proveedor_id: fila.proveedor_id,
@@ -29336,7 +29365,7 @@ async function comprasDetailMarcarPedido() {
       unidad_compra: fila.unidad_compra || '',
       costo_unitario_estimado: fila.costo_unitario_actual || 0,
       pedido_por: _comprasUsuarioActual()
-    }, { timeout: 20000 });
+    }, 20000);
 
     if (r && r.ok && r.data && r.data.ok) {
       alert('✅ Pedido informal marcado.');
@@ -29433,11 +29462,11 @@ async function comprasDetailCargarFecha() {
   }
 
   try {
-    var r = await appsScriptFetch({
+    var r = await _comprasFetch({
       accion: 'pedidoInformalActualizarFecha',
       id: pedidoActivo.id,
       fecha_estimada_llegada: nuevaFecha
-    }, { timeout: 15000 });
+    }, 15000);
 
     if (r && r.ok && r.data && r.data.ok) {
       alert('✅ Fecha actualizada.');
