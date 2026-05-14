@@ -11805,6 +11805,27 @@ input.canales-exp-input[type="date"] {
         </div>
       </div>
 
+      <!-- v12.19.0 — TECHOS DINÁMICOS (3 instrumentos + total) ─────────── -->
+      <div style="background:#2C2416;padding:10px 8px;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;" id="cpr-techos-strip">
+        <div style="grid-column:1/-1;text-align:center;padding:8px;color:#ccc;font-style:italic;font-size:11px;">Cargando techos…</div>
+      </div>
+      <div id="cpr-techos-total" style="display:none;background:linear-gradient(90deg,#FFD700,#FFA500);padding:7px 14px;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:900;color:#1A0800;text-transform:uppercase;letter-spacing:0.5px;">💰 Total disponible</div>
+          <div id="cpr-techos-fecha" style="font-size:9.5px;color:#5C3A1E;margin-top:1px;">—</div>
+        </div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:900;color:#1A0800;line-height:1;">
+          <span style="font-size:13px;color:#5C3A1E;margin-right:2px;">$</span><span id="cpr-techos-total-monto">—</span>
+        </div>
+      </div>
+
+      <!-- Detalle expandible al tapear un techo -->
+      <div id="cpr-techos-detalle" style="display:none;background:#fff;margin:8px;border-radius:10px;padding:14px;box-shadow:0 2px 8px rgba(0,0,0,.08);">
+        <div id="cpr-techos-detalle-title" style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:900;color:#1A0800;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:10px;">Detalle</div>
+        <div id="cpr-techos-detalle-content"></div>
+        <button onclick="document.getElementById('cpr-techos-detalle').style.display='none';" style="margin-top:10px;background:#F4ECD8;border:none;border-radius:6px;padding:6px 12px;font-size:11px;color:#5C3A1E;cursor:pointer;font-weight:700;">Cerrar</button>
+      </div>
+
       <!-- KPIs strip -->
       <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;padding:8px;background:#F4ECD8;" id="compras-kpis">
         <div class="cpr-kpi" data-urg="SOBREVENTA" style="text-align:center;padding:5px 3px;background:#fff;border-radius:6px;border-left:3px solid #6A1B9A;">
@@ -28790,6 +28811,135 @@ function _comprasColorCobertura(dias) {
 // ─────────────────────────────────────────────────────────────────────────
 // INIT del tab — se llama desde cambiarTab
 // ─────────────────────────────────────────────────────────────────────────
+// v12.19.0 — Header de techos dinámicos (líquido / cheques / e-cheques)
+// Lee de vw_techos_dinamicos en Supabase. Sprint 1 día 4-5.
+// ════════════════════════════════════════════════════════════════════
+var _cprTechosData = [];
+
+async function _comprasRenderTechos() {
+  var strip = document.getElementById('cpr-techos-strip');
+  var total = document.getElementById('cpr-techos-total');
+  if (!strip || !total) return;
+
+  try {
+    var data = await sbFetch('vw_techos_dinamicos?select=*');
+    if (!data || !data.length) {
+      strip.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:8px;color:#FFCDD2;font-size:11px;">⚠️ Sin data de techos</div>';
+      total.style.display = 'none';
+      return;
+    }
+    _cprTechosData = data;
+
+    var cards = data.map(function(t) {
+      var borderColor =
+        t.instrumento === 'liquido'       ? '#66BB6A' :
+        t.instrumento === 'cheque_fisico' ? '#1976D2' :
+        t.instrumento === 'echeque'       ? '#7B1FA2' : '#999';
+      var emoji =
+        t.instrumento === 'liquido'       ? '💵' :
+        t.instrumento === 'cheque_fisico' ? '📄' :
+        t.instrumento === 'echeque'       ? '📱' : '❓';
+      var label =
+        t.instrumento === 'liquido'       ? 'Líquido' :
+        t.instrumento === 'cheque_fisico' ? 'Cheques' :
+        t.instrumento === 'echeque'       ? 'E-cheques' : t.instrumento;
+      var extra = '';
+      if (Number(t.cobranzas_proyectadas_conservador) > 0) {
+        extra = '<div style="font-size:8.5px;color:#5C3A1E;margin-top:3px;line-height:1.1;">+' + _cprFmtMillones(t.cobranzas_proyectadas_conservador) + ' cob</div>';
+      }
+      return '<div onclick="_comprasAbrirDetalleTecho(\'' + t.instrumento + '\')" style="background:linear-gradient(180deg,#FFFFFF 0%,#F8F8F8 100%);border-radius:9px;padding:8px 6px;text-align:center;border-top:3px solid ' + borderColor + ';box-shadow:0 1px 4px rgba(0,0,0,.15);cursor:pointer;">' +
+        '<div style="font-size:17px;line-height:1;margin-bottom:3px;">' + emoji + '</div>' +
+        '<div style="font-size:9px;text-transform:uppercase;color:#8B7B5F;font-weight:800;letter-spacing:0.3px;margin-bottom:4px;">' + label + '</div>' +
+        '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:19px;font-weight:900;color:#1A0800;line-height:1;">' +
+          '<span style="font-size:11px;color:#8B7B5F;margin-right:1px;">$</span>' + _cprFmtMillones(t.techo_real) +
+        '</div>' +
+        extra +
+      '</div>';
+    }).join('');
+    strip.innerHTML = cards;
+
+    var totalReal = data.reduce(function(s, t) { return s + Number(t.techo_real || 0); }, 0);
+    document.getElementById('cpr-techos-total-monto').textContent = _cprFmtMillones(totalReal);
+    var fecha = data[0] && data[0].fecha_saldo;
+    var sync = data[0] && data[0].ultima_sync;
+    document.getElementById('cpr-techos-fecha').textContent =
+      'Datos del ' + _cprFmtFechaCorta(fecha) + ' · sync ' + _cprFmtHora(sync);
+    total.style.display = 'flex';
+  } catch (e) {
+    console.error('[compras techos] error:', e);
+    strip.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:8px;color:#FFCDD2;font-size:11px;">❌ ' + (e.message || e) + '</div>';
+    total.style.display = 'none';
+  }
+}
+
+function _comprasAbrirDetalleTecho(instrumento) {
+  var t = _cprTechosData.find(function(x) { return x.instrumento === instrumento; });
+  if (!t) return;
+  var box = document.getElementById('cpr-techos-detalle');
+  var title = document.getElementById('cpr-techos-detalle-title');
+  var content = document.getElementById('cpr-techos-detalle-content');
+  var titulos = {
+    liquido:       'Líquido — efvo + MP + Galicia + BBVA TCK',
+    cheque_fisico: 'Cheques físicos en cartera',
+    echeque:       'E-cheques en cartera'
+  };
+  title.textContent = titulos[instrumento] || instrumento;
+  var gapHtml = '';
+  if (Number(t.gap_riesgo) > 0) {
+    gapHtml = '<div style="display:flex;justify-content:space-between;padding:6px 8px;margin:6px -8px 0;background:#FFF3E0;border-radius:6px;font-size:12.5px;">' +
+      '<span style="color:#E65100;font-weight:800;">⚠️ Gap de riesgo</span>' +
+      '<strong style="color:#E65100;font-family:\'Barlow Condensed\',sans-serif;font-size:14px;">$ ' + _cprFmtMonto(t.gap_riesgo) + '</strong>' +
+    '</div>';
+  }
+  content.innerHTML =
+    _cprRowDetalle('Saldo real', t.saldo_real) +
+    _cprRowDetalle('+ Cobranzas YA cobradas', t.cobranzas_cobradas) +
+    _cprRowDetalle('= Techo real', t.techo_real, true) +
+    _cprRowDetalle('Proyectado conservador', t.techo_conservador) +
+    _cprRowDetalle('Proyectado optimista', t.techo_optimista) +
+    gapHtml +
+    '<div style="font-size:10.5px;color:#9C7050;margin-top:8px;font-style:italic;">Foto del ' + _cprFmtFechaCorta(t.fecha_saldo) + ' · sync ' + _cprFmtHora(t.ultima_sync) + '</div>';
+  box.style.display = 'block';
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function _cprRowDetalle(label, monto, bold) {
+  var weight = bold ? '900' : '800';
+  return '<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12.5px;color:#5C3A1E;border-bottom:1px solid #f0f0f0;">' +
+    '<span>' + label + '</span>' +
+    '<strong style="color:#1A0800;font-weight:' + weight + ';">$ ' + _cprFmtMonto(monto) + '</strong>' +
+  '</div>';
+}
+
+function _cprFmtMillones(n) {
+  if (!n) return '0';
+  var m = Number(n) / 1000000;
+  if (m >= 100) return m.toFixed(0) + 'M';
+  if (m >= 10)  return m.toFixed(1) + 'M';
+  return m.toFixed(2) + 'M';
+}
+
+function _cprFmtMonto(n) {
+  if (!n && n !== 0) return '0';
+  return Math.round(Number(n)).toLocaleString('es-AR');
+}
+
+function _cprFmtFechaCorta(s) {
+  if (!s) return '—';
+  var parts = String(s).split('-');
+  if (parts.length < 3) return s;
+  return parts[2].substring(0,2) + '/' + parts[1];
+}
+
+function _cprFmtHora(ts) {
+  if (!ts) return '—';
+  var d = new Date(ts);
+  var hh = String(d.getHours()).padStart(2, '0');
+  var mm = String(d.getMinutes()).padStart(2, '0');
+  return hh + ':' + mm;
+}
+
+// ════════════════════════════════════════════════════════════════════
 async function comprasInit() {
   if (!_comprasInitDone) {
     _comprasInitDone = true;
@@ -28812,6 +28962,8 @@ async function comprasRecargar() {
     _comprasRenderPedidosActivos();
     _comprasRender();
     _comprasUpdateBadgeMenuMas();
+    // v12.19.0 — header de techos (lectura de vw_techos_dinamicos)
+    _comprasRenderTechos();
   } catch (e) {
     console.error('[compras] Error recargar:', e);
     if (cont) cont.innerHTML = '<div style="text-align:center;padding:30px;color:#C62828;font-size:12.5px;">Error al cargar: ' + (e.message || e) + '</div>';
