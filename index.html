@@ -11805,21 +11805,53 @@ input.canales-exp-input[type="date"] {
         </div>
       </div>
 
-      <!-- v12.19.0 — TECHOS DINÁMICOS (3 instrumentos + total) ─────────── -->
-      <div style="background:#2C2416;padding:10px 8px;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;" id="cpr-techos-strip">
-        <div style="grid-column:1/-1;text-align:center;padding:8px;color:#ccc;font-style:italic;font-size:11px;">Cargando techos…</div>
-      </div>
-      <div id="cpr-techos-total" style="display:none;background:linear-gradient(90deg,#FFD700,#FFA500);padding:7px 14px;justify-content:space-between;align-items:center;">
-        <div>
-          <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:900;color:#1A0800;text-transform:uppercase;letter-spacing:0.5px;">💰 Total disponible</div>
-          <div id="cpr-techos-fecha" style="font-size:9.5px;color:#5C3A1E;margin-top:1px;">—</div>
+      <!-- v12.19.1 — TECHOS DINÁMICOS jerárquicos ──────────────────────
+           Disponible HOY destacado (solo líquido).
+           Cheques/e-cheques visibles como info pero NO suman al disponible
+           porque su fecha de vencimiento determina cuándo entra ese dinero.
+           Vista Proyección 30d resuelve el día a día (próxima sesión). -->
+      <div style="background:#2C2416;padding:10px 8px;" id="cpr-techos-wrapper">
+        <div id="cpr-techos-loading" style="text-align:center;padding:8px;color:#ccc;font-style:italic;font-size:11px;">Cargando techos…</div>
+
+        <!-- DISPONIBLE HOY — bloque principal -->
+        <div id="cpr-techo-disponible" style="display:none;background:linear-gradient(180deg,#FFFFFF 0%,#F8F8F8 100%);border-radius:9px;padding:10px 12px;border-left:5px solid #2E7D32;box-shadow:0 1px 4px rgba(0,0,0,.15);">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:10px;text-transform:uppercase;color:#5C3A1E;font-weight:800;letter-spacing:0.4px;">💵 Disponible hoy</div>
+              <div style="font-size:9.5px;color:#9C7050;margin-top:1px;">Líquido: efvo + MP + Galicia + BBVA TCK</div>
+            </div>
+            <div style="font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:900;color:#1A0800;line-height:1;text-align:right;">
+              <span style="font-size:14px;color:#5C3A1E;margin-right:2px;">$</span><span id="cpr-techo-disponible-monto">—</span>
+            </div>
+          </div>
         </div>
-        <div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:900;color:#1A0800;line-height:1;">
-          <span style="font-size:13px;color:#5C3A1E;margin-right:2px;">$</span><span id="cpr-techos-total-monto">—</span>
+
+        <!-- POR COBRAR — bloque secundario (cheques + e-cheques) -->
+        <div id="cpr-techo-por-cobrar" style="display:none;margin-top:6px;background:rgba(255,255,255,0.08);border-radius:9px;padding:8px 12px;">
+          <div style="font-size:9.5px;text-transform:uppercase;color:#FFD700;font-weight:800;letter-spacing:0.4px;margin-bottom:6px;">📥 Por cobrar (en cartera)</div>
+          <div style="display:flex;gap:10px;">
+            <div style="flex:1;display:flex;justify-content:space-between;align-items:baseline;color:#fff;font-size:12px;">
+              <span style="opacity:0.85;">📄 Cheques</span>
+              <span style="font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:900;"><span style="font-size:10px;opacity:0.7;">$</span><span id="cpr-techo-cheques">—</span></span>
+            </div>
+            <div style="flex:1;display:flex;justify-content:space-between;align-items:baseline;color:#fff;font-size:12px;">
+              <span style="opacity:0.85;">📱 E-cheques</span>
+              <span style="font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:900;"><span style="font-size:10px;opacity:0.7;">$</span><span id="cpr-techo-echeques">—</span></span>
+            </div>
+          </div>
+          <div style="font-size:9px;color:#FFE082;margin-top:5px;font-style:italic;">Entran a tu caja según vencimiento — ver proyección 30d</div>
+        </div>
+
+        <!-- FOOTER del bloque -->
+        <div id="cpr-techo-footer" style="display:none;margin-top:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <div style="font-size:9.5px;color:#FFE082;">
+            Datos del <span id="cpr-techo-fecha">—</span> · sync <span id="cpr-techo-hora">—</span>
+          </div>
+          <button onclick="_comprasAbrirProyeccion()" style="background:linear-gradient(135deg,#1565C0,#1976D2);color:#fff;border:none;border-radius:6px;padding:6px 10px;font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:0.3px;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.2);">📈 Ver proyección 30d</button>
         </div>
       </div>
 
-      <!-- Detalle expandible al tapear un techo -->
+      <!-- Detalle expandible al tapear (se mantiene de v12.19.0) -->
       <div id="cpr-techos-detalle" style="display:none;background:#fff;margin:8px;border-radius:10px;padding:14px;box-shadow:0 2px 8px rgba(0,0,0,.08);">
         <div id="cpr-techos-detalle-title" style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:900;color:#1A0800;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:10px;">Detalle</div>
         <div id="cpr-techos-detalle-content"></div>
@@ -28811,65 +28843,79 @@ function _comprasColorCobertura(dias) {
 // ─────────────────────────────────────────────────────────────────────────
 // INIT del tab — se llama desde cambiarTab
 // ─────────────────────────────────────────────────────────────────────────
-// v12.19.0 — Header de techos dinámicos (líquido / cheques / e-cheques)
-// Lee de vw_techos_dinamicos en Supabase. Sprint 1 día 4-5.
+// v12.19.1 — Header de techos jerárquico (Disponible HOY + Por cobrar)
+// Lee de vw_techos_dinamicos en Supabase.
+// Solo el LÍQUIDO suma al "Disponible hoy". Cheques y e-cheques
+// quedan como "Por cobrar" porque dependen de fecha de vencimiento.
 // ════════════════════════════════════════════════════════════════════
 var _cprTechosData = [];
 
 async function _comprasRenderTechos() {
-  var strip = document.getElementById('cpr-techos-strip');
-  var total = document.getElementById('cpr-techos-total');
-  if (!strip || !total) return;
+  var loading = document.getElementById('cpr-techos-loading');
+  var dispBlock = document.getElementById('cpr-techo-disponible');
+  var porCobrarBlock = document.getElementById('cpr-techo-por-cobrar');
+  var footer = document.getElementById('cpr-techo-footer');
+  if (!loading || !dispBlock) return;
 
   try {
     var data = await sbFetch('vw_techos_dinamicos?select=*');
     if (!data || !data.length) {
-      strip.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:8px;color:#FFCDD2;font-size:11px;">⚠️ Sin data de techos</div>';
-      total.style.display = 'none';
+      loading.textContent = '⚠️ Sin data de techos';
+      loading.style.color = '#FFCDD2';
       return;
     }
     _cprTechosData = data;
 
-    var cards = data.map(function(t) {
-      var borderColor =
-        t.instrumento === 'liquido'       ? '#66BB6A' :
-        t.instrumento === 'cheque_fisico' ? '#1976D2' :
-        t.instrumento === 'echeque'       ? '#7B1FA2' : '#999';
-      var emoji =
-        t.instrumento === 'liquido'       ? '💵' :
-        t.instrumento === 'cheque_fisico' ? '📄' :
-        t.instrumento === 'echeque'       ? '📱' : '❓';
-      var label =
-        t.instrumento === 'liquido'       ? 'Líquido' :
-        t.instrumento === 'cheque_fisico' ? 'Cheques' :
-        t.instrumento === 'echeque'       ? 'E-cheques' : t.instrumento;
-      var extra = '';
-      if (Number(t.cobranzas_proyectadas_conservador) > 0) {
-        extra = '<div style="font-size:8.5px;color:#5C3A1E;margin-top:3px;line-height:1.1;">+' + _cprFmtMillones(t.cobranzas_proyectadas_conservador) + ' cob</div>';
-      }
-      return '<div onclick="_comprasAbrirDetalleTecho(\'' + t.instrumento + '\')" style="background:linear-gradient(180deg,#FFFFFF 0%,#F8F8F8 100%);border-radius:9px;padding:8px 6px;text-align:center;border-top:3px solid ' + borderColor + ';box-shadow:0 1px 4px rgba(0,0,0,.15);cursor:pointer;">' +
-        '<div style="font-size:17px;line-height:1;margin-bottom:3px;">' + emoji + '</div>' +
-        '<div style="font-size:9px;text-transform:uppercase;color:#8B7B5F;font-weight:800;letter-spacing:0.3px;margin-bottom:4px;">' + label + '</div>' +
-        '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:19px;font-weight:900;color:#1A0800;line-height:1;">' +
-          '<span style="font-size:11px;color:#8B7B5F;margin-right:1px;">$</span>' + _cprFmtMillones(t.techo_real) +
-        '</div>' +
-        extra +
-      '</div>';
-    }).join('');
-    strip.innerHTML = cards;
+    var liquido       = data.find(function(t) { return t.instrumento === 'liquido'; });
+    var chequeFisico  = data.find(function(t) { return t.instrumento === 'cheque_fisico'; });
+    var echeque       = data.find(function(t) { return t.instrumento === 'echeque'; });
 
-    var totalReal = data.reduce(function(s, t) { return s + Number(t.techo_real || 0); }, 0);
-    document.getElementById('cpr-techos-total-monto').textContent = _cprFmtMillones(totalReal);
+    // Bloque principal: Disponible HOY (solo líquido)
+    var dispMonto = liquido ? Number(liquido.techo_real || 0) : 0;
+    document.getElementById('cpr-techo-disponible-monto').textContent = _cprFmtMillones(dispMonto);
+    dispBlock.style.display = 'block';
+    dispBlock.style.cursor = 'pointer';
+    dispBlock.onclick = function() { _comprasAbrirDetalleTecho('liquido'); };
+
+    // Bloque secundario: Por cobrar (cheques + e-cheques) — solo si hay alguno
+    var chequesMonto = chequeFisico ? Number(chequeFisico.techo_real || 0) : 0;
+    var echequesMonto = echeque ? Number(echeque.techo_real || 0) : 0;
+    if (chequesMonto > 0 || echequesMonto > 0) {
+      document.getElementById('cpr-techo-cheques').textContent = _cprFmtMillones(chequesMonto);
+      document.getElementById('cpr-techo-echeques').textContent = _cprFmtMillones(echequesMonto);
+      porCobrarBlock.style.display = 'block';
+      porCobrarBlock.style.cursor = 'pointer';
+      porCobrarBlock.onclick = function(ev) {
+        // Si hizo click en uno de los items, abrir su detalle
+        var tgt = ev && ev.target && ev.target.closest('div');
+        if (tgt && tgt.textContent && tgt.textContent.indexOf('Cheques') >= 0) {
+          _comprasAbrirDetalleTecho('cheque_fisico');
+        } else if (tgt && tgt.textContent && tgt.textContent.indexOf('E-cheques') >= 0) {
+          _comprasAbrirDetalleTecho('echeque');
+        }
+      };
+    } else {
+      porCobrarBlock.style.display = 'none';
+    }
+
+    // Footer: fecha + sync + botón proyección
     var fecha = data[0] && data[0].fecha_saldo;
     var sync = data[0] && data[0].ultima_sync;
-    document.getElementById('cpr-techos-fecha').textContent =
-      'Datos del ' + _cprFmtFechaCorta(fecha) + ' · sync ' + _cprFmtHora(sync);
-    total.style.display = 'flex';
+    document.getElementById('cpr-techo-fecha').textContent = _cprFmtFechaCorta(fecha);
+    document.getElementById('cpr-techo-hora').textContent = _cprFmtHora(sync);
+    footer.style.display = 'flex';
+    loading.style.display = 'none';
   } catch (e) {
     console.error('[compras techos] error:', e);
-    strip.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:8px;color:#FFCDD2;font-size:11px;">❌ ' + (e.message || e) + '</div>';
-    total.style.display = 'none';
+    loading.textContent = '❌ ' + (e.message || e);
+    loading.style.color = '#FFCDD2';
   }
+}
+
+// Placeholder: el botón "Ver proyección 30d" abre un modal informativo
+// hasta que en la próxima sesión integremos la vista real con backend SQL.
+function _comprasAbrirProyeccion() {
+  alert('📈 Vista Proyección 30 días\n\nEsta vista mostrará:\n• Saldo proyectado día a día\n• Pagos próximos (de Gastón)\n• Cobros esperados\n• Cheques/e-cheques que ingresan\n\nDisponible próximamente.');
 }
 
 function _comprasAbrirDetalleTecho(instrumento) {
@@ -28879,9 +28925,9 @@ function _comprasAbrirDetalleTecho(instrumento) {
   var title = document.getElementById('cpr-techos-detalle-title');
   var content = document.getElementById('cpr-techos-detalle-content');
   var titulos = {
-    liquido:       'Líquido — efvo + MP + Galicia + BBVA TCK',
-    cheque_fisico: 'Cheques físicos en cartera',
-    echeque:       'E-cheques en cartera'
+    liquido:       '💵 Disponible hoy — desglose',
+    cheque_fisico: '📄 Cheques físicos en cartera',
+    echeque:       '📱 E-cheques en cartera'
   };
   title.textContent = titulos[instrumento] || instrumento;
   var gapHtml = '';
