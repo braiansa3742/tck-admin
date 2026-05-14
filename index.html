@@ -1,6 +1,29 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v12.18.1 — 16/05/2026
+     TCK ADMIN — v12.18.2 — 16/05/2026
+     ──────────────────────────────────────────────────────────────────────
+     FIX v12.18.2 sobre v12.18.1:
+       1. Margen estimado mostraba ~94% en productos con peso (Suprema,
+          Alita, CT IQF). Causa: el JS asumía que costo_unitario_actual
+          estaba en $/unidad, pero realmente está en $/kg cuando
+          kg_por_unidad NOT NULL.
+          Fix: eliminado cálculo de margen en JS, ahora se usa el campo
+          margen_pct calculado correctamente en la vista
+          vw_detalle_compra_producto (regla por kg_por_unidad).
+
+       2. Costo del proveedor en la tarjeta de sugerencia: nuevo toggle
+          UNID./KG para alternar entre $/unidad y $/kg cuando hay
+          kg_por_unidad cargado. Se oculta el toggle si el producto solo
+          tiene precio por unidad (ej. maples, cajitas).
+
+       3. Marcar pedido y Copiar para Xubio ahora usan costo_x_unidad
+          (siempre por unidad) para calcular el total correctamente,
+          independiente de en qué unidad esté visualizando el usuario.
+
+     PRE-REQUISITOS:
+       · SQL fix_margen_vista_v1.sql aplicado (agrega costo_x_kg,
+         costo_x_unidad, costo_unidad_origen, margen_pct correcto a
+         vw_detalle_compra_producto)
      ──────────────────────────────────────────────────────────────────────
      HOTFIX v12.18.1 sobre v12.18.0:
        Reemplazado appsScriptFetch (no existe en tck-admin) por helper
@@ -28720,6 +28743,7 @@ var _comprasDetailFilas = [];             // filas (puede ser multi-proveedor)
 var _comprasDetailProveedorSel = null;    // proveedor_id elegido en multi
 var _comprasDetailCantidad = 0;           // cantidad actual del slider
 var _comprasDetailVelDias = [];           // chart velocidad x día semana
+var _comprasDetailUnidadVista = 'unidad'; // v12.18.2 — 'unidad' | 'kg' para toggle costo
 var _comprasInitDone = false;
 
 // Helper: nombre del usuario logueado en formato para pedido_por
@@ -29055,6 +29079,7 @@ async function comprasDetailAbrir(nombreProducto) {
   _comprasDetailProveedorSel = null;
   _comprasDetailCantidad = 0;
   _comprasDetailVelDias = [];
+  _comprasDetailUnidadVista = 'unidad';   // v12.18.2 — reset toggle
 
   document.getElementById('cpr-det-titulo').textContent = nombreProducto;
   document.getElementById('cpr-det-subtitulo').textContent = 'Cargando...';
@@ -29236,14 +29261,44 @@ function _comprasDetailRender() {
   }
 
   // Bloque 5: Sugerencia + slider
+  // v12.18.2 — costo con toggle $/kg ↔ $/unidad (cuando hay kg_por_unidad)
+  var hayKg = fila.costo_x_kg !== null && fila.costo_x_kg !== undefined;
+  var costoMostrar, unidadMostrarLbl, togglePuede;
+  if (hayKg) {
+    togglePuede = true;
+    if (_comprasDetailUnidadVista === 'kg') {
+      costoMostrar = fila.costo_x_kg;
+      unidadMostrarLbl = 'por kg';
+    } else {
+      costoMostrar = fila.costo_x_unidad;
+      unidadMostrarLbl = 'por ' + (fila.unidad_compra || 'unidad');
+    }
+  } else {
+    togglePuede = false;
+    costoMostrar = fila.costo_x_unidad || fila.costo_unitario_actual || 0;
+    unidadMostrarLbl = 'por ' + (fila.unidad_compra || 'unidad');
+  }
+
+  var toggleHTML = '';
+  if (togglePuede) {
+    var btnUni = (_comprasDetailUnidadVista === 'unidad');
+    toggleHTML =
+      '<div style="display:inline-flex;background:#F4ECD8;border-radius:6px;padding:2px;margin-top:4px;">' +
+        '<button onclick="comprasDetailToggleUnidad(\'unidad\')" style="padding:3px 8px;border:none;border-radius:5px;background:' + (btnUni ? '#1B5E20' : 'transparent') + ';color:' + (btnUni ? '#fff' : '#5C4F3A') + ';font-family:\'Barlow Condensed\',sans-serif;font-size:10.5px;font-weight:800;cursor:pointer;text-transform:uppercase;letter-spacing:0.3px;">unid.</button>' +
+        '<button onclick="comprasDetailToggleUnidad(\'kg\')" style="padding:3px 8px;border:none;border-radius:5px;background:' + (!btnUni ? '#1B5E20' : 'transparent') + ';color:' + (!btnUni ? '#fff' : '#5C4F3A') + ';font-family:\'Barlow Condensed\',sans-serif;font-size:10.5px;font-weight:800;cursor:pointer;text-transform:uppercase;letter-spacing:0.3px;">kg</button>' +
+      '</div>';
+  }
+
   html += '<div style="background:linear-gradient(135deg,#F1F8E9,#E8F5E9);border:1.5px solid #66BB6A;border-radius:11px;padding:13px;">';
   html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;color:#1B5E20;margin-bottom:9px;">💡 Sugerencia de compra</div>';
 
-  html += '<div style="display:flex;justify-content:space-between;margin-bottom:10px;align-items:flex-end;">';
-  html += '<div><div style="font-family:\'Barlow Condensed\',sans-serif;font-size:15px;font-weight:800;color:#1B5E20;">📦 ' + fila.proveedor_nombre + '</div>';
+  html += '<div style="display:flex;justify-content:space-between;margin-bottom:10px;align-items:flex-end;gap:10px;">';
+  html += '<div style="flex:1;min-width:0;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-size:15px;font-weight:800;color:#1B5E20;">📦 ' + fila.proveedor_nombre + '</div>';
   html += '<div style="font-size:11px;color:#5C4F3A;margin-top:2px;font-weight:600;">' + (fila.forma_pago || '') + (fila.plazo_pago_dias ? ' · pago ' + fila.plazo_pago_dias + 'd' : '') + ' · pedir ' + (fila.dia_pedido || 'planificado') + '</div></div>';
-  html += '<div style="text-align:right;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-size:15px;font-weight:800;">' + _comprasFmtMontoFull(fila.costo_unitario_actual || 0) + '</div>';
-  html += '<div style="font-size:10px;color:#8B7B5F;text-transform:uppercase;">por ' + (fila.unidad_compra || 'u') + '</div></div>';
+  html += '<div style="text-align:right;flex-shrink:0;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-size:15px;font-weight:800;">' + _comprasFmtMontoFull(costoMostrar) + '</div>';
+  html += '<div style="font-size:10px;color:#8B7B5F;text-transform:uppercase;">' + unidadMostrarLbl + '</div>';
+  html += toggleHTML;
+  html += '</div>';
   html += '</div>';
 
   // Slider
@@ -29266,9 +29321,10 @@ function _comprasDetailRender() {
 
 function _comprasDetailPreviewHTML(fila) {
   var cant = _comprasDetailCantidad;
-  var costoUnit = fila.costo_unitario_actual || 0;
-  var total = cant * costoUnit;
-  var kgPorU = fila.kg_por_unidad;
+  // v12.18.2 — el costo total siempre se calcula en $/unidad para multiplicar por la cantidad
+  // (la cantidad SIEMPRE está en unidades, sea cajas/maples/etc)
+  var costoPorUnidad = fila.costo_x_unidad || fila.costo_unitario_actual || 0;
+  var total = cant * costoPorUnidad;
   var velDia = fila.velocidad_dia_30d || 0;
   var stock = fila.stock_visible || 0;
 
@@ -29281,18 +29337,12 @@ function _comprasDetailPreviewHTML(fila) {
     coberturaColPost = d > 7 ? '#1B5E20' : (d > 3 ? '#F57F17' : '#C62828');
   }
 
-  // Margen
+  // v12.18.2 — Margen viene calculado del backend (vw_detalle_compra_producto)
   var margenHTML = '';
-  if (fila.precio_venta_kg && kgPorU && costoUnit > 0) {
-    var precioKgVenta = fila.precio_venta_kg;
-    var costoKg = costoUnit / kgPorU;
-    var margenPct = ((precioKgVenta - costoKg) / precioKgVenta * 100).toFixed(1);
-    var margenColor = margenPct > 15 ? '#1B5E20' : (margenPct > 5 ? '#F57F17' : '#C62828');
-    margenHTML = '<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12.5px;border-bottom:1px solid rgba(0,0,0,.05);"><span style="color:#5C4F3A;">Margen estimado:</span><span style="font-family:\'Barlow Condensed\',sans-serif;font-weight:800;color:' + margenColor + ';">' + margenPct + '%</span></div>';
-  } else if (fila.precio_venta && !kgPorU && costoUnit > 0) {
-    var margenPct2 = ((fila.precio_venta - costoUnit) / fila.precio_venta * 100).toFixed(1);
-    var margenColor2 = margenPct2 > 15 ? '#1B5E20' : (margenPct2 > 5 ? '#F57F17' : '#C62828');
-    margenHTML = '<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12.5px;border-bottom:1px solid rgba(0,0,0,.05);"><span style="color:#5C4F3A;">Margen estimado:</span><span style="font-family:\'Barlow Condensed\',sans-serif;font-weight:800;color:' + margenColor2 + ';">' + margenPct2 + '%</span></div>';
+  if (fila.margen_pct !== null && fila.margen_pct !== undefined) {
+    var mp = parseFloat(fila.margen_pct);
+    var margenColor = mp > 15 ? '#1B5E20' : (mp > 5 ? '#F57F17' : '#C62828');
+    margenHTML = '<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12.5px;border-bottom:1px solid rgba(0,0,0,.05);"><span style="color:#5C4F3A;">Margen estimado:</span><span style="font-family:\'Barlow Condensed\',sans-serif;font-weight:800;color:' + margenColor + ';">' + mp.toFixed(1) + '%</span></div>';
   }
 
   var html = '';
@@ -29306,6 +29356,13 @@ function _comprasDetailPreviewHTML(fila) {
     html += '<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12.5px;"><span style="color:#5C4F3A;">Vence pago:</span><span style="font-family:\'Barlow Condensed\',sans-serif;font-weight:800;">' + fmt + '</span></div>';
   }
   return html;
+}
+
+// v12.18.2 — Toggle entre $/kg y $/unidad en el detail
+function comprasDetailToggleUnidad(unidad) {
+  if (unidad !== 'kg' && unidad !== 'unidad') return;
+  _comprasDetailUnidadVista = unidad;
+  _comprasDetailRender();
 }
 
 function comprasDetailSwitchProveedor(provId) {
@@ -29363,7 +29420,7 @@ async function comprasDetailMarcarPedido() {
       productos_proveedores_id: fila.pp_id,
       cantidad: _comprasDetailCantidad,
       unidad_compra: fila.unidad_compra || '',
-      costo_unitario_estimado: fila.costo_unitario_actual || 0,
+      costo_unitario_estimado: fila.costo_x_unidad || fila.costo_unitario_actual || 0,
       pedido_por: _comprasUsuarioActual()
     }, 20000);
 
@@ -29390,7 +29447,7 @@ function comprasDetailCopiarXubio() {
     return;
   }
 
-  var costoUnit = fila.costo_unitario_actual || 0;
+  var costoUnit = fila.costo_x_unidad || fila.costo_unitario_actual || 0;
   var total = _comprasDetailCantidad * costoUnit;
   var hoy = new Date();
   var fmtHoy = hoy.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
