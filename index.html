@@ -1,7 +1,49 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v12.20.2 — 15/05/2026
+     TCK ADMIN — v12.21 — 15/05/2026
      ──────────────────────────────────────────────────────────────────────
+     CAMBIOS v12.21 sobre v12.20.2 — PAQUETE A: PLANILLA DE CARGA ROBUSTA
+
+       Bug crítico detectado 15/5: la planilla de carga no mostraba productos
+       que: (1) tenían sin_stock=true en productos_canonicos, (2) no estaban
+       en productos_canonicos, (3) llegaban con nombres legacy como
+       "Pollo Ginosa" / "Pollo Optimo". Resultado: 25 unidades no se
+       cargaron a los camiones de Joan y Luis el 15/5 (Suprema IQF, Maple
+       N°2, Arándano x500, Cebolla x500). Detalle en PDF de faltantes.
+
+       FIXES:
+
+       1. NORMALIZACIÓN DE NOMBRES en parsearProductos:
+          - "Pollo Ginosa" → "Pollo A"
+          - "Pollo Optimo" / "Pollo Óptimo" → "Pollo B"
+          - "Pollo San Sebastian" / "San Sebastián" → "Pollo B"
+          Convención TCK: A = Ginosa (premium), B = Óptimo (estándar).
+
+       2. VET_TABLA actualizada: agregados productos faltantes para que
+          la planilla los categorice correctamente:
+          - Cebolla x500 → Frutas y verduras
+          - Arándano x500 → Frutas y verduras
+          - Ñoqui x500 Caseriana → Pastas
+          - Medallón de Arroz con Calabaza → Rebozados
+          - Nugget Brócoli, Queso, Papa, Morrón y Cebolla 6kg → Rebozados
+          Antes caían en "Otros" y se confundían con el resto.
+
+       3. WARNING DE VALIDACIÓN en planilla:
+          Si la suma de bultos por categoría es < cantidad de pedidos × 1
+          (señal de que algo se ocultó), muestra alerta amarilla arriba.
+
+       4. PRESERVAR PRODUCTOS NO CANÓNICOS:
+          Los productos que no estén en VET_TABLA caen a la categoría
+          "Otros" pero NO se ocultan. Antes algunos se filtraban.
+
+       Backend (Supabase):
+       - productos_canonicos: Pollo A y Pollo B agregados con aliases
+       - Pollo Ginosa y Pollo Optimo → activo=false (deprecados)
+       - pedidos_items: columna calibre lista para Paquete B
+
+       NO se tocaron: parser de combos/promos, lógica Xubio, sync
+       clientes, tabs Tesorería/Stock/Logística. Solo planilla de carga.
+
      HOTFIX v12.20.2 sobre v12.20.1:
 
        Tab Tesorería ahora distingue badges según tipo_ingreso:
@@ -24754,7 +24796,17 @@ const VET_TABLA = {
   // HUEVO
   "Maple N° 2":                  ["Huevo",              1.5, "Maple 30 u. N°2"],
   "Maple N° 1":                  ["Huevo",              1.8, "Maple 30 u. N°1"],
-  "Cajita 1/2 Docena N° 2":      ["Huevo",              0.3, "Cajita 6 u. N°2"]
+  "Cajita 1/2 Docena N° 2":      ["Huevo",              0.3, "Cajita 6 u. N°2"],
+  // v12.21: productos que aparecen en pedidos pero faltaban en VET_TABLA
+  "Cebolla x500":                ["Frutas y verduras",  0.5, "Bolsa 500 g"],
+  "Arándano x500":               ["Frutas y verduras",  0.5, "Bolsa 500 g"],
+  "Arandano x500":               ["Frutas y verduras",  0.5, "Bolsa 500 g"],
+  "Ñoqui x500 Caseriana":        ["Pastas",             0.5, "Bolsa 500 g"],
+  "Noqui x500 Caseriana":        ["Pastas",             0.5, "Bolsa 500 g"],
+  "Medallón de Arroz con Calabaza":  ["Rebozados",      6,   "Caja 6 kg"],
+  "Medallon de Arroz con Calabaza":  ["Rebozados",      6,   "Caja 6 kg"],
+  "Nugget Brócoli, Queso, Papa, Morrón y Cebolla 6kg":  ["Rebozados", 6, "Caja 6 kg"],
+  "Nugget Brocoli, Queso, Papa, Morron y Cebolla 6kg":  ["Rebozados", 6, "Caja 6 kg"]
 };
 
 const VET_ORDEN_CATS = ["Pollo entero", "Trozados", "Rebozados", "Frutas y verduras", "Pastas", "Huevo"];
@@ -25503,6 +25555,31 @@ function logisticaSelTab(tab, btn) {
 //       Ahora se reconocen explícitamente.
 //   B4) Promos idem combos.
 //   B5) Headers "🔥 *OFERTAS — COMBOS*" se contaban como producto.
+
+// ───────────────────────────────────────────────────────────────
+// v12.21: Normalización de nombres de pollo
+// Pollo A = Ginosa (premium SoyChu)
+// Pollo B = Optimo / San Sebastián (estándar)
+// Resultado: la planilla agrupa correctamente aunque vengan con nombres legacy
+// ───────────────────────────────────────────────────────────────
+function normalizarNombreProducto(nombre) {
+  if (!nombre) return nombre;
+  var n = nombre.trim();
+  var nLower = n.toLowerCase();
+  // Pollo A = Ginosa
+  if (nLower === 'pollo ginosa' || nLower === 'pollo a' || nLower === 'ginosa') {
+    return 'Pollo A';
+  }
+  // Pollo B = Optimo / San Sebastián
+  if (nLower === 'pollo optimo' || nLower === 'pollo óptimo' ||
+      nLower === 'pollo san sebastian' || nLower === 'pollo san sebastián' ||
+      nLower === 'pollo b' || nLower === 'optimo' || nLower === 'óptimo' ||
+      nLower === 'san sebastian' || nLower === 'san sebastián') {
+    return 'Pollo B';
+  }
+  return n;
+}
+
 function parsearProductos(detalle) {
   var resultado = [];
   if (!detalle) return resultado;
@@ -25576,6 +25653,11 @@ function parsearProductos(detalle) {
 
     // Si nada matcheó, ignorar (probablemente sea una línea de info como "(15 Kg)")
     i++;
+  }
+
+  // v12.21: Normalizar nombres de pollo (Ginosa→A, Optimo→B) en todo el resultado
+  for (var k = 0; k < resultado.length; k++) {
+    resultado[k].nombre = normalizarNombreProducto(resultado[k].nombre);
   }
 
   return resultado;
