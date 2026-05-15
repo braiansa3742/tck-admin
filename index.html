@@ -1,7 +1,31 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v12.20.1 — 15/05/2026
+     TCK ADMIN — v12.20.2 — 15/05/2026
      ──────────────────────────────────────────────────────────────────────
+     HOTFIX v12.20.2 sobre v12.20.1:
+
+       Tab Tesorería ahora distingue badges según tipo_ingreso:
+         · "Real" (verde) — viaje real con pedidos cargados
+         · "Real+Est" (gradiente verde→amarillo) — viaje real + zonas
+           estimadas que faltan ese día (ej: Z1 real + TL estimado)
+         · "Estimado" (amarillo) — solo estimación por calendario
+         · sin badge — días sin movimiento
+
+       Esto pasa porque vw_proyeccion_caja_30d ahora consume
+       vw_ingresos_proyectados_30d_v2 (combina real + estimado por
+       zona×día de semana, sin doble conteo).
+
+       Leyenda del calendario actualizada con 3 tipos.
+
+     PRE-REQUISITOS BACKEND (ya aplicados en sesión 15/5):
+       · Vistas creadas:
+         - vw_factor_tendencia
+         - vw_calendario_zonas
+         - vw_promedio_zona_dow_full
+         - vw_ingresos_proyectados_30d_v2
+       · vw_proyeccion_caja_30d actualizada
+       · 4 keys nuevas en config_proyeccion (tendencia_*)
+
      HOTFIX v12.20.1 sobre v12.20.0:
 
        Saldo del calendario de Tesorería estaba mostrando saldo_gaston
@@ -10948,6 +10972,8 @@ input.canales-exp-input[type="date"] {
   letter-spacing: 0.3px;
 }
 .tes-badge.real { background: #E8F5E9; color: #1B5E20; }
+.tes-badge.real-est { background: linear-gradient(90deg, #E8F5E9 0%, #FFF8E1 100%); color: #5D4037; border: 1px solid #C8E6C9; }
+.tes-badge.estimado { background: #FFF8E1; color: #F57F17; }
 .tes-badge.sin-data { background: #ECEFF1; color: #607D8B; }
 .tes-badge.pico { background: #B71C1C; color: #fff; font-weight: 900; }
 
@@ -12624,6 +12650,7 @@ input.canales-exp-input[type="date"] {
             <div class="tes-cal-tit-h">📅 Próximos 30 días</div>
             <div class="tes-cal-leyenda">
               <span><span class="tes-cal-leyenda-dot" style="background:#2E7D32"></span>Real</span>
+              <span><span class="tes-cal-leyenda-dot" style="background:#F57F17"></span>Estim.</span>
               <span><span class="tes-cal-leyenda-dot" style="background:#90A4AE"></span>Sin data</span>
             </div>
           </div>
@@ -29935,9 +29962,21 @@ function _tesRenderCalendario(dias, saldoHoy) {
       var detalleTxt = d.detalle_viajes
         ? d.detalle_viajes.replace(/\(\$0\)/g, '').replace(/, /g, ', ').replace(/^[, ]+|[, ]+$/g, '')
         : '';
+      // v12.20.2 — badge dinámico según tipo_ingreso
+      var tipoIng = d.tipo_ingreso || 'real';
+      var badgeHtml = '';
+      if (tipoIng === 'real') {
+        badgeHtml = '<span class="tes-badge real">Real</span>';
+      } else if (tipoIng === 'real+estimado') {
+        badgeHtml = '<span class="tes-badge real-est">Real+Est</span>';
+      } else if (tipoIng === 'estimado') {
+        badgeHtml = '<span class="tes-badge estimado">Estimado</span>';
+      } else {
+        badgeHtml = '<span class="tes-badge real">Real</span>';
+      }
       resumenRows += '<div class="tes-dia-resumen-row">'
         + '<span class="tes-dia-flujo entra">⬆ Entra <span class="tes-dia-flujo-monto">$' + _tesFmtMonto(ingreso) + '</span></span>'
-        + '<span class="tes-badge real">Real</span>'
+        + badgeHtml
         + '</div>';
     }
 
