@@ -1,7 +1,49 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v12.18.2 — 16/05/2026
+     TCK ADMIN — v12.20.0 — 15/05/2026
      ──────────────────────────────────────────────────────────────────────
+     CAMBIOS v12.20.0 sobre v12.18.2:
+
+       1. Tab nueva "💰 Tesorería" en menú Más.
+
+          Pantalla de proyección de caja 30 días que cruza:
+          · vw_proyeccion_caja_30d (saldo Gastón + ingresos por viajes +
+            pagos comprometidos pendientes)
+          · vw_deuda_vencida ($76,3M en banner aparte)
+          · caja_saldo_diario (último día) para "Disponible hoy"
+
+          Lógica de ingresos basada en config_zona_lag:
+          · TL = lag 0 (rinde mismo día)
+          · america_fortin = lag 1
+          · zona1 / zona2 = lag 2
+          · Override manual vía viajes.fecha_rendicion_esperada
+
+          Cobranzas en "Disponible hoy" SOLO plata líquida — cheques y
+          e-cheques se muestran como "En cartera", se acreditan según vto.
+
+          Detalle de pagos del día: top 2 inline + botón "Ver todos los X
+          pagos" que abre modal con la lista completa.
+
+       2. Botón "Ver proyección 30d" en header del tab Compras ahora
+          navega a la tab Tesorería (antes mostraba alert placeholder).
+
+     PRE-REQUISITOS:
+       · SQL ya aplicado en Supabase (sesión 15/5):
+         - tabla config_proyeccion (44/45/10 efvo/banco/cheque)
+         - tabla config_zona_lag (lags por zona)
+         - columna viajes.fecha_rendicion_esperada
+         - vista vw_ventas_diarias_historicas
+         - vista vw_ingresos_caja_proyectados_30d
+         - vista vw_proyeccion_caja_30d
+         - vista vw_deuda_vencida
+       · No requiere cambios en Apps Script.
+
+     DEPLOY:
+       1. Subir este archivo al repo tck-admin como index.html
+       2. Hard refresh en navegador Francisco (Cmd+Shift+R)
+       3. Validar: menú Más → 💰 Tesorería → debe abrir vista con data
+          real de Supabase.
+     ══════════════════════════════════════════════════════════════════════
      FIX v12.18.2 sobre v12.18.1:
        1. Margen estimado mostraba ~94% en productos con peso (Suprema,
           Alita, CT IQF). Causa: el JS asumía que costo_unitario_actual
@@ -10563,6 +10605,558 @@ input.canales-exp-input[type="date"] {
   min-height: 16px;
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   v12.20.0 — TESORERÍA
+   ═══════════════════════════════════════════════════════════════════ */
+
+#view-tesoreria { background: var(--cream); }
+
+.tes-hdr {
+  background: linear-gradient(135deg, #8B0000, #6B0000);
+  padding: 14px 14px 13px;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 3px solid var(--gold);
+}
+.tes-hdr-tit {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 900;
+  font-size: 22px;
+  color: var(--gold);
+  letter-spacing: 0.5px;
+  line-height: 1;
+}
+.tes-hdr-sub {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.75);
+  margin-top: 3px;
+}
+.tes-hdr-btn-actualizar {
+  background: rgba(255, 215, 0, 0.15);
+  border: 1.5px solid var(--gold);
+  color: var(--gold);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 12px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  letter-spacing: 0.4px;
+}
+.tes-hdr-btn-actualizar:active { transform: scale(0.97); }
+
+.tes-wrap { padding: 12px; }
+
+.tes-deuda {
+  background: linear-gradient(135deg, #FFEBEE, #FFCDD2);
+  border: 1.5px solid #C62828;
+  border-left: 4px solid #B71C1C;
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.tes-deuda-icon { font-size: 26px; flex: 0 0 auto; }
+.tes-deuda-body { flex: 1; min-width: 0; }
+.tes-deuda-tit {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 900;
+  font-size: 15px;
+  color: #B71C1C;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.tes-deuda-monto {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 900;
+  font-size: 24px;
+  color: #8B0000;
+  line-height: 1.1;
+  margin-top: 1px;
+}
+.tes-deuda-info { font-size: 11px; color: #5D2020; margin-top: 3px; }
+.tes-deuda-btn {
+  background: #B71C1C;
+  color: #fff;
+  border: none;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 11px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+
+.tes-hoy {
+  background: #fff;
+  border-radius: 14px;
+  border: 1.5px solid var(--cream3);
+  padding: 13px 15px;
+  margin-bottom: 10px;
+  box-shadow: 0 2px 12px rgba(139, 0, 0, .08);
+}
+.tes-hoy-tit {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 900;
+  font-size: 12px;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 6px;
+}
+.tes-hoy-monto-grande {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 900;
+  font-size: 34px;
+  color: #1B5E20;
+  line-height: 1;
+}
+.tes-hoy-monto-detalle {
+  font-size: 10.5px;
+  color: var(--text3);
+  margin-top: 3px;
+}
+.tes-hoy-instrumentos {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 5px;
+  margin-top: 10px;
+}
+.tes-instr-card {
+  background: var(--cream);
+  border-radius: 8px;
+  padding: 7px 5px;
+  text-align: center;
+  border: 1px solid var(--cream3);
+}
+.tes-instr-lbl {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 9px;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.tes-instr-monto {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 900;
+  font-size: 14px;
+  color: var(--text);
+  margin-top: 2px;
+}
+
+.tes-cartera {
+  background: linear-gradient(135deg, #FFFBF0, #FFF8E1);
+  border: 1px solid #F5D580;
+  border-left: 4px solid #FFA500;
+  border-radius: 10px;
+  padding: 10px 13px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.tes-cartera-icon { font-size: 20px; flex: 0 0 auto; }
+.tes-cartera-body { flex: 1; min-width: 0; }
+.tes-cartera-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.tes-cartera-lbl {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 900;
+  font-size: 11px;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.tes-cartera-monto {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 900;
+  font-size: 17px;
+  color: var(--text);
+}
+.tes-cartera-info {
+  font-size: 10px;
+  color: var(--text3);
+  margin-top: 2px;
+  font-style: italic;
+}
+
+.tes-cal-tit {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 7px;
+}
+.tes-cal-tit-h {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 900;
+  font-size: 15px;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.tes-cal-leyenda {
+  font-size: 10px;
+  color: var(--text3);
+  display: flex;
+  gap: 10px;
+}
+.tes-cal-leyenda-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.tes-dia {
+  background: #fff;
+  border-radius: 11px;
+  border: 1.5px solid var(--cream3);
+  margin-bottom: 7px;
+  overflow: hidden;
+  transition: all 0.15s;
+}
+.tes-dia.es-hoy {
+  border-color: var(--gold);
+  border-width: 2px;
+  box-shadow: 0 3px 14px rgba(255, 215, 0, 0.22);
+}
+.tes-dia.es-finde {
+  background: linear-gradient(180deg, #fff, #FAFAFA);
+}
+.tes-dia.sin-data {
+  background: #FAFAFA;
+  border-style: dashed;
+  border-color: #DDD;
+}
+.tes-dia.pico-pagos {
+  border-color: #FFCDD2;
+  background: linear-gradient(180deg, #FFEBEE, #FFCDD2);
+}
+.tes-dia-hdr {
+  padding: 9px 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+}
+.tes-dia-fecha {
+  flex: 0 0 54px;
+  text-align: center;
+}
+.tes-dia-num {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 900;
+  font-size: 21px;
+  color: var(--text);
+  line-height: 1;
+}
+.tes-dia.es-hoy .tes-dia-num { color: #8B0000; }
+.tes-dia.pico-pagos .tes-dia-num { color: #B71C1C; }
+.tes-dia-sem {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 9.5px;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-top: 2px;
+}
+.tes-dia.es-hoy .tes-dia-sem { color: #8B0000; }
+.tes-dia.pico-pagos .tes-dia-sem { color: #B71C1C; }
+.tes-dia-resumen { flex: 1; min-width: 0; }
+.tes-dia-resumen-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-bottom: 2px;
+  flex-wrap: wrap;
+}
+.tes-dia-flujo {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 12.5px;
+}
+.tes-dia-flujo.entra { color: #1B5E20; }
+.tes-dia-flujo.sale { color: #B71C1C; }
+.tes-dia-flujo.sin { color: var(--text3); font-style: italic; }
+.tes-dia-flujo-monto {
+  font-weight: 900;
+  font-size: 14px;
+}
+.tes-dia-saldo {
+  flex: 0 0 auto;
+  text-align: right;
+  padding-left: 7px;
+  border-left: 1.5px solid var(--cream3);
+}
+.tes-dia-saldo-lbl {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 9px;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.tes-dia-saldo-monto {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 900;
+  font-size: 15px;
+  margin-top: 1px;
+}
+.tes-dia-saldo-monto.positivo { color: #1B5E20; }
+.tes-dia-saldo-monto.negativo { color: #B71C1C; }
+.tes-dia-saldo-monto.cero { color: var(--text3); }
+
+.tes-badge {
+  display: inline-block;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.tes-badge.real { background: #E8F5E9; color: #1B5E20; }
+.tes-badge.sin-data { background: #ECEFF1; color: #607D8B; }
+.tes-badge.pico { background: #B71C1C; color: #fff; font-weight: 900; }
+
+.tes-dia-detalle {
+  border-top: 1px dashed var(--cream3);
+  padding: 10px 12px 11px;
+  background: #FAFAFA;
+  display: none;
+}
+.tes-dia.expandido .tes-dia-detalle { display: block; }
+.tes-dia-detalle-sec { margin-bottom: 9px; }
+.tes-dia-detalle-sec:last-child { margin-bottom: 0; }
+.tes-dia-detalle-tit {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 10.5px;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 5px;
+}
+.tes-dia-detalle-item {
+  font-size: 12px;
+  color: var(--text);
+  padding: 3px 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.tes-dia-detalle-item-prov {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tes-dia-detalle-item-monto {
+  font-weight: 700;
+  font-family: 'Barlow Condensed', sans-serif;
+  flex-shrink: 0;
+}
+.tes-dia-detalle-vermas {
+  text-align: center;
+  background: #8B0000;
+  color: #fff;
+  border: none;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 11px;
+  padding: 7px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  letter-spacing: 0.4px;
+  margin-top: 7px;
+  width: 100%;
+}
+
+.tes-resumen {
+  background: linear-gradient(135deg, var(--cream), var(--cream2));
+  border: 1.5px solid var(--cream3);
+  border-radius: 12px;
+  padding: 13px;
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.tes-resumen-item { text-align: center; }
+.tes-resumen-lbl {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 10px;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.tes-resumen-monto {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 900;
+  font-size: 20px;
+  color: var(--text);
+  margin-top: 2px;
+}
+.tes-resumen-monto.entrada { color: #1B5E20; }
+.tes-resumen-monto.salida { color: #B71C1C; }
+
+/* MODAL (mismo patrón que admin) */
+.tes-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: none;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 700;
+}
+.tes-modal-overlay.activo { display: flex; }
+.tes-modal {
+  background: var(--cream);
+  width: 100%;
+  max-width: 700px;
+  max-height: 85vh;
+  border-radius: 16px 16px 0 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: tesSlideUp 0.25s ease-out;
+}
+@keyframes tesSlideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+.tes-modal-hdr {
+  background: #8B0000;
+  color: #fff;
+  padding: 13px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 2px solid var(--gold);
+  flex-shrink: 0;
+}
+.tes-modal-hdr-tit {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 900;
+  font-size: 15px;
+  color: var(--gold);
+  letter-spacing: 0.4px;
+}
+.tes-modal-hdr-sub {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.75);
+  margin-top: 2px;
+}
+.tes-modal-cerrar {
+  background: none;
+  border: none;
+  color: var(--gold);
+  font-size: 28px;
+  cursor: pointer;
+  padding: 0 6px;
+  font-family: monospace;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.tes-modal-body {
+  overflow-y: auto;
+  padding: 13px;
+  flex: 1;
+}
+.tes-modal-total {
+  background: #fff;
+  border-radius: 10px;
+  padding: 11px 13px;
+  margin-bottom: 11px;
+  border: 1px solid var(--cream3);
+  text-align: center;
+}
+.tes-modal-total-lbl {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 10px;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.tes-modal-total-monto {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 900;
+  font-size: 26px;
+  color: #B71C1C;
+}
+.tes-modal-pago {
+  background: #fff;
+  border-radius: 9px;
+  padding: 9px 11px;
+  margin-bottom: 5px;
+  border: 1px solid var(--cream3);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.tes-modal-pago-icon {
+  width: 30px;
+  height: 30px;
+  background: var(--cream2);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  flex: 0 0 auto;
+}
+.tes-modal-pago-body { flex: 1; min-width: 0; }
+.tes-modal-pago-prov {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 12.5px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tes-modal-pago-cat {
+  font-size: 10px;
+  color: var(--text3);
+  margin-top: 1px;
+}
+.tes-modal-pago-monto {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 900;
+  font-size: 14px;
+  color: #B71C1C;
+  flex: 0 0 auto;
+}
+.tes-dia-vacio-cal {
+  text-align: center;
+  padding: 14px;
+  color: var(--text3);
+  font-size: 12px;
+  font-style: italic;
+  background: var(--cream);
+  border-radius: 10px;
+  border: 1px dashed var(--cream3);
+}
+
+
 </style>
 </head>
 <body>
@@ -11934,6 +12528,163 @@ input.canales-exp-input[type="date"] {
     </div>
   </div>
 
+  <!-- ═══════════════════════════════════════════════════════════════════
+       v12.20.0 — TAB TESORERÍA
+       ═══════════════════════════════════════════════════════════════════ -->
+  <div class="view" id="view-tesoreria">
+    <div style="padding-bottom:80px;">
+
+      <!-- Header -->
+      <div class="tes-hdr">
+        <div>
+          <div class="tes-hdr-tit">💰 Tesorería</div>
+          <div class="tes-hdr-sub" id="tes-hdr-sub">Proyección 30 días</div>
+        </div>
+        <button class="tes-hdr-btn-actualizar" onclick="tesCargar()">⟳ Actualizar</button>
+      </div>
+
+      <div class="tes-wrap">
+
+        <!-- Loading -->
+        <div id="tes-loading" style="text-align:center;padding:60px 20px;color:#9C7050;font-style:italic;">
+          Cargando proyección…
+        </div>
+
+        <!-- Contenido (oculto hasta cargar) -->
+        <div id="tes-contenido" style="display:none;">
+
+          <!-- BANNER DEUDA VENCIDA -->
+          <div class="tes-deuda" id="tes-deuda" style="display:none;">
+            <div class="tes-deuda-icon">⚠️</div>
+            <div class="tes-deuda-body">
+              <div class="tes-deuda-tit">Deuda Vencida</div>
+              <div class="tes-deuda-monto">$<span id="tes-deuda-monto">—</span></div>
+              <div class="tes-deuda-info" id="tes-deuda-info">—</div>
+            </div>
+            <button class="tes-deuda-btn" onclick="tesAbrirDeuda()">VER</button>
+          </div>
+
+          <!-- DISPONIBLE HOY -->
+          <div class="tes-hoy">
+            <div class="tes-hoy-tit">💵 Disponible para usar HOY</div>
+            <div class="tes-hoy-monto-grande">$<span id="tes-hoy-monto">—</span></div>
+            <div class="tes-hoy-monto-detalle">Plata real en cuentas y caja, sin cheques pendientes</div>
+            <div class="tes-hoy-instrumentos">
+              <div class="tes-instr-card">
+                <div class="tes-instr-lbl">Galicia</div>
+                <div class="tes-instr-monto" id="tes-hoy-galicia">—</div>
+              </div>
+              <div class="tes-instr-card">
+                <div class="tes-instr-lbl">BBVA</div>
+                <div class="tes-instr-monto" id="tes-hoy-bbva">—</div>
+              </div>
+              <div class="tes-instr-card">
+                <div class="tes-instr-lbl">Mercado P</div>
+                <div class="tes-instr-monto" id="tes-hoy-mp">—</div>
+              </div>
+              <div class="tes-instr-card">
+                <div class="tes-instr-lbl">Efvo Admin</div>
+                <div class="tes-instr-monto" id="tes-hoy-efvo">—</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- EN CARTERA (informativa) -->
+          <div class="tes-cartera" id="tes-cartera" style="display:none;">
+            <div class="tes-cartera-icon">📄</div>
+            <div class="tes-cartera-body">
+              <div class="tes-cartera-row">
+                <span class="tes-cartera-lbl">En cartera</span>
+                <span class="tes-cartera-monto">$<span id="tes-cartera-monto">—</span></span>
+              </div>
+              <div class="tes-cartera-info" id="tes-cartera-info">—</div>
+            </div>
+          </div>
+
+          <!-- CALENDARIO -->
+          <div class="tes-cal-tit">
+            <div class="tes-cal-tit-h">📅 Próximos 30 días</div>
+            <div class="tes-cal-leyenda">
+              <span><span class="tes-cal-leyenda-dot" style="background:#2E7D32"></span>Real</span>
+              <span><span class="tes-cal-leyenda-dot" style="background:#90A4AE"></span>Sin data</span>
+            </div>
+          </div>
+
+          <div id="tes-calendario">
+            <!-- Las cards de los días se renderizan acá -->
+          </div>
+
+          <!-- RESUMEN PIE -->
+          <div class="tes-resumen">
+            <div class="tes-resumen-item">
+              <div class="tes-resumen-lbl">Entran 30d (real)</div>
+              <div class="tes-resumen-monto entrada">$<span id="tes-resumen-entran">—</span></div>
+            </div>
+            <div class="tes-resumen-item">
+              <div class="tes-resumen-lbl">Salen 30d</div>
+              <div class="tes-resumen-monto salida">$<span id="tes-resumen-salen">—</span></div>
+            </div>
+          </div>
+
+        </div><!-- /tes-contenido -->
+
+        <!-- Error -->
+        <div id="tes-error" style="display:none;text-align:center;padding:40px 20px;color:#B71C1C;">
+          <div style="font-size:32px;margin-bottom:10px;">⚠️</div>
+          <div style="font-weight:700;font-size:14px;margin-bottom:4px;">No se pudo cargar la proyección</div>
+          <div id="tes-error-msg" style="font-size:11px;color:#9C7050;"></div>
+          <button onclick="tesCargar()" style="margin-top:14px;background:#8B0000;color:#fff;border:none;font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:12px;padding:9px 16px;border-radius:6px;cursor:pointer;letter-spacing:0.4px;">REINTENTAR</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- v12.20.0 — MODAL DETALLE PAGOS DEL DÍA ─────────────────────────── -->
+  <div class="tes-modal-overlay" id="tes-modal-pagos" onclick="tesModalCerrarFondo(event)">
+    <div class="tes-modal" onclick="event.stopPropagation()">
+      <div class="tes-modal-hdr">
+        <div>
+          <div class="tes-modal-hdr-tit" id="tes-modal-titulo">🗓️ Pagos del día</div>
+          <div class="tes-modal-hdr-sub" id="tes-modal-subtitulo">—</div>
+        </div>
+        <button class="tes-modal-cerrar" onclick="tesModalCerrar()">×</button>
+      </div>
+      <div class="tes-modal-body">
+        <div class="tes-modal-total">
+          <div class="tes-modal-total-lbl">Total a pagar</div>
+          <div class="tes-modal-total-monto">$<span id="tes-modal-total-monto">—</span></div>
+        </div>
+        <div id="tes-modal-lista">
+          <!-- Items se renderizan acá -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- v12.20.0 — MODAL DEUDA VENCIDA ─────────────────────────────────── -->
+  <div class="tes-modal-overlay" id="tes-modal-deuda" onclick="tesModalDeudaCerrarFondo(event)">
+    <div class="tes-modal" onclick="event.stopPropagation()">
+      <div class="tes-modal-hdr" style="background:#B71C1C;">
+        <div>
+          <div class="tes-modal-hdr-tit">⚠️ Deuda Vencida</div>
+          <div class="tes-modal-hdr-sub" id="tes-modal-deuda-sub">—</div>
+        </div>
+        <button class="tes-modal-cerrar" onclick="tesModalDeudaCerrar()">×</button>
+      </div>
+      <div class="tes-modal-body">
+        <div class="tes-modal-total" style="background:#FFEBEE;border-color:#FFCDD2;">
+          <div class="tes-modal-total-lbl">Total vencido</div>
+          <div class="tes-modal-total-monto">$<span id="tes-modal-deuda-monto">—</span></div>
+        </div>
+        <div id="tes-modal-deuda-lista">
+          <!-- Items se renderizan acá -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+
 </div>
 <nav class="tab-nav" id="tab-nav">
   <button class="tab-btn" id="tab-btn-logistica" onclick="cambiarTab('logistica')">
@@ -12000,6 +12751,11 @@ input.canales-exp-input[type="date"] {
         <div class="menu-mas-icon">🛒</div>
         <div class="menu-mas-lbl">Compras</div>
         <div class="menu-mas-badge" id="menu-mas-compras-badge" style="display:none;background:#C62828;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;margin-top:3px;">0</div>
+      </button>
+      <!-- v12.20.0 — Tab Tesorería -->
+      <button class="menu-mas-item" id="menu-mas-tesoreria" onclick="cambiarTab('tesoreria');cerrarMenuMas()">
+        <div class="menu-mas-icon">💰</div>
+        <div class="menu-mas-lbl">Tesorería</div>
       </button>
       <button class="menu-mas-item" onclick="cambiarTab('clientes');cerrarMenuMas()">
         <div class="menu-mas-icon">⭐</div>
@@ -16380,8 +17136,8 @@ function cambiarTab(tab) {
   if (_tabActual === tab) return;
   _tabActual = tab;
 
-  // Views — incluye logistica + stock (v12.15.0) + compras (v12.18.0)
-  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock','compras'].forEach(function(t) {
+  // Views — incluye logistica + stock (v12.15.0) + compras (v12.18.0) + tesoreria (v12.20.0)
+  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock','compras','tesoreria'].forEach(function(t) {
     var v = document.getElementById('view-' + t);
     var b = document.getElementById('tab-btn-' + t);
     if (v) v.classList.toggle('active', t === tab);
@@ -16390,7 +17146,13 @@ function cambiarTab(tab) {
 
   // El botón "Más" se marca activo si estás en un tab oculto
   var btnMas = document.getElementById('tab-btn-mas');
-  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes' || tab === 'rendiciones' || tab === 'acc-dup' || tab === 'prod-canon' || tab === 'ccanon' || tab === 'stock' || tab === 'compras');
+  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes' || tab === 'rendiciones' || tab === 'acc-dup' || tab === 'prod-canon' || tab === 'ccanon' || tab === 'stock' || tab === 'compras' || tab === 'tesoreria');
+
+  // v12.20.0 — Tesorería: cargar al abrir
+  if (tab === 'tesoreria') {
+    if (typeof tesCargar === 'function') tesCargar();
+    var v = document.getElementById('view-tesoreria'); if (v) v.scrollTop = 0;
+  }
 
   // Logística — renderizar DESPUÉS de activar el view
   if (tab === 'logistica') {
@@ -28915,7 +29677,478 @@ async function _comprasRenderTechos() {
 // Placeholder: el botón "Ver proyección 30d" abre un modal informativo
 // hasta que en la próxima sesión integremos la vista real con backend SQL.
 function _comprasAbrirProyeccion() {
-  alert('📈 Vista Proyección 30 días\n\nEsta vista mostrará:\n• Saldo proyectado día a día\n• Pagos próximos (de Gastón)\n• Cobros esperados\n• Cheques/e-cheques que ingresan\n\nDisponible próximamente.');
+  // v12.20.0 — navega a la tab Tesorería (antes era alert placeholder)
+  if (typeof cambiarTab === 'function') {
+    cambiarTab('tesoreria');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   v12.20.0 — TESORERÍA: lógica de la tab
+   ═══════════════════════════════════════════════════════════════════ */
+
+var _tesData = null;
+var _tesDeudaData = null;
+
+// Formatters
+function _tesFmtMonto(n) {
+  if (n === null || n === undefined || isNaN(n)) return '—';
+  var num = Number(n);
+  if (Math.abs(num) >= 1000000) {
+    return (num / 1000000).toFixed(2).replace('.', ',') + 'M';
+  }
+  if (Math.abs(num) >= 1000) {
+    return (num / 1000).toFixed(0) + 'k';
+  }
+  return num.toFixed(0);
+}
+function _tesFmtMontoEntero(n) {
+  if (n === null || n === undefined || isNaN(n)) return '—';
+  return Math.round(Number(n)).toLocaleString('es-AR');
+}
+function _tesFmtDiaSemana(dow) {
+  var d = ['DOM', 'LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB'];
+  return d[dow] || '—';
+}
+function _tesFmtDiaSemanaLargo(dow) {
+  var d = ['DOMINGO', 'LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES', 'SABADO'];
+  return d[dow] || '—';
+}
+function _tesFechaToObj(fechaStr) {
+  // fechaStr = '2026-05-15' → Date local
+  var p = fechaStr.split('-');
+  return new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+}
+
+// Helper para fetch a Supabase
+function _tesFetch(path) {
+  return fetch(SUPABASE_URL + '/rest/v1/' + path, {
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': 'Bearer ' + SUPABASE_KEY
+    }
+  }).then(function(r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  });
+}
+
+// CARGAR data principal
+async function tesCargar() {
+  var loading = document.getElementById('tes-loading');
+  var contenido = document.getElementById('tes-contenido');
+  var errorBox = document.getElementById('tes-error');
+
+  if (loading) loading.style.display = 'block';
+  if (contenido) contenido.style.display = 'none';
+  if (errorBox) errorBox.style.display = 'none';
+
+  try {
+    // 3 fetches en paralelo
+    var promises = [
+      _tesFetch('vw_proyeccion_caja_30d?select=*&order=dia.asc'),
+      _tesFetch('vw_deuda_vencida?select=*'),
+      _tesFetch('caja_saldo_diario?select=*&total_tck=gt.0&order=fecha.desc&limit=1')
+    ];
+
+    var results = await Promise.all(promises);
+    var proyeccion = results[0];
+    var deuda = (results[1] && results[1].length > 0) ? results[1][0] : null;
+    var saldoHoy = (results[2] && results[2].length > 0) ? results[2][0] : null;
+
+    _tesData = proyeccion;
+    _tesDeudaData = deuda;
+
+    _tesRenderHoy(saldoHoy);
+    _tesRenderCartera(saldoHoy);
+    _tesRenderDeuda(deuda);
+    _tesRenderCalendario(proyeccion);
+    _tesRenderResumen(proyeccion);
+
+    // Actualizar fecha de sync
+    var hdrSub = document.getElementById('tes-hdr-sub');
+    if (hdrSub && saldoHoy) {
+      var fecha = _tesFechaToObj(saldoHoy.fecha);
+      var ahora = new Date();
+      var sync = ahora.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+      hdrSub.textContent = 'Proyección 30 días · Saldo del ' + fecha.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }) + ' · sync ' + sync;
+    }
+
+    if (loading) loading.style.display = 'none';
+    if (contenido) contenido.style.display = 'block';
+
+  } catch (e) {
+    console.error('[Tesorería] Error cargando:', e);
+    if (loading) loading.style.display = 'none';
+    if (errorBox) {
+      errorBox.style.display = 'block';
+      var msg = document.getElementById('tes-error-msg');
+      if (msg) msg.textContent = e.message || 'Error desconocido';
+    }
+  }
+}
+
+// RENDER: Disponible HOY
+function _tesRenderHoy(saldo) {
+  if (!saldo) return;
+  // Líquido = total - cheques_fisicos - e_cheques
+  var liquido = Number(saldo.total_tck || 0)
+              - Number(saldo.cheques_fisicos || 0)
+              - Number(saldo.e_cheques || 0);
+
+  var galicia = Number(saldo.galicia_tck || 0);
+  var bbva    = Number(saldo.bbva_tck || 0);
+  var mp      = Number(saldo.mercado_pago || 0);
+  var efvo    = Number(saldo.efvo_rep_distri || 0)
+              + Number(saldo.efvo_food_play || 0)
+              + Number(saldo.caja_tesoreria || 0);
+
+  var setText = function(id, val) { var el = document.getElementById(id); if (el) el.textContent = val; };
+  setText('tes-hoy-monto', _tesFmtMontoEntero(liquido));
+  setText('tes-hoy-galicia', '$' + _tesFmtMonto(galicia));
+  setText('tes-hoy-bbva', '$' + _tesFmtMonto(bbva));
+  setText('tes-hoy-mp', '$' + _tesFmtMonto(mp));
+  setText('tes-hoy-efvo', '$' + _tesFmtMonto(efvo));
+}
+
+// RENDER: En cartera
+function _tesRenderCartera(saldo) {
+  if (!saldo) return;
+  var cheques  = Number(saldo.cheques_fisicos || 0);
+  var echeques = Number(saldo.e_cheques || 0);
+  var total = cheques + echeques;
+
+  var carteraBox = document.getElementById('tes-cartera');
+  if (!carteraBox) return;
+
+  if (total > 0) {
+    document.getElementById('tes-cartera-monto').textContent = _tesFmtMontoEntero(total);
+    document.getElementById('tes-cartera-info').textContent =
+      '$' + _tesFmtMonto(cheques) + ' cheques físicos + $' + _tesFmtMonto(echeques) + ' e-cheques · se acreditan según vencimiento';
+    carteraBox.style.display = 'flex';
+  } else {
+    carteraBox.style.display = 'none';
+  }
+}
+
+// RENDER: Banner deuda vencida
+function _tesRenderDeuda(deuda) {
+  var box = document.getElementById('tes-deuda');
+  if (!box) return;
+
+  if (!deuda || !deuda.cantidad_pagos || Number(deuda.cantidad_pagos) === 0) {
+    box.style.display = 'none';
+    return;
+  }
+
+  document.getElementById('tes-deuda-monto').textContent = _tesFmtMontoEntero(deuda.monto_total);
+  var dias = Number(deuda.dias_mas_antiguo || 0);
+  document.getElementById('tes-deuda-info').textContent =
+    deuda.cantidad_pagos + ' pagos en mora · más antiguo vence hace ' + dias + ' días';
+  box.style.display = 'flex';
+}
+
+// RENDER: Calendario 30 días
+function _tesRenderCalendario(dias) {
+  var cont = document.getElementById('tes-calendario');
+  if (!cont) return;
+
+  var hoy = new Date();
+  var hoyStr = hoy.getFullYear() + '-'
+             + String(hoy.getMonth() + 1).padStart(2, '0') + '-'
+             + String(hoy.getDate()).padStart(2, '0');
+
+  // Saldo acumulado para mostrar evolución (arranca en el último saldo real)
+  // De momento usamos el saldo_gaston de cada día si está, sino el último conocido
+  var ultimoSaldo = null;
+  var html = '';
+  var diasMostrados = 0;
+  var diasOcultosVacios = 0;
+
+  dias.forEach(function(d) {
+    var ingreso = Number(d.ingreso_real_viajes || 0);
+    var pago    = Number(d.monto_pagos || 0);
+    var saldoG  = Number(d.saldo_gaston || 0);
+
+    // Calcular saldo del día: usar saldo_gaston si > 0, sino acumular
+    var saldoMostrar = (saldoG !== 0) ? saldoG : ultimoSaldo;
+    if (saldoG !== 0) ultimoSaldo = saldoG;
+
+    var esHoy = (d.dia === hoyStr);
+    var fecha = _tesFechaToObj(d.dia);
+    var dow = fecha.getDay();
+    var esFinde = (dow === 0 || dow === 6);
+    var sinData = (ingreso === 0 && pago === 0);
+
+    // Si no hay nada Y no es hoy Y no es viernes/sábado/domingo después de hoy, ocultarlo
+    if (sinData && !esHoy && fecha < hoy) {
+      diasOcultosVacios++;
+      return;
+    }
+
+    diasMostrados++;
+    var clases = 'tes-dia';
+    if (esHoy) clases += ' es-hoy';
+    if (esFinde) clases += ' es-finde';
+    if (sinData) clases += ' sin-data';
+
+    // Detectar pico: pago grande > $30M
+    if (pago >= 30000000) clases += ' pico-pagos';
+
+    // Etiqueta del día
+    var diaEtiqueta = String(fecha.getDate()).padStart(2, '0');
+    var mesEtiqueta = '';
+    if (fecha.getMonth() !== hoy.getMonth() && diasMostrados > 1) {
+      mesEtiqueta = ' · ' + (['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'][fecha.getMonth()]);
+    }
+    var diaSemTxt = _tesFmtDiaSemana(dow) + (esHoy ? ' · HOY' : '') + mesEtiqueta;
+
+    // Construir resumen rows
+    var resumenRows = '';
+
+    if (ingreso > 0) {
+      var detalleTxt = d.detalle_viajes
+        ? d.detalle_viajes.replace(/\(\$0\)/g, '').replace(/, /g, ', ').replace(/^[, ]+|[, ]+$/g, '')
+        : '';
+      resumenRows += '<div class="tes-dia-resumen-row">'
+        + '<span class="tes-dia-flujo entra">⬆ Entra <span class="tes-dia-flujo-monto">$' + _tesFmtMonto(ingreso) + '</span></span>'
+        + '<span class="tes-badge real">Real</span>'
+        + '</div>';
+    }
+
+    if (pago > 0) {
+      var labelPico = (pago >= 30000000) ? '<span class="tes-badge pico">⚠️ PICO</span>' : '';
+      resumenRows += '<div class="tes-dia-resumen-row">'
+        + '<span class="tes-dia-flujo sale">⬇ Sale <span class="tes-dia-flujo-monto">$' + _tesFmtMonto(pago) + '</span></span>'
+        + labelPico
+        + '</div>';
+    }
+
+    if (ingreso === 0 && pago === 0) {
+      resumenRows += '<div class="tes-dia-resumen-row"><span class="tes-dia-flujo sin">Sin movimientos</span></div>';
+    }
+
+    // Saldo (clase según signo)
+    var saldoClase = 'cero';
+    if (saldoMostrar !== null && saldoMostrar !== undefined) {
+      if (saldoMostrar > 0) saldoClase = 'positivo';
+      else if (saldoMostrar < 0) saldoClase = 'negativo';
+    }
+    var saldoTxt = (saldoMostrar !== null && saldoMostrar !== undefined && saldoMostrar !== 0)
+      ? '$' + _tesFmtMonto(saldoMostrar)
+      : '—';
+
+    // Detalle expandible (solo si hay info)
+    var detalleHtml = '';
+    var tieneDetalle = (ingreso > 0 && d.detalle_viajes) || (pago > 0 && d.detalle_pagos);
+    if (tieneDetalle) {
+      detalleHtml = '<div class="tes-dia-detalle">';
+
+      if (ingreso > 0 && d.detalle_viajes) {
+        detalleHtml += '<div class="tes-dia-detalle-sec">'
+          + '<div class="tes-dia-detalle-tit">⬆ Cobranzas del día</div>'
+          + _tesFmtDetalleViajes(d.detalle_viajes, d.pedidos_a_cobrar)
+          + '</div>';
+      }
+
+      if (pago > 0 && d.detalle_pagos) {
+        detalleHtml += '<div class="tes-dia-detalle-sec">'
+          + '<div class="tes-dia-detalle-tit">⬇ Pagos del día' + (d.cant_pagos > 2 ? ' (top 2)' : '') + '</div>'
+          + _tesFmtDetallePagos(d.detalle_pagos, 2);
+        if (d.cant_pagos > 2) {
+          detalleHtml += '<button class="tes-dia-detalle-vermas" onclick="event.stopPropagation();tesAbrirModalPagos(\'' + d.dia + '\')">VER LOS ' + d.cant_pagos + ' PAGOS</button>';
+        }
+        detalleHtml += '</div>';
+      }
+
+      detalleHtml += '</div>';
+    }
+
+    // Card final
+    html += '<div class="' + clases + (tieneDetalle && esHoy ? ' expandido' : '') + '" data-dia="' + d.dia + '" onclick="tesToggleDia(this)">'
+      + '<div class="tes-dia-hdr">'
+        + '<div class="tes-dia-fecha">'
+          + '<div class="tes-dia-num">' + diaEtiqueta + '</div>'
+          + '<div class="tes-dia-sem">' + diaSemTxt + '</div>'
+        + '</div>'
+        + '<div class="tes-dia-resumen">' + resumenRows + '</div>'
+        + '<div class="tes-dia-saldo">'
+          + '<div class="tes-dia-saldo-lbl">Saldo</div>'
+          + '<div class="tes-dia-saldo-monto ' + saldoClase + '">' + saldoTxt + '</div>'
+        + '</div>'
+      + '</div>'
+      + detalleHtml
+      + '</div>';
+  });
+
+  if (diasOcultosVacios > 0) {
+    html += '<div class="tes-dia-vacio-cal">— ' + diasOcultosVacios + ' días sin movimientos cargados —</div>';
+  }
+
+  if (!html) {
+    html = '<div class="tes-dia-vacio-cal">Sin proyección cargada todavía</div>';
+  }
+
+  cont.innerHTML = html;
+}
+
+// Helper: formato del desglose de viajes
+function _tesFmtDetalleViajes(detalleRaw, pedidos) {
+  // detalleRaw viene como "zona2 ($6189450), zona2 ($6869050)" o "tl_tarde ($576000)"
+  if (!detalleRaw) return '';
+  var items = detalleRaw.split(/, (?=\w+ \()/);
+  var html = '';
+  items.forEach(function(item) {
+    var m = item.match(/^(.+?) \(\$(-?\d+)\)$/);
+    if (!m) return;
+    var zona = m[1];
+    var monto = Number(m[2]);
+    if (monto === 0) return; // ocultar zonas con 0
+    var zonaNice = zona.replace(/_/g, ' ').replace('america fortin', 'Fortín/Olavarría');
+    zonaNice = zonaNice.charAt(0).toUpperCase() + zonaNice.slice(1);
+    html += '<div class="tes-dia-detalle-item">'
+      + '<span class="tes-dia-detalle-item-prov">' + zonaNice + '</span>'
+      + '<span class="tes-dia-detalle-item-monto">$' + _tesFmtMontoEntero(monto) + '</span>'
+      + '</div>';
+  });
+  return html;
+}
+
+// Helper: formato del detalle de pagos (solo top N inline)
+function _tesFmtDetallePagos(detalleRaw, topN) {
+  if (!detalleRaw) return '';
+  // detalleRaw viene como "Proveedor A ($1234), Proveedor B ($5678)"
+  var items = detalleRaw.split(/, (?=[^,]+\(\$)/);
+  var html = '';
+  items.slice(0, topN).forEach(function(item) {
+    var m = item.match(/^(.+?) \(\$(-?\d+)\)$/);
+    if (!m) return;
+    html += '<div class="tes-dia-detalle-item">'
+      + '<span class="tes-dia-detalle-item-prov">' + m[1] + '</span>'
+      + '<span class="tes-dia-detalle-item-monto">$' + _tesFmtMontoEntero(m[2]) + '</span>'
+      + '</div>';
+  });
+  return html;
+}
+
+// RENDER: Resumen pie
+function _tesRenderResumen(dias) {
+  var entran = 0, salen = 0;
+  dias.forEach(function(d) {
+    entran += Number(d.ingreso_real_viajes || 0);
+    salen  += Number(d.monto_pagos || 0);
+  });
+  var setText = function(id, val) { var el = document.getElementById(id); if (el) el.textContent = val; };
+  setText('tes-resumen-entran', _tesFmtMontoEntero(entran));
+  setText('tes-resumen-salen', _tesFmtMontoEntero(salen));
+}
+
+// Toggle expandir/colapsar día
+function tesToggleDia(card) {
+  if (card.querySelector('.tes-dia-detalle')) {
+    card.classList.toggle('expandido');
+  }
+}
+
+// MODAL PAGOS (detalle completo)
+function tesAbrirModalPagos(dia) {
+  if (!_tesData) return;
+  var d = _tesData.find(function(x) { return x.dia === dia; });
+  if (!d) return;
+
+  var fecha = _tesFechaToObj(dia);
+  var dow = fecha.getDay();
+  var fechaTxt = fecha.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+  document.getElementById('tes-modal-titulo').textContent = '🗓️ Pagos del ' + fechaTxt + ' — ' + _tesFmtDiaSemanaLargo(dow);
+  document.getElementById('tes-modal-subtitulo').textContent = d.cant_pagos + ' pagos comprometidos';
+  document.getElementById('tes-modal-total-monto').textContent = _tesFmtMontoEntero(d.monto_pagos);
+
+  // Parsear detalle completo
+  var items = (d.detalle_pagos || '').split(/, (?=[^,]+\(\$)/);
+  var html = '';
+  items.forEach(function(item) {
+    var m = item.match(/^(.+?) \(\$(-?\d+)\)$/);
+    if (!m) return;
+    var prov = m[1];
+    var monto = Number(m[2]);
+    var icon = _tesPagoIcon(prov);
+    html += '<div class="tes-modal-pago">'
+      + '<div class="tes-modal-pago-icon">' + icon + '</div>'
+      + '<div class="tes-modal-pago-body">'
+        + '<div class="tes-modal-pago-prov">' + prov + '</div>'
+      + '</div>'
+      + '<div class="tes-modal-pago-monto">$' + _tesFmtMontoEntero(monto) + '</div>'
+      + '</div>';
+  });
+  document.getElementById('tes-modal-lista').innerHTML = html;
+
+  document.getElementById('tes-modal-pagos').classList.add('activo');
+  document.body.style.overflow = 'hidden';
+}
+
+function tesModalCerrar() {
+  document.getElementById('tes-modal-pagos').classList.remove('activo');
+  document.body.style.overflow = '';
+}
+function tesModalCerrarFondo(e) {
+  if (e.target.id === 'tes-modal-pagos') tesModalCerrar();
+}
+
+// MODAL DEUDA VENCIDA
+function tesAbrirDeuda() {
+  if (!_tesDeudaData) return;
+  document.getElementById('tes-modal-deuda-sub').textContent = _tesDeudaData.cantidad_pagos + ' pagos en mora';
+  document.getElementById('tes-modal-deuda-monto').textContent = _tesFmtMontoEntero(_tesDeudaData.monto_total);
+
+  // Parsear detalle: viene como "Prov ($1234, vto 2026-01-01)\nProv2 ($5678, vto 2026-02-15)"
+  var items = (_tesDeudaData.detalle || '').split('\n');
+  var html = '';
+  items.forEach(function(item) {
+    var m = item.match(/^(.+?) \(\$(-?\d+), vto (.+?)\)$/);
+    if (!m) return;
+    var prov = m[1];
+    var monto = Number(m[2]);
+    var vto = m[3];
+    var icon = _tesPagoIcon(prov);
+    html += '<div class="tes-modal-pago">'
+      + '<div class="tes-modal-pago-icon">' + icon + '</div>'
+      + '<div class="tes-modal-pago-body">'
+        + '<div class="tes-modal-pago-prov">' + prov + '</div>'
+        + '<div class="tes-modal-pago-cat">Vencía: ' + vto + '</div>'
+      + '</div>'
+      + '<div class="tes-modal-pago-monto">$' + _tesFmtMontoEntero(monto) + '</div>'
+      + '</div>';
+  });
+  document.getElementById('tes-modal-deuda-lista').innerHTML = html;
+
+  document.getElementById('tes-modal-deuda').classList.add('activo');
+  document.body.style.overflow = 'hidden';
+}
+function tesModalDeudaCerrar() {
+  document.getElementById('tes-modal-deuda').classList.remove('activo');
+  document.body.style.overflow = '';
+}
+function tesModalDeudaCerrarFondo(e) {
+  if (e.target.id === 'tes-modal-deuda') tesModalDeudaCerrar();
+}
+
+// Helper: icon por proveedor según keywords
+function _tesPagoIcon(prov) {
+  var p = (prov || '').toLowerCase();
+  if (p.includes('sueldo')) return '👥';
+  if (p.includes('seguro')) return '🚚';
+  if (p.includes('arca') || p.includes('afip')) return '🏛️';
+  if (p.includes('luz') || p.includes('edes') || p.includes('nis')) return '💡';
+  if (p.includes('agua')) return '💧';
+  if (p.includes('gas') || p.includes('camuzzi')) return '🔥';
+  if (p.includes('internet')) return '🌐';
+  if (p.includes('xubio')) return '💼';
+  if (p.includes('vet')) return '🏥';
+  if (p.includes('municipal') || p.includes('tasa')) return '🏛️';
+  if (p.includes('salud')) return '🏥';
+  if (p.includes('camion') || p.includes('flota')) return '🚚';
+  return '💸';
 }
 
 function _comprasAbrirDetalleTecho(instrumento) {
