@@ -1,7 +1,25 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v12.20.0 — 15/05/2026
+     TCK ADMIN — v12.20.1 — 15/05/2026
      ──────────────────────────────────────────────────────────────────────
+     HOTFIX v12.20.1 sobre v12.20.0:
+
+       Saldo del calendario de Tesorería estaba mostrando saldo_gaston
+       (proyección incompleta del Sheet) y no cuadraba con el flujo
+       de ingresos+pagos visibles. Ej: 18/5 mostraba -$3,93M sin ningún
+       movimiento, 19/5 +$2,48M sin movimiento, 20/5 +$9M cuando entran
+       $28M.
+
+       Fix: calcular saldo acumulado en cliente:
+         saldo[día] = saldo[día-1] + ingreso_viajes[día] - pagos[día]
+
+       Arranca en el saldo líquido HOY ($15,34M) y se propaga día a día.
+
+       Esto es honesto: solo refleja flujos visibles en el sistema.
+       No incluye gastos fijos ni ventas proyectadas externas, por
+       lo que el saldo va a ser optimista hasta integrar el proyectado
+       de ventas de Lucas/Ariel.
+
      CAMBIOS v12.20.0 sobre v12.18.2:
 
        1. Tab nueva "💰 Tesorería" en menú Más.
@@ -29762,7 +29780,7 @@ async function tesCargar() {
     _tesRenderHoy(saldoHoy);
     _tesRenderCartera(saldoHoy);
     _tesRenderDeuda(deuda);
-    _tesRenderCalendario(proyeccion);
+    _tesRenderCalendario(proyeccion, saldoHoy);
     _tesRenderResumen(proyeccion);
 
     // Actualizar fecha de sync
@@ -29849,7 +29867,7 @@ function _tesRenderDeuda(deuda) {
 }
 
 // RENDER: Calendario 30 días
-function _tesRenderCalendario(dias) {
+function _tesRenderCalendario(dias, saldoHoy) {
   var cont = document.getElementById('tes-calendario');
   if (!cont) return;
 
@@ -29858,9 +29876,17 @@ function _tesRenderCalendario(dias) {
              + String(hoy.getMonth() + 1).padStart(2, '0') + '-'
              + String(hoy.getDate()).padStart(2, '0');
 
-  // Saldo acumulado para mostrar evolución (arranca en el último saldo real)
-  // De momento usamos el saldo_gaston de cada día si está, sino el último conocido
-  var ultimoSaldo = null;
+  // v12.20.1 — Saldo calculado: arranca en saldo líquido HOY y se va
+  // acumulando con ingresos por viajes y restando pagos comprometidos.
+  // Honesto: solo refleja flujos visibles en el sistema. No incluye
+  // gastos fijos ni ventas proyectadas (eso lo trae Gastón aparte).
+  var saldoInicial = 0;
+  if (saldoHoy) {
+    saldoInicial = Number(saldoHoy.total_tck || 0)
+                 - Number(saldoHoy.cheques_fisicos || 0)
+                 - Number(saldoHoy.e_cheques || 0);
+  }
+  var saldoAcum = saldoInicial;
   var html = '';
   var diasMostrados = 0;
   var diasOcultosVacios = 0;
@@ -29868,11 +29894,10 @@ function _tesRenderCalendario(dias) {
   dias.forEach(function(d) {
     var ingreso = Number(d.ingreso_real_viajes || 0);
     var pago    = Number(d.monto_pagos || 0);
-    var saldoG  = Number(d.saldo_gaston || 0);
 
-    // Calcular saldo del día: usar saldo_gaston si > 0, sino acumular
-    var saldoMostrar = (saldoG !== 0) ? saldoG : ultimoSaldo;
-    if (saldoG !== 0) ultimoSaldo = saldoG;
+    // Acumular para obtener saldo del día
+    saldoAcum = saldoAcum + ingreso - pago;
+    var saldoMostrar = saldoAcum;
 
     var esHoy = (d.dia === hoyStr);
     var fecha = _tesFechaToObj(d.dia);
