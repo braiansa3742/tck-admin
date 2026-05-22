@@ -1,47 +1,51 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v12.22 — 22/05/2026
+     TCK ADMIN — v12.23 — 22/05/2026
      ──────────────────────────────────────────────────────────────────────
-     FIX: MAPA — RESULTADO REAL DE VISITAS (fin del "50/50 falso")
+     MAPA: RESULTADO REAL DE VISITAS + AUDITORÍA DE VENTAS (3a + 3b)
 
+     Incluye TODO lo de v12.22 (fix del 50/50 falso) MÁS la auditoría 3b.
+     Si venías de v12.21 en producción, este archivo trae ambas cosas.
+
+     ─── v12.23 — AUDITORÍA 3b ───
      CONTEXTO (Braian, 22/05):
-       El mapa marcaba casi todas las visitas como "Con pedido" porque
-       asumía venta por descarte: si no había un registro explícito
-       tipo='visita_sin_pedido', contaba como vendida. Pero los vendedores
-       registran la no-venta de OTRA forma (checkout con motivo_no_compra),
-       que el mapa ignoraba. Resultado: 50 visitados / 50 con pedido / 0
-       sin pedido, todo falso. Además el mapa y la lista usaban lógicas
-       distintas y podían discrepar.
+       Tras corregir el 50/50, el siguiente paso es saber si la venta que
+       declara el vendedor en la calle EXISTE como pedido cargado. Detecta
+       al vendedor que marca "tomé el pedido" pero el pedido nunca aparece.
 
-     CAMBIOS:
+     CÓMO:
+       · El mapa cruza cada visita declarada como venta contra los pedidos
+         reales del día (de _pedidosCache, el mismo dato del Sheet que ve
+         la pestaña Pedidos).
+       · Cruce por NOMBRE NORMALIZADO (sin tildes/mayúsculas/espacios) +
+         VENDEDOR + DÍA. No hay xubio_id en el pedido del Sheet, así que el
+         cruce exacto por ID queda para N42; el acotado por vendedor+día
+         hace los falsos negativos muy raros.
+       · Nuevo estado 'declarado_sin_pedido': declaró venta pero no hay
+         pedido cargado ese día.
 
-       1. NUEVA FUNCIÓN mapaResultadoVisita(checkin, todasVisitas):
-          Fuente única de verdad del resultado de una visita. Combina las
-          3 señales reales en orden de prioridad:
-            1. pedido_campo (tomó pedido en check-in) → Con pedido
-            2. checkout "Sí tomé el pedido" (sin motivo) → Con pedido
-            3. visita_sin_pedido → Sin pedido (con motivo)
-            4. checkout con motivo_no_compra → Sin pedido (con motivo)
-            5. checkin sin checkout → Activo (en curso)
-            6. checkout sin señal → Sin definir (NO se asume venta)
+     QUÉ SE VE:
+       · Marker NARANJA + badge "⚠️ Declaró venta — sin pedido cargado".
+       · Banner de alerta arriba de la lista con el detalle (cliente,
+         vendedor, hora) de cada caso.
+       · Las ventas confirmadas muestran el total del pedido real.
 
-       2. mapaActualizar (markers + contadores) y mapaActualizarLista
-          ahora usan esa función. Mapa y lista siempre coinciden.
+     DEGRADACIÓN ELEGANTE: si _pedidosCache no se puede cargar, la auditoría
+       se omite (índice null) y el mapa funciona igual que en v12.22, sin
+       alarmar. El mapa precarga pedidos en silencio al abrirse.
 
-       3. Markers/badges con 3 estados: verde=pedido, rojo=sin pedido
-          (muestra el motivo), azul=en curso/sin definir.
+     LIMITACIÓN: visitas de check-in manual con nombres muy distintos al del
+       Sheet pueden dar falso "declaró sin pedido". Acotado por vendedor+día.
 
-       NOTA: durante el día los contadores Con+Sin pueden no sumar
-       exactamente al total Visitados — la diferencia son visitas "en
-       curso" (check-in sin checkout todavía), que se ven en azul en el
-       mapa. Al cierre del día deberían resolverse casi todas.
+     ─── v12.22 — FIX 50/50 ───
+       Nueva función mapaResultadoVisita: fuente única de verdad del
+       resultado de una visita (pedido_campo / checkout con o sin motivo /
+       visita_sin_pedido). Mapa y lista usan la misma lógica. Antes el mapa
+       asumía venta por descarte → 50 visitados / 50 con pedido / 0 sin
+       pedido, todo falso.
 
-       Esto es la Fase 3a. La 3b (cruzar contra el pedido real del Sheet
-       por cliente+día para auditar ventas declaradas vs cargadas) queda
-       pendiente para cuando esté resuelto el matching de clientes (N42).
-
-       NO se tocó: tomador de pedidos, planilla de carga, Xubio, Logística,
-       Tesorería, tracking continuo.
+     NO se tocó: tomador de pedidos, planilla de carga, Xubio, Logística,
+     Tesorería, tracking continuo, flujo de cierre de pedidos.
 
      ─── histórico ───
      TCK ADMIN — v12.21 — 15/05/2026
@@ -11562,6 +11566,15 @@ input.canales-exp-input[type="date"] {
             <div id="mapa-alertas-body" style="padding:10px 14px;font-size:13px;color:var(--text);"></div>
           </div>
         </div>
+        <div id="mapa-auditoria-wrap" style="margin:0 12px 12px;display:none;">
+          <div style="background:#FFF3E0;border:1.5px solid #FFB74D;border-radius:12px;overflow:hidden;">
+            <div style="background:#EF6C00;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;">
+              <div style="font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:900;color:#fff;">⚠️ Ventas declaradas sin pedido cargado</div>
+              <div id="mapa-auditoria-count" style="background:rgba(255,255,255,.2);border-radius:20px;padding:2px 10px;font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;color:#fff;"></div>
+            </div>
+            <div id="mapa-auditoria-body" style="padding:10px 14px;font-size:13px;color:var(--text);"></div>
+          </div>
+        </div>
         <div id="mapa-lista"></div>
         <div id="mapa-no-visitados-wrap" style="display:none;">
           <div onclick="mapaToggleNoVisitados()" style="padding:10px 14px;background:#f5f5f5;border-top:1px solid #eee;cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
@@ -20719,6 +20732,16 @@ async function mapaRender() {
     _mapaInstance.addLayer(_mapaCluster);
   }
 
+  // v12.23: asegurar que _pedidosCache esté poblado para la auditoría 3b.
+  // Si el admin abrió el mapa sin pasar por Pedidos, lo cargamos en silencio.
+  // Si falla, no bloqueamos: la auditoría se omite y el mapa funciona igual.
+  try {
+    if ((typeof _pedidosCache === 'undefined' || !_pedidosCache || !_pedidosCache.length)
+        && typeof cargarPedidos === 'function') {
+      await cargarPedidos(true);
+    }
+  } catch(e) { console.warn('[mapa 3b] no se pudo precargar pedidos:', e); }
+
   await mapaCargarVisitas();
 }
 
@@ -20763,7 +20786,91 @@ function mapaFiltrar(vendedor) {
 }
 
 // ════════════════════════════════════════════════════════════════
-// v12.22 — RESULTADO REAL DE UNA VISITA (fuente única de verdad)
+// v12.23 — AUDITORÍA 3b: cruce visita ↔ pedido real
+// ────────────────────────────────────────────────────────────────
+// Compara cada visita declarada como "con pedido" contra los pedidos
+// reales del día (de _pedidosCache, el mismo dato del Sheet que ve la
+// pestaña Pedidos). Cruce por nombre normalizado + vendedor + día.
+//
+// Resultado posible nuevo: 'declarado_sin_pedido' = el vendedor marcó
+// venta pero NO hay pedido cargado ese día → ALERTA (badge naranja).
+//
+// Limitación conocida: el cruce es por nombre (no hay xubio_id en el
+// pedido del Sheet). Se normaliza (sin tildes, minúsculas, sin espacios
+// dobles) y se acota a mismo vendedor + mismo día, lo que reduce los
+// falsos negativos a casos muy raros (dos clientes de nombre casi igual,
+// mismo vendedor, mismo día). El cruce exacto por xubio_id queda para N42.
+// ════════════════════════════════════════════════════════════════
+
+// Normaliza un nombre para comparar: minúsculas, sin tildes, sin espacios
+// extra. "Claudia Fernández " → "claudia fernandez"
+function _mapaNormNombre(s) {
+  return (s || '')
+    .toString()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // saca tildes
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Índice de pedidos reales del día, construido por mapaActualizar antes
+// de pintar. Mapa: clienteNorm|vendedorNorm → array de pedidos.
+// Se consulta en mapaResultadoVisita. Si está null, el cruce se omite
+// (degradación elegante: el mapa funciona igual sin auditoría).
+var _mapaPedidosIndex = null;
+
+// Construye el índice a partir de _pedidosCache, filtrando al día que se
+// está viendo en el mapa (_mapaDiasAtras). Devuelve true si se pudo armar.
+function mapaConstruirIndicePedidos() {
+  try {
+    if (typeof _pedidosCache === 'undefined' || !_pedidosCache || !_pedidosCache.length) {
+      _mapaPedidosIndex = null;
+      return false;
+    }
+    // Día objetivo en Argentina (mismo cálculo que mapaCargarVisitas)
+    var offsetMs = 3 * 60 * 60 * 1000;
+    var ahoraAR = new Date(Date.now() - offsetMs);
+    var dAR = new Date(ahoraAR); dAR.setUTCHours(0,0,0,0);
+    if (_mapaDiasAtras > 0) dAR.setUTCDate(dAR.getUTCDate() - _mapaDiasAtras);
+    var diaTarget = dAR.getUTCFullYear() + '-' + (dAR.getUTCMonth()+1) + '-' + dAR.getUTCDate();
+
+    var idx = {};
+    _pedidosCache.forEach(function(p) {
+      if (!p.cliente || !p.fechaHora) return;
+      if ((p.estado || '') === 'Cancelado') return;
+      // Fecha del pedido a día-AR. fechaHora viene como string del Sheet;
+      // intentamos parsear; si no se puede, lo dejamos pasar (mejor incluir
+      // de más que perder un pedido y marcar falsa alerta).
+      var fp = new Date(p.fechaHora);
+      if (!isNaN(fp.getTime())) {
+        var fpAR = new Date(fp.getTime() - offsetMs);
+        var diaP = fpAR.getUTCFullYear() + '-' + (fpAR.getUTCMonth()+1) + '-' + fpAR.getUTCDate();
+        if (diaP !== diaTarget) return; // no es del día que miramos
+      }
+      var key = _mapaNormNombre(p.cliente) + '|' + _mapaNormNombre(p.vendedor);
+      if (!idx[key]) idx[key] = [];
+      idx[key].push(p);
+    });
+    _mapaPedidosIndex = idx;
+    return true;
+  } catch(e) {
+    console.warn('[mapa 3b] no se pudo construir índice de pedidos:', e);
+    _mapaPedidosIndex = null;
+    return false;
+  }
+}
+
+// ¿Hay un pedido real para esta visita? Devuelve el pedido o null.
+// Si el índice no está disponible, devuelve undefined (= no se pudo auditar).
+function mapaBuscarPedidoReal(checkin) {
+  if (_mapaPedidosIndex === null) return undefined; // sin auditoría
+  var vend = checkin.vendedores ? checkin.vendedores.nombre : '';
+  var key = _mapaNormNombre(checkin.nombre_cliente) + '|' + _mapaNormNombre(vend);
+  var arr = _mapaPedidosIndex[key];
+  return (arr && arr.length) ? arr[0] : null;
+}
+
+
 // ────────────────────────────────────────────────────────────────
 // Antes había 3 señales de "vendió o no" y cada función usaba una
 // distinta, lo que daba el 50/50 falso (el mapa asumía "con pedido"
@@ -20778,9 +20885,11 @@ function mapaFiltrar(vendedor) {
 //   6. checkout sin pedido_campo y sin motivo → 'indefinido' (no se
 //      asume venta; antes esto inflaba el "con pedido").
 //
-// Devuelve { estado, motivo }
+// Devuelve { estado, motivo, pedido }
 //   estado ∈ 'con_pedido' | 'sin_pedido' | 'activo' | 'indefinido'
+//            | 'declarado_sin_pedido' (v12.23: venta declarada sin pedido real)
 //   motivo  = texto del motivo de no-compra (solo si sin_pedido)
+//   pedido  = el pedido real cruzado (solo si con_pedido y se encontró)
 // ════════════════════════════════════════════════════════════════
 function mapaResultadoVisita(checkin, todasVisitas) {
   var cli = checkin.nombre_cliente;
@@ -20791,7 +20900,6 @@ function mapaResultadoVisita(checkin, todasVisitas) {
     return c.tipo === 'pedido_campo' && c.nombre_cliente === cli &&
            new Date(c.fecha) >= tCheckin;
   });
-  if (pedido) return { estado: 'con_pedido', motivo: null };
 
   // Checkout correspondiente (el primero posterior al check-in)
   var checkout = todasVisitas.find(function(c) {
@@ -20799,31 +20907,48 @@ function mapaResultadoVisita(checkin, todasVisitas) {
            new Date(c.fecha) > tCheckin;
   });
 
-  // 2. checkout marcado como venta (sin motivo de no-compra)
-  if (checkout && !checkout.motivo_no_compra) {
-    return { estado: 'con_pedido', motivo: null };
+  // ¿La visita DECLARA venta? (pedido_campo o checkout sin motivo)
+  var declaraVenta = !!pedido || (checkout && !checkout.motivo_no_compra);
+
+  if (declaraVenta) {
+    // v12.23: cruzar contra pedido real del día.
+    var pedidoReal = mapaBuscarPedidoReal(checkin);
+    if (pedidoReal === undefined) {
+      // Auditoría no disponible (sin índice) → confiamos en la declaración.
+      return { estado: 'con_pedido', motivo: null, pedido: null };
+    }
+    if (pedidoReal) {
+      return { estado: 'con_pedido', motivo: null, pedido: pedidoReal };
+    }
+    // Declaró venta pero NO hay pedido cargado ese día → ALERTA.
+    return { estado: 'declarado_sin_pedido', motivo: null, pedido: null };
   }
 
   // 3. visita_sin_pedido (botón separado)
   var sinPed = todasVisitas.find(function(c) {
     return c.tipo === 'visita_sin_pedido' && c.nombre_cliente === cli;
   });
-  if (sinPed) return { estado: 'sin_pedido', motivo: sinPed.motivo_no_compra || 'Sin motivo' };
+  if (sinPed) return { estado: 'sin_pedido', motivo: sinPed.motivo_no_compra || 'Sin motivo', pedido: null };
 
   // 4. checkout con motivo de no-compra
   if (checkout && checkout.motivo_no_compra) {
-    return { estado: 'sin_pedido', motivo: checkout.motivo_no_compra };
+    return { estado: 'sin_pedido', motivo: checkout.motivo_no_compra, pedido: null };
   }
 
   // 5. check-in sin checkout todavía → en curso
-  if (!checkout) return { estado: 'activo', motivo: null };
+  if (!checkout) return { estado: 'activo', motivo: null, pedido: null };
 
   // 6. checkout sin señal clara → no se asume venta
-  return { estado: 'indefinido', motivo: null };
+  return { estado: 'indefinido', motivo: null, pedido: null };
 }
 
 function mapaActualizar() {
   if (!_mapaInstance) return;
+
+  // v12.23: construir índice de pedidos reales del día para la auditoría 3b.
+  // Si _pedidosCache está vacío (no se cargó la pestaña Pedidos), el índice
+  // queda null y la auditoría se omite silenciosamente (el mapa funciona igual).
+  mapaConstruirIndicePedidos();
 
   // Limpiar markers anteriores
   _mapaMarkers.forEach(function(m) { _mapaInstance.removeLayer(m); });
@@ -20851,19 +20976,23 @@ function mapaActualizar() {
   var conPedido = 0;
   var sinPedido = 0;
   var enCurso = 0;  // v12.22: visitas activas o sin resultado definido
+  var declaradoSinPedido = 0; // v12.23: declaró venta pero no hay pedido real
+  var declaradosLista = []; // v12.23: detalle para el banner de auditoría
   var bounds = [];
 
   checkins.forEach(function(v, idx) {
     var vendedorNombre = v.vendedores ? v.vendedores.nombre : 'Vendedor';
     var color = COLORES_VENDEDOR[vendedorNombre] || '#8B0000';
 
-    // v12.22: resultado real de la visita (fuente única de verdad)
+    // v12.22/12.23: resultado real de la visita (fuente única de verdad)
     var res = mapaResultadoVisita(v, visitas);
     var esConPedido = res.estado === 'con_pedido';
     var esSinPedido = res.estado === 'sin_pedido';
+    var esDeclaradoSinPed = res.estado === 'declarado_sin_pedido';
 
     if (esConPedido) conPedido++;
     else if (esSinPedido) sinPedido++;
+    else if (esDeclaradoSinPed) { declaradoSinPedido++; declaradosLista.push(v); }
     else enCurso++;
 
     // Buscar checkout correspondiente solo para calcular el tiempo
@@ -20879,17 +21008,22 @@ function mapaActualizar() {
       tiempoStr = mins + ' min';
     }
 
-    // Color del marker según estado: verde=pedido, rojo=sin pedido, azul=en curso
-    var markerColor = esConPedido ? '#2E7D32' : esSinPedido ? '#C62828' : '#1976D2';
+    // Color del marker: verde=pedido, rojo=sin pedido, naranja=declaró sin
+    // pedido real (alerta), azul=en curso
+    var markerColor = esConPedido ? '#2E7D32'
+                    : esSinPedido ? '#C62828'
+                    : esDeclaradoSinPed ? '#EF6C00'
+                    : '#1976D2';
     var iconHtml = '<div style="background:' + markerColor + ';color:#fff;border-radius:50% 50% 50% 0;transform:rotate(-45deg);width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;box-shadow:0 2px 8px rgba(0,0,0,.3);"><span style="transform:rotate(45deg)">' + (idx + 1) + '</span></div>';
     var icon = L.divIcon({ html: iconHtml, iconSize: [30,30], iconAnchor: [15,30], className: '' });
     var hora = new Date(v.fecha).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'});
 
     // Badge del popup según estado
     var badgeBg, badgeColor, badgeTxt;
-    if (esConPedido)      { badgeBg = '#E8F5E9'; badgeColor = '#2E7D32'; badgeTxt = '✅ Con pedido'; }
-    else if (esSinPedido) { badgeBg = '#FFEBEE'; badgeColor = '#C62828'; badgeTxt = '❌ ' + (res.motivo || 'Sin motivo'); }
-    else                  { badgeBg = '#E3F2FD'; badgeColor = '#1976D2'; badgeTxt = '🔵 ' + (res.estado === 'activo' ? 'En curso' : 'Sin definir'); }
+    if (esConPedido)            { badgeBg = '#E8F5E9'; badgeColor = '#2E7D32'; badgeTxt = '✅ Con pedido' + (res.pedido && res.pedido.total ? ' · ' + res.pedido.total : ''); }
+    else if (esSinPedido)       { badgeBg = '#FFEBEE'; badgeColor = '#C62828'; badgeTxt = '❌ ' + (res.motivo || 'Sin motivo'); }
+    else if (esDeclaradoSinPed) { badgeBg = '#FFF3E0'; badgeColor = '#EF6C00'; badgeTxt = '⚠️ Declaró venta — sin pedido cargado'; }
+    else                        { badgeBg = '#E3F2FD'; badgeColor = '#1976D2'; badgeTxt = '🔵 ' + (res.estado === 'activo' ? 'En curso' : 'Sin definir'); }
 
     // Popup con historial al tocar
     var popupIdV = 'popup-vis-' + idx + '-' + Date.now();
@@ -20923,12 +21057,13 @@ function mapaActualizar() {
   if (_mapaRuta) { _mapaInstance.removeLayer(_mapaRuta); _mapaRuta = null; }
   if (Array.isArray(_mapaRutas)) _mapaRutas.forEach(function(r){ _mapaInstance.removeLayer(r); });
   _mapaRutas = [];
-  // Contar también checkins sin coordenadas para los stats (v12.22)
+  // Contar también checkins sin coordenadas para los stats (v12.22/12.23)
   todosCheckins.forEach(function(v) {
     if (v.lat && v.lng) return; // ya contados arriba
     var res = mapaResultadoVisita(v, visitas);
     if (res.estado === 'con_pedido') conPedido++;
     else if (res.estado === 'sin_pedido') sinPedido++;
+    else if (res.estado === 'declarado_sin_pedido') { declaradoSinPedido++; declaradosLista.push(v); }
     else enCurso++;
   });
 
@@ -20974,6 +21109,29 @@ function mapaActualizar() {
   if (elTotal) elTotal.textContent = total;
   if (elCon)   elCon.textContent   = conPedido;
   if (elSin)   elSin.textContent   = sinPedido;
+
+  // v12.23: banner de auditoría — ventas declaradas sin pedido cargado.
+  // Solo se muestra si el índice de pedidos pudo construirse (si no, no
+  // podemos auditar y no tendría sentido alarmar).
+  var audWrap  = document.getElementById('mapa-auditoria-wrap');
+  var audBody  = document.getElementById('mapa-auditoria-body');
+  var audCount = document.getElementById('mapa-auditoria-count');
+  if (audWrap && audBody) {
+    if (_mapaPedidosIndex !== null && declaradosLista.length > 0) {
+      audWrap.style.display = 'block';
+      if (audCount) audCount.textContent = declaradosLista.length + (declaradosLista.length === 1 ? ' caso' : ' casos');
+      audBody.innerHTML = declaradosLista.map(function(v) {
+        var vn = v.vendedores ? v.vendedores.nombre : 'Vendedor';
+        var hr = new Date(v.fecha).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'});
+        return '<div style="padding:6px 0;border-bottom:1px solid #FFE0B2;">'
+          + '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:14px;font-weight:900;color:#E65100;">' + v.nombre_cliente + '</div>'
+          + '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + vn + ' · ' + hr + ' · marcó venta pero no hay pedido cargado hoy</div>'
+          + '</div>';
+      }).join('');
+    } else {
+      audWrap.style.display = 'none';
+    }
+  }
 
   // Actualizar lista con todos los checkins
   mapaActualizarLista(todosCheckins, visitas);
@@ -21195,10 +21353,11 @@ function mapaActualizarLista(checkins, todasVisitas) {
     }
 
     var icono, resultColor, resultado;
-    if (res.estado === 'con_pedido')      { icono = '📦'; resultColor = '#2E7D32'; resultado = 'Con pedido'; }
-    else if (res.estado === 'sin_pedido') { icono = '🔴'; resultColor = '#C62828'; resultado = res.motivo || 'Sin pedido'; }
-    else if (res.estado === 'activo')     { icono = '🟢'; resultColor = '#1976D2'; resultado = 'Activo'; }
-    else                                  { icono = '⚪'; resultColor = '#757575'; resultado = 'Sin definir'; }
+    if (res.estado === 'con_pedido')             { icono = '📦'; resultColor = '#2E7D32'; resultado = 'Con pedido' + (res.pedido && res.pedido.total ? ' · ' + res.pedido.total : ''); }
+    else if (res.estado === 'sin_pedido')        { icono = '🔴'; resultColor = '#C62828'; resultado = res.motivo || 'Sin pedido'; }
+    else if (res.estado === 'declarado_sin_pedido') { icono = '⚠️'; resultColor = '#EF6C00'; resultado = 'Declaró venta — sin pedido'; }
+    else if (res.estado === 'activo')            { icono = '🟢'; resultColor = '#1976D2'; resultado = 'Activo'; }
+    else                                         { icono = '⚪'; resultColor = '#757575'; resultado = 'Sin definir'; }
 
     return '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid #f5f0e8;">'
       + '<div style="width:28px;height:28px;border-radius:50%;background:' + color + ';color:#fff;display:flex;align-items:center;justify-content:center;font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:900;flex-shrink:0;">' + (idx+1) + '</div>'
