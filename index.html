@@ -1,5 +1,45 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v12.24 — 22/05/2026
+     ──────────────────────────────────────────────────────────────────────
+     MAPA: VISTA DE RECORRIDO PARA AUDITAR VENDEDORES
+
+     CONTEXTO (Braian, 22/05):
+       Los números en los pines confundían (eran cantidad agrupada por
+       cluster, no orden de visita). No se podía ver el recorrido real ni
+       evaluar si el vendedor optimiza su ruta o va de una punta a la otra.
+
+     CAMBIOS:
+
+       1. MODO RECORRIDO (al elegir un vendedor en los chips):
+          · Pines NUMERADOS POR ORDEN de visita (1,2,3…), no por cluster.
+          · Borde dorado en pines de visitas de 0 min (check-in exprés).
+          · 3 capas con toggle independiente:
+              📍 Pines · ➡️ Orden de visita (punteado + flechas) ·
+              🛣️ Rastro GPS (camino real del auto, de tabla posiciones)
+          · El admin prende/apaga cada capa para ver lo que necesita limpio.
+
+       2. MODO TODOS (chip "Todos"): se mantiene el cluster y las rutas por
+          vendedor como antes (vista general/cobertura). Sin rastro GPS
+          (sería un amasijo de líneas de varios vendedores).
+
+       3. Agregado el chip de Miguel (faltaba en el selector de vendedores).
+
+     DECISIONES (Braian):
+       · Toggles de capa en vez de una capa dominante fija.
+       · Sin badge de calidad de rastro (Braian interpreta los pocos puntos).
+       · Recorrido = un vendedor; "Todos" solo en vista general.
+
+     NOTA: el rastro GPS depende de cuántos puntos haya grabado la app del
+       vendedor ese día (varía mucho: app abierta = rastro fiel; app cerrada
+       = pocos puntos y líneas rectas engañosas).
+
+     Incluye TODO lo de v12.23 (auditoría 3b) y v12.22 (fix 50/50).
+
+     NO se tocó: tomador, planilla, Xubio, Logística, Tesorería, tracking
+     continuo (solo se enrutó su dibujo al grupo de capa toggleable).
+
+     ─── histórico ───
      TCK ADMIN — v12.23 — 22/05/2026
      ──────────────────────────────────────────────────────────────────────
      MAPA: RESULTADO REAL DE VISITAS + AUDITORÍA DE VENTAS (3a + 3b)
@@ -3603,6 +3643,21 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 .mapa-chip.sel { background: var(--red); color: #fff; border-color: var(--red); }
+/* v12.24: botones de toggle de capa del recorrido */
+.mapa-cap-btn {
+  padding: 5px 11px;
+  border-radius: 16px;
+  border: 1.5px solid rgba(255,255,255,.35);
+  background: rgba(255,255,255,.12);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  color: rgba(255,255,255,.6);
+  -webkit-tap-highlight-color: transparent;
+}
+.mapa-cap-btn.on { background: #fff; color: var(--red); border-color: #fff; }
 #mapa-container {
   height: 380px;
   width: 100%;
@@ -11541,9 +11596,18 @@ input.canales-exp-input[type="date"] {
           </select>
           <div class="mapa-filtros" id="mapa-filtros-wrap" style="margin:0;padding:0;background:none;border:none;gap:6px;">
             <button class="mapa-chip sel" id="mapa-chip-todos" onclick="mapaFiltrar('todos')">👥 Todos</button>
+            <button class="mapa-chip" id="mapa-chip-Miguel" onclick="mapaFiltrar('Miguel')">Miguel</button>
             <button class="mapa-chip" id="mapa-chip-Juan" onclick="mapaFiltrar('Juan')">Juan</button>
             <button class="mapa-chip" id="mapa-chip-Lisandro" onclick="mapaFiltrar('Lisandro')">Lisandro</button>
           </div>
+        </div>
+        <!-- v12.24: toggles de capa del recorrido. Solo visibles con un
+             vendedor seleccionado (un solo rastro a la vez). -->
+        <div id="mapa-capas-wrap" style="display:none;gap:6px;padding:8px 12px;background:rgba(0,0,0,.08);flex-wrap:wrap;align-items:center;">
+          <span style="font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;color:#fff;opacity:.8;">Capas:</span>
+          <button class="mapa-cap-btn on" id="mapa-cap-pines" onclick="mapaToggleCapa('pines')">📍 Pines</button>
+          <button class="mapa-cap-btn on" id="mapa-cap-orden" onclick="mapaToggleCapa('orden')">➡️ Orden</button>
+          <button class="mapa-cap-btn on" id="mapa-cap-gps" onclick="mapaToggleCapa('gps')">🛣️ Rastro GPS</button>
         </div>
         <div id="mapa-container"></div>
         <div class="mapa-stats" style="grid-template-columns:repeat(4,1fr);">
@@ -20681,6 +20745,12 @@ var _mapaTrackLines  = {};
 var _mapaTrackMarkers = [];
 var _mapaDiasAtras   = 0; // 0=hoy, 1=ayer, etc.
 
+// v12.24: capas del recorrido (toggle independiente). Estado y grupos.
+var _mapaCapaOn      = { pines:true, orden:true, gps:true };
+var _mapaGrupoPines  = null;  // L.layerGroup de pines numerados
+var _mapaGrupoOrden  = null;  // L.layerGroup de línea de orden + flechas
+var _mapaGrupoGps    = null;  // L.layerGroup del rastro GPS real
+
 // Tracking continuo
 var _trackingWatchId  = null;
 var _trackingInterval = null;
@@ -20730,6 +20800,10 @@ async function mapaRender() {
     }).addTo(_mapaInstance);
     _mapaCluster = L.markerClusterGroup({ maxClusterRadius: 40, showCoverageOnHover: false, zoomToBoundsOnClick: true });
     _mapaInstance.addLayer(_mapaCluster);
+    // v12.24: grupos de capa del recorrido
+    _mapaGrupoGps   = L.layerGroup().addTo(_mapaInstance);
+    _mapaGrupoOrden = L.layerGroup().addTo(_mapaInstance);
+    _mapaGrupoPines = L.layerGroup().addTo(_mapaInstance);
   }
 
   // v12.23: asegurar que _pedidosCache esté poblado para la auditoría 3b.
@@ -20783,6 +20857,20 @@ function mapaFiltrar(vendedor) {
     if (chip) chip.classList.toggle('sel', v === vendedor);
   });
   mapaActualizar();
+}
+
+// v12.24: prender/apagar una capa del recorrido (pines / orden / gps)
+function mapaToggleCapa(cual) {
+  if (!_mapaInstance) return;
+  _mapaCapaOn[cual] = !_mapaCapaOn[cual];
+  var btn = document.getElementById('mapa-cap-' + cual);
+  if (btn) btn.classList.toggle('on', _mapaCapaOn[cual]);
+  var grupo = cual === 'pines' ? _mapaGrupoPines
+            : cual === 'orden' ? _mapaGrupoOrden
+            : _mapaGrupoGps;
+  if (!grupo) return;
+  if (_mapaCapaOn[cual]) _mapaInstance.addLayer(grupo);
+  else _mapaInstance.removeLayer(grupo);
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -20954,6 +21042,17 @@ function mapaActualizar() {
   _mapaMarkers.forEach(function(m) { _mapaInstance.removeLayer(m); });
   _mapaMarkers = [];
   if (_mapaCluster) _mapaCluster.clearLayers();
+  // v12.24: limpiar grupos de capa
+  if (_mapaGrupoPines) _mapaGrupoPines.clearLayers();
+  if (_mapaGrupoOrden) _mapaGrupoOrden.clearLayers();
+  if (_mapaGrupoGps)   _mapaGrupoGps.clearLayers();
+
+  // v12.24: modo recorrido = un vendedor seleccionado (no "todos"). Ahí se
+  // muestran pines numerados por orden + línea de orden + rastro GPS. Con
+  // "todos" se mantiene el cluster (vista cobertura/operativa general).
+  var modoRecorrido = (_mapaFiltro !== 'todos');
+  var capasWrap = document.getElementById('mapa-capas-wrap');
+  if (capasWrap) capasWrap.style.display = modoRecorrido ? 'flex' : 'none';
 
   // Filtrar visitas
   var visitas = _mapaVisitas.filter(function(v) {
@@ -21014,7 +21113,11 @@ function mapaActualizar() {
                     : esSinPedido ? '#C62828'
                     : esDeclaradoSinPed ? '#EF6C00'
                     : '#1976D2';
-    var iconHtml = '<div style="background:' + markerColor + ';color:#fff;border-radius:50% 50% 50% 0;transform:rotate(-45deg);width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;box-shadow:0 2px 8px rgba(0,0,0,.3);"><span style="transform:rotate(45deg)">' + (idx + 1) + '</span></div>';
+    // v12.24: en modo recorrido, borde dorado si la visita fue de 0 min
+    // (señal visual de check-in exprés). El número es el orden de visita.
+    var min0 = (tiempoStr === '0 min');
+    var bordePin = (modoRecorrido && min0) ? '3px solid #FFD700' : '2px solid rgba(255,255,255,.6)';
+    var iconHtml = '<div style="background:' + markerColor + ';color:#fff;border:' + bordePin + ';border-radius:50% 50% 50% 0;transform:rotate(-45deg);width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;box-shadow:0 2px 8px rgba(0,0,0,.3);"><span style="transform:rotate(45deg)">' + (idx + 1) + '</span></div>';
     var icon = L.divIcon({ html: iconHtml, iconSize: [30,30], iconAnchor: [15,30], className: '' });
     var hora = new Date(v.fecha).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'});
 
@@ -21042,7 +21145,10 @@ function mapaActualizar() {
 
     var marker = L.marker([v.lat, v.lng], {icon: icon})
       .bindPopup(popupVisitado);
-    if (_mapaCluster) _mapaCluster.addLayer(marker);
+    // v12.24: en modo recorrido los pines van al grupo toggleable; en modo
+    // "todos" siguen en el cluster (agrupación por cercanía).
+    if (modoRecorrido && _mapaGrupoPines) _mapaGrupoPines.addLayer(marker);
+    else if (_mapaCluster) _mapaCluster.addLayer(marker);
     else marker.addTo(_mapaInstance);
 
     marker.on('popupopen', function() {
@@ -21074,12 +21180,36 @@ function mapaActualizar() {
     rutasPorVend[n].push([v.lat, v.lng]);
   });
   var vendedoresEnMapa = Object.keys(rutasPorVend);
-  vendedoresEnMapa.forEach(function(nombre) {
-    var pts = rutasPorVend[nombre];
-    if (pts.length < 2) return;
-    var col = COLORES_VENDEDOR[nombre] || '#8B0000';
-    _mapaRutas.push(L.polyline(pts, { color: col, weight: 3, opacity: 0.75, dashArray: '8,6' }).addTo(_mapaInstance));
-  });
+
+  if (modoRecorrido) {
+    // v12.24: en modo recorrido, la línea de orden va al grupo toggleable
+    // con flechas de dirección. Un solo vendedor → una sola ruta.
+    vendedoresEnMapa.forEach(function(nombre) {
+      var pts = rutasPorVend[nombre];
+      if (pts.length < 2) return;
+      var col = COLORES_VENDEDOR[nombre] || '#8B0000';
+      // Línea punteada de orden
+      L.polyline(pts, { color: '#444', weight: 2, opacity: 0.85, dashArray: '2,7' }).addTo(_mapaGrupoOrden);
+      // Flechas de dirección en cada tramo
+      for (var i = 0; i < pts.length - 1; i++) {
+        var mid = [(pts[i][0]+pts[i+1][0])/2, (pts[i][1]+pts[i+1][1])/2];
+        var ang = Math.atan2(pts[i+1][0]-pts[i][0], pts[i+1][1]-pts[i][1]) * 180 / Math.PI;
+        var arrowIcon = L.divIcon({
+          html: '<div style="color:#333;font-size:13px;transform:rotate(' + (-ang) + 'deg)">▶</div>',
+          iconSize: [13,13], iconAnchor: [7,7], className: ''
+        });
+        L.marker(mid, { icon: arrowIcon, interactive: false }).addTo(_mapaGrupoOrden);
+      }
+    });
+  } else {
+    // Modo "todos": rutas por vendedor con su color, directo al mapa (como antes)
+    vendedoresEnMapa.forEach(function(nombre) {
+      var pts = rutasPorVend[nombre];
+      if (pts.length < 2) return;
+      var col = COLORES_VENDEDOR[nombre] || '#8B0000';
+      _mapaRutas.push(L.polyline(pts, { color: col, weight: 3, opacity: 0.75, dashArray: '8,6' }).addTo(_mapaInstance));
+    });
+  }
 
   // Leyenda
   var leyendaEl = document.getElementById('mapa-leyenda');
@@ -21141,6 +21271,12 @@ function mapaActualizar() {
 
   // Cargar líneas de tracking GPS continuo
   if (vendedorActual === 'ADMIN') mapaCargarPosiciones();
+
+  // v12.24: respetar el estado de los toggles de capa tras redibujar.
+  // (pines y orden se re-agregaron al redibujar; si el usuario los apagó,
+  // los sacamos. El gps ya se maneja dentro de mapaCargarPosiciones.)
+  if (!_mapaCapaOn.pines && _mapaGrupoPines) _mapaInstance.removeLayer(_mapaGrupoPines);
+  if (!_mapaCapaOn.orden && _mapaGrupoOrden) _mapaInstance.removeLayer(_mapaGrupoOrden);
 }
 
 // Cargar clientes sin visita (puntos grises + panel colapsable)
@@ -21457,10 +21593,11 @@ async function mapaCargarPosiciones() {
     if (!posiciones || !posiciones.length) return;
 
     // Limpiar líneas anteriores
-    Object.values(_mapaTrackLines).forEach(function(l) { _mapaInstance.removeLayer(l); });
+    Object.values(_mapaTrackLines).forEach(function(l) { if(_mapaGrupoGps) _mapaGrupoGps.removeLayer(l); _mapaInstance.removeLayer(l); });
     _mapaTrackLines = {};
-    _mapaTrackMarkers.forEach(function(m) { _mapaInstance.removeLayer(m); });
+    _mapaTrackMarkers.forEach(function(m) { if(_mapaGrupoGps) _mapaGrupoGps.removeLayer(m); _mapaInstance.removeLayer(m); });
     _mapaTrackMarkers = [];
+    if (_mapaGrupoGps) _mapaGrupoGps.clearLayers();
 
     // Filtrar por vendedor si hay filtro activo
     if (_mapaFiltro !== 'todos') {
@@ -21468,6 +21605,11 @@ async function mapaCargarPosiciones() {
         return p.vendedores && p.vendedores.nombre === _mapaFiltro;
       });
     }
+
+    // v12.24: el rastro GPS solo se dibuja en modo recorrido (un vendedor).
+    // En "todos" sería un amasijo de líneas; ahí no se muestra.
+    var modoRec = (_mapaFiltro !== 'todos');
+    if (!modoRec) return;
 
     // Agrupar por vendedor
     var porVendedor = {};
@@ -21477,17 +21619,17 @@ async function mapaCargarPosiciones() {
       porVendedor[nombre].push([p.lat, p.lng]);
     });
 
-    // Dibujar línea de ruta por vendedor
+    // Dibujar rastro GPS (camino real) por vendedor, al grupo toggleable
     Object.keys(porVendedor).forEach(function(nombre) {
       var pts = porVendedor[nombre];
       if (pts.length < 2) return;
       var color = COLORES_VENDEDOR[nombre] || '#8B0000';
       var linea = L.polyline(pts, {
         color: color,
-        weight: 3,
-        opacity: 0.7,
+        weight: 4,
+        opacity: 0.5,
         dashArray: null
-      }).addTo(_mapaInstance);
+      }).addTo(_mapaGrupoGps);
       _mapaTrackLines[nombre] = linea;
 
       // Marcador de posición actual (último punto)
@@ -21499,10 +21641,13 @@ async function mapaCargarPosiciones() {
         className: ''
       });
       var m = L.marker(ultimo, {icon: iconActual})
-        .bindPopup('<b>' + nombre + '</b><br>📍 Posición actual')
-        .addTo(_mapaInstance);
+        .bindPopup('<b>' + nombre + '</b><br>📍 Última posición')
+        .addTo(_mapaGrupoGps);
       _mapaTrackMarkers.push(m);
     });
+
+    // Aplicar el estado del toggle (si el usuario apagó la capa GPS)
+    if (!_mapaCapaOn.gps && _mapaGrupoGps) _mapaInstance.removeLayer(_mapaGrupoGps);
   } catch(e) { console.error('Error tracking:', e); }
 }
 
