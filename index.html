@@ -1,5 +1,49 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v12.22 — 22/05/2026
+     ──────────────────────────────────────────────────────────────────────
+     FIX: MAPA — RESULTADO REAL DE VISITAS (fin del "50/50 falso")
+
+     CONTEXTO (Braian, 22/05):
+       El mapa marcaba casi todas las visitas como "Con pedido" porque
+       asumía venta por descarte: si no había un registro explícito
+       tipo='visita_sin_pedido', contaba como vendida. Pero los vendedores
+       registran la no-venta de OTRA forma (checkout con motivo_no_compra),
+       que el mapa ignoraba. Resultado: 50 visitados / 50 con pedido / 0
+       sin pedido, todo falso. Además el mapa y la lista usaban lógicas
+       distintas y podían discrepar.
+
+     CAMBIOS:
+
+       1. NUEVA FUNCIÓN mapaResultadoVisita(checkin, todasVisitas):
+          Fuente única de verdad del resultado de una visita. Combina las
+          3 señales reales en orden de prioridad:
+            1. pedido_campo (tomó pedido en check-in) → Con pedido
+            2. checkout "Sí tomé el pedido" (sin motivo) → Con pedido
+            3. visita_sin_pedido → Sin pedido (con motivo)
+            4. checkout con motivo_no_compra → Sin pedido (con motivo)
+            5. checkin sin checkout → Activo (en curso)
+            6. checkout sin señal → Sin definir (NO se asume venta)
+
+       2. mapaActualizar (markers + contadores) y mapaActualizarLista
+          ahora usan esa función. Mapa y lista siempre coinciden.
+
+       3. Markers/badges con 3 estados: verde=pedido, rojo=sin pedido
+          (muestra el motivo), azul=en curso/sin definir.
+
+       NOTA: durante el día los contadores Con+Sin pueden no sumar
+       exactamente al total Visitados — la diferencia son visitas "en
+       curso" (check-in sin checkout todavía), que se ven en azul en el
+       mapa. Al cierre del día deberían resolverse casi todas.
+
+       Esto es la Fase 3a. La 3b (cruzar contra el pedido real del Sheet
+       por cliente+día para auditar ventas declaradas vs cargadas) queda
+       pendiente para cuando esté resuelto el matching de clientes (N42).
+
+       NO se tocó: tomador de pedidos, planilla de carga, Xubio, Logística,
+       Tesorería, tracking continuo.
+
+     ─── histórico ───
      TCK ADMIN — v12.21 — 15/05/2026
      ──────────────────────────────────────────────────────────────────────
      CAMBIOS v12.21 sobre v12.20.2 — PAQUETE A: PLANILLA DE CARGA ROBUSTA
@@ -20718,6 +20762,66 @@ function mapaFiltrar(vendedor) {
   mapaActualizar();
 }
 
+// ════════════════════════════════════════════════════════════════
+// v12.22 — RESULTADO REAL DE UNA VISITA (fuente única de verdad)
+// ────────────────────────────────────────────────────────────────
+// Antes había 3 señales de "vendió o no" y cada función usaba una
+// distinta, lo que daba el 50/50 falso (el mapa asumía "con pedido"
+// por descarte) y discrepancias entre el mapa y la lista.
+//
+// Esta función centraliza la decisión. Orden de prioridad:
+//   1. pedido_campo  → el vendedor tomó el pedido en el check-in. Venta.
+//   2. checkout "Sí tomé el pedido" (sin motivo_no_compra) → venta.
+//   3. visita_sin_pedido  → no compró (con motivo).
+//   4. checkout con motivo_no_compra → no compró (con motivo).
+//   5. checkin sin checkout todavía → 'activo' (en curso).
+//   6. checkout sin pedido_campo y sin motivo → 'indefinido' (no se
+//      asume venta; antes esto inflaba el "con pedido").
+//
+// Devuelve { estado, motivo }
+//   estado ∈ 'con_pedido' | 'sin_pedido' | 'activo' | 'indefinido'
+//   motivo  = texto del motivo de no-compra (solo si sin_pedido)
+// ════════════════════════════════════════════════════════════════
+function mapaResultadoVisita(checkin, todasVisitas) {
+  var cli = checkin.nombre_cliente;
+  var tCheckin = new Date(checkin.fecha);
+
+  // 1. pedido tomado en campo (posterior al check-in)
+  var pedido = todasVisitas.find(function(c) {
+    return c.tipo === 'pedido_campo' && c.nombre_cliente === cli &&
+           new Date(c.fecha) >= tCheckin;
+  });
+  if (pedido) return { estado: 'con_pedido', motivo: null };
+
+  // Checkout correspondiente (el primero posterior al check-in)
+  var checkout = todasVisitas.find(function(c) {
+    return c.tipo === 'checkout' && c.nombre_cliente === cli &&
+           new Date(c.fecha) > tCheckin;
+  });
+
+  // 2. checkout marcado como venta (sin motivo de no-compra)
+  if (checkout && !checkout.motivo_no_compra) {
+    return { estado: 'con_pedido', motivo: null };
+  }
+
+  // 3. visita_sin_pedido (botón separado)
+  var sinPed = todasVisitas.find(function(c) {
+    return c.tipo === 'visita_sin_pedido' && c.nombre_cliente === cli;
+  });
+  if (sinPed) return { estado: 'sin_pedido', motivo: sinPed.motivo_no_compra || 'Sin motivo' };
+
+  // 4. checkout con motivo de no-compra
+  if (checkout && checkout.motivo_no_compra) {
+    return { estado: 'sin_pedido', motivo: checkout.motivo_no_compra };
+  }
+
+  // 5. check-in sin checkout todavía → en curso
+  if (!checkout) return { estado: 'activo', motivo: null };
+
+  // 6. checkout sin señal clara → no se asume venta
+  return { estado: 'indefinido', motivo: null };
+}
+
 function mapaActualizar() {
   if (!_mapaInstance) return;
 
@@ -20746,27 +20850,28 @@ function mapaActualizar() {
   // Para cada checkin buscar si tiene checkout (para calcular tiempo)
   var conPedido = 0;
   var sinPedido = 0;
+  var enCurso = 0;  // v12.22: visitas activas o sin resultado definido
   var bounds = [];
 
   checkins.forEach(function(v, idx) {
     var vendedorNombre = v.vendedores ? v.vendedores.nombre : 'Vendedor';
     var color = COLORES_VENDEDOR[vendedorNombre] || '#8B0000';
 
-    // Buscar checkout correspondiente
+    // v12.22: resultado real de la visita (fuente única de verdad)
+    var res = mapaResultadoVisita(v, visitas);
+    var esConPedido = res.estado === 'con_pedido';
+    var esSinPedido = res.estado === 'sin_pedido';
+
+    if (esConPedido) conPedido++;
+    else if (esSinPedido) sinPedido++;
+    else enCurso++;
+
+    // Buscar checkout correspondiente solo para calcular el tiempo
     var checkout = visitas.find(function(c) {
       return c.tipo === 'checkout' &&
              c.nombre_cliente === v.nombre_cliente &&
              new Date(c.fecha) > new Date(v.fecha);
     });
-
-    // Buscar visita sin pedido
-    var sinPed = visitas.find(function(c) {
-      return c.tipo === 'visita_sin_pedido' &&
-             c.nombre_cliente === v.nombre_cliente;
-    });
-
-    var tienePedido = !sinPed;
-    if (sinPed) sinPedido++; else conPedido++;
 
     var tiempoStr = '';
     if (checkout) {
@@ -20774,10 +20879,17 @@ function mapaActualizar() {
       tiempoStr = mins + ' min';
     }
 
-    var markerColor = sinPed ? '#C62828' : '#2E7D32';
+    // Color del marker según estado: verde=pedido, rojo=sin pedido, azul=en curso
+    var markerColor = esConPedido ? '#2E7D32' : esSinPedido ? '#C62828' : '#1976D2';
     var iconHtml = '<div style="background:' + markerColor + ';color:#fff;border-radius:50% 50% 50% 0;transform:rotate(-45deg);width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;box-shadow:0 2px 8px rgba(0,0,0,.3);"><span style="transform:rotate(45deg)">' + (idx + 1) + '</span></div>';
     var icon = L.divIcon({ html: iconHtml, iconSize: [30,30], iconAnchor: [15,30], className: '' });
     var hora = new Date(v.fecha).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'});
+
+    // Badge del popup según estado
+    var badgeBg, badgeColor, badgeTxt;
+    if (esConPedido)      { badgeBg = '#E8F5E9'; badgeColor = '#2E7D32'; badgeTxt = '✅ Con pedido'; }
+    else if (esSinPedido) { badgeBg = '#FFEBEE'; badgeColor = '#C62828'; badgeTxt = '❌ ' + (res.motivo || 'Sin motivo'); }
+    else                  { badgeBg = '#E3F2FD'; badgeColor = '#1976D2'; badgeTxt = '🔵 ' + (res.estado === 'activo' ? 'En curso' : 'Sin definir'); }
 
     // Popup con historial al tocar
     var popupIdV = 'popup-vis-' + idx + '-' + Date.now();
@@ -20789,7 +20901,7 @@ function mapaActualizar() {
         + '<div style="width:8px;height:8px;border-radius:50%;background:' + color + ';"></div>'
         + '<div style="font-size:11px;color:#666;">' + vendedorNombre + ' · ' + hora + (tiempoStr ? ' · ⏱ <b>' + tiempoStr + '</b>' : '') + '</div>'
         + '</div>'
-        + '<div style="background:' + (sinPed?'#FFEBEE':'#E8F5E9') + ';border-radius:8px;padding:6px 10px;margin-bottom:8px;font-size:12px;font-weight:700;color:' + (sinPed?'#C62828':'#2E7D32') + ';">' + (sinPed ? '❌ ' + (sinPed.motivo_no_compra||'Sin motivo') : '✅ Con pedido') + '</div>'
+        + '<div style="background:' + badgeBg + ';border-radius:8px;padding:6px 10px;margin-bottom:8px;font-size:12px;font-weight:700;color:' + badgeColor + ';">' + badgeTxt + '</div>'
         + '<div id="' + popupIdV + '" style="font-size:12px;color:#999;">⏳ Cargando historial...</div>'
         + '</div>'
       );
@@ -20811,16 +20923,13 @@ function mapaActualizar() {
   if (_mapaRuta) { _mapaInstance.removeLayer(_mapaRuta); _mapaRuta = null; }
   if (Array.isArray(_mapaRutas)) _mapaRutas.forEach(function(r){ _mapaInstance.removeLayer(r); });
   _mapaRutas = [];
-  // Contar también checkins sin coordenadas para los stats
+  // Contar también checkins sin coordenadas para los stats (v12.22)
   todosCheckins.forEach(function(v) {
     if (v.lat && v.lng) return; // ya contados arriba
-    var sinPed = visitas.find(function(c) {
-      return (c.tipo === 'visita_sin_pedido' || c.tipo === 'checkout') &&
-             c.nombre_cliente === v.nombre_cliente &&
-             new Date(c.fecha) > new Date(v.fecha);
-    });
-    if (sinPed && sinPed.tipo === 'visita_sin_pedido') sinPedido++;
-    else conPedido++;
+    var res = mapaResultadoVisita(v, visitas);
+    if (res.estado === 'con_pedido') conPedido++;
+    else if (res.estado === 'sin_pedido') sinPedido++;
+    else enCurso++;
   });
 
   var rutasPorVend = {};
@@ -21071,14 +21180,11 @@ function mapaActualizarLista(checkins, todasVisitas) {
     var vendedorNombre = v.vendedores ? v.vendedores.nombre : '';
     var color = COLORES_VENDEDOR[vendedorNombre] || '#8B0000';
 
+    // v12.22: mismo resultado que usa el mapa (fuente única de verdad)
+    var res = mapaResultadoVisita(v, todasVisitas);
+
     var checkout = todasVisitas.find(function(c) {
       return c.tipo === 'checkout' && c.nombre_cliente === v.nombre_cliente && new Date(c.fecha) > new Date(v.fecha);
-    });
-    var sinPed = todasVisitas.find(function(c) {
-      return c.tipo === 'visita_sin_pedido' && c.nombre_cliente === v.nombre_cliente;
-    });
-    var tuvoPedido = todasVisitas.some(function(c) {
-      return c.tipo === 'pedido_campo' && c.nombre_cliente === v.nombre_cliente && new Date(c.fecha) > new Date(v.fecha);
     });
 
     var hora = new Date(v.fecha).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'});
@@ -21088,9 +21194,11 @@ function mapaActualizarLista(checkins, todasVisitas) {
       duracion = mins + ' min';
     }
 
-    var icono = tuvoPedido ? '📦' : sinPed ? '🔴' : '🟢';
-    var resultColor = tuvoPedido ? '#2E7D32' : sinPed ? '#C62828' : '#1976D2';
-    var resultado = tuvoPedido ? 'Con pedido' : sinPed ? (sinPed.motivo_no_compra || 'Sin pedido') : 'Activo';
+    var icono, resultColor, resultado;
+    if (res.estado === 'con_pedido')      { icono = '📦'; resultColor = '#2E7D32'; resultado = 'Con pedido'; }
+    else if (res.estado === 'sin_pedido') { icono = '🔴'; resultColor = '#C62828'; resultado = res.motivo || 'Sin pedido'; }
+    else if (res.estado === 'activo')     { icono = '🟢'; resultColor = '#1976D2'; resultado = 'Activo'; }
+    else                                  { icono = '⚪'; resultColor = '#757575'; resultado = 'Sin definir'; }
 
     return '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid #f5f0e8;">'
       + '<div style="width:28px;height:28px;border-radius:50%;background:' + color + ';color:#fff;display:flex;align-items:center;justify-content:center;font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:900;flex-shrink:0;">' + (idx+1) + '</div>'
