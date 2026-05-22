@@ -1,5 +1,35 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v12.25 — 22/05/2026
+     ──────────────────────────────────────────────────────────────────────
+     MAPA: LEGIBILIDAD DEL RECORRIDO (sobre v12.24)
+
+     CONTEXTO (Braian, 22/05):
+       Con las dos capas prendidas (orden + GPS) las líneas se cruzaban y
+       no se podía seguir el recorrido ni ver dónde arrancó el vendedor.
+
+     CAMBIOS:
+       1. GPS APAGADO POR DEFECTO. Al elegir un vendedor se ve solo el orden
+          de visita (limpio). El rastro GPS se prende con su toggle cuando
+          se quiere ver el camino real del auto.
+       2. BANDERAS inicio/fin: pin verde 🟢 en la 1ª visita, pin rojo 🔴 en
+          la última. Más grandes que los pines normales. Ubican de dónde a
+          dónde fue el vendedor sin contar.
+       3. DEGRADADO de color en la línea de orden: verde claro (inicio) →
+          verde oscuro (fin). El ojo sigue el avance sin depender de contar
+          pines ni de muchas flechas.
+       4. Flechas de dirección más sutiles, del color de su tramo.
+
+     FIX: en v12.24 las variables esInicio/esFin se usaban en el popup sin
+       estar definidas → ReferenceError al abrir un popup en modo recorrido.
+       Ahora se definen dentro del loop.
+
+     Incluye TODO lo de v12.24 (vista recorrido), v12.23 (auditoría 3b),
+     v12.22 (fix 50/50).
+
+     NO se tocó: tomador, planilla, Xubio, Logística, Tesorería.
+
+     ─── histórico ───
      TCK ADMIN — v12.24 — 22/05/2026
      ──────────────────────────────────────────────────────────────────────
      MAPA: VISTA DE RECORRIDO PARA AUDITAR VENDEDORES
@@ -11607,7 +11637,7 @@ input.canales-exp-input[type="date"] {
           <span style="font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;color:#fff;opacity:.8;">Capas:</span>
           <button class="mapa-cap-btn on" id="mapa-cap-pines" onclick="mapaToggleCapa('pines')">📍 Pines</button>
           <button class="mapa-cap-btn on" id="mapa-cap-orden" onclick="mapaToggleCapa('orden')">➡️ Orden</button>
-          <button class="mapa-cap-btn on" id="mapa-cap-gps" onclick="mapaToggleCapa('gps')">🛣️ Rastro GPS</button>
+          <button class="mapa-cap-btn" id="mapa-cap-gps" onclick="mapaToggleCapa('gps')">🛣️ Rastro GPS</button>
         </div>
         <div id="mapa-container"></div>
         <div class="mapa-stats" style="grid-template-columns:repeat(4,1fr);">
@@ -20745,8 +20775,10 @@ var _mapaTrackLines  = {};
 var _mapaTrackMarkers = [];
 var _mapaDiasAtras   = 0; // 0=hoy, 1=ayer, etc.
 
-// v12.24: capas del recorrido (toggle independiente). Estado y grupos.
-var _mapaCapaOn      = { pines:true, orden:true, gps:true };
+// v12.24/12.25: capas del recorrido (toggle independiente). Estado y grupos.
+// v12.25: GPS apagado por defecto — el rastro GPS se cruzaba con la línea
+// de orden y ensuciaba la vista. Se prende a mano para ver el camino real.
+var _mapaCapaOn      = { pines:true, orden:true, gps:false };
 var _mapaGrupoPines  = null;  // L.layerGroup de pines numerados
 var _mapaGrupoOrden  = null;  // L.layerGroup de línea de orden + flechas
 var _mapaGrupoGps    = null;  // L.layerGroup del rastro GPS real
@@ -21117,8 +21149,21 @@ function mapaActualizar() {
     // (señal visual de check-in exprés). El número es el orden de visita.
     var min0 = (tiempoStr === '0 min');
     var bordePin = (modoRecorrido && min0) ? '3px solid #FFD700' : '2px solid rgba(255,255,255,.6)';
-    var iconHtml = '<div style="background:' + markerColor + ';color:#fff;border:' + bordePin + ';border-radius:50% 50% 50% 0;transform:rotate(-45deg);width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;box-shadow:0 2px 8px rgba(0,0,0,.3);"><span style="transform:rotate(45deg)">' + (idx + 1) + '</span></div>';
-    var icon = L.divIcon({ html: iconHtml, iconSize: [30,30], iconAnchor: [15,30], className: '' });
+
+    // v12.25: banderas de inicio (verde) y fin (rojo) del recorrido.
+    var esInicio = (modoRecorrido && idx === 0);
+    var esFin    = (modoRecorrido && idx === checkins.length - 1 && checkins.length > 1);
+
+    var iconHtml;
+    if (esInicio) {
+      iconHtml = '<div style="background:#1B5E20;color:#fff;border:3px solid #fff;border-radius:50% 50% 50% 0;transform:rotate(-45deg);width:38px;height:38px;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 10px rgba(0,0,0,.45);"><span style="transform:rotate(45deg);font-size:17px;">🟢</span></div>';
+    } else if (esFin) {
+      iconHtml = '<div style="background:#B71C1C;color:#fff;border:3px solid #fff;border-radius:50% 50% 50% 0;transform:rotate(-45deg);width:38px;height:38px;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 10px rgba(0,0,0,.45);"><span style="transform:rotate(45deg);font-size:17px;">🔴</span></div>';
+    } else {
+      iconHtml = '<div style="background:' + markerColor + ';color:#fff;border:' + bordePin + ';border-radius:50% 50% 50% 0;transform:rotate(-45deg);width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;box-shadow:0 2px 8px rgba(0,0,0,.3);"><span style="transform:rotate(45deg)">' + (idx + 1) + '</span></div>';
+    }
+    var iconSz = (esInicio || esFin) ? 38 : 30;
+    var icon = L.divIcon({ html: iconHtml, iconSize: [iconSz,iconSz], iconAnchor: [iconSz/2,iconSz], className: '' });
     var hora = new Date(v.fecha).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'});
 
     // Badge del popup según estado
@@ -21139,6 +21184,8 @@ function mapaActualizar() {
         + '<div style="font-size:11px;color:#666;">' + vendedorNombre + ' · ' + hora + (tiempoStr ? ' · ⏱ <b>' + tiempoStr + '</b>' : '') + '</div>'
         + '</div>'
         + '<div style="background:' + badgeBg + ';border-radius:8px;padding:6px 10px;margin-bottom:8px;font-size:12px;font-weight:700;color:' + badgeColor + ';">' + badgeTxt + '</div>'
+        + (esInicio ? '<div style="font-size:12px;font-weight:700;color:#1B5E20;margin-bottom:6px;">🟢 Arranque del día</div>' : '')
+        + (esFin ? '<div style="font-size:12px;font-weight:700;color:#B71C1C;margin-bottom:6px;">🔴 Última visita</div>' : '')
         + '<div id="' + popupIdV + '" style="font-size:12px;color:#999;">⏳ Cargando historial...</div>'
         + '</div>'
       );
@@ -21182,21 +21229,27 @@ function mapaActualizar() {
   var vendedoresEnMapa = Object.keys(rutasPorVend);
 
   if (modoRecorrido) {
-    // v12.24: en modo recorrido, la línea de orden va al grupo toggleable
-    // con flechas de dirección. Un solo vendedor → una sola ruta.
+    // v12.25: línea de orden con DEGRADADO claro→oscuro. Cada tramo lleva
+    // su color según la posición en el recorrido, así el ojo sigue el
+    // avance sin contar pin por pin. Va al grupo toggleable.
     vendedoresEnMapa.forEach(function(nombre) {
       var pts = rutasPorVend[nombre];
       if (pts.length < 2) return;
-      var col = COLORES_VENDEDOR[nombre] || '#8B0000';
-      // Línea punteada de orden
-      L.polyline(pts, { color: '#444', weight: 2, opacity: 0.85, dashArray: '2,7' }).addTo(_mapaGrupoOrden);
-      // Flechas de dirección en cada tramo
-      for (var i = 0; i < pts.length - 1; i++) {
+      var n = pts.length;
+      for (var i = 0; i < n - 1; i++) {
+        var t = i / (n - 1); // 0 = inicio, 1 = fin
+        // interpolar verde claro (155,207,155) → verde oscuro (27,94,32)
+        var r = Math.round(155 + (27 - 155) * t);
+        var g = Math.round(207 + (94 - 207) * t);
+        var b = Math.round(155 + (32 - 155) * t);
+        var colTramo = 'rgb(' + r + ',' + g + ',' + b + ')';
+        L.polyline([pts[i], pts[i+1]], { color: colTramo, weight: 4, opacity: 0.9 }).addTo(_mapaGrupoOrden);
+        // Flecha de dirección sutil en el medio del tramo, del color del tramo
         var mid = [(pts[i][0]+pts[i+1][0])/2, (pts[i][1]+pts[i+1][1])/2];
         var ang = Math.atan2(pts[i+1][0]-pts[i][0], pts[i+1][1]-pts[i][1]) * 180 / Math.PI;
         var arrowIcon = L.divIcon({
-          html: '<div style="color:#333;font-size:13px;transform:rotate(' + (-ang) + 'deg)">▶</div>',
-          iconSize: [13,13], iconAnchor: [7,7], className: ''
+          html: '<div style="color:' + colTramo + ';font-size:11px;transform:rotate(' + (-ang) + 'deg);text-shadow:0 0 2px #fff">▶</div>',
+          iconSize: [11,11], iconAnchor: [5,5], className: ''
         });
         L.marker(mid, { icon: arrowIcon, interactive: false }).addTo(_mapaGrupoOrden);
       }
