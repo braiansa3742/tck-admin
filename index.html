@@ -22498,7 +22498,7 @@ function ordenDeCiudad(ciudad) {
 // de más de un proveedor), el admin lo define después en el modal.
 // ══════════════════════════════════════════════════════════════
 const PROVEEDORES_LIST = [
-  'Soychu', 'San Sebastián', 'Lujo Pampeano', 'Shaddai', 'Fresnova', 'GTA',
+  'Soychu', 'San Sebastián', 'Mark', 'Lujo Pampeano', 'Shaddai', 'Fresnova', 'GTA',
   'McCain', 'Finca Balcarce', 'Solimeno', 'La Caseriana',
   'Avi One', 'Otro Proveedor de Huevo', 'Otro'
 ];
@@ -22510,6 +22510,7 @@ const PROVEEDORES_MAP = {
   // Pollos (todos ambiguos Soychu/San Sebastián)
   'Pollo A':                        ['Soychu', 'San Sebastián'],
   'Pollo B':                        ['Soychu', 'San Sebastián'],
+  'Pollo C':                        ['Soychu', 'San Sebastián', 'Mark'],
   'Suprema':                        ['Soychu', 'San Sebastián'],
   'Suprema IQF':                    ['Soychu', 'San Sebastián'],
   'Suprema B IQF':                  ['Soychu', 'San Sebastián'],
@@ -29736,6 +29737,7 @@ function _stockObtenerCategoria(productoTckNombre) {
       'Pollo Ginosa': 'POLLOS CONGELADOS', 'Pollo A': 'POLLOS CONGELADOS',
       'Pollo A x6': 'POLLOS CONGELADOS', 'Pollo A x7': 'POLLOS CONGELADOS',
       'Pollo Optimo': 'POLLOS CONGELADOS', 'Pollo B': 'POLLOS CONGELADOS',
+      'Pollo C': 'POLLOS CONGELADOS',
       'Pollo B x6 Congelado': 'POLLOS CONGELADOS', 'Pollo B x6 Fresco': 'POLLOS CONGELADOS',
       'Pollo B x7 Fresco': 'POLLOS CONGELADOS', 'Pollo B x8': 'POLLOS CONGELADOS', 'Pollo B x9': 'POLLOS CONGELADOS',
       'Suprema': 'POLLOS CONGELADOS', 'Suprema IQF': 'POLLOS CONGELADOS', 'Suprema B IQF': 'POLLOS CONGELADOS',
