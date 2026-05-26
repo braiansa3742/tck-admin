@@ -1,5 +1,18 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v12.26 — 26/05/2026
+     ──────────────────────────────────────────────────────────────────────
+     LÍNEA PREMIUM FRESNOVA — mapeo de devoluciones (sobre v12.25)
+
+       1. Agregado 'Fresnova' a PROVEEDORES_LIST.
+       2. Agregados 7 productos al PROVEEDORES_MAP (todos → 'Fresnova',
+          proveedor único, no ambiguo):
+            Medallon de Pollo Premium, Formitas Premium,
+            Medallon Pollo JyQ Premium, Filet Merluza Finas Hierbas Premium,
+            Langostinos Rebozados, Rabas, Bocaditos de Mar Rebozados
+       Nombres EXACTOS iguales a catálogo v3.10 / ventas v14.25.0 / Sheet.
+
+     ──────────────────────────────────────────────────────────────────────
      TCK ADMIN — v12.25 — 22/05/2026
      ──────────────────────────────────────────────────────────────────────
      MAPA: LEGIBILIDAD DEL RECORRIDO (sobre v12.24)
@@ -22485,7 +22498,7 @@ function ordenDeCiudad(ciudad) {
 // de más de un proveedor), el admin lo define después en el modal.
 // ══════════════════════════════════════════════════════════════
 const PROVEEDORES_LIST = [
-  'Soychu', 'San Sebastián', 'Lujo Pampeano', 'Shaddai', 'GTA',
+  'Soychu', 'San Sebastián', 'Lujo Pampeano', 'Shaddai', 'Fresnova', 'GTA',
   'McCain', 'Finca Balcarce', 'Solimeno', 'La Caseriana',
   'Avi One', 'Otro Proveedor de Huevo', 'Otro'
 ];
@@ -22518,6 +22531,14 @@ const PROVEEDORES_MAP = {
   'Filet Merluza Finas Hierbas':    'Shaddai',
   'Filet de Merluza Rebozado':      'Shaddai',
   'Filet Merluza a Granel':         'Shaddai',
+  // Rebozados Premium (Fresnova — todos fijos)
+  'Medallon de Pollo Premium':           'Fresnova',
+  'Formitas Premium':                    'Fresnova',
+  'Medallon Pollo JyQ Premium':          'Fresnova',
+  'Filet Merluza Finas Hierbas Premium': 'Fresnova',
+  'Langostinos Rebozados':               'Fresnova',
+  'Rabas':                               'Fresnova',
+  'Bocaditos de Mar Rebozados':          'Fresnova',
   // Milanesas y Hamburguesas
   'Milanesa de Nalga':              'Lujo Pampeano',
   'Milanesa de Pollo':              'Lujo Pampeano',
