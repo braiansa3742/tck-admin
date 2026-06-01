@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v12.26 — 26/05/2026
+     TCK ADMIN — v12.27 — 30/05/2026
      ──────────────────────────────────────────────────────────────────────
      LÍNEA PREMIUM FRESNOVA — mapeo de devoluciones (sobre v12.25)
 
@@ -11721,29 +11721,82 @@ input.canales-exp-input[type="date"] {
   <!-- ══ VIEW: VISITAS / GPS ══ -->
   <div class="view" id="view-gps">
     <!-- ══ VISTA ADMIN: VISITAS ══ -->
+    <style>
+/* ══ TAB VISITAS v2 (v12.27) — control de trabajo en campo ══ */
+.av2-hdr{background:linear-gradient(135deg,#4A0000,#8B0000);padding:14px 16px 12px;}
+.av2-hdr-tit{font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:900;color:#fff;letter-spacing:.5px;}
+.av2-hdr-sub{font-size:11px;color:rgba(255,255,255,.7);margin:1px 0 12px;}
+.av2-chips{display:flex;gap:8px;}
+.av2-chip{flex:1;background:rgba(255,255,255,.12);border:1.5px solid rgba(255,255,255,.25);border-radius:11px;padding:9px;text-align:center;cursor:pointer;}
+.av2-chip.on{background:#fff;border-color:#fff;}
+.av2-chip-nom{font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:900;color:rgba(255,255,255,.85);}
+.av2-chip.on .av2-chip-nom{color:#8B0000;}
+.av2-chip-meta{font-size:10px;color:rgba(255,255,255,.55);}
+.av2-chip.on .av2-chip-meta{color:#9C7050;}
+.av2-body{padding:14px;}
+.av2-sem-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+.av2-sem-t{font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:900;color:#5C4030;}
+.av2-arrow{width:28px;height:28px;border-radius:8px;background:#fff;border:1.5px solid #eee;display:flex;align-items:center;justify-content:center;font-size:15px;color:#8B0000;cursor:pointer;font-weight:700;}
+.av2-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:8px;}
+.av2-kpi{background:#fff;border:1.5px solid #eee;border-radius:12px;padding:10px 6px;text-align:center;}
+.av2-kpi-num{font-family:'Barlow Condensed',sans-serif;font-size:24px;font-weight:900;line-height:1;}
+.av2-kpi-lbl{font-size:9px;color:#9C7050;margin-top:4px;text-transform:uppercase;letter-spacing:.3px;}
+.av2-kpi-wide{grid-column:span 3;display:flex;align-items:center;justify-content:space-between;padding:11px 14px;}
+.av2-kpi-wide .l{font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;color:#5C4030;}
+.av2-kpi-wide .r{font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:900;}
+.av2-dots{display:flex;gap:3px;}
+.av2-dot{width:13px;height:13px;border-radius:4px;}
+.av2-cal-nav{display:flex;align-items:center;justify-content:space-between;margin:16px 0 10px;}
+.av2-cal-mes{font-family:'Barlow Condensed',sans-serif;font-size:17px;font-weight:900;text-transform:capitalize;}
+.av2-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
+.av2-dow{text-align:center;font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;color:#9C7050;padding-bottom:2px;}
+.av2-cell{aspect-ratio:.92;border-radius:9px;padding:3px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:2px solid transparent;position:relative;cursor:pointer;}
+.av2-cell.empty{background:transparent;cursor:default;}
+.av2-cell .d{font-size:9px;font-weight:700;position:absolute;top:3px;left:5px;opacity:.65;}
+.av2-cell .v{font-family:'Barlow Condensed',sans-serif;font-size:19px;font-weight:900;line-height:1;}
+.av2-cell .chk{font-size:8px;font-weight:700;opacity:.85;margin-top:1px;}
+.av2-ok{background:#7DC36F;color:#0d2b0a;}
+.av2-cerca{background:#FFE082;color:#7A5A00;}
+.av2-flojo{background:#FFCC9E;color:#8a3d00;}
+.av2-sindata{background:#EFEBE6;color:#BCB0A4;}
+.av2-dom{background:#F4F1ED;color:#cfc7bd;}
+.av2-cell.weeksel{border-color:#8B0000;}
+.av2-cell.daysel{outline:3px solid #4A0000;outline-offset:-2px;}
+.av2-ley{display:flex;flex-wrap:wrap;gap:9px;margin-top:11px;font-size:10px;color:#9C7050;}
+.av2-ley .sw{width:13px;height:13px;border-radius:3px;display:inline-block;vertical-align:middle;margin-right:3px;}
+.av2-nota{font-size:10px;color:#9C7050;text-align:center;margin-top:10px;line-height:1.45;padding:0 4px;}
+.av2-det{margin-top:16px;background:#fff;border:1.5px solid #eee;border-radius:14px;overflow:hidden;display:none;}
+.av2-det-hdr{background:#E8F5E9;padding:11px 14px;}
+.av2-det-f{font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:16px;}
+.av2-det-j{font-size:11px;color:#5C4030;margin-top:1px;}
+.av2-det-stats{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #f0f0f0;}
+.av2-det-stat{padding:9px 4px;text-align:center;border-right:1px solid #f4f4f4;}
+.av2-det-stat .n{font-family:'Barlow Condensed',sans-serif;font-size:17px;font-weight:900;}
+.av2-det-stat .l{font-size:8px;color:#9C7050;margin-top:2px;text-transform:uppercase;}
+.av2-tl{display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid #f6f6f6;}
+.av2-tl-ic{width:24px;height:24px;border-radius:50%;background:#f5f5f5;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;}
+.av2-tl-nom{font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:700;line-height:1.1;}
+.av2-tl-meta{font-size:10px;color:#9E9E9E;}
+.av2-tl-res{font-size:10px;font-weight:700;margin-left:auto;white-space:nowrap;}
+.av2-det-ruta{padding:12px 14px;}
+.av2-btn-ruta{width:100%;background:#8B0000;color:#fff;border:none;border-radius:11px;padding:11px;font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:900;letter-spacing:.3px;cursor:pointer;}
+.av2-empty{text-align:center;padding:40px 20px;color:#999;font-size:13px;}
+</style>
     <div id="admin-visitas-wrap" style="display:none">
-      <!-- Header con filtros -->
-      <div style="background:linear-gradient(135deg,#4A0000,#8B0000);padding:14px 16px 10px;">
-        <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:900;color:#fff;letter-spacing:.5px;margin-bottom:10px;">📋 VISITAS DE VENDEDORES</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <select id="av-fecha" onchange="adminVisitasCargar()" style="flex:1;min-width:130px;padding:8px 10px;border-radius:10px;border:none;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;background:#fff;color:#333;">
-            <option value="hoy">Hoy</option>
-            <option value="ayer">Ayer</option>
-            <option value="hace2">Hace 2 días</option>
-            <option value="hace3">Hace 3 días</option>
-            <option value="hace7">Hace 7 días</option>
-          </select>
-          <select id="av-vendedor" onchange="adminVisitasCargar()" style="flex:1;min-width:130px;padding:8px 10px;border-radius:10px;border:none;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;background:#fff;color:#333;">
-            <option value="todos">👥 Todos</option>
-            <option value="Juan">Juan</option>
-            <option value="Lisandro">Lisandro</option>
-          </select>
+      <div class="av2-hdr">
+        <div class="av2-hdr-tit">📋 VISITAS — TRABAJO EN CAMPO</div>
+        <div class="av2-hdr-sub">Objetivo: 20 visitas/día (sábado 10) · Juan y Lisandro</div>
+        <div class="av2-chips" id="av2-chips">
+          <div class="av2-chip on" id="av2-chip-Lisandro" onclick="avSetVendedor('Lisandro')">
+            <div class="av2-chip-nom">Lisandro</div><div class="av2-chip-meta">campo</div>
+          </div>
+          <div class="av2-chip" id="av2-chip-Juan" onclick="avSetVendedor('Juan')">
+            <div class="av2-chip-nom">Juan</div><div class="av2-chip-meta">campo</div>
+          </div>
         </div>
       </div>
-
-      <!-- Contenido dinámico -->
-      <div id="admin-visitas-body" style="padding:12px 14px;">
-        <div style="text-align:center;padding:30px;color:#999;font-size:13px;">Cargando...</div>
+      <div class="av2-body" id="av2-body">
+        <div class="av2-empty">⏳ Cargando...</div>
       </div>
     </div>
 
@@ -20107,211 +20160,313 @@ function gpsGetCoords() {
 // ══ ADMIN: VISITAS DE VENDEDORES ══════════════════════════════════
 
 async function adminVisitasCargar() {
-  var body = document.getElementById('admin-visitas-body');
-  if (!body) return;
-  body.innerHTML = '<div style="text-align:center;padding:30px;color:#999;font-size:13px;">⏳ Cargando...</div>';
+  avInit();
+  var cont = document.getElementById('av2-body');
+  if (cont && !document.getElementById('av2-calendario')) {
+    cont.innerHTML = '<div id="av2-resumen"></div><div id="av2-calendario"></div><div class="av2-det" id="av2-det"></div>';
+  }
+  await avCargarVisitas();
+  avRenderChips();
+  avRender();
+}
 
-  var fechaSelect = document.getElementById('av-fecha');
-  var vendSelect  = document.getElementById('av-vendedor');
-  var fechaVal    = fechaSelect ? fechaSelect.value : 'hoy';
-  var vendVal     = vendSelect  ? vendSelect.value  : 'todos';
+// Estado del tab Visitas v2
+var _avVendedor  = 'Lisandro';
+var _avMesRef    = null;   // Date dia 1 del mes mostrado en el calendario
+var _avSemanaRef = null;   // Date lunes de la semana del resumen
+var _avVisitas   = [];     // cache de visitas del rango cargado
+var _avRangoMes  = '';     // 'YYYY-M' del mes cacheado
 
-  // Calcular fecha usando zona horaria Argentina (UTC-3)
-  var offsetMs = 3 * 60 * 60 * 1000;
-  var ahoraAR = new Date(new Date().getTime() - offsetMs);
-  var d = new Date(ahoraAR);
-  d.setUTCHours(0,0,0,0);
-  if (fechaVal === 'ayer')  d.setUTCDate(d.getUTCDate()-1);
-  if (fechaVal === 'hace2') d.setUTCDate(d.getUTCDate()-2);
-  if (fechaVal === 'hace3') d.setUTCDate(d.getUTCDate()-3);
-  if (fechaVal === 'hace7') d.setUTCDate(d.getUTCDate()-7);
-  var dFin = new Date(d); dFin.setUTCHours(23,59,59,999);
-  // Convertir de vuelta a UTC real
-  var dUTC = new Date(d.getTime() + offsetMs);
-  var dFinUTC = new Date(dFin.getTime() + offsetMs);
+function avHoyAR() { var d = new Date(); d.setHours(0,0,0,0); return d; }
+function avLunesDe(date) {
+  var d = new Date(date); d.setHours(0,0,0,0);
+  var dow = d.getDay();                 // 0=dom .. 6=sab
+  var diff = (dow === 0) ? -6 : (1 - dow);
+  d.setDate(d.getDate() + diff);
+  return d;
+}
+function avObjetivoDia(dow) {           // 0=dom -> 0 ; 6=sab -> 10 ; resto -> 20
+  if (dow === 0) return 0;
+  if (dow === 6) return 10;
+  return 20;
+}
+function avDiaISO(date) {
+  var y = date.getFullYear(), m = date.getMonth()+1, dd = date.getDate();
+  return y + '-' + String(m).padStart(2,'0') + '-' + String(dd).padStart(2,'0');
+}
+function avDiaISOdeUTC(fechaUTC) { return avDiaISO(new Date(fechaUTC)); }
+function avInit() {
+  if (!_avMesRef)    { var h = avHoyAR(); _avMesRef = new Date(h.getFullYear(), h.getMonth(), 1); }
+  if (!_avSemanaRef) { _avSemanaRef = avLunesDe(avHoyAR()); }
+}
 
+async function avCargarVisitas() {
+  var mesKey = _avMesRef.getFullYear() + '-' + _avMesRef.getMonth();
+  if (mesKey === _avRangoMes && _avVisitas.length) return;   // cache hit
+  var res = document.getElementById('av2-resumen');
+  if (res) res.innerHTML = '<div class="av2-empty">⏳ Cargando...</div>';
+  var y = _avMesRef.getFullYear(), m = _avMesRef.getMonth();
+  var ini = new Date(y, m, 1);     ini.setDate(ini.getDate()-7); ini.setHours(0,0,0,0);
+  var fin = new Date(y, m+1, 0);   fin.setDate(fin.getDate()+7); fin.setHours(23,59,59,999);
   try {
-    // Traer visitas del día
-    var url = 'visitas?fecha=gte.' + dUTC.toISOString() + '&fecha=lte.' + dFinUTC.toISOString() + '&order=fecha.asc&select=*,vendedores(nombre)';
-    var visitas = await sbFetch(url);
-    if (!visitas) visitas = [];
-
-    // Filtrar por vendedor si corresponde
-    if (vendVal !== 'todos') {
-      visitas = visitas.filter(function(v) {
-        return v.vendedores && v.vendedores.nombre === vendVal;
-      });
-    }
-
-    // Obtener objetivos
-    var objetivosData = await sbFetch('objetivos?activo=eq.true&select=*,vendedores(nombre)');
-    var objMap = {};
-    if (objetivosData) {
-      objetivosData.forEach(function(o) {
-        var n = o.vendedores ? o.vendedores.nombre : '';
-        if (!objMap[n]) objMap[n] = {};
-        objMap[n][o.tipo] = Number(o.valor);
-      });
-    }
-
-    // Obtener pedidos del día para cruzar montos
-    var hoyStr = d.toISOString().slice(0,10);
-    var pedidosHoy = todosLosPedidos.filter(function(p) {
-      var f = fechaPedido(p); f.setHours(0,0,0,0);
-      return f.getTime() === d.getTime() && p.estado !== 'Cancelado';
-    });
-
-    // Agrupar por vendedor
-    var vendedores = vendVal === 'todos' ? ['Juan','Lisandro'] : [vendVal];
-    var html = '';
-
-    vendedores.forEach(function(vend) {
-      var vVisitas = visitas.filter(function(v) {
-        return v.vendedores && v.vendedores.nombre === vend;
-      });
-      var vPedidos = pedidosHoy.filter(function(p) {
-        return p.vendedor === vend;
-      });
-
-      html += adminVisitasRenderVendedor(vend, vVisitas, vPedidos, objMap[vend] || {}, d);
-    });
-
-    if (!html) {
-      html = '<div style="text-align:center;padding:40px;color:#999;font-size:13px;">Sin visitas registradas para este período</div>';
-    }
-
-    body.innerHTML = html;
-  } catch(e) {
-    body.innerHTML = '<div style="text-align:center;padding:30px;color:#c00;font-size:13px;">Error al cargar visitas</div>';
-    console.error(e);
+    var path = 'visitas?fecha=gte.' + ini.toISOString() + '&fecha=lte.' + fin.toISOString()
+      + '&select=*,vendedores(nombre)&order=fecha.asc';
+    var data = await sbFetch(path);
+    _avVisitas = Array.isArray(data) ? data : [];
+    _avRangoMes = mesKey;
+  } catch (e) {
+    console.error('Visitas v2 - error cargando:', e);
+    _avVisitas = [];
   }
 }
 
-function adminVisitasRenderVendedor(nombre, visitas, pedidos, objetivos, fecha) {
-  // Agrupar eventos en visitas completas
-  var visitasAgrupadas = [];
-  var visitaActual = null;
-  var visitasAsc = visitas.slice().sort(function(a,b){ return new Date(a.fecha)-new Date(b.fecha); });
-
-  visitasAsc.forEach(function(v) {
+// Agrupa los eventos del vendedor seleccionado por dia (ISO) en visitas completas
+function avPorDia() {
+  var mapa = {};      // fechaISO -> { checkins, visitas:[{cliente,entrada,salida,tuvo_pedido,motivo}] }
+  var abierta = {};   // fechaISO -> visita abierta (checkin sin checkout)
+  _avVisitas.forEach(function(v) {
+    if (!v.vendedores || v.vendedores.nombre !== _avVendedor) return;
+    var dia = avDiaISOdeUTC(v.fecha);
+    if (!mapa[dia]) mapa[dia] = { checkins: 0, visitas: [] };
     if (v.tipo === 'checkin') {
-      visitaActual = { cliente: v.nombre_cliente, entrada: new Date(v.fecha), salida: null, tuvo_pedido: false, motivo: null };
-      visitasAgrupadas.push(visitaActual);
-    } else if (v.tipo === 'pedido_campo' && visitaActual && v.nombre_cliente === visitaActual.cliente) {
-      visitaActual.tuvo_pedido = true;
-    } else if (v.tipo === 'checkout' && visitaActual && v.nombre_cliente === visitaActual.cliente) {
-      visitaActual.salida = new Date(v.fecha);
-      visitaActual.motivo = v.motivo_no_compra || null;
-      visitaActual = null;
+      var nv = { cliente: v.nombre_cliente, entrada: new Date(v.fecha), salida: null, tuvo_pedido: false, motivo: null };
+      mapa[dia].visitas.push(nv); mapa[dia].checkins++; abierta[dia] = nv;
+    } else if (v.tipo === 'pedido_campo') {
+      if (abierta[dia] && abierta[dia].cliente === v.nombre_cliente) abierta[dia].tuvo_pedido = true;
+    } else if (v.tipo === 'checkout') {
+      if (abierta[dia] && abierta[dia].cliente === v.nombre_cliente) {
+        abierta[dia].salida = new Date(v.fecha);
+        abierta[dia].motivo = v.motivo_no_compra || null;
+        abierta[dia] = null;
+      }
     } else if (v.tipo === 'visita_sin_pedido') {
-      visitasAgrupadas.push({ cliente: v.nombre_cliente, entrada: new Date(v.fecha), salida: null, tuvo_pedido: false, motivo: v.motivo_no_compra || 'Sin motivo' });
+      mapa[dia].visitas.push({ cliente: v.nombre_cliente, entrada: new Date(v.fecha), salida: null, tuvo_pedido: false, motivo: v.motivo_no_compra || 'Sin motivo' });
+      mapa[dia].checkins++;
     }
   });
+  return mapa;
+}
 
-  var totalVisitas   = visitasAgrupadas.length;
-  var conPedido      = visitasAgrupadas.filter(function(v){ return v.tuvo_pedido; }).length;
-  var sinPedido      = totalVisitas - conPedido;
-  var conversion     = totalVisitas ? Math.round((conPedido/totalVisitas)*100) : 0;
-  var totalMonto     = pedidos.reduce(function(a,p){ return a+(parseInt((p.total||'').replace(/[^\d]/g,''))||0); },0);
-
-  // Horario
-  var primero = visitasAgrupadas.length ? visitasAgrupadas[0].entrada : null;
-  var ultimo  = visitasAgrupadas.filter(function(v){ return v.salida; });
-  var ultimoSalida = ultimo.length ? ultimo[ultimo.length-1].salida : null;
-  var horaInicio = primero ? primero.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}) : '—';
-  var horaFin    = ultimoSalida ? ultimoSalida.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}) : (visitasAgrupadas.length ? '(en curso)' : '—');
-
-  // Duración promedio por visita
-  var visitasConDuracion = visitasAgrupadas.filter(function(v){ return v.salida; });
-  var durProm = 0;
-  if (visitasConDuracion.length) {
-    durProm = Math.round(visitasConDuracion.reduce(function(a,v){ return a+((v.salida-v.entrada)/60000); },0) / visitasConDuracion.length);
-  }
-
-  // Semáforo de rendimiento
-  var objVisitas = objetivos.visitas_dia || 8;
-  var objMonto   = objetivos.monto_dia   || 500000;
-  var score = 0;
-  if (totalVisitas >= objVisitas)      score += 35;
-  else if (totalVisitas >= objVisitas*0.7) score += 20;
-  if (conversion >= 60)   score += 25;
-  else if (conversion >= 40) score += 15;
-  if (totalMonto >= objMonto)      score += 25;
-  else if (totalMonto >= objMonto*0.7) score += 15;
-  if (primero && primero.getHours() <= 9)  score += 15;
-  else if (primero && primero.getHours() <= 10) score += 8;
-
-  var semaforo, semaforoLabel, semaforoBg;
-  if (score >= 75)      { semaforo='🟢'; semaforoLabel='Buen día';     semaforoBg='#E8F5E9'; }
-  else if (score >= 45) { semaforo='🟡'; semaforoLabel='Día regular';  semaforoBg='#FFFDE7'; }
-  else                  { semaforo='🔴'; semaforoLabel='Día flojo';    semaforoBg='#FFEBEE'; }
-
-  // Motivos de no compra
-  var motivoMap = {};
-  visitasAgrupadas.filter(function(v){ return !v.tuvo_pedido && v.motivo; }).forEach(function(v){
-    motivoMap[v.motivo] = (motivoMap[v.motivo]||0)+1;
+function avRenderChips() {
+  ['Lisandro','Juan'].forEach(function(n) {
+    var c = document.getElementById('av2-chip-' + n);
+    if (c) c.classList.toggle('on', n === _avVendedor);
   });
-  var motivoHTML = Object.entries(motivoMap).sort(function(a,b){return b[1]-a[1];}).map(function(e){
-    return '<span style="background:#fff3e0;color:#e65100;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;margin:2px;display:inline-block;">'
-      + e[0] + ' ×' + e[1] + '</span>';
+}
+
+function avRender() {
+  avRenderResumen();
+  avRenderCalendario();
+  var det = document.getElementById('av2-det');
+  if (det) { det.style.display = 'none'; det.innerHTML = ''; }
+}
+
+function avRenderResumen() {
+  var mapa = avPorDia();
+  var lunes = new Date(_avSemanaRef);
+  var dias = [];
+  for (var i=0;i<6;i++) { var d=new Date(lunes); d.setDate(d.getDate()+i); dias.push(d); }
+  var totalVis=0, totalPed=0, diasCalle=0, dotsHtml='', cumplidos=0, posibles=0;
+  dias.forEach(function(d) {
+    var iso = avDiaISO(d);
+    var info = mapa[iso];
+    var obj = avObjetivoDia(d.getDay());
+    var n = info ? info.checkins : 0;
+    if (n>0) { diasCalle++; posibles++; }
+    totalVis += n;
+    if (info) totalPed += info.visitas.filter(function(x){return x.tuvo_pedido;}).length;
+    var col;
+    if (n===0) col = '#EFEBE6';
+    else if (n>=obj) { col = '#7DC36F'; cumplidos++; }
+    else col = '#FFCC9E';
+    dotsHtml += '<div class="av2-dot" style="background:' + col + '" title="' + iso + ': ' + n + ' visitas"></div>';
+  });
+  var prom = diasCalle ? (totalVis/diasCalle) : 0;
+  var promTxt = (Math.round(prom*10)/10).toString().replace('.',',');
+  var conv = totalVis ? Math.round(100*totalPed/totalVis) : 0;
+  var dom = new Date(lunes); dom.setDate(dom.getDate()+5);
+  var rango = lunes.getDate() + ' → ' + dom.getDate() + ' ' + dom.toLocaleDateString('es-AR',{month:'short'});
+  var convColor = conv>=55 ? '#2E7D32' : conv>=40 ? '#E65100' : '#C62828';
+  var objColor = (posibles>0 && cumplidos>=posibles) ? '#2E7D32' : '#E65100';
+  var html =
+    '<div class="av2-sem-hdr">'
+    + '<div class="av2-sem-t">Semana ' + rango + '</div>'
+    + '<div style="display:flex;gap:6px;"><div class="av2-arrow" onclick="avCambiarSemana(-1)">‹</div><div class="av2-arrow" onclick="avCambiarSemana(1)">›</div></div>'
+    + '</div>'
+    + '<div class="av2-kpis">'
+    + '<div class="av2-kpi"><div class="av2-kpi-num" style="color:#8B0000">' + diasCalle + '</div><div class="av2-kpi-lbl">Días en calle</div></div>'
+    + '<div class="av2-kpi"><div class="av2-kpi-num" style="color:#2E7D32">' + totalVis + '</div><div class="av2-kpi-lbl">Visitas</div></div>'
+    + '<div class="av2-kpi"><div class="av2-kpi-num">' + promTxt + '</div><div class="av2-kpi-lbl">Prom/día</div></div>'
+    + '<div class="av2-kpi av2-kpi-wide"><div class="l">Días que cumplió el objetivo</div>'
+    + '<div style="display:flex;align-items:center;gap:10px;"><div class="av2-dots">' + dotsHtml + '</div>'
+    + '<div class="r" style="color:' + objColor + '">' + cumplidos + ' / ' + posibles + '</div></div></div>'
+    + '<div class="av2-kpi av2-kpi-wide" style="grid-column:span 3;"><div class="l">Conversión a pedido</div><div class="r" style="color:' + convColor + '">' + conv + '%</div></div>'
+    + '</div>';
+  var el = document.getElementById('av2-resumen');
+  if (el) el.innerHTML = html;
+}
+
+function avRenderCalendario() {
+  var mapa = avPorDia();
+  var y = _avMesRef.getFullYear(), m = _avMesRef.getMonth();
+  var primero = new Date(y, m, 1);
+  var nombreMes = primero.toLocaleDateString('es-AR',{month:'long',year:'numeric'});
+  var diasMes = new Date(y, m+1, 0).getDate();
+  var primerDow = primero.getDay();
+  var offsetLun = (primerDow===0) ? 6 : primerDow-1;
+  var semDias = {};
+  var lunes = new Date(_avSemanaRef);
+  for (var i=0;i<6;i++) { var ds=new Date(lunes); ds.setDate(ds.getDate()+i); semDias[avDiaISO(ds)] = true; }
+
+  var dows = ['L','M','M','J','V','S','D'];
+  var grid = dows.map(function(x){ return '<div class="av2-dow">' + x + '</div>'; }).join('');
+  for (var k=0;k<offsetLun;k++) grid += '<div class="av2-cell empty"></div>';
+  for (var dia=1; dia<=diasMes; dia++) {
+    var dd = new Date(y, m, dia);
+    var iso = avDiaISO(dd);
+    var dow = dd.getDay();
+    var esDom = (dow===0);
+    var info = mapa[iso];
+    var n = info ? info.checkins : 0;
+    var obj = avObjetivoDia(dow);
+    var cls, vTxt, chk = '';
+    if (esDom) { cls='av2-dom'; vTxt=''; }
+    else if (!info) { cls='av2-sindata'; vTxt='·'; }
+    else if (n>=obj) { cls='av2-ok'; vTxt=n; chk='✓'; }
+    else if (n>=Math.round(obj*0.65)) { cls='av2-cerca'; vTxt=n; }
+    else { cls='av2-flojo'; vTxt=n; }
+    var clsExtra = semDias[iso] ? ' weeksel' : '';
+    var clickable = (!esDom) ? 'onclick="avAbrirDia(\'' + iso + '\')"' : '';
+    grid += '<div class="av2-cell ' + cls + clsExtra + '" ' + clickable + ' data-iso="' + iso + '">'
+      + '<span class="d">' + dia + '</span>'
+      + '<span class="v">' + vTxt + '</span>'
+      + (chk ? '<span class="chk">' + chk + '</span>' : '')
+      + '</div>';
+  }
+  var html =
+    '<div class="av2-cal-nav">'
+    + '<div class="av2-arrow" onclick="avCambiarMes(-1)">‹</div>'
+    + '<div class="av2-cal-mes">' + nombreMes + '</div>'
+    + '<div class="av2-arrow" onclick="avCambiarMes(1)">›</div>'
+    + '</div>'
+    + '<div class="av2-grid">' + grid + '</div>'
+    + '<div class="av2-ley">'
+    + '<span><span class="sw" style="background:#7DC36F"></span>cumplió</span>'
+    + '<span><span class="sw" style="background:#FFE082"></span>cerca</span>'
+    + '<span><span class="sw" style="background:#FFCC9E"></span>flojo</span>'
+    + '<span><span class="sw" style="background:#EFEBE6"></span>sin check-in</span>'
+    + '</div>'
+    + '<div class="av2-nota">Gris = sin check-in ese día (no salió o no marcó). Tocá un día para ver el detalle y su semana.</div>';
+  var el = document.getElementById('av2-calendario');
+  if (el) el.innerHTML = html;
+}
+
+function avAbrirDia(iso) {
+  var p = iso.split('-');
+  var dd = new Date(+p[0], +p[1]-1, +p[2]);
+  _avSemanaRef = avLunesDe(dd);
+  avRenderResumen();
+  avRenderCalendario();
+  avRenderDetalle(iso);
+}
+
+function avRenderDetalle(iso) {
+  var mapa = avPorDia();
+  var info = mapa[iso];
+  var det = document.getElementById('av2-det');
+  if (!det) return;
+  document.querySelectorAll('.av2-cell').forEach(function(c){ c.classList.remove('daysel'); });
+  var cell = document.querySelector('.av2-cell[data-iso="' + iso + '"]');
+  if (cell) cell.classList.add('daysel');
+
+  var p = iso.split('-');
+  var dd = new Date(+p[0], +p[1]-1, +p[2]);
+  var fechaTxt = dd.toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'numeric'});
+  fechaTxt = fechaTxt.charAt(0).toUpperCase() + fechaTxt.slice(1);
+
+  if (!info || !info.visitas.length) {
+    det.innerHTML = '<div class="av2-det-hdr"><div class="av2-det-f">' + fechaTxt + '</div><div class="av2-det-j">Sin check-in registrado ese día</div></div>';
+    det.style.display = 'block';
+    det.scrollIntoView({behavior:'smooth',block:'nearest'});
+    return;
+  }
+  var vis = info.visitas;
+  var n = info.checkins;
+  var ped = vis.filter(function(x){return x.tuvo_pedido;}).length;
+  var conv = n ? Math.round(100*ped/n) : 0;
+  var entradas = vis.map(function(x){return x.entrada;}).filter(Boolean).sort(function(a,b){return a-b;});
+  var salidas  = vis.map(function(x){return x.salida;}).filter(Boolean).sort(function(a,b){return a-b;});
+  var ini  = entradas.length ? entradas[0] : null;
+  var finJ = salidas.length ? salidas[salidas.length-1] : null;
+  var fmtH = function(d){ return d ? d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}) : '—'; };
+  var jornada = '🕗 ' + fmtH(ini) + ' → ' + fmtH(finJ);
+  if (ini && finJ) { var mins = Math.round((finJ-ini)/60000); jornada += ' · ' + Math.floor(mins/60) + 'h ' + (mins%60) + 'm'; }
+  var conDur = vis.filter(function(x){return x.salida;});
+  var durProm = conDur.length ? Math.round(conDur.reduce(function(a,x){return a+(x.salida-x.entrada)/60000;},0)/conDur.length) : 0;
+
+  var timeline = vis.map(function(v) {
+    var hora = v.entrada.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+    var dur = v.salida ? Math.round((v.salida-v.entrada)/60000) + 'm' : '(activo)';
+    var icono = v.tuvo_pedido ? '📦' : (v.motivo ? '🔴' : '🟢');
+    var res = v.tuvo_pedido ? 'Pedido' : (v.motivo || 'Sin pedido');
+    var col = v.tuvo_pedido ? '#2E7D32' : '#C62828';
+    return '<div class="av2-tl"><div class="av2-tl-ic">' + icono + '</div>'
+      + '<div style="flex:1;min-width:0;"><div class="av2-tl-nom">' + (v.cliente||'—') + '</div><div class="av2-tl-meta">' + hora + ' · ' + dur + '</div></div>'
+      + '<div class="av2-tl-res" style="color:' + col + '">' + res + '</div></div>';
   }).join('');
 
-  // Timeline de visitas
-  var timelineHTML = visitasAgrupadas.map(function(v, i) {
-    var hora = v.entrada.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
-    var dur  = v.salida ? Math.round((v.salida-v.entrada)/60000) + ' min' : '(activo)';
-    var icono = v.tuvo_pedido ? '📦' : (v.motivo ? '🔴' : '🟢');
-    var resultado = v.tuvo_pedido ? 'Con pedido' : (v.motivo || 'Sin checkout');
-    var resultColor = v.tuvo_pedido ? '#2E7D32' : '#C62828';
-    return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #f0f0f0;">'
-      + '<div style="width:28px;height:28px;border-radius:50%;background:#f5f5f5;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;">' + icono + '</div>'
-      + '<div style="flex:1;min-width:0;">'
-      + '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (v.cliente||'—') + '</div>'
-      + '<div style="font-size:11px;color:#999;">' + hora + ' · ' + dur + '</div>'
-      + '</div>'
-      + '<div style="font-size:11px;font-weight:700;color:' + resultColor + ';white-space:nowrap;">' + resultado + '</div>'
-      + '</div>';
-  }).join('') || '<div style="color:#999;font-size:13px;padding:12px 0;">Sin visitas registradas</div>';
-
-  var fmt = function(n){ return n>=1000000?'$'+(n/1000000).toFixed(1)+'M':n>=1000?'$'+Math.round(n/1000)+'k':'$'+n.toLocaleString('es-AR'); };
-
-  return '<div style="background:#fff;border-radius:14px;border:1.5px solid #eee;margin-bottom:14px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.06);">'
-    // Header vendedor + semáforo
-    + '<div style="background:' + semaforoBg + ';padding:12px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1.5px solid #eee;">'
-    + '<div>'
-    + '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:18px;font-weight:900;">' + semaforo + ' ' + nombre + '</div>'
-    + '<div style="font-size:12px;color:#666;margin-top:2px;">' + semaforoLabel + ' · ' + horaInicio + ' → ' + horaFin + '</div>'
+  var html =
+    '<div class="av2-det-hdr"><div class="av2-det-f">' + fechaTxt + '</div><div class="av2-det-j">' + jornada + '</div></div>'
+    + '<div class="av2-det-stats">'
+    + '<div class="av2-det-stat"><div class="n">' + n + '</div><div class="l">Visitas</div></div>'
+    + '<div class="av2-det-stat"><div class="n" style="color:#2E7D32">' + ped + '</div><div class="l">Pedidos</div></div>'
+    + '<div class="av2-det-stat"><div class="n" style="color:' + (conv>=55?'#2E7D32':'#E65100') + '">' + conv + '%</div><div class="l">Conv.</div></div>'
+    + '<div class="av2-det-stat" style="border-right:none;"><div class="n">' + (durProm ? durProm + "'" : '—') + '</div><div class="l">Prom/visita</div></div>'
     + '</div>'
-    + '<div style="text-align:right;">'
-    + '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:22px;font-weight:900;color:#8B0000;">' + fmt(totalMonto) + '</div>'
-    + '<div style="font-size:11px;color:#999;">facturado</div>'
-    + '</div>'
-    + '</div>'
-    // Stats
-    + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-bottom:1.5px solid #eee;">'
-    + adminStatCell(totalVisitas, 'Visitas', '#333')
-    + adminStatCell(conPedido, 'Con pedido', '#2E7D32')
-    + adminStatCell(conversion+'%', 'Conversión', conversion>=60?'#2E7D32':conversion>=40?'#E65100':'#C62828')
-    + adminStatCell(durProm ? durProm+' min' : '—', 'Prom. visita', '#555')
-    + '</div>'
-    // Motivos
-    + (motivoHTML ? '<div style="padding:10px 14px;border-bottom:1.5px solid #eee;"><div style="font-size:10px;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Motivos de no compra</div>' + motivoHTML + '</div>' : '')
-    // Timeline
-    + '<div style="padding:0 14px;">'
-    + '<div style="font-size:10px;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:.5px;padding:10px 0 4px;">Detalle de visitas</div>'
-    + timelineHTML
-    + '</div>'
-    + '</div>';
+    + timeline
+    + '<div class="av2-det-ruta"><button class="av2-btn-ruta" onclick="avVerRecorrido(\'' + iso + '\')">🗺️ Ver recorrido en el mapa</button></div>';
+  det.innerHTML = html;
+  det.style.display = 'block';
+  det.scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 
-function adminStatCell(val, lbl, color) {
-  return '<div style="padding:10px 8px;text-align:center;border-right:1px solid #f0f0f0;">'
-    + '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:20px;font-weight:900;color:' + color + ';line-height:1;">' + val + '</div>'
-    + '<div style="font-size:10px;color:#999;margin-top:2px;">' + lbl + '</div>'
-    + '</div>';
+function avCambiarSemana(dir) {
+  var d = new Date(_avSemanaRef); d.setDate(d.getDate() + dir*7);
+  _avSemanaRef = d;
+  // mes "dominante" de la semana = el del jueves (estilo ISO)
+  var jue = new Date(d); jue.setDate(jue.getDate()+3);
+  var nm = new Date(jue.getFullYear(), jue.getMonth(), 1);
+  if (nm.getTime() !== _avMesRef.getTime()) { _avMesRef = nm; adminVisitasCargar(); }
+  else avRender();
 }
-
-// ══ FIN ADMIN VISITAS ══════════════════════════════════════════════
+function avCambiarMes(dir) {
+  var y = _avMesRef.getFullYear(), m = _avMesRef.getMonth();
+  _avMesRef = new Date(y, m+dir, 1);
+  // semana del resumen = la del dia 1 del nuevo mes
+  _avSemanaRef = avLunesDe(_avMesRef);
+  adminVisitasCargar();
+}
+function avSetVendedor(nom) {
+  _avVendedor = nom;
+  avRenderChips();
+  avRender();
+}
+function avVerRecorrido(iso) {
+  var p = iso.split('-');
+  var dd = new Date(+p[0], +p[1]-1, +p[2]); dd.setHours(0,0,0,0);
+  var diasAtras = Math.max(0, Math.round((avHoyAR()-dd)/86400000));
+  if (typeof _mapaDiasAtras !== 'undefined') _mapaDiasAtras = diasAtras;
+  cambiarTab('mapa');
+  setTimeout(function() {
+    try {
+      var sel = document.getElementById('mapa-fecha-sel');
+      if (sel) { for (var i=0;i<sel.options.length;i++){ if (parseInt(sel.options[i].value)===diasAtras){ sel.value=String(diasAtras); break; } } }
+      if (typeof mapaFiltrar === 'function') mapaFiltrar(_avVendedor);
+      else if (typeof mapaFiltrarFecha === 'function') mapaFiltrarFecha(String(diasAtras));
+    } catch (e) { console.warn('avVerRecorrido:', e); }
+  }, 350);
+}
+// ══ FIN ADMIN VISITAS v2 ══════════════════════════════════════════
 
 async function gpsCargarHistorial() {
   var vendedorId = await gpsObtenerVendedorId();
