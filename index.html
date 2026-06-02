@@ -13779,8 +13779,10 @@ var _pedidoSucursalesMap = {};
 
 async function pedidoSucursalesMapCargar() {
   try {
-    var path = 'pedido_sucursales?select=pedido_id,sucursal_id,cliente_sucursales(id,nombre_suc,direccion,localidad,cliente_norm)&limit=5000';
-    var data = await sbFetch(path);
+    // v14.26: paginado (antes limit=5000). pedido_sucursales crece con cada pedido
+    // que tiene sucursal vinculada; orden total por (pedido_id, sucursal_id).
+    var path = 'pedido_sucursales?select=pedido_id,sucursal_id,cliente_sucursales(id,nombre_suc,direccion,localidad,cliente_norm)&order=pedido_id.asc,sucursal_id.asc';
+    var data = await sbFetchAll(path);
     if (!Array.isArray(data)) return;
     var m = {};
     data.forEach(function(row) {
@@ -18245,20 +18247,13 @@ async function canalesVendAbrir(vendedor) {
 
   try {
     // Traer SOLO los clientes de este vendedor SIN canal, ordenados por último pedido
-    var url = SUPABASE_URL + '/rest/v1/clientes_activos' +
-              '?select=nombre,localidad,ultimo_pedido,n_pedidos_78d' +
-              '&vendedor=eq.' + encodeURIComponent(vendedor) +
-              '&canal=is.null' +
-              '&order=ultimo_pedido.desc.nullslast' +
-              '&limit=500';
-    var resp = await fetch(url, {
-      headers: {
-        'apikey':        SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY
-      }
-    });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    var pend = await resp.json();
+    // v14.26: paginado con sbFetchAll (antes fetch crudo con limit=500). Tiebreaker
+    // por cliente_id para que el offset no saltee clientes con el mismo ultimo_pedido.
+    var path = 'clientes_activos?select=nombre,localidad,ultimo_pedido,n_pedidos_78d' +
+               '&vendedor=eq.' + encodeURIComponent(vendedor) +
+               '&canal=is.null' +
+               '&order=ultimo_pedido.desc.nullslast,cliente_id.asc';
+    var pend = await sbFetchAll(path);
 
     if (stats) {
       stats.textContent = pend.length.toLocaleString('es-AR') + ' clientes pendientes de canalizar';
@@ -28075,11 +28070,11 @@ async function adminMiRondaCargar() {
   _amrCargando = true;
   try {
     // 1. Cargar TODOS los clientes activos (de los 3 vendedores)
-    // v13.6: clientes_activos paginado (antes limit=2000, mismo riesgo de recorte
-    // que tenía pedidos_zona). mironda_gestiones queda acotado por fecha.
+    // v13.6: clientes_activos paginado. v14.26: mironda_gestiones también paginado
+    // (tiebreaker id para que el offset no saltee gestiones del mismo día).
     var results = await Promise.all([
       sbFetchAll('clientes_activos?activo_en_ronda=eq.true&select=cliente_id,nombre,telefono,localidad,vendedor,ruta_viaje,ritmo,ultimo_pedido,dias_desde_ult_pedido,frec_dias_prom,notas&order=cliente_id.asc'),
-      sbFetch('mironda_gestiones?fecha_ronda=gte.' + amrFechaDesde() + '&select=*&order=fecha_ronda.desc&limit=5000')
+      sbFetchAll('mironda_gestiones?fecha_ronda=gte.' + amrFechaDesde() + '&select=*&order=fecha_ronda.desc,id.asc')
     ]);
     _amrClientes = Array.isArray(results[0]) ? results[0] : [];
     _amrGestiones = Array.isArray(results[1]) ? results[1] : [];
