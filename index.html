@@ -1,5 +1,23 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.12 — 02/06/2026
+     v13.12: CONCILIACIÓN DE TRANSFERENCIAS + VER COMPROBANTES.
+       Complementa la v14.38.0 de VENTAS (foto de comprobante obligatoria).
+       · LOGÍSTICA → nueva sub-pestaña "💸 Transferencias": lista las entregas
+         cobradas por transferencia (las que estaban excluidas de la rendición),
+         con la FOTO del comprobante, cliente, chofer, monto y fecha. La admin
+         mira el comprobante, lo cruza contra el banco/MP y marca "Conciliada".
+         Resumen arriba: total a conciliar + cuántas vienen SIN comprobante (rojo).
+       · LOGÍSTICA → Cheques: ahora cada cheque muestra botón "📷 Ver cheque"
+         con la foto del frente (capturada por el chofer).
+       · Las fotos se leen del bucket privado 'comprobantes' con la key del panel
+         (auth fetch → se abren en grande). Caché por sesión.
+       REQUIERE SQL (ver v13.12_conciliacion.sql):
+         · alter table entregas add transfer_conciliada / transfer_conciliada_en
+         · policy de SELECT en storage.objects para el bucket 'comprobantes'
+       NOTA: el "pase libre" de la transferencia en la rendición del chofer
+       (punto 2) se ataca en una pasada aparte sobre VENTAS.
+     ──────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.11 — 02/06/2026
      v13.11: Maple N° 3 agregado a la sección HUEVOS del tomador (faltaba; ya estaba
        en catálogo y ventas). N° 2 corregido a $4.920 (estaba $4.800 desactualizado).
@@ -12485,6 +12503,7 @@ input.canales-exp-input[type="date"] {
         <button class="planilla-chofer-tab" id="log-tab-encurso" onclick="logisticaSelTab('encurso',this)">📊 En Curso</button>
         <button class="planilla-chofer-tab" id="log-tab-historico" onclick="logisticaSelTab('historico',this)">📜 Histórico</button>
         <button class="planilla-chofer-tab" id="log-tab-cheques" onclick="logisticaSelTab('cheques',this)">📋 Cheques</button>
+        <button class="planilla-chofer-tab" id="log-tab-transferencias" onclick="logisticaSelTab('transferencias',this)">💸 Transferencias</button>
         <button class="planilla-chofer-tab" id="log-tab-devoluciones" onclick="logisticaSelTab('devoluciones',this)">↩️ Devoluciones</button>
       </div>
 
@@ -27010,6 +27029,7 @@ function renderLogistica() {
   if (_logTab === 'historico')    { lzRenderHistorico(el); return; }
   if (_logTab === 'seguimiento')  { lzRenderEnCurso(el); return; }  // alias retrocompat
   if (_logTab === 'cheques')      { renderLogisticaCheques(el); return; }
+  if (_logTab === 'transferencias') { renderLogisticaTransferencias(el); return; }
   if (_logTab === 'devoluciones') { renderLogisticaDevoluciones(el); return; }
   // Tabs viejos (joan, luis, asignar) caen al fallback de viajes
   lzRenderViajes(el);
@@ -27069,6 +27089,164 @@ function _renderBotonUbicacion(lat, lng, precision) {
 // (eliminada en v12.0: renderLogisticaSeguimiento)
 
 // ══════════════════════════════════════════════════════════
+// v13.12 — COMPROBANTES (transferencias y cheques)
+// ══════════════════════════════════════════════════════════
+// Trae los bytes del comprobante desde el bucket privado usando la key del
+// panel (auth fetch) y devuelve un blob URL local. Cachea por path.
+async function _comprobanteBlobURL(path) {
+  if (!path) return null;
+  if (!window._compCache) window._compCache = {};
+  if (window._compCache[path]) return window._compCache[path];
+  var resp = await fetch(SUPABASE_URL + '/storage/v1/object/comprobantes/' + path, {
+    headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+  });
+  if (!resp.ok) throw new Error('No se pudo cargar el comprobante (' + resp.status + ')');
+  var blob = await resp.blob();
+  var url = URL.createObjectURL(blob);
+  window._compCache[path] = url;
+  return url;
+}
+
+// Lightbox simple (tocá para cerrar).
+function _verImgAdminLightbox(url) {
+  if (!url) return;
+  var ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;z-index:5000;background:rgba(0,0,0,.92);display:flex;align-items:center;justify-content:center;padding:18px;';
+  ov.onclick = function() { ov.remove(); };
+  var img = document.createElement('img');
+  img.src = url;
+  img.style.cssText = 'max-width:100%;max-height:100%;border-radius:10px;box-shadow:0 12px 44px rgba(0,0,0,.55);';
+  ov.appendChild(img);
+  var hint = document.createElement('div');
+  hint.textContent = 'Tocá para cerrar';
+  hint.style.cssText = "position:absolute;bottom:18px;left:0;right:0;text-align:center;color:#fff;font-family:'Barlow Condensed',sans-serif;font-size:14px;opacity:.85;";
+  ov.appendChild(hint);
+  document.body.appendChild(ov);
+}
+
+// Carga (con estado de "Cargando…" en el botón) y abre el comprobante.
+async function _verComprobanteAdmin(path, btn) {
+  if (!path) { toast('Sin comprobante', 'err'); return; }
+  var original = btn ? btn.innerHTML : '';
+  if (btn) { btn.innerHTML = '⏳ Cargando…'; btn.disabled = true; }
+  try {
+    var url = await _comprobanteBlobURL(path);
+    _verImgAdminLightbox(url);
+  } catch(e) {
+    console.error('comprobante:', e);
+    toast('❌ No se pudo cargar la foto', 'err');
+  } finally {
+    if (btn) { btn.innerHTML = original; btn.disabled = false; }
+  }
+}
+
+// Marca / desmarca una transferencia como conciliada.
+async function transferConciliar(id, conciliar) {
+  try {
+    await sbFetch('entregas?id=eq.' + id, {
+      method: 'PATCH',
+      headers: { 'Prefer': 'return=minimal' },
+      body: JSON.stringify({
+        transfer_conciliada: conciliar,
+        transfer_conciliada_en: conciliar ? new Date().toISOString() : null
+      })
+    });
+    toast(conciliar ? '✅ Transferencia conciliada' : '↩ Vuelta a pendiente', 'ok');
+    var el = document.getElementById('logistica-contenido');
+    if (el) renderLogisticaTransferencias(el);
+  } catch(e) {
+    console.error('transferConciliar:', e);
+    toast('❌ Error al guardar', 'err');
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// v13.12 — PANEL DE TRANSFERENCIAS A CONCILIAR
+// ══════════════════════════════════════════════════════════
+async function renderLogisticaTransferencias(el) {
+  el.innerHTML = '<div class="planilla-empty"><div class="loading-spinner" style="margin:0 auto 12px;"></div>Cargando transferencias...</div>';
+  try {
+    var SEL = 'id,cliente,comercio,ciudad,monto,forma_cobro,detalle_cobro,comprobante_transfer,transfer_conciliada,transfer_conciliada_en,chofer,fecha_entrega,pedido_id';
+    // Dos consultas estándar (más robusto que un or):
+    //  q1 = cobradas por transferencia (incluye las que vienen SIN comprobante → rojo)
+    //  q2 = cualquier entrega con comprobante de transferencia (cobros mixtos)
+    var q1 = await sbFetch('entregas?forma_cobro=eq.transferencia&estado=eq.entregado&order=fecha_entrega.desc&select=' + SEL + '&limit=400') || [];
+    var q2 = await sbFetch('entregas?comprobante_transfer=not.is.null&estado=eq.entregado&order=fecha_entrega.desc&select=' + SEL + '&limit=400') || [];
+    var _map = {};
+    q1.concat(q2).forEach(function(e) { if (e && e.id) _map[e.id] = e; });
+    var rows = Object.keys(_map).map(function(k) { return _map[k]; });
+    rows.sort(function(a, b) { return String(b.fecha_entrega || '').localeCompare(String(a.fecha_entrega || '')); });
+    var fmt = function(n) { return '$' + Math.round(n).toLocaleString('es-AR'); };
+    function montoTransfer(e) {
+      var m = parseFloat(e.monto) || 0;
+      if (e.detalle_cobro) {
+        try { var d = JSON.parse(e.detalle_cobro); if (d && typeof d.transferencia !== 'undefined') return parseFloat(d.transferencia) || 0; } catch(_) {}
+      }
+      if (m > 0 && m < 1000) m = m * 1000;
+      return m;
+    }
+    if (!rows.length) {
+      el.innerHTML = '<div class="planilla-empty">📲 No hay transferencias registradas.<br><small style="color:var(--text3);">Aparecen acá cuando el chofer cobra por transferencia.</small></div>';
+      return;
+    }
+    var pend = rows.filter(function(e) { return !e.transfer_conciliada; });
+    var conc = rows.filter(function(e) { return e.transfer_conciliada; });
+    var sinFoto = pend.filter(function(e) { return !e.comprobante_transfer; });
+    var totalPend = pend.reduce(function(s, e) { return s + montoTransfer(e); }, 0);
+
+    var html = '';
+    html += '<div style="background:#E8F5E9;border-radius:12px;padding:12px 16px;margin-bottom:14px;display:flex;gap:12px;">';
+    html += '<div style="flex:1;text-align:center;"><div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;">A conciliar</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#1B5E20;">' + fmt(totalPend) + '</div><div style="font-size:11px;color:#2E7D32;">' + pend.length + ' transferencia' + (pend.length === 1 ? '' : 's') + '</div></div>';
+    if (sinFoto.length) html += '<div style="flex:1;text-align:center;background:#FFEBEE;border-radius:10px;padding:6px;"><div style="font-size:10px;color:#C62828;text-transform:uppercase;letter-spacing:.8px;">Sin comprobante</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#C62828;">' + sinFoto.length + '</div></div>';
+    html += '</div>';
+    html += '<div style="font-size:12px;color:var(--text3);margin-bottom:12px;line-height:1.4;">Mirá el comprobante y cruzalo contra el banco / Mercado Pago. Cuando confirmes que entró la plata, marcá <b>Conciliada</b>.</div>';
+
+    function card(e, esConc) {
+      var monto = montoTransfer(e);
+      var fecha = e.fecha_entrega ? new Date(e.fecha_entrega).toLocaleDateString('es-AR') : '—';
+      var tieneFoto = !!e.comprobante_transfer;
+      var accent = esConc ? '#2E7D32' : (tieneFoto ? '#1B5E20' : '#C62828');
+      var bg = esConc ? '#F1F8E9' : '#fff';
+      var s = '<div style="background:' + bg + ';border:1.5px solid #E0E0E0;border-left:4px solid ' + accent + ';border-radius:12px;padding:12px 14px;margin-bottom:10px;">';
+      s += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">';
+      s += '<div style="min-width:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:17px;font-weight:900;color:var(--text);">' + (e.cliente || '—') + '</div>';
+      s += '<div style="font-size:11px;color:var(--text3);">🚚 ' + (e.chofer || '—') + ' · 📍 ' + (e.ciudad || '—') + ' · ' + fecha + '</div></div>';
+      s += '<div style="text-align:right;flex-shrink:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:' + accent + ';">' + fmt(monto) + '</div></div>';
+      s += '</div>';
+      s += '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">';
+      if (tieneFoto) {
+        s += '<button onclick="_verComprobanteAdmin(\'' + String(e.comprobante_transfer).replace(/\x27/g, "%27") + '\',this)" style="flex:1;min-width:130px;padding:9px;background:#E8EAF6;color:#283593;border:none;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">📷 Ver comprobante</button>';
+      } else {
+        s += '<div style="flex:1;min-width:130px;padding:9px;background:#FFEBEE;color:#C62828;border-radius:9px;font-size:12px;font-weight:800;text-align:center;">⚠️ Sin comprobante</div>';
+      }
+      if (!esConc) {
+        s += '<button onclick="transferConciliar(\'' + e.id + '\',true)" style="flex:1;min-width:130px;padding:9px;background:#2E7D32;color:#fff;border:none;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">✓ Marcar conciliada</button>';
+      } else {
+        var cuando = e.transfer_conciliada_en ? new Date(e.transfer_conciliada_en).toLocaleDateString('es-AR') : '';
+        s += '<button onclick="transferConciliar(\'' + e.id + '\',false)" style="flex:1;min-width:130px;padding:9px;background:#fff;color:#2E7D32;border:1.5px solid #2E7D32;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">✅ Conciliada' + (cuando ? ' · ' + cuando : '') + ' · deshacer</button>';
+      }
+      s += '</div></div>';
+      return s;
+    }
+
+    if (pend.length) {
+      html += pend.map(function(e) { return card(e, false); }).join('');
+    } else {
+      html += '<div style="background:#E8F5E9;border-radius:12px;padding:18px;text-align:center;color:#2E7D32;font-weight:700;margin-bottom:14px;">✅ Todo conciliado</div>';
+    }
+    if (conc.length) {
+      html += '<details style="margin-top:8px;"><summary style="cursor:pointer;font-family:Barlow Condensed,sans-serif;font-weight:800;color:var(--text3);padding:8px 0;">✅ Conciliadas (' + conc.length + ')</summary>';
+      html += conc.slice(0, 50).map(function(e) { return card(e, true); }).join('');
+      html += '</details>';
+    }
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = '<div class="planilla-empty">❌ Error cargando transferencias.<br><small style="color:var(--text3);">¿Corriste el SQL de v13.12 (columna transfer_conciliada + policy de lectura del bucket)?</small></div>';
+    console.error('renderLogisticaTransferencias:', e);
+  }
+}
+
+// ══════════════════════════════════════════════════════════
 // PANEL DE CHEQUES
 // ══════════════════════════════════════════════════════════
 async function renderLogisticaCheques(el) {
@@ -27098,7 +27276,10 @@ async function renderLogisticaCheques(el) {
       if (est.next) { html += '<button class="cheque-estado-btn '+est.cls+'" onclick="avanzarEstadoCheque(\''+c.id+'\',\''+est.next+'\')">'+est.label+' →</button><button onclick="marcarChequeRechazado(\''+c.id+'\')" style="padding:3px 8px;background:#FFEBEE;color:#C62828;border:none;border-radius:20px;font-size:11px;font-weight:800;cursor:pointer;">✕</button>'; }
       else { html += '<span class="cheque-estado-btn '+est.cls+'">'+est.label+'</span>'; }
       html += '</div></div></div><div class="cheque-body"><div class="cheque-field"><span>Banco</span><strong>'+(c.banco||'—')+'</strong></div><div class="cheque-field"><span>N° cheque</span><strong>'+(c.numero_cheque||'—')+'</strong></div><div class="cheque-field"><span>Emisor</span><strong>'+(c.emisor||'—')+'</strong></div><div class="cheque-field"><span>Vencimiento</span><strong>'+venc.toLocaleDateString('es-AR')+' · '+vStr+'</strong></div></div>';
-      html += '<div style="padding:8px 14px 10px;"><a href="https://www.bcra.gob.ar/BCRAyVos/Consulta_Deudores.asp" target="_blank" style="display:flex;align-items:center;gap:6px;background:#F5F7FF;border:1px solid #E8EAF6;border-radius:8px;padding:7px 12px;text-decoration:none;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:700;color:#1A237E;">🔍 Consultar BCRA · '+(c.emisor||'emisor')+'</a></div></div>';
+      html += '<div style="padding:8px 14px 10px;display:flex;gap:8px;align-items:center;">';
+      if (c.foto_url) html += '<button onclick="_verComprobanteAdmin(\''+String(c.foto_url).replace(/\x27/g,"%27")+'\',this)" style="flex:0 0 auto;display:flex;align-items:center;gap:6px;background:#E8F5E9;border:1px solid #C8E6C9;border-radius:8px;padding:7px 12px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;color:#2E7D32;cursor:pointer;">📷 Ver cheque</button>';
+      html += '<a href="https://www.bcra.gob.ar/BCRAyVos/Consulta_Deudores.asp" target="_blank" style="flex:1;display:flex;align-items:center;gap:6px;justify-content:center;background:#F5F7FF;border:1px solid #E8EAF6;border-radius:8px;padding:7px 12px;text-decoration:none;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:700;color:#1A237E;">🔍 BCRA · '+(c.emisor||'emisor')+'</a>';
+      html += '</div></div>';
     });
     el.innerHTML = html;
   } catch(e) { el.innerHTML = '<div class="planilla-empty">❌ Error. ¿Existe la tabla cheques_recibidos?</div>'; console.error(e); }
