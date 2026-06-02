@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.9 — 02/06/2026
+     TCK ADMIN — v13.10 — 02/06/2026
+     v13.10: TRAMOS DE PRECIO (precio escalonado por cantidad).
+       · Suprema 4x5: 1 a 3 bolsas $36.000 · caja x4+ $34.000 c/u.
+       · Fuente: Supabase producto_tramos (match por nombre, zona 'todas').
+       · Helper tckPrecioTramo aplica el precio del tramo en los 3 cálculos del tomador admin (total, resumen, confirmación final → texto del pedido).
+       · El admin NO tiene descuentos manuales, por eso no hay cap acá (solo precio del tramo). cargarTramosAdmin() en el boot.
+       · Pedido de campo manda texto → parser legacy del Apps Script lee el precio del tramo del propio texto.
+     ──────────────────────────────────────────────────────────────────────
      ──────────────────────────────────────────────────────────────────────
      FIX: UNIR PEDIDOS — dejaba de perder precios/calibre y de generar 'corrupto'
 
@@ -13629,6 +13636,50 @@ function _prodCanonNormalizar(s) {
 
 // Carga productos_canonicos desde Supabase y arma los índices.
 // Usa cache localStorage si está fresco (< 1h).
+// ═══════════════════════════════════════════════════════════════
+//  v13.10 — TRAMOS DE PRECIO (precio escalonado por cantidad)
+//  Fuente: Supabase tabla producto_tramos. Match por nombre
+//  (TOMADOR_CAT.n === productos_canonicos.nombre). Producto con
+//  tramos → manda la tabla; sin tramos → item.pr (sin cambios).
+//  El admin no tiene descuentos manuales: solo aplica el precio del tramo.
+// ═══════════════════════════════════════════════════════════════
+var TRAMOS_V = {};  // { "Suprema": [{min, precio}, ...] }
+
+async function cargarTramosAdmin() {
+  try {
+    var data = await sbFetch('producto_tramos'
+      + '?select=cantidad_min,precio,producto_id,productos_canonicos(nombre)'
+      + '&activo=eq.true&zona=eq.todas&order=producto_id.asc,cantidad_min.asc');
+    var rows = Array.isArray(data) ? data : [];
+    var map = {};
+    rows.forEach(function(row) {
+      var nombre = row.productos_canonicos && row.productos_canonicos.nombre;
+      if (!nombre) return;
+      if (!map[nombre]) map[nombre] = [];
+      map[nombre].push({ min: Number(row.cantidad_min), precio: Number(row.precio) });
+    });
+    Object.keys(map).forEach(function(n) { map[n].sort(function(a, b) { return a.min - b.min; }); });
+    TRAMOS_V = map;
+  } catch (e) {
+    console.error('[tramos] cargar:', e);
+    TRAMOS_V = {};  // fallback seguro: todo usa item.pr
+  }
+}
+
+// Precio unitario del tramo según cantidad. Sin tramos (o sin piso) → item.pr.
+function tckPrecioTramo(item, q) {
+  var base = (item && item.pr) || 0;
+  if (!item || !item.n) return base;
+  var t = TRAMOS_V[item.n];
+  if (!t || !t.length) return base;
+  var qn = Math.max(1, Number(q) || 1);
+  var precio = base, hayPiso = false;
+  for (var i = 0; i < t.length; i++) {
+    if (qn >= t[i].min) { precio = t[i].precio; hayPiso = true; }
+  }
+  return hayPiso ? precio : base;
+}
+
 async function cargarProductosCanonicos() {
   // 1. Intentar cache local
   try {
@@ -15535,6 +15586,10 @@ function login(nombre) {
   mostrarBotonesManual();
   // v12.7.0 N40b: cargar productos canónicos en background (no bloquea login)
   cargarProductosCanonicos();
+  // v13.10: tramos de precio escalonado desde Supabase
+  if (typeof cargarTramosAdmin === 'function') {
+    cargarTramosAdmin().catch(function(e){ console.error('[tramos] cargar:', e); });
+  }
   // v12.14.0: cargar ciudades canónicas en background (mismo patrón)
   cargarCiudadesCanonicas();
   // v12.5.0: removido checkPrimeraVez() — el manual ya no se abre solo al inicio.
@@ -22976,7 +23031,7 @@ function tomadorActualizarTotal() {
       }
       if (item) break;
     }
-    if (item) { total += item.pr * qty; count += qty; }
+    if (item) { total += tckPrecioTramo(item, qty) * qty; count += qty; }
   });
   var totalEl = document.getElementById('tomador-total');
   var btnEl   = document.getElementById('tomador-btn-confirmar');
@@ -23055,9 +23110,10 @@ async function tomadorConfirmar() {
       if (item) break;
     }
     if (!item) return;
-    var sub = item.pr * qty;
+    var _puT = tckPrecioTramo(item, qty);  // v13.10 precio del tramo
+    var sub = _puT * qty;
     resumenTotal += sub;
-    resumenLineas.push({ nombre: nombre, qty: qty, presentacion: item.p, precio: item.pr, subtotal: sub });
+    resumenLineas.push({ nombre: nombre, qty: qty, presentacion: item.p, precio: _puT, subtotal: sub });
   });
 
   // Crear modal de resumen
@@ -23123,7 +23179,8 @@ async function tomadorConfirmarFinal() {
       if (item) break;
     }
     if (!item) return;
-    var subtotal = item.pr * qty;
+    var _puF = tckPrecioTramo(item, qty);  // v13.10 precio del tramo
+    var subtotal = _puF * qty;
     total += subtotal;
     lineas.push(qty + 'x ' + nombre + ' (' + item.p + ') → $' + subtotal.toLocaleString('es-AR'));
   });
