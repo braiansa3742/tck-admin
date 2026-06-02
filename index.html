@@ -1,5 +1,32 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.7 — 02/06/2026
+     ──────────────────────────────────────────────────────────────────────
+     TAB VISITAS — control de trabajo en campo (reaplica v12.28 sobre v13.6)
+
+       1. Mañana / tarde automático: detecta la pausa de almuerzo (gap más
+          largo con reanudación 12–18h) y parte el día en dos bloques:
+          primer cliente + hora de arranque, # de clientes y hora de cierre
+          de cada bloque, hora de fin de jornada. Si no hay pausa larga →
+          "jornada continua".
+       2. Meta a 30 visitas/día (mín. 25); sábado 15/10; domingo 0.
+          Recoloreo del calendario (verde meta / amarillo mín / naranja flojo).
+       3. Cuánto vendió en el día (opción C, fuente = todosLosPedidos del
+          Sheet, excluye Cancelado, match por nombre de vendedor):
+            · Calendario: # grande = visitas, # chico verde = $ del día.
+              Gris con $ = vendió sin visita registrada.
+            · Resumen semanal: "Vendido en la semana" + "$ por visita".
+            · Detalle del día: total + desglose por origen + $/visita;
+              cada visita del timeline muestra su monto.
+       Funciones nuevas: avMetaDia, avMismoVendedor, avMontoFull/Corto,
+       avParseMontoTexto, avVentasDia, avSplitAlmuerzo. avObjetivoDia quedó
+       como shim → avMetaDia(dow).meta.
+       NO modifica nada fuera del tab Visitas (Fresnova devoluciones y los
+       fixes de v13.6 intactos).
+
+       1. Subir este archivo al repo tck-admin como index.html
+       2. Hard refresh (Cmd+Shift+R).
+     ──────────────────────────────────────────────────────────────────────
      TCK ADMIN — v12.27 — 30/05/2026
      ──────────────────────────────────────────────────────────────────────
      LÍNEA PREMIUM FRESNOVA — mapeo de devoluciones (sobre v12.25)
@@ -11755,6 +11782,17 @@ input.canales-exp-input[type="date"] {
 .av2-cell .d{font-size:9px;font-weight:700;position:absolute;top:3px;left:5px;opacity:.65;}
 .av2-cell .v{font-family:'Barlow Condensed',sans-serif;font-size:19px;font-weight:900;line-height:1;}
 .av2-cell .chk{font-size:8px;font-weight:700;opacity:.85;margin-top:1px;}
+.av2-cell .av2-cell-monto{font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:9.5px;color:#1B5E20;opacity:.92;line-height:1;}
+.av2-blq{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;}
+.av2-blq-card{background:#FAFAF7;border:1.5px solid #eee;border-radius:11px;padding:9px 11px;}
+.av2-blq-t{font-size:9px;color:#9C7050;text-transform:uppercase;letter-spacing:.4px;font-weight:700;margin-bottom:3px;}
+.av2-blq-cli{font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:900;color:#1A0800;line-height:1.05;}
+.av2-blq-h{font-size:11px;color:#5C4030;margin-top:2px;}
+.av2-blq-n{font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:900;color:#8B0000;margin-top:2px;}
+.av2-vend-row{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#E8F5E9;border-bottom:1px solid #eef3ee;}
+.av2-vend-l{font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;color:#5C4030;}
+.av2-vend-r{font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:900;color:#1B5E20;}
+.av2-vend-ori{font-size:10px;color:#7A8A7A;text-align:right;margin-top:1px;}
 .av2-ok{background:#7DC36F;color:#0d2b0a;}
 .av2-cerca{background:#FFE082;color:#7A5A00;}
 .av2-flojo{background:#FFCC9E;color:#8a3d00;}
@@ -11785,7 +11823,7 @@ input.canales-exp-input[type="date"] {
     <div id="admin-visitas-wrap" style="display:none">
       <div class="av2-hdr">
         <div class="av2-hdr-tit">📋 VISITAS — TRABAJO EN CAMPO</div>
-        <div class="av2-hdr-sub">Objetivo: 20 visitas/día (sábado 10) · Juan y Lisandro</div>
+        <div class="av2-hdr-sub">Meta: 30 visitas/día · mín. 25 (sáb 15) · Juan y Lisandro</div>
         <div class="av2-chips" id="av2-chips">
           <div class="av2-chip on" id="av2-chip-Lisandro" onclick="avSetVendedor('Lisandro')">
             <div class="av2-chip-nom">Lisandro</div><div class="av2-chip-meta">campo</div>
@@ -20206,11 +20244,13 @@ function avLunesDe(date) {
   d.setDate(d.getDate() + diff);
   return d;
 }
-function avObjetivoDia(dow) {           // 0=dom -> 0 ; 6=sab -> 10 ; resto -> 20
-  if (dow === 0) return 0;
-  if (dow === 6) return 10;
-  return 20;
+// v12.28 — metas por día: domingo 0 · sábado 15 (mín 10) · resto 30 (mín 25)
+function avMetaDia(dow) {
+  if (dow === 0) return { meta: 0,  min: 0  };
+  if (dow === 6) return { meta: 15, min: 10 };
+  return { meta: 30, min: 25 };
 }
+function avObjetivoDia(dow) { return avMetaDia(dow).meta; }   // compat
 function avDiaISO(date) {
   var y = date.getFullYear(), m = date.getMonth()+1, dd = date.getDate();
   return y + '-' + String(m).padStart(2,'0') + '-' + String(dd).padStart(2,'0');
@@ -20221,6 +20261,59 @@ function avInit() {
   if (!_avSemanaRef) { _avSemanaRef = avLunesDe(avHoyAR()); }
 }
 
+// ── v12.28 — helpers de monto vendido (fuente: todosLosPedidos del Sheet) ──
+function avMismoVendedor(a, b) {
+  a = (a || '').trim().toLowerCase(); b = (b || '').trim().toLowerCase();
+  if (!a || !b) return false;
+  return a === b || a.indexOf(b) === 0 || b.indexOf(a) === 0;
+}
+function avMontoFull(n)  { return '$' + Math.round(n || 0).toLocaleString('es-AR'); }
+function avMontoCorto(n) {
+  n = Math.round(n || 0);
+  if (n >= 1000000) return '$' + (n / 1000000).toFixed(n >= 10000000 ? 0 : 1).replace('.', ',') + 'M';
+  if (n >= 1000)    return '$' + Math.round(n / 1000) + 'k';
+  return '$' + n;
+}
+// Suma los montos "$ 12.345" que aparezcan en el texto del pedido de campo
+function avParseMontoTexto(txt) {
+  if (!txt) return 0; var s = 0, re = /\$\s*([\d.]+)/g, m;
+  while ((m = re.exec(txt))) { s += (parseInt(m[1].replace(/\./g, ''), 10) || 0); }
+  return s;
+}
+// Ventas del vendedor seleccionado, agrupadas por día ISO (desde el Sheet)
+function avVentasDia() {
+  var mapa = {};   // iso -> { total, n, ori:{origen:monto} }
+  var fuente = (typeof todosLosPedidos !== 'undefined' && todosLosPedidos) ? todosLosPedidos : [];
+  fuente.forEach(function(p) {
+    if (!p || p.estado === 'Cancelado') return;
+    if (!avMismoVendedor(p.vendedor, _avVendedor)) return;
+    var iso = null, mm = (p.pedidoId || '').match(/TCK-(\d{4})(\d{2})(\d{2})/);
+    if (mm) iso = mm[1] + '-' + mm[2] + '-' + mm[3];
+    else if ((p.fechaHora || '').length >= 10) iso = p.fechaHora.substring(0, 10);
+    if (!iso) return;
+    var monto = parseInt((p.total || '0').replace(/[^\d]/g, ''), 10) || 0;
+    if (!mapa[iso]) mapa[iso] = { total: 0, n: 0, ori: {} };
+    mapa[iso].total += monto; mapa[iso].n++;
+    var o = (p.origen || 'otro').toLowerCase();
+    mapa[iso].ori[o] = (mapa[iso].ori[o] || 0) + monto;
+  });
+  return mapa;
+}
+// Detecta la pausa de almuerzo (gap más largo con reanudación 12–18h) y parte el día
+function avSplitAlmuerzo(vis) {
+  if (!vis || vis.length < 2) return null;
+  var maxGap = 0, idx = -1;
+  for (var i = 0; i < vis.length - 1; i++) {
+    var finA = vis[i].salida || vis[i].entrada;
+    var iniB = vis[i + 1].entrada;
+    if (!finA || !iniB) continue;
+    var gap = (iniB - finA) / 60000;            // minutos
+    var hB = iniB.getHours();
+    if (gap > 60 && hB >= 12 && hB <= 18 && gap > maxGap) { maxGap = gap; idx = i; }
+  }
+  if (idx === -1) return null;
+  return { idx: idx, finManana: vis[idx].salida || vis[idx].entrada, iniTarde: vis[idx + 1].entrada, gapMin: Math.round(maxGap) };
+}
 async function avCargarVisitas() {
   var mesKey = _avMesRef.getFullYear() + '-' + _avMesRef.getMonth();
   if (mesKey === _avRangoMes && _avVisitas.length) return;   // cache hit
@@ -20243,17 +20336,21 @@ async function avCargarVisitas() {
 
 // Agrupa los eventos del vendedor seleccionado por dia (ISO) en visitas completas
 function avPorDia() {
-  var mapa = {};      // fechaISO -> { checkins, visitas:[{cliente,entrada,salida,tuvo_pedido,motivo}] }
+  var mapa = {};      // fechaISO -> { checkins, visitas:[{cliente,entrada,salida,tuvo_pedido,motivo,montoCampo}] }
   var abierta = {};   // fechaISO -> visita abierta (checkin sin checkout)
   _avVisitas.forEach(function(v) {
     if (!v.vendedores || v.vendedores.nombre !== _avVendedor) return;
     var dia = avDiaISOdeUTC(v.fecha);
     if (!mapa[dia]) mapa[dia] = { checkins: 0, visitas: [] };
     if (v.tipo === 'checkin') {
-      var nv = { cliente: v.nombre_cliente, entrada: new Date(v.fecha), salida: null, tuvo_pedido: false, motivo: null };
+      var nv = { cliente: v.nombre_cliente, entrada: new Date(v.fecha), salida: null, tuvo_pedido: false, motivo: null, montoCampo: 0 };
       mapa[dia].visitas.push(nv); mapa[dia].checkins++; abierta[dia] = nv;
     } else if (v.tipo === 'pedido_campo') {
-      if (abierta[dia] && abierta[dia].cliente === v.nombre_cliente) abierta[dia].tuvo_pedido = true;
+      if (abierta[dia] && abierta[dia].cliente === v.nombre_cliente) {
+        abierta[dia].tuvo_pedido = true;
+        // primer pedido_campo de la visita: tomar el monto del texto (los duplicados repiten el mismo)
+        if (!abierta[dia].montoCampo) abierta[dia].montoCampo = avParseMontoTexto(v.observacion);
+      }
     } else if (v.tipo === 'checkout') {
       if (abierta[dia] && abierta[dia].cliente === v.nombre_cliente) {
         abierta[dia].salida = new Date(v.fecha);
@@ -20261,7 +20358,7 @@ function avPorDia() {
         abierta[dia] = null;
       }
     } else if (v.tipo === 'visita_sin_pedido') {
-      mapa[dia].visitas.push({ cliente: v.nombre_cliente, entrada: new Date(v.fecha), salida: null, tuvo_pedido: false, motivo: v.motivo_no_compra || 'Sin motivo' });
+      mapa[dia].visitas.push({ cliente: v.nombre_cliente, entrada: new Date(v.fecha), salida: null, tuvo_pedido: false, motivo: v.motivo_no_compra || 'Sin motivo', montoCampo: 0 });
       mapa[dia].checkins++;
     }
   });
@@ -20284,27 +20381,31 @@ function avRender() {
 
 function avRenderResumen() {
   var mapa = avPorDia();
+  var ventas = avVentasDia();
   var lunes = new Date(_avSemanaRef);
   var dias = [];
   for (var i=0;i<6;i++) { var d=new Date(lunes); d.setDate(d.getDate()+i); dias.push(d); }
-  var totalVis=0, totalPed=0, diasCalle=0, dotsHtml='', cumplidos=0, posibles=0;
+  var totalVis=0, totalPed=0, diasCalle=0, dotsHtml='', cumplidos=0, posibles=0, totalVend=0;
   dias.forEach(function(d) {
     var iso = avDiaISO(d);
     var info = mapa[iso];
-    var obj = avObjetivoDia(d.getDay());
+    var meta = avMetaDia(d.getDay());
     var n = info ? info.checkins : 0;
     if (n>0) { diasCalle++; posibles++; }
     totalVis += n;
     if (info) totalPed += info.visitas.filter(function(x){return x.tuvo_pedido;}).length;
+    if (ventas[iso]) totalVend += ventas[iso].total;
     var col;
     if (n===0) col = '#EFEBE6';
-    else if (n>=obj) { col = '#7DC36F'; cumplidos++; }
+    else if (n>=meta.meta) { col = '#7DC36F'; cumplidos++; }
+    else if (n>=meta.min)  { col = '#FFE082'; }
     else col = '#FFCC9E';
     dotsHtml += '<div class="av2-dot" style="background:' + col + '" title="' + iso + ': ' + n + ' visitas"></div>';
   });
   var prom = diasCalle ? (totalVis/diasCalle) : 0;
   var promTxt = (Math.round(prom*10)/10).toString().replace('.',',');
   var conv = totalVis ? Math.round(100*totalPed/totalVis) : 0;
+  var xVisita = totalVis ? Math.round(totalVend/totalVis) : 0;
   var dom = new Date(lunes); dom.setDate(dom.getDate()+5);
   var rango = lunes.getDate() + ' → ' + dom.getDate() + ' ' + dom.toLocaleDateString('es-AR',{month:'short'});
   var convColor = conv>=55 ? '#2E7D32' : conv>=40 ? '#E65100' : '#C62828';
@@ -20318,7 +20419,9 @@ function avRenderResumen() {
     + '<div class="av2-kpi"><div class="av2-kpi-num" style="color:#8B0000">' + diasCalle + '</div><div class="av2-kpi-lbl">Días en calle</div></div>'
     + '<div class="av2-kpi"><div class="av2-kpi-num" style="color:#2E7D32">' + totalVis + '</div><div class="av2-kpi-lbl">Visitas</div></div>'
     + '<div class="av2-kpi"><div class="av2-kpi-num">' + promTxt + '</div><div class="av2-kpi-lbl">Prom/día</div></div>'
-    + '<div class="av2-kpi av2-kpi-wide"><div class="l">Días que cumplió el objetivo</div>'
+    + '<div class="av2-kpi av2-kpi-wide"><div class="l">Vendido en la semana</div><div class="r" style="color:#1B5E20">' + avMontoFull(totalVend) + '</div></div>'
+    + '<div class="av2-kpi av2-kpi-wide"><div class="l">$ por visita</div><div class="r" style="color:#5C4030">' + avMontoFull(xVisita) + '</div></div>'
+    + '<div class="av2-kpi av2-kpi-wide"><div class="l">Días que llegó a la meta (30)</div>'
     + '<div style="display:flex;align-items:center;gap:10px;"><div class="av2-dots">' + dotsHtml + '</div>'
     + '<div class="r" style="color:' + objColor + '">' + cumplidos + ' / ' + posibles + '</div></div></div>'
     + '<div class="av2-kpi av2-kpi-wide" style="grid-column:span 3;"><div class="l">Conversión a pedido</div><div class="r" style="color:' + convColor + '">' + conv + '%</div></div>'
@@ -20329,6 +20432,7 @@ function avRenderResumen() {
 
 function avRenderCalendario() {
   var mapa = avPorDia();
+  var ventas = avVentasDia();
   var y = _avMesRef.getFullYear(), m = _avMesRef.getMonth();
   var primero = new Date(y, m, 1);
   var nombreMes = primero.toLocaleDateString('es-AR',{month:'long',year:'numeric'});
@@ -20349,19 +20453,21 @@ function avRenderCalendario() {
     var esDom = (dow===0);
     var info = mapa[iso];
     var n = info ? info.checkins : 0;
-    var obj = avObjetivoDia(dow);
-    var cls, vTxt, chk = '';
-    if (esDom) { cls='av2-dom'; vTxt=''; }
-    else if (!info) { cls='av2-sindata'; vTxt='·'; }
-    else if (n>=obj) { cls='av2-ok'; vTxt=n; chk='✓'; }
-    else if (n>=Math.round(obj*0.65)) { cls='av2-cerca'; vTxt=n; }
+    var meta = avMetaDia(dow);
+    var vend = ventas[iso] ? ventas[iso].total : 0;
+    var cls, vTxt;
+    if (esDom)            { cls='av2-dom';     vTxt = (n>0 ? n : ''); }
+    else if (!info)       { cls='av2-sindata'; vTxt='·'; }
+    else if (n>=meta.meta){ cls='av2-ok';      vTxt=n; }
+    else if (n>=meta.min) { cls='av2-cerca';   vTxt=n; }
     else { cls='av2-flojo'; vTxt=n; }
+    var montoTxt = vend>0 ? avMontoCorto(vend) : '';
     var clsExtra = semDias[iso] ? ' weeksel' : '';
-    var clickable = (!esDom) ? 'onclick="avAbrirDia(\'' + iso + '\')"' : '';
+    var clickable = (!esDom || n>0) ? 'onclick="avAbrirDia(\'' + iso + '\')"' : '';
     grid += '<div class="av2-cell ' + cls + clsExtra + '" ' + clickable + ' data-iso="' + iso + '">'
       + '<span class="d">' + dia + '</span>'
       + '<span class="v">' + vTxt + '</span>'
-      + (chk ? '<span class="chk">' + chk + '</span>' : '')
+      + (montoTxt ? '<span class="chk av2-cell-monto">' + montoTxt + '</span>' : '')
       + '</div>';
   }
   var html =
@@ -20372,12 +20478,12 @@ function avRenderCalendario() {
     + '</div>'
     + '<div class="av2-grid">' + grid + '</div>'
     + '<div class="av2-ley">'
-    + '<span><span class="sw" style="background:#7DC36F"></span>cumplió</span>'
-    + '<span><span class="sw" style="background:#FFE082"></span>cerca</span>'
-    + '<span><span class="sw" style="background:#FFCC9E"></span>flojo</span>'
+    + '<span><span class="sw" style="background:#7DC36F"></span>meta (30+)</span>'
+    + '<span><span class="sw" style="background:#FFE082"></span>mín. (25+)</span>'
+    + '<span><span class="sw" style="background:#FFCC9E"></span>flojo (&lt;25)</span>'
     + '<span><span class="sw" style="background:#EFEBE6"></span>sin check-in</span>'
     + '</div>'
-    + '<div class="av2-nota">Gris = sin check-in ese día (no salió o no marcó). Tocá un día para ver el detalle y su semana.</div>';
+    + '<div class="av2-nota">Número grande = visitas · número chico = $ vendido ese día. Gris con $ = vendió sin visita registrada. Tocá un día para ver el detalle.</div>';
   var el = document.getElementById('av2-calendario');
   if (el) el.innerHTML = html;
 }
@@ -20393,6 +20499,7 @@ function avAbrirDia(iso) {
 
 function avRenderDetalle(iso) {
   var mapa = avPorDia();
+  var ventas = avVentasDia();
   var info = mapa[iso];
   var det = document.getElementById('av2-det');
   if (!det) return;
@@ -20404,32 +20511,74 @@ function avRenderDetalle(iso) {
   var dd = new Date(+p[0], +p[1]-1, +p[2]);
   var fechaTxt = dd.toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'numeric'});
   fechaTxt = fechaTxt.charAt(0).toUpperCase() + fechaTxt.slice(1);
+  var fmtH = function(d){ return d ? d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}) : '—'; };
+  var vdia = ventas[iso] || null;
 
   if (!info || !info.visitas.length) {
-    det.innerHTML = '<div class="av2-det-hdr"><div class="av2-det-f">' + fechaTxt + '</div><div class="av2-det-j">Sin check-in registrado ese día</div></div>';
+    var extra = vdia
+      ? '<div class="av2-vend-row"><div><div class="av2-vend-l">💰 Vendido (sin visita registrada)</div></div><div style="text-align:right;"><div class="av2-vend-r">' + avMontoFull(vdia.total) + '</div><div class="av2-vend-ori">' + vdia.n + ' pedido' + (vdia.n!==1?'s':'') + '</div></div></div>'
+      : '';
+    det.innerHTML = '<div class="av2-det-hdr"><div class="av2-det-f">' + fechaTxt + '</div><div class="av2-det-j">Sin check-in registrado ese día</div></div>' + extra;
     det.style.display = 'block';
     det.scrollIntoView({behavior:'smooth',block:'nearest'});
     return;
   }
-  var vis = info.visitas;
+
+  var vis = info.visitas.slice().sort(function(a,b){ return a.entrada - b.entrada; });
   var n = info.checkins;
   var ped = vis.filter(function(x){return x.tuvo_pedido;}).length;
   var conv = n ? Math.round(100*ped/n) : 0;
-  var entradas = vis.map(function(x){return x.entrada;}).filter(Boolean).sort(function(a,b){return a-b;});
-  var salidas  = vis.map(function(x){return x.salida;}).filter(Boolean).sort(function(a,b){return a-b;});
-  var ini  = entradas.length ? entradas[0] : null;
-  var finJ = salidas.length ? salidas[salidas.length-1] : null;
-  var fmtH = function(d){ return d ? d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}) : '—'; };
+  var ini  = vis[0].entrada;
+  var salidas = vis.map(function(x){return x.salida;}).filter(Boolean).sort(function(a,b){return a-b;});
+  var finJ = salidas.length ? salidas[salidas.length-1] : vis[vis.length-1].entrada;
   var jornada = '🕗 ' + fmtH(ini) + ' → ' + fmtH(finJ);
-  if (ini && finJ) { var mins = Math.round((finJ-ini)/60000); jornada += ' · ' + Math.floor(mins/60) + 'h ' + (mins%60) + 'm'; }
+  if (ini && finJ) { var mins = Math.round((finJ-ini)/60000); if (mins>0) jornada += ' · ' + Math.floor(mins/60) + 'h ' + (mins%60) + 'm'; }
   var conDur = vis.filter(function(x){return x.salida;});
   var durProm = conDur.length ? Math.round(conDur.reduce(function(a,x){return a+(x.salida-x.entrada)/60000;},0)/conDur.length) : 0;
+  var vendDia = vdia ? vdia.total : 0;
+  var xVisita = n ? Math.round(vendDia/n) : 0;
+
+  // Bloques mañana / tarde (corte = pausa de almuerzo)
+  var split = avSplitAlmuerzo(vis);
+  var blqHtml;
+  if (split) {
+    var manana = vis.slice(0, split.idx+1);
+    var tarde  = vis.slice(split.idx+1);
+    blqHtml = '<div class="av2-blq">'
+      + '<div class="av2-blq-card"><div class="av2-blq-t">☀️ Mañana</div>'
+        + '<div class="av2-blq-cli">' + (manana[0].cliente||'—') + '</div>'
+        + '<div class="av2-blq-h">Arrancó ' + fmtH(manana[0].entrada) + ' · cerró ' + fmtH(split.finManana) + '</div>'
+        + '<div class="av2-blq-n">' + manana.length + ' cliente' + (manana.length!==1?'s':'') + '</div></div>'
+      + '<div class="av2-blq-card"><div class="av2-blq-t">🌇 Tarde</div>'
+        + '<div class="av2-blq-cli">' + (tarde[0].cliente||'—') + '</div>'
+        + '<div class="av2-blq-h">Arrancó ' + fmtH(tarde[0].entrada) + ' · terminó ' + fmtH(finJ) + '</div>'
+        + '<div class="av2-blq-n">' + tarde.length + ' cliente' + (tarde.length!==1?'s':'') + '</div></div>'
+      + '</div>';
+  } else {
+    blqHtml = '<div class="av2-blq" style="grid-template-columns:1fr;">'
+      + '<div class="av2-blq-card"><div class="av2-blq-t">Jornada continua (sin pausa larga)</div>'
+        + '<div class="av2-blq-cli">Primer cliente: ' + (vis[0].cliente||'—') + '</div>'
+        + '<div class="av2-blq-h">Arrancó ' + fmtH(ini) + ' · terminó ' + fmtH(finJ) + '</div>'
+        + '<div class="av2-blq-n">' + n + ' cliente' + (n!==1?'s':'') + '</div></div>'
+      + '</div>';
+  }
+
+  // Fila vendido + desglose por origen
+  var oriTxt = '';
+  if (vdia) {
+    oriTxt = Object.keys(vdia.ori).sort(function(a,b){return vdia.ori[b]-vdia.ori[a];})
+      .map(function(o){ return o + ' ' + avMontoCorto(vdia.ori[o]); }).join(' · ');
+  }
+  var vendRow = '<div class="av2-vend-row"><div style="min-width:0;"><div class="av2-vend-l">💰 Vendido en el día</div>'
+    + (oriTxt ? '<div class="av2-vend-ori" style="text-align:left;">' + oriTxt + '</div>' : '')
+    + '</div><div style="text-align:right;"><div class="av2-vend-r">' + avMontoFull(vendDia) + '</div>'
+    + '<div class="av2-vend-ori">' + avMontoFull(xVisita) + ' /visita</div></div></div>';
 
   var timeline = vis.map(function(v) {
     var hora = v.entrada.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
     var dur = v.salida ? Math.round((v.salida-v.entrada)/60000) + 'm' : '(activo)';
     var icono = v.tuvo_pedido ? '📦' : (v.motivo ? '🔴' : '🟢');
-    var res = v.tuvo_pedido ? 'Pedido' : (v.motivo || 'Sin pedido');
+    var res = v.tuvo_pedido ? (v.montoCampo ? avMontoCorto(v.montoCampo) : 'Pedido') : (v.motivo || 'Sin pedido');
     var col = v.tuvo_pedido ? '#2E7D32' : '#C62828';
     return '<div class="av2-tl"><div class="av2-tl-ic">' + icono + '</div>'
       + '<div style="flex:1;min-width:0;"><div class="av2-tl-nom">' + (v.cliente||'—') + '</div><div class="av2-tl-meta">' + hora + ' · ' + dur + '</div></div>'
@@ -20438,11 +20587,13 @@ function avRenderDetalle(iso) {
 
   var html =
     '<div class="av2-det-hdr"><div class="av2-det-f">' + fechaTxt + '</div><div class="av2-det-j">' + jornada + '</div></div>'
+    + vendRow
+    + '<div style="padding:0 14px 4px;">' + blqHtml + '</div>'
     + '<div class="av2-det-stats">'
     + '<div class="av2-det-stat"><div class="n">' + n + '</div><div class="l">Visitas</div></div>'
     + '<div class="av2-det-stat"><div class="n" style="color:#2E7D32">' + ped + '</div><div class="l">Pedidos</div></div>'
     + '<div class="av2-det-stat"><div class="n" style="color:' + (conv>=55?'#2E7D32':'#E65100') + '">' + conv + '%</div><div class="l">Conv.</div></div>'
-    + '<div class="av2-det-stat" style="border-right:none;"><div class="n">' + (durProm ? durProm + "'" : '—') + '</div><div class="l">Prom/visita</div></div>'
+    + '<div class="av2-det-stat" style="border-right:none;"><div class="n">' + (durProm ? durProm + "\'" : '—') + '</div><div class="l">Prom/visita</div></div>'
     + '</div>'
     + timeline
     + '<div class="av2-det-ruta"><button class="av2-btn-ruta" onclick="avVerRecorrido(\'' + iso + '\')">🗺️ Ver recorrido en el mapa</button></div>';
@@ -23335,7 +23486,9 @@ async function lzCargarEntregasIndex() {
   // Cargar entregas en estados finales (entregado / no_encontrado) para los viajes en curso/cerrados recientes
   // Limit para no traer toda la historia.
   try {
-    const rows = await sbFetch('entregas?estado=in.(entregado,no_encontrado)&select=pedido_id,estado,fecha_entrega&order=fecha_entrega.desc&limit=2000');
+    // v13.5: paginado — antes limit=2000 y la tabla entregas crece sin techo.
+    // Orden con tiebreaker por id para que la paginación no saltee filas.
+    const rows = await sbFetchAll('entregas?estado=in.(entregado,no_encontrado)&select=pedido_id,estado,fecha_entrega&order=fecha_entrega.desc.nullslast,id.asc');
     const idx = {};
     (rows || []).forEach(e => {
       if (e.pedido_id && !idx[e.pedido_id]) {
@@ -24859,7 +25012,10 @@ async function lzCargarDrawers() {
   // FIX N42 (07/05/2026): traer también cliente, ciudad, monto, fecha,
   // motivo_no_entrega, motivo_detalle, viaje_id (para link a Xubio)
   try {
-    const todas = await sbFetch('entregas?select=id,pedido_id,chofer,estado,fecha_asignacion,fecha_entrega,cliente,ciudad,comercio,monto,motivo_no_entrega,motivo_detalle,viaje_id,telefono&limit=1000&order=fecha_entrega.desc.nullslast');
+    // v13.5: paginado — antes limit=1000. Esta carga alimenta _asignacionesEstado
+    // (estado de entrega de TODOS los pedidos) además del drawer No Entregados,
+    // así que truncar dejaba pedidos sin estado conocido. Tiebreaker por id.
+    const todas = await sbFetchAll('entregas?select=id,pedido_id,chofer,estado,fecha_asignacion,fecha_entrega,cliente,ciudad,comercio,monto,motivo_no_entrega,motivo_detalle,viaje_id,telefono&order=fecha_entrega.desc.nullslast,id.asc');
     if (Array.isArray(todas) && todas.length > 0) {
       // v11.5: actualizar también el cache de estados para todos los pedidos
       todas.forEach(e => {
@@ -25243,9 +25399,11 @@ async function cargarAsignaciones() {
     hace7.setDate(hace7.getDate() - 7);
     const desdeStr = hace7.toISOString().split('T')[0];
     // v11.5: incluimos estado en el select
-    const rows = await sbFetch(
+    // v13.5: paginado sobre la ventana de 7 días (antes limit=1000, que podía
+    // quedar corto en semanas de mucho volumen). Tiebreaker por id.
+    const rows = await sbFetchAll(
       'entregas?fecha_asignacion=gte.' + desdeStr + 'T00:00:00' +
-      '&select=pedido_id,chofer,estado&limit=1000'
+      '&select=pedido_id,chofer,estado&order=fecha_asignacion.asc,id.asc'
     );
     if (rows && rows.length) {
       rows.forEach(function(r) {
@@ -27917,11 +28075,12 @@ async function adminMiRondaCargar() {
   _amrCargando = true;
   try {
     // 1. Cargar TODOS los clientes activos (de los 3 vendedores)
-    var paths = [
-      'clientes_activos?activo_en_ronda=eq.true&select=cliente_id,nombre,telefono,localidad,vendedor,ruta_viaje,ritmo,ultimo_pedido,dias_desde_ult_pedido,frec_dias_prom,notas&limit=2000',
-      'mironda_gestiones?fecha_ronda=gte.' + amrFechaDesde() + '&select=*&order=fecha_ronda.desc&limit=5000'
-    ];
-    var results = await Promise.all(paths.map(function(p){ return sbFetch(p); }));
+    // v13.6: clientes_activos paginado (antes limit=2000, mismo riesgo de recorte
+    // que tenía pedidos_zona). mironda_gestiones queda acotado por fecha.
+    var results = await Promise.all([
+      sbFetchAll('clientes_activos?activo_en_ronda=eq.true&select=cliente_id,nombre,telefono,localidad,vendedor,ruta_viaje,ritmo,ultimo_pedido,dias_desde_ult_pedido,frec_dias_prom,notas&order=cliente_id.asc'),
+      sbFetch('mironda_gestiones?fecha_ronda=gte.' + amrFechaDesde() + '&select=*&order=fecha_ronda.desc&limit=5000')
+    ]);
     _amrClientes = Array.isArray(results[0]) ? results[0] : [];
     _amrGestiones = Array.isArray(results[1]) ? results[1] : [];
 
