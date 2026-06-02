@@ -13710,6 +13710,27 @@ async function sbFetch(path, options = {}) {
   return text ? JSON.parse(text) : null;
 }
 
+// ── v13.4: Paginación — trae TODAS las filas sin tope ciego ──────
+// pedidos_zona superó las 2000 filas y el limit fijo recortaba los
+// pedidos de los viajes más nuevos → la planilla de carga salía
+// incompleta (faltaban productos y ciudades). Pagina de a 1000 con
+// orden estable (pedido_id) hasta agotar la tabla.
+async function sbFetchAll(pathBase, pageSize, maxPaginas) {
+  pageSize = pageSize || 1000;
+  maxPaginas = maxPaginas || 60;   // tope de seguridad (~60k filas)
+  var todas = [];
+  var offset = 0;
+  for (var i = 0; i < maxPaginas; i++) {
+    var sep = pathBase.indexOf('?') >= 0 ? '&' : '?';
+    var rows = await sbFetch(pathBase + sep + 'limit=' + pageSize + '&offset=' + offset);
+    if (!Array.isArray(rows) || rows.length === 0) break;
+    todas = todas.concat(rows);
+    if (rows.length < pageSize) break;   // última página
+    offset += pageSize;
+  }
+  return todas;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // v8.2 admin — MAPA pedidoId → sucursal (para card + detector duplicados)
 // Replicado de ventas v8.7. Admin solo LEE el mapa; los vendedores son
@@ -22915,7 +22936,10 @@ let _lzDataLoaded       = false;  // flag para saber si ya se cargó alguna vez
 async function lzCargarDatos() {
   try {
     // v12.0-B3: schema confirmado tras debug
-    const pedidos = await sbFetch('pedidos_zona?select=*&limit=2000');
+    // v13.4: paginado con sbFetchAll — antes era limit=2000 fijo y, al
+    // superar la tabla las 2000 filas, recortaba pedidos de los viajes
+    // más nuevos (planilla de carga incompleta). Orden estable por pedido_id.
+    const pedidos = await sbFetchAll('pedidos_zona?select=*&order=pedido_id.asc');
     _lzPedidosZona = Array.isArray(pedidos) ? pedidos : [];
 
     // Ciudades canónicas con su zona (para el grid del drawer "Sin Zona")
