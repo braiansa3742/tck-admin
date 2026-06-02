@@ -1,5 +1,21 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.9 — 02/06/2026
+     ──────────────────────────────────────────────────────────────────────
+     FIX: UNIR PEDIDOS — dejaba de perder precios/calibre y de generar 'corrupto'
+
+       dupUnirPedidos reconstruia el detalle como 'emoji *Nombre* qty' (sin
+       precios, sin calibre, sin combos/promos). Ese formato ('Pollo B' + N) es
+       el que ventas marca como 'formato corrupto' y el que rompe el presupuesto
+       en Xubio. O sea: ADMIN era el que generaba los pedidos corruptos.
+
+       Ahora usa la misma consolidacion que ventas (4 funciones _dup... portadas
+       a este archivo): conserva precios, presentacion, calibre, combos y promos,
+       y aborta con aviso si algun pedido viene corrupto de una union vieja.
+       Incluye el fix de unidad multipalabra ('paquete retail'). parseProds se
+       mantiene intacto (lo usan otras vistas).
+     ──────────────────────────────────────────────────────────────────────
+
      TCK ADMIN — v13.8 — 02/06/2026
      ──────────────────────────────────────────────────────────────────────
      TAB VISITAS — mapa de rendimiento + ventas (sobre v13.7)
@@ -16488,6 +16504,295 @@ async function dupCancelarPedido(pedidoId) {
 //   3. Reasigna vendedor al elegido (habitual o manual)
 //   4. Actualiza el pedido principal con TODA esa info
 //   5. Cancela los otros con nota que los vincula
+// ════════════════════════════════════════════════════════════════════════
+// v13.9 — CONSOLIDADOR DE UNIÓN (portado de TCK VENTAS, alineado).
+// Reemplaza la lógica vieja que reconstruía el detalle como "emoji *Nombre* qty"
+// (perdía precios, calibre, combos y promos). Estas 4 funciones son autocontenidas
+// e incluyen el fix de unidades multipalabra ("paquete retail") y el calibre.
+// ════════════════════════════════════════════════════════════════════════
+function _dupParsearMontoLocal(str) {
+  if (!str) return 0;
+  var limpio = String(str).replace(/\./g,'').replace(',','.');
+  return parseFloat(limpio) || 0;
+}
+
+function _dupParsearDetalle(detalle) {
+  var out = { productos: [], combos: [], promos: [], errores: [] };
+  if (!detalle) return out;
+  var bloques = String(detalle).split(/\s*\|\s*/).map(function(b){ return b.trim(); }).filter(Boolean);
+  var i = 0;
+
+  while (i < bloques.length) {
+    var b = bloques[i];
+
+    // Header suelto de promos (formato viejo) — saltear sin procesar
+    if (/^🎁\s*\*OFERTAS\s*1\+1\b[^*]*\*\s*$/u.test(b)) { i++; continue; }
+
+    // v14.13.4: PROMO 50% OFF (formato nuevo, alineado con catálogo y AS v25.3.0+)
+    // Captura: 🎁 *50% OFF: NOMBRE* × N
+    // Sub-líneas opcionales: 💰 $TOTAL (a continuación, separado por | dentro del mismo bloque
+    //   o en bloque siguiente). El formato típico es "🎁 *50% OFF: X* × N | 💰 $TOTAL".
+    var mPromoNuevo = b.match(/🎁\s*\*50%\s*OFF:\s*([^*]+?)\*\s*[×x]\s*(\d+)/ui);
+    if (mPromoNuevo) {
+      var nombrePN = mPromoNuevo[1].trim();
+      var unidadesPN = parseInt(mPromoNuevo[2]);
+      var totalPN = 0;
+      // Buscar el "💰 $TOTAL" que sigue (puede estar en el mismo bloque tras "|" o en bloque siguiente)
+      var jPN = i + 1;
+      // Primero chequear si el bloque actual ya tiene el monto incluido (ej: "...× 2 | 💰 $4.500")
+      var mInline = b.match(/💰\s*\$([\d.,]+)/u);
+      if (mInline) {
+        totalPN = _dupParsearMontoLocal(mInline[1]);
+      } else {
+        while (jPN < bloques.length) {
+          var subPN = bloques[jPN];
+          var mFinPN = subPN.match(/💰\s*\$([\d.,]+)/u);
+          if (mFinPN) { totalPN = _dupParsearMontoLocal(mFinPN[1]); jPN++; break; }
+          break;
+        }
+      }
+      if (nombrePN && unidadesPN && totalPN > 0) {
+        // Estructura interna: campo `pares` mantenido por compat pero conceptualmente UNIDADES.
+        out.promos.push({ nombre: nombrePN, pares: unidadesPN, total: totalPN });
+      } else {
+        out.errores.push('Promo 50% OFF incompleta: "' + nombrePN + '" (faltan unidades o total)');
+      }
+      i = jPN;
+      continue;
+    }
+
+    // PROMO 1+1 viejo (acepta formato ventas "PROMO 1+1:" y catálogo "1+1 ")
+    // v14.13.4: NO convertir pares→unidades (los precios cambiaron de "precio del par"
+    // a "precio de la unidad"). Marcamos legacy=true para que el serializador
+    // mantenga el formato viejo y no introduzca un error de cálculo.
+    var mPromo = b.match(/🎁\s*\*(?:PROMO\s*)?1\+1[:\s]\s*([^*]+?)\*\s*[×x]\s*(\d+)(?:\s*par(?:es)?)?/ui);
+    if (mPromo) {
+      var nombrePromo = mPromo[1].trim();
+      var pares = parseInt(mPromo[2]);
+      var totalPromo = 0;
+      var j = i + 1;
+      while (j < bloques.length) {
+        var sub = bloques[j];
+        var mFin = sub.match(/💰\s*\$([\d.,]+)(?:\s*\(-?(\d+(?:\.\d+)?)%?\))?/u);
+        if (mFin) { totalPromo = _dupParsearMontoLocal(mFin[1]); j++; break; }
+        if (/^\s*✓\s*\d+[ux]?\s+/u.test(sub)) { j++; continue; }
+        break;
+      }
+      if (nombrePromo && pares && totalPromo > 0) {
+        // Pedido legacy: campo `pares` representa pares (no unidades), legacy=true
+        // se mantiene formato 1+1 al re-serializar para preservar el total original.
+        out.promos.push({ nombre: nombrePromo, pares: pares, total: totalPromo, legacy: true });
+      } else {
+        out.errores.push('Promo 1+1 incompleta: "' + nombrePromo + '" (faltan pares o total)');
+      }
+      i = j;
+      continue;
+    }
+
+    // COMBO
+    var mCombo = b.match(/^[🔥]+\s*\*([^*]+)\*\s*[×x]\s*(\d+)/u);
+    if (mCombo) {
+      var nombreCombo = mCombo[1].trim();
+      var qtyCombo = parseInt(mCombo[2]);
+      var items = [];
+      var descPct = 0;
+      var totalCombo = 0;
+      var j2 = i + 1;
+      while (j2 < bloques.length) {
+        var sub2 = bloques[j2];
+        var mFin2 = sub2.match(/💰\s*\$([\d.,]+)\s*\(-(\d+(?:\.\d+)?)%?\)/u);
+        if (mFin2) { totalCombo = _dupParsearMontoLocal(mFin2[1]); descPct = parseFloat(mFin2[2]); j2++; break; }
+        var mItem = sub2.match(/✓\s*(\d+)x?\s+(.+?)$/u);
+        if (mItem) { items.push({ cantidad: parseInt(mItem[1]), nombre: mItem[2].trim() }); j2++; continue; }
+        break;
+      }
+      if (nombreCombo && qtyCombo && items.length) {
+        out.combos.push({ nombre: nombreCombo, qty: qtyCombo, items: items, descPct: descPct, total: totalCombo });
+      } else {
+        out.errores.push('Combo incompleto: "' + nombreCombo + '"');
+      }
+      i = j2;
+      continue;
+    }
+
+    // CATALOGO WEB: cabecera "🐔 *Nombre*" + bloque siguiente con precios
+    // v14.34.0: set de emojis ampliado (agrego 🍔 🍝) para alinear con el parser
+    // del Apps Script y no fallar la cabecera de rebozados/hamburguesas/pastas.
+    var mCabCat = b.match(/^[🔥🐔🍗🥚🍟🍖🥦🥬🥔📦🍅🍝🍔]+\s*\*([^*]+)\*\s*$/u);
+    if (mCabCat) {
+      var nombreCat = mCabCat[1].trim();
+      var emojiCat = b.match(/^\S+/)[0];
+      if (i + 1 < bloques.length) {
+        var sig = bloques[i + 1];
+        // v14.34.0: [\w\s]+? (en vez de \w+) acepta unidades de MÁS de una palabra
+        // como "paquete retail", "bolsa retail", etc. Mismo fix que el Apps Script
+        // ya tenía (v25.10.3); acá había quedado la regex vieja → "bloque no reconocido".
+        var mCat = sig.match(/^(\d+)\s+[\w\s]+?\s*(?:\(([^)]*)\))?\s*x\s*\$?([\d.,]+)\s*→\s*\$?([\d.,]+)/i);
+        if (mCat) {
+          out.productos.push({
+            formato: 'catalogo', emoji: emojiCat, nombre: nombreCat,
+            qty: parseInt(mCat[1]),
+            presentacion: (mCat[2] || '').trim(),
+            precio_unit: _dupParsearMontoLocal(mCat[3]),
+            total: _dupParsearMontoLocal(mCat[4]),
+            dtoPct: 0
+          });
+          i += 2;
+          continue;
+        }
+      }
+      // cabecera suelta (header sin siguiente bloque) — saltear
+      i++;
+      continue;
+    }
+
+    // WHATSAPP MANUAL: "1x Nombre (X Kg) → $XXX" con descuento opcional
+    var mWA = b.match(/^(\d+)x\s+(.+?)(?:\s*\[-(\d+(?:\.\d+)?)%\])?\s*→\s*\$?([\d.,]+)/i);
+    if (mWA) {
+      var qtyWA = parseInt(mWA[1]);
+      var restoWA = mWA[2].trim();
+      var dtoPctWA = mWA[3] ? parseFloat(mWA[3]) : 0;
+      var totalWA = _dupParsearMontoLocal(mWA[4]);
+      var mPresWA = restoWA.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
+      var nombreWA = mPresWA ? mPresWA[1].trim() : restoWA;
+      var presWA = mPresWA ? mPresWA[2].trim() : '';
+      var precioUnitCalc = (qtyWA > 0 && (1 - dtoPctWA/100) > 0)
+        ? totalWA / qtyWA / (1 - dtoPctWA/100)
+        : 0;
+      out.productos.push({
+        formato: 'whatsapp', emoji: '', nombre: nombreWA, qty: qtyWA,
+        presentacion: presWA, precio_unit: precioUnitCalc, total: totalWA, dtoPct: dtoPctWA
+      });
+      i++;
+      continue;
+    }
+
+    // Formato corrupto típico del bug previo: "🍟 *Nombre* 1" sin datos
+    // Antes de tirar error chequeamos si el siguiente bloque es footer "💰"
+    // (si sí, era una promo mal catalogada arriba y la dejamos pasar sin error)
+    var mCorrupto = b.match(/^[^\s]+\s*\*([^*]+)\*\s+(\d+)\s*$/u);
+    if (mCorrupto) {
+      out.errores.push('Formato corrupto (probable unión previa defectuosa): "' + b + '"');
+      i++;
+      continue;
+    }
+
+    out.errores.push('Bloque no reconocido: ' + b.substring(0, 80));
+    i++;
+  }
+
+  return out;
+}
+
+function _dupSerializarDetalle(estructurado) {
+  var partes = [];
+
+  // 1) Promos primero — v14.13.4: si la promo viene de formato viejo (legacy=true),
+  //    se mantiene el formato 1+1 para preservar el total original (en el modelo viejo
+  //    el precio_unitario en BD era distinto del actual). Si es del modelo nuevo,
+  //    se serializa como "🎁 *50% OFF: NOMBRE* × N | 💰 $TOTAL".
+  if (estructurado.promos.length > 0) {
+    estructurado.promos.forEach(function(p) {
+      if (p.legacy) {
+        // Legacy: re-emitir formato 1+1 viejo (pares + ✓ 2Nx + 💰 con -50%)
+        var totalU = p.pares * 2;
+        partes.push('🎁 *PROMO 1+1: ' + p.nombre + '* × ' + p.pares);
+        partes.push('   ✓ ' + totalU + 'x ' + p.nombre);
+        partes.push('   💰 $' + p.total.toLocaleString('es-AR') + ' (-50%)');
+      } else {
+        // Modelo nuevo: 🎁 *50% OFF: NOMBRE* × N | 💰 $TOTAL
+        var unidades = p.pares;  // legacy field name = unidades en modelo nuevo
+        partes.push('🎁 *50% OFF: ' + (p.nombre || '').toUpperCase() + '* × ' + unidades + ' | 💰 $' + p.total.toLocaleString('es-AR'));
+      }
+    });
+  }
+
+  // 2) Combos
+  estructurado.combos.forEach(function(c) {
+    partes.push('🔥 *' + c.nombre + '* × ' + c.qty);
+    c.items.forEach(function(it) {
+      partes.push('   ✓ ' + it.cantidad + 'x ' + it.nombre);
+    });
+    partes.push('   💰 $' + c.total.toLocaleString('es-AR') + ' (-' + c.descPct + '%)');
+  });
+
+  // 3) Productos normales en formato WA (compacto, parseable)
+  estructurado.productos.forEach(function(pr) {
+    var presenStr = pr.presentacion ? ' (' + pr.presentacion + ')' : '';
+    var dtoStr = pr.dtoPct > 0 ? '[-' + pr.dtoPct + '%]' : '';
+    partes.push(pr.qty + 'x ' + pr.nombre + presenStr + dtoStr + ' → $' + pr.total.toLocaleString('es-AR'));
+  });
+
+  return partes.join(' | ');
+}
+
+function _dupConsolidarPedidos(detalles) {
+  // detalles = array de strings
+  // Retorna { detalle: stringConsolidado, resumen: {productos, combos, promos, errores} }
+
+  var todos = { productos: [], combos: [], promos: [], errores: [] };
+
+  detalles.forEach(function(detalle, idx) {
+    var parsed = _dupParsearDetalle(detalle);
+    todos.productos = todos.productos.concat(parsed.productos);
+    todos.combos    = todos.combos.concat(parsed.combos);
+    todos.promos    = todos.promos.concat(parsed.promos);
+    // Anotar de qué pedido viene cada error para que el mensaje sea útil
+    parsed.errores.forEach(function(e) {
+      todos.errores.push('[pedido #' + (idx + 1) + '] ' + e);
+    });
+  });
+
+  // Consolidar PRODUCTOS: mismo nombre + presentación + dtoPct → sumar qty y total
+  var cProd = {};
+  todos.productos.forEach(function(p) {
+    var key = (p.nombre || '').trim().toLowerCase() + '||' +
+              (p.presentacion || '').trim().toLowerCase() + '||' +
+              String(p.dtoPct || 0);
+    if (cProd[key]) {
+      cProd[key].qty += p.qty;
+      cProd[key].total += p.total;
+    } else {
+      cProd[key] = Object.assign({}, p);
+    }
+  });
+  todos.productos = Object.keys(cProd).map(function(k){ return cProd[k]; });
+
+  // Consolidar PROMOS: mismo nombre + flag legacy → sumar pares y total
+  // v14.13.4: separamos legacy (1+1 viejo) de nuevas (50% OFF) porque tienen
+  // precios distintos. Si se une legacy + nuevo del mismo producto, quedan
+  // como dos líneas separadas en el detalle final.
+  var cPromo = {};
+  todos.promos.forEach(function(p) {
+    var key = (p.nombre || '').trim().toLowerCase() + '||' + (p.legacy ? 'legacy' : 'new');
+    if (cPromo[key]) {
+      cPromo[key].pares += p.pares;
+      cPromo[key].total += p.total;
+    } else {
+      cPromo[key] = Object.assign({}, p);
+    }
+  });
+  todos.promos = Object.keys(cPromo).map(function(k){ return cPromo[k]; });
+
+  // Consolidar COMBOS: mismo nombre + descPct → sumar qty y total (items se mantienen del primero)
+  var cCombo = {};
+  todos.combos.forEach(function(c) {
+    var key = (c.nombre || '').trim().toLowerCase() + '||' + String(c.descPct || 0);
+    if (cCombo[key]) {
+      cCombo[key].qty += c.qty;
+      cCombo[key].total += c.total;
+    } else {
+      cCombo[key] = Object.assign({}, c, { items: c.items.slice() });
+    }
+  });
+  todos.combos = Object.keys(cCombo).map(function(k){ return cCombo[k]; });
+
+  return {
+    detalle: _dupSerializarDetalle(todos),
+    resumen: todos
+  };
+}
+
 async function dupUnirPedidos() {
   var s = _dupModalState;
   if (!s) return;
@@ -16501,49 +16806,60 @@ async function dupUnirPedidos() {
   var principal = activos[0];
   var restantes = activos.slice(1);
 
-  // 1) COMBINAR PRODUCTOS (suma cantidades de los que se repiten)
-  var prodsCombinados = {};  // key (nombre normalizado) → { emoji, name, qty }
-  var ordenInsercion = [];   // para preservar el orden original
-  activos.forEach(function(p) {
-    var prods = parseProds(p.detalle || '');
-    prods.forEach(function(pr) {
-      var key = (pr.name || '').toLowerCase().replace(/\s+/g,' ').trim();
-      if (!key) return;
-      if (prodsCombinados[key]) {
-        prodsCombinados[key].qty += pr.qty;
-      } else {
-        prodsCombinados[key] = { emoji: pr.emoji, name: pr.name, qty: pr.qty };
-        ordenInsercion.push(key);
-      }
-    });
-  });
+  // v13.9 — CONSOLIDACIÓN que PRESERVA precios / calibre / combos / promos.
+  // ANTES: parseProds + reconstrucción como "emoji *Nombre* qty" → se PERDÍAN
+  // precios y calibre, y ese formato ("🍗 *Pollo B* 1") es justo el que después
+  // rompe el presupuesto en Xubio y se detecta como "formato corrupto" al re-unir.
+  // Ahora usa la MISMA lógica que ventas: parsea cada detalle, fusiona líneas
+  // iguales y re-serializa al formato parseable por el Apps Script (conserva
+  // "Pollo B · calibre x7", presentación, precios, combos y promos).
+  var consolidacion = _dupConsolidarPedidos(activos.map(function(p){ return p.detalle || ''; }));
 
-  // 2) SUMAR TOTALES
+  // Si algún pedido tiene formato corrupto (unión previa con versión vieja),
+  // abortamos en vez de generar más basura.
+  if (consolidacion.resumen.errores && consolidacion.resumen.errores.length > 0) {
+    var _errTxt = consolidacion.resumen.errores.slice(0,6).map(function(e){ return '• ' + e; }).join('\n');
+    if (consolidacion.resumen.errores.length > 6) {
+      _errTxt += '\n• ... y ' + (consolidacion.resumen.errores.length - 6) + ' más';
+    }
+    alert('⚠️ NO SE PUEDE UNIR — FORMATO CORRUPTO\n\n' +
+          'Uno o más pedidos tienen el detalle en un formato que no se puede procesar ' +
+          'para unir de forma segura (suele pasar con pedidos unidos por una versión vieja).\n\n' +
+          _errTxt +
+          '\n\n¿Qué hacer? Presupuestá cada pedido por separado, o resolvelo desde admin.');
+    return;
+  }
+
+  var nuevoDetalle = consolidacion.detalle;
+  var itemsPorTipo = consolidacion.resumen;
+  var totalLineas  = itemsPorTipo.productos.length + itemsPorTipo.combos.length + itemsPorTipo.promos.length;
+
+  // 2) SUMAR TOTALES (suma aritmética de los totales originales)
   var totalUnido = activos.reduce(function(acc, p) {
     var n = parseInt((p.total || '').replace(/[^\d]/g,'')) || 0;
     return acc + n;
   }, 0);
 
-  // 3) CONSTRUIR NUEVO DETALLE en formato TCK (usa pipes como separador)
-  // Formato: "emoji *Nombre* qty"
-  var nuevoDetalle = ordenInsercion.map(function(key) {
-    var pr = prodsCombinados[key];
-    return (pr.emoji || '🛒') + ' *' + pr.name + '* ' + pr.qty;
-  }).join(' | ');
+  // RESUMEN CORTO (primeros 4: productos + combos + promos)
+  var resumenItems = [];
+  itemsPorTipo.productos.forEach(function(pr){ resumenItems.push(pr.qty + '× ' + pr.nombre); });
+  itemsPorTipo.combos.forEach(function(c){ resumenItems.push(c.qty + '× ' + c.nombre); });
+  itemsPorTipo.promos.forEach(function(pr){
+    resumenItems.push(pr.legacy ? (pr.pares + ' par' + (pr.pares>1?'es':'') + ' 1+1 ' + pr.nombre)
+                                : (pr.pares + 'u 50% OFF ' + pr.nombre));
+  });
+  var resumenNuevo = resumenItems.slice(0,4).join(', ');
+  if (resumenItems.length > 4) resumenNuevo += '...';
 
-  // 4) RESUMEN CORTO (primeros 4 productos)
-  var resumenNuevo = ordenInsercion.slice(0,4).map(function(key) {
-    var pr = prodsCombinados[key];
-    return pr.qty + '× ' + pr.name;
-  }).join(', ');
-  if (ordenInsercion.length > 4) resumenNuevo += '...';
-
-  // 5) Total de items
-  var itemsTotal = Object.values(prodsCombinados).reduce(function(a, pr) { return a + pr.qty; }, 0);
+  // TOTAL DE ITEMS (unidades): productos qty + combos qty + promos (legacy=pares×2, nuevas=pares)
+  var itemsTotal = 0;
+  itemsPorTipo.productos.forEach(function(pr){ itemsTotal += pr.qty; });
+  itemsPorTipo.combos.forEach(function(c){ itemsTotal += c.qty; });
+  itemsPorTipo.promos.forEach(function(pr){ itemsTotal += pr.legacy ? pr.pares*2 : pr.pares; });
 
   // Confirmar antes de actuar
   var confirmMsg = '🔗 ¿Confirmás unir estos ' + activos.length + ' pedidos?\n\n'
-    + '• Se combinarán ' + ordenInsercion.length + ' productos diferentes\n'
+    + '• Se combinarán ' + totalLineas + ' líneas\n'
     + '• El pedido ' + principal.pedidoId + ' quedará como único con total ' + formatMoneda(totalUnido) + '\n'
     + '• Se cancelarán los otros ' + restantes.length + ' pedidos\n'
     + '• Acreditado a: ' + s.acreditarA;
