@@ -1,5 +1,20 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.13 — 03/06/2026
+     v13.13: GENERADOR DE EXCEL DE COBRANZAS PARA XUBIO.
+       · Detalle del viaje (rindiendo / cerrado) → botón "📥 Armar Excel
+         cobranzas (Xubio)". Lee las entregas cobradas del viaje + los
+         cheques (cheques_recibidos) desde Supabase por REST, mapea cuenta
+         contable, reserva números correlativos en Apps Script (rango alto
+         900000+) y descarga un .xlsx con el formato de importación de Xubio
+         (hoja "Cobranzas", 11 columnas, aplicación vacía → "a cuenta").
+       · Reglas: efectivo→Caja administracion, transferencia→Mercadopago,
+         cheque→Valores a Depositar. Nombre = clientes_xubio.nombre (no el
+         del chofer). Mixtos / sin match Xubio / importe 0 → carga manual.
+         Cheques salen SOLO de cheques_recibidos (evita doble conteo).
+       · SheetJS cargado por CDN on-demand (sin build, sin dependencias).
+       REQUIERE Apps Script v25.40.0: acción cobranzaReservarNumeros.
+     ──────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.12 — 02/06/2026
      v13.12: CONCILIACIÓN DE TRANSFERENCIAS + VER COMPROBANTES.
        Complementa la v14.38.0 de VENTAS (foto de comprobante obligatoria).
@@ -24943,10 +24958,15 @@ function lzRenderDetalleViaje() {
       html += '    </button>';
     }
   } else if (estado === 'rindiendo') {
+    html += lzBtnExcelCobranzas();
     html += '    <button class="v-btn-grande v-btn-confirmar-rend" ' +
             'onclick="lzConfirmarRendicionViaje()">';
     html += '      ✅ Confirmar rendición del chofer';
     html += '    </button>';
+  } else if (estado === 'cerrado') {
+    // Viaje cerrado: el ciclo financiero ya se cierra en Xubio; acá solo
+    // queda disponible re-generar el Excel de cobranzas del viaje.
+    html += lzBtnExcelCobranzas();
   }
 
   html += '  </div>';
@@ -25231,6 +25251,383 @@ async function lzConfirmarRendicionViaje() {
     toast('❌ Error de conexión', 'err');
     console.error('[lz] confirmarRend error:', err);
   }
+}
+
+// ════════════════════════════════════════════════════════════════
+// v13.13 — GENERADOR DE EXCEL DE COBRANZAS PARA XUBIO
+// ════════════════════════════════════════════════════════════════
+// Al cerrar (o durante) la rendición de un viaje, arma un .xlsx con
+// las cobranzas de ese viaje, listo para importar en Xubio
+// (Ventas → Cobranzas → Importar). Una fila por cobranza simple.
+//
+// Reglas (validadas contra datos reales):
+//   · Incluye entregas con forma_cobro IN (efectivo, transferencia).
+//   · Cheques: salen SOLO de cheques_recibidos (fuente con banco/número).
+//     Las entregas forma_cobro='cheque' NO generan línea propia.
+//   · Cobros MIXTOS (detalle_cobro con ≥2 medios) → carga manual (afuera).
+//   · Sin cliente_xubio_id o sin nombre Xubio → afuera (no hay match).
+//   · Importe = monto_cobrado_real ?? monto; si ≤0 → afuera.
+//   · Nombre del cliente = clientes_xubio.nombre (NO el que tipea el chofer).
+//   · Cuenta: efectivo→Caja administracion, transferencia→Mercadopago,
+//     cheque→Valores a Depositar.
+//   · Aplicación VACÍA → las cobranzas entran "a cuenta".
+//   · Números correlativos reservados por Apps Script (rango alto 900000+).
+
+const LZ_COB_CUENTA = {
+  efectivo: 'Caja administracion',
+  transferencia: 'Mercadopago',
+  cheque: 'Valores a Depositar'
+};
+
+const LZ_COB_HEADERS = [
+  'Fecha *', 'Nombre del cliente *', 'Número de cobranza *',
+  'Cuenta contable *', 'Importe *', 'Retención',
+  'Número de comprobante', 'Importe ISAR', 'Importe retenido',
+  'Observaciones', 'Aplicación'
+];
+
+// ── SheetJS lazy-load por CDN (clona el patrón de _cargarJsPDF) ──
+var _lzCobJsPromise = null;
+function _cargarSheetJS() {
+  if (_lzCobJsPromise) return _lzCobJsPromise;
+  _lzCobJsPromise = new Promise(function(resolve, reject) {
+    if (window.XLSX) return resolve(window.XLSX);
+    var s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload = function() {
+      if (window.XLSX) resolve(window.XLSX);
+      else reject(new Error('XLSX no disponible tras carga'));
+    };
+    s.onerror = function() { reject(new Error('No se pudo cargar SheetJS')); };
+    document.head.appendChild(s);
+  });
+  return _lzCobJsPromise;
+}
+
+// ── Formato de pesos EXACTO (no abrevia; ≠ lzFmtMoneda) ──
+function _lzPesos(n) {
+  var x = Number(n) || 0;
+  return '$' + x.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+// ── Fecha en zona Buenos Aires → {str:'dd/mm/yyyy', serial:Excel} ──
+// El serial es date-only (días desde 1899-12-30, base UTC) para evitar
+// cualquier corrimiento de huso al escribirlo como celda fecha en Excel.
+function _lzFechaCobranza(ts) {
+  var d = ts ? new Date(ts) : new Date();
+  if (isNaN(d.getTime())) d = new Date();
+  var fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  });
+  var parts = String(fmt.format(d)).split('-'); // YYYY-MM-DD
+  var yy = parseInt(parts[0], 10);
+  var mm = parseInt(parts[1], 10);
+  var dd = parseInt(parts[2], 10);
+  var epoch = Date.UTC(1899, 11, 30);
+  var serial = Math.round((Date.UTC(yy, mm - 1, dd) - epoch) / 86400000);
+  var str = String(dd).padStart(2, '0') + '/' + String(mm).padStart(2, '0') + '/' + yy;
+  return { str: str, serial: serial, y: yy, m: mm, d: dd };
+}
+
+// ── Parser de cobro mixto (detalle_cobro JSON) ──
+function _lzParseMixto(detalleStr) {
+  if (!detalleStr) return { mixto: false, medios: {} };
+  var obj;
+  try { obj = JSON.parse(detalleStr); } catch (e) { return { mixto: false, medios: {} }; }
+  if (!obj || typeof obj !== 'object') return { mixto: false, medios: {} };
+  var medios = {};
+  var cuenta = 0;
+  for (var k in obj) {
+    if (!Object.prototype.hasOwnProperty.call(obj, k)) continue;
+    var val = Number(obj[k]) || 0;
+    if (val > 0) { medios[k] = val; cuenta++; }
+  }
+  return { mixto: cuenta >= 2, medios: medios };
+}
+
+// ── Helper REST a Supabase (mismo patrón que el resto del admin) ──
+async function _lzSbFetch(pathQuery) {
+  var resp = await fetch(SUPABASE_URL + '/rest/v1/' + pathQuery, {
+    headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY }
+  });
+  if (!resp.ok) {
+    var txt = '';
+    try { txt = await resp.text(); } catch (e) {}
+    throw new Error('Supabase ' + resp.status + ' — ' + pathQuery + (txt ? (' · ' + txt.slice(0, 160)) : ''));
+  }
+  return await resp.json();
+}
+
+// ── Lista IN(...) con valores texto entrecomillados para PostgREST ──
+function _lzInList(arr) {
+  var quoted = arr.map(function (x) { return '"' + String(x).replace(/"/g, '') + '"'; });
+  return '(' + quoted.join(',') + ')';
+}
+
+// ── Botón (se inyecta en el detalle del viaje) ──
+function lzBtnExcelCobranzas() {
+  return '<button class="v-btn-grande" ' +
+         'style="border:2px solid var(--blue);color:var(--blue);background:#fff;" ' +
+         'onclick="lzArmarExcelCobranzas(this)">' +
+         '📥 Armar Excel cobranzas (Xubio)' +
+         '</button>';
+}
+
+// ── Acción principal ──
+async function lzArmarExcelCobranzas(btn) {
+  if (!_vDetalleId) { toast('No hay viaje abierto', 'err'); return; }
+  var v = _vDetalleData || {};
+  var viajeId = _vDetalleId;
+
+  var txtOrig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Armando Excel...'; }
+
+  try {
+    // SheetJS + datos en paralelo
+    var inFormas = encodeURIComponent('(efectivo,transferencia,cheque)');
+    var vEnc = encodeURIComponent(viajeId);
+
+    var pEntregas = _lzSbFetch(
+      'entregas?select=pedido_id,cliente,forma_cobro,monto,monto_cobrado_real,detalle_cobro,fecha_entrega' +
+      '&viaje_id=eq.' + vEnc +
+      '&forma_cobro=in.' + inFormas
+    );
+    var pPedidos = _lzSbFetch(
+      'pedidos_zona?select=pedido_id,cliente_xubio_id,cliente,localidad_canonica' +
+      '&viaje_id=eq.' + vEnc
+    );
+
+    var resArr = await Promise.all([_cargarSheetJS(), pEntregas, pPedidos]);
+    var XLSXlib = resArr[0];
+    var entregas = resArr[1] || [];
+    var pedidos = resArr[2] || [];
+
+    // Mapa pedido_id → cliente_xubio_id  (y fecha por pedido desde entregas)
+    var xubioIdPorPedido = {};
+    pedidos.forEach(function (p) {
+      if (p.cliente_xubio_id) xubioIdPorPedido[String(p.pedido_id)] = String(p.cliente_xubio_id);
+    });
+    var fechaPorPedido = {};
+    entregas.forEach(function (e) {
+      if (e.fecha_entrega) fechaPorPedido[String(e.pedido_id)] = e.fecha_entrega;
+    });
+
+    // Clientes Xubio (nombre exacto)
+    var xubioIds = [];
+    Object.keys(xubioIdPorPedido).forEach(function (pid) {
+      var id = xubioIdPorPedido[pid];
+      if (xubioIds.indexOf(id) === -1) xubioIds.push(id);
+    });
+    var nombrePorXubioId = {};
+    if (xubioIds.length) {
+      var clientes = await _lzSbFetch(
+        'clientes_xubio?select=id,nombre&id=in.' + encodeURIComponent(_lzInList(xubioIds))
+      );
+      (clientes || []).forEach(function (c) { nombrePorXubioId[String(c.id)] = c.nombre || ''; });
+    }
+
+    // Cheques del viaje (por los pedidos del viaje)
+    var pedidoIds = pedidos.map(function (p) { return String(p.pedido_id); });
+    var cheques = [];
+    if (pedidoIds.length) {
+      cheques = await _lzSbFetch(
+        'cheques_recibidos?select=pedido_id,monto,banco,numero_cheque,emisor,fecha_vencimiento' +
+        '&pedido_id=in.' + encodeURIComponent(_lzInList(pedidoIds))
+      ) || [];
+    }
+
+    // ── Clasificación ──
+    var lineas = [];
+    var exc = { mixtas: 0, sinCliente: 0, importeCero: 0, chequeSinCliente: 0, chequeManual: 0, chequeCero: 0 };
+    var pedidosMixtos = {};
+
+    entregas.forEach(function (e) {
+      var pid = String(e.pedido_id);
+      var parsed = _lzParseMixto(e.detalle_cobro);
+      if (parsed.mixto) { exc.mixtas++; pedidosMixtos[pid] = true; return; }
+      if (e.forma_cobro === 'cheque') return; // los cheques salen de cheques_recibidos
+
+      var xid = xubioIdPorPedido[pid];
+      var nombre = xid ? nombrePorXubioId[xid] : '';
+      if (!xid || !nombre) { exc.sinCliente++; return; }
+
+      var importe = (e.monto_cobrado_real !== null && e.monto_cobrado_real !== undefined)
+        ? Number(e.monto_cobrado_real) : Number(e.monto);
+      importe = Number(importe) || 0;
+      if (importe <= 0) { exc.importeCero++; return; }
+
+      var f = _lzFechaCobranza(e.fecha_entrega);
+      lineas.push({
+        serial: f.serial, fechaStr: f.str, nombre: nombre,
+        cuenta: LZ_COB_CUENTA[e.forma_cobro] || '',
+        importe: importe, obs: 'Pedido ' + pid
+      });
+    });
+
+    cheques.forEach(function (ch) {
+      var pid = String(ch.pedido_id);
+      if (pedidosMixtos[pid]) { exc.chequeManual++; return; }
+
+      var xid = xubioIdPorPedido[pid];
+      var nombre = xid ? nombrePorXubioId[xid] : '';
+      if (!xid || !nombre) { exc.chequeSinCliente++; return; }
+
+      var importe = Number(ch.monto) || 0;
+      if (importe <= 0) { exc.chequeCero++; return; }
+
+      var f = _lzFechaCobranza(fechaPorPedido[pid] || null);
+      var banco = (ch.banco || '').toString().trim();
+      var nro = (ch.numero_cheque || '').toString().trim();
+      var obs = 'Cheque' + (banco ? (' ' + banco) : '') + (nro ? (' N° ' + nro) : '') + ' · Pedido ' + pid;
+      lineas.push({
+        serial: f.serial, fechaStr: f.str, nombre: nombre,
+        cuenta: LZ_COB_CUENTA.cheque, importe: importe, obs: obs
+      });
+    });
+
+    if (!lineas.length) {
+      lzModalCobranzas({ ok: false, cantidad: 0, total: 0, exc: exc, zona: v.zona });
+      return;
+    }
+
+    // Orden: fecha asc, luego nombre
+    lineas.sort(function (a, b) {
+      if (a.serial !== b.serial) return a.serial - b.serial;
+      return a.nombre.localeCompare(b.nombre, 'es');
+    });
+
+    // ── Reservar números correlativos en Apps Script ──
+    var numUrl = APPS_SCRIPT_URL + '?accion=cobranzaReservarNumeros&cantidad=' + lineas.length;
+    var numResp = await fetch(numUrl);
+    var numData = await numResp.json();
+    if (!numData || numData.status !== 'ok' || !Array.isArray(numData.numeros) || numData.numeros.length < lineas.length) {
+      throw new Error('No se pudieron reservar números de cobranza: ' + ((numData && numData.message) || 'respuesta inválida'));
+    }
+    var numeros = numData.numeros;
+
+    // ── Armar AOA ──
+    var aoa = [LZ_COB_HEADERS.slice()];
+    lineas.forEach(function (ln, i) {
+      aoa.push([
+        ln.serial,          // Fecha (serial; se formatea abajo)
+        ln.nombre,          // Nombre del cliente
+        numeros[i],         // Número de cobranza
+        ln.cuenta,          // Cuenta contable
+        ln.importe,         // Importe (número)
+        '',                 // Retención
+        '',                 // Número de comprobante
+        '',                 // Importe ISAR
+        '',                 // Importe retenido
+        ln.obs,             // Observaciones
+        ''                  // Aplicación (vacío → a cuenta)
+      ]);
+    });
+
+    var ws = XLSXlib.utils.aoa_to_sheet(aoa);
+    // Formatear columna A (Fecha) de las filas de datos como dd/mm/yyyy
+    for (var r = 1; r <= lineas.length; r++) {
+      var addr = XLSXlib.utils.encode_cell({ r: r, c: 0 });
+      if (ws[addr]) { ws[addr].t = 'n'; ws[addr].z = 'dd/mm/yyyy'; }
+    }
+    // Anchos de columna (cosmético)
+    ws['!cols'] = [
+      { wch: 12 }, { wch: 34 }, { wch: 20 }, { wch: 22 }, { wch: 14 },
+      { wch: 10 }, { wch: 20 }, { wch: 12 }, { wch: 14 }, { wch: 38 }, { wch: 20 }
+    ];
+
+    var wb = XLSXlib.utils.book_new();
+    XLSXlib.utils.book_append_sheet(wb, ws, 'Cobranzas');
+
+    // Nombre de archivo
+    var fSal = _lzFechaCobranza(v.fecha_salida || null);
+    var fechaArch = fSal.y + '-' + String(fSal.m).padStart(2, '0') + '-' + String(fSal.d).padStart(2, '0');
+    var zonaSan = String(v.zona || 'zona').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'zona';
+    var fname = 'cobranzas_' + fechaArch + '_' + zonaSan + '.xlsx';
+
+    XLSXlib.writeFile(wb, fname);
+
+    var total = lineas.reduce(function (s, l) { return s + l.importe; }, 0);
+    lzModalCobranzas({
+      ok: true, cantidad: lineas.length, total: total, exc: exc,
+      fname: fname, desde: numeros[0], hasta: numeros[lineas.length - 1], zona: v.zona
+    });
+
+  } catch (err) {
+    console.error('[lz] armarExcelCobranzas error:', err);
+    toast('❌ ' + (err && err.message ? err.message : 'Error armando el Excel'), 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = txtOrig; }
+  }
+}
+
+// ── Modal de resumen ──
+function lzModalCobranzas(d) {
+  _lzCobInyectarCSS();
+  var exc = d.exc || {};
+  var totalAfuera = (exc.mixtas || 0) + (exc.sinCliente || 0) + (exc.importeCero || 0) +
+                    (exc.chequeSinCliente || 0) + (exc.chequeManual || 0) + (exc.chequeCero || 0);
+
+  var html = '<div class="lz-cob-overlay" id="lz-cob-overlay" onclick="if(event.target===this)lzCerrarModalCobranzas()">';
+  html += '<div class="lz-cob-card">';
+
+  if (d.ok) {
+    html += '<div class="lz-cob-title">✅ Excel de cobranzas generado</div>';
+    html += '<div class="lz-cob-row"><span>Cobranzas incluidas</span><b>' + d.cantidad + '</b></div>';
+    html += '<div class="lz-cob-row"><span>Total</span><b>' + _lzPesos(d.total) + '</b></div>';
+    html += '<div class="lz-cob-row"><span>Números</span><b>' + lzEsc(d.desde) + ' → ' + lzEsc(d.hasta) + '</b></div>';
+    html += '<div class="lz-cob-file">📄 ' + lzEsc(d.fname) + '</div>';
+  } else {
+    html += '<div class="lz-cob-title">⚠️ Sin cobranzas para exportar</div>';
+    html += '<div class="lz-cob-sub">No hubo entregas con cobro válido (efectivo / transferencia / cheque) en este viaje.</div>';
+  }
+
+  if (totalAfuera > 0) {
+    html += '<div class="lz-cob-excl-title">Quedaron afuera (carga manual):</div>';
+    html += '<ul class="lz-cob-excl">';
+    if (exc.mixtas)          html += '<li>🔀 Cobros mixtos: <b>' + exc.mixtas + '</b></li>';
+    if (exc.sinCliente)      html += '<li>👤 Sin cliente Xubio: <b>' + exc.sinCliente + '</b></li>';
+    if (exc.importeCero)     html += '<li>⚠️ Importe en cero: <b>' + exc.importeCero + '</b></li>';
+    if (exc.chequeManual)    html += '<li>🔀 Cheques de pedido mixto: <b>' + exc.chequeManual + '</b></li>';
+    if (exc.chequeSinCliente) html += '<li>👤 Cheques sin cliente Xubio: <b>' + exc.chequeSinCliente + '</b></li>';
+    if (exc.chequeCero)      html += '<li>⚠️ Cheques en cero: <b>' + exc.chequeCero + '</b></li>';
+    html += '</ul>';
+  }
+
+  html += '<button class="lz-cob-btn" onclick="lzCerrarModalCobranzas()">Cerrar</button>';
+  html += '</div></div>';
+
+  var prev = document.getElementById('lz-cob-overlay');
+  if (prev) prev.remove();
+  var wrap = document.createElement('div');
+  wrap.innerHTML = html;
+  document.body.appendChild(wrap.firstChild);
+}
+
+function lzCerrarModalCobranzas() {
+  var ov = document.getElementById('lz-cob-overlay');
+  if (ov) ov.remove();
+}
+
+function _lzCobInyectarCSS() {
+  if (document.getElementById('lz-cob-style')) return;
+  var st = document.createElement('style');
+  st.id = 'lz-cob-style';
+  st.textContent =
+    '.lz-cob-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100000;display:flex;align-items:center;justify-content:center;padding:18px;}' +
+    '.lz-cob-card{background:#fff;border-radius:16px;max-width:440px;width:100%;padding:22px 22px 18px;box-shadow:0 18px 50px rgba(0,0,0,.3);font-family:inherit;}' +
+    '.lz-cob-title{font-size:19px;font-weight:800;color:var(--blue);margin-bottom:14px;}' +
+    '.lz-cob-sub{font-size:14px;color:var(--text3);margin-bottom:8px;line-height:1.4;}' +
+    '.lz-cob-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #EEE;font-size:15px;}' +
+    '.lz-cob-row span{color:#555;}' +
+    '.lz-cob-row b{color:#111;font-weight:700;}' +
+    '.lz-cob-file{margin-top:12px;padding:10px 12px;background:var(--green3);border-radius:10px;font-size:13px;color:var(--green);word-break:break-all;}' +
+    '.lz-cob-excl-title{margin-top:16px;font-size:13px;font-weight:700;color:var(--orange);text-transform:uppercase;letter-spacing:.3px;}' +
+    '.lz-cob-excl{margin:8px 0 0;padding-left:18px;font-size:14px;color:#555;line-height:1.7;}' +
+    '.lz-cob-excl b{color:#111;}' +
+    '.lz-cob-btn{margin-top:18px;width:100%;padding:13px;border:none;border-radius:12px;background:var(--blue);color:#fff;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;}' +
+    '.lz-cob-btn:active{opacity:.85;}';
+  document.head.appendChild(st);
 }
 
 // ════════════════════════════════════════════════════════════════
