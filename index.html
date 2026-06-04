@@ -1,5 +1,18 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.15 — 03/06/2026
+     v13.15: PERFORMANCE 2 — paralelizar las cargas de la lista de pedidos.
+       Sintoma: admin tardaba mas que ventas en mostrar la lista (uno se queda
+       mirando "Cargando pedidos..."). Causa: cargarPedidos esperaba dos
+       round-trips a Supabase EN SERIE — dupCargarNoDuplicados() ANTES del CSV y
+       pedidoSucursalesMapCargar() DESPUES — sumando ambas latencias a la
+       descarga del CSV. Ventas no las espera en serie.
+       Fix: las dos cargas auxiliares arrancan en paralelo con la descarga del
+       CSV; se esperan recien antes de la deteccion de duplicados. El tiempo de
+       aparicion pasa de (dupNoDups + CSV + sucursales) a max(las tres). Cero
+       cambios en la deteccion de duplicados ni en el render.
+       Sin SQL ni backend.
+     ───────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.14 — 03/06/2026
      v13.14: PERFORMANCE — la lista de pedidos lee el tab recortado.
        Mismo fix que tck-ventas v14.43.0. cargarPedidos bajaba el CSV ENTERO
@@ -15696,10 +15709,14 @@ async function cargarPedidos(silencioso) {
     '<div class="loading"><div class="loading-spinner"></div>Cargando pedidos...</div>';
   try {
     console.log('[TCK] cargarPedidos iniciando, silencioso:', silencioso);
-    // v10: cargar pares "no duplicado" desde Supabase ANTES de procesar (para que el filtro funcione)
-    if (typeof dupCargarNoDuplicados === 'function') {
-      await dupCargarNoDuplicados();
-    }
+    // v13.15: las dos cargas auxiliares (pares "no duplicado" de Supabase y mapa
+    // de sucursales) arrancan EN PARALELO con la descarga del CSV, en vez de en
+    // serie. Antes el await de dupCargarNoDuplicados frenaba la aparicion de la
+    // lista (round-trip a Supabase ANTES de bajar el CSV). Las promesas se
+    // esperan mas abajo, justo antes de la deteccion de duplicados, asi que la
+    // logica no cambia: los datos siguen estando listos antes de usarse.
+    var _pNoDups     = (typeof dupCargarNoDuplicados === 'function') ? dupCargarNoDuplicados().catch(function(){}) : Promise.resolve();
+    var _pSucursales = pedidoSucursalesMapCargar().catch(function(){});
     var res = await fetch(SHEET_CSV_RECIENTES + '&t=' + Date.now());
     var csv = await res.text();
     console.log('[TCK] CSV recibido, líneas:', csv.trim().split('\n').length, 'chars:', csv.length);
@@ -15746,7 +15763,10 @@ async function cargarPedidos(silencioso) {
     }
 
     // v8.2 admin: cargar mapa de vínculos pedido→sucursal
-    await pedidoSucursalesMapCargar();
+    // v13.15: ya se arrancaron arriba en paralelo con el CSV; aca solo las
+    // esperamos antes de la deteccion de duplicados (no bloquean si fallan).
+    await _pSucursales;
+    await _pNoDups;
 
     // Detectar duplicados — solo dentro del MISMO DÍA
     // MEJORA (fase A): solo marcar como duplicado si comparten algún producto.
