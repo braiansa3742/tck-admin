@@ -1,5 +1,18 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.14 — 03/06/2026
+     v13.14: PERFORMANCE — la lista de pedidos lee el tab recortado.
+       Mismo fix que tck-ventas v14.43.0. cargarPedidos bajaba el CSV ENTERO
+       del tab Pedidos (~2.585 filas y creciendo) en cada carga. Ahora lee el
+       tab publicado "pedidos_recientes" (ultimas ~1500 filas) via nueva
+       constante SHEET_CSV_RECIENTES (gid=1792723858). Admin mapea hasta col 17,
+       asi que A:S le sobra. El payload deja de crecer.
+       El calculo de cobertura por periodo (puede pedir 30/60 dias o "todos")
+       SIGUE leyendo el tab completo (SHEET_CSV, gid=0) para no quedar corto.
+       Toda la escritura va por Apps Script buscando por pedidoId, no por fila,
+       asi que el recorte no afecta cambios de estado ni asignaciones.
+       Reversible: volver SHEET_CSV_RECIENTES a gid=0. Sin SQL ni backend.
+     ───────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.13 — 03/06/2026
      v13.13: GENERADOR DE EXCEL DE COBRANZAS PARA XUBIO.
        · Detalle del viaje (rindiendo / cerrado) → botón "📥 Armar Excel
@@ -13401,6 +13414,9 @@ input.canales-exp-input[type="date"] {
 <script>
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxbx9ma8S5wcuRqFXjRyFYvIo_kLwc5Px4eE4Y7-CqPmIfJbI3VBEP4I9qSV8s0owMMYg/exec';
 const SHEET_CSV = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQDZk6Z5pejrI_djbUYBLEvh-X7H_sLF5ZCW2RQr0Bc03r8LOL17_C3pCmwwyLe2iXf3Fan0tgl7IJG/pub?gid=0&single=true&output=csv';
+// v13.14: tab "pedidos_recientes" (QUERY ultimas ~1500 filas) — SOLO para la LISTA.
+// El calculo de cobertura sigue usando SHEET_CSV (gid=0). Para volver atras: gid=0.
+const SHEET_CSV_RECIENTES = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQDZk6Z5pejrI_djbUYBLEvh-X7H_sLF5ZCW2RQr0Bc03r8LOL17_C3pCmwwyLe2iXf3Fan0tgl7IJG/pub?gid=1792723858&single=true&output=csv';
 const NUM_ADMIN = '5492314475357';
 const PINS = { 'Miguel':'3356', 'Juan':'4256', 'Lisandro':'8020', 'ADMIN':'3050' };
 const SESSION_KEY   = 'tck_session';
@@ -15684,7 +15700,7 @@ async function cargarPedidos(silencioso) {
     if (typeof dupCargarNoDuplicados === 'function') {
       await dupCargarNoDuplicados();
     }
-    var res = await fetch(SHEET_CSV + '&t=' + Date.now());
+    var res = await fetch(SHEET_CSV_RECIENTES + '&t=' + Date.now());
     var csv = await res.text();
     console.log('[TCK] CSV recibido, líneas:', csv.trim().split('\n').length, 'chars:', csv.length);
     var lines = csv.trim().split('\n');
