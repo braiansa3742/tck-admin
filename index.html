@@ -33014,7 +33014,14 @@ function _comprasDetailRender() {
       var sel = f.proveedor_id === _comprasDetailProveedorSel;
       html += '<div onclick="comprasDetailSwitchProveedor(' + f.proveedor_id + ')" style="background:' + (sel?'#E8F5E9':'#fff') + ';border:2px solid ' + (sel?'#2E7D32':'#E0E0E0') + ';border-radius:9px;padding:8px;cursor:pointer;">';
       html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:800;color:#2C2416;">' + f.proveedor_nombre + (sel?' ★':'') + '</div>';
-      html += '<div style="font-size:11px;color:#5C4F3A;font-weight:700;margin-top:3px;">' + _comprasFmtMontoFull(f.costo_unitario_actual || 0) + '/' + (f.kg_por_unidad ? 'kg' : 'u') + '</div>';
+      // v12.30 — costo de reposición correcto (costo_x_unidad) + margen por proveedor
+      var _cu = (f.costo_x_unidad != null) ? f.costo_x_unidad : (f.costo_unitario_actual || 0);
+      html += '<div style="font-size:11px;color:#5C4F3A;font-weight:700;margin-top:3px;">' + _comprasFmtMontoFull(_cu) + '/' + (f.kg_por_unidad ? 'caja' : 'u') + '</div>';
+      if (f.margen_pct != null) {
+        var _mc = parseFloat(f.margen_pct);
+        var _mcol = _mc >= 22 ? '#2E7D32' : (_mc >= 12 ? '#EF6C00' : '#C62828');
+        html += '<div style="font-size:11px;font-weight:800;margin-top:1px;color:' + _mcol + ';">margen ' + _mc.toFixed(1) + '%</div>';
+      }
       html += '<div style="font-size:10px;color:#8B7B5F;margin-top:1px;">Pago ' + (f.plazo_pago_dias||'?') + 'd</div>';
       html += '</div>';
     });
