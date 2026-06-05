@@ -13146,7 +13146,84 @@ input.canales-exp-input[type="date"] {
       </div>
     </div>
   </div>
-
+  <!-- ═══════════ v12.29 — TAB MÁRGENES ═══════════ -->
+  <style id="mg-styles">
+    #view-margenes{ padding:0 0 50px; }
+    #view-margenes .mg-head{ background:linear-gradient(135deg,#1B5E20,#2E7D32); color:#fff; padding:14px 14px 12px; border-radius:0 0 14px 14px; box-shadow:0 2px 8px rgba(0,0,0,.12); }
+    #view-margenes .mg-head h2{ font-size:19px; font-weight:900; text-transform:uppercase; letter-spacing:.5px; margin:0; display:flex; align-items:center; gap:7px; }
+    #view-margenes .mg-head .mg-sub{ font-size:12px; opacity:.85; margin-top:2px; font-weight:500; }
+    #view-margenes .mg-kpis{ display:grid; grid-template-columns:repeat(4,1fr); gap:6px; padding:12px 12px 4px; }
+    #view-margenes .mg-kpi{ background:#fff; border-radius:10px; padding:9px 6px; text-align:center; box-shadow:0 1px 4px rgba(0,0,0,.07); border-top:3px solid #66BB6A; }
+    #view-margenes .mg-kpi .v{ font-size:19px; font-weight:900; line-height:1; color:#2C2416; }
+    #view-margenes .mg-kpi .l{ font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.2px; color:#8A7B63; margin-top:4px; }
+    #view-margenes .mg-kpi.big{ border-top-color:#1B5E20; } #view-margenes .mg-kpi.big .v{ color:#1B5E20; font-size:21px; }
+    #view-margenes .mg-kpi.rojo{ border-top-color:#C62828; } #view-margenes .mg-kpi.rojo .v{ color:#C62828; }
+    #view-margenes .mg-kpi.gris{ border-top-color:#9E9E9E; } #view-margenes .mg-kpi.gris .v{ color:#9E9E9E; }
+    #view-margenes .mg-ctrl{ display:flex; gap:8px; align-items:center; padding:8px 12px 0; flex-wrap:wrap; }
+    #view-margenes .mg-ctrl .mg-lbl{ font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.4px; color:#8A7B63; }
+    #view-margenes .mg-toggle{ display:flex; background:#fff; border-radius:8px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+    #view-margenes .mg-toggle button{ border:none; background:transparent; padding:7px 11px; font-family:inherit; font-size:11.5px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; color:#5C4F3A; cursor:pointer; }
+    #view-margenes .mg-toggle button.on{ background:#1B5E20; color:#fff; }
+    #view-margenes .mg-toggle.iva button.on{ background:#EF6C00; }
+    #view-margenes select.mg-filtro{ flex:1; min-width:140px; font-family:inherit; font-size:13px; font-weight:700; padding:7px 10px; border:1.5px solid #D8CBB0; border-radius:8px; background:#fff; color:#2C2416; }
+    #view-margenes .mg-nota-iva{ margin:6px 12px 0; font-size:11.5px; font-weight:600; color:#EF6C00; background:#FFF3E0; border-radius:7px; padding:6px 10px; display:none; }
+    #view-margenes .mg-nota-iva.show{ display:block; }
+    #view-margenes .mg-list{ padding:8px 12px 0; }
+    #view-margenes .mg-row{ background:#fff; border-radius:11px; margin-bottom:8px; padding:11px 12px; box-shadow:0 1px 3px rgba(0,0,0,.06); position:relative; overflow:hidden; }
+    #view-margenes .mg-row::before{ content:""; position:absolute; left:0; top:0; bottom:0; width:5px; }
+    #view-margenes .mg-row.r-rojo::before{ background:#C62828; } #view-margenes .mg-row.r-nar::before{ background:#EF6C00; }
+    #view-margenes .mg-row.r-lima::before{ background:#9E9D24; } #view-margenes .mg-row.r-ok::before{ background:#2E7D32; }
+    #view-margenes .mg-row.r-sin::before{ background:#9E9E9E; } #view-margenes .mg-row.r-sin{ opacity:.72; }
+    #view-margenes .mg-rtop{ display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+    #view-margenes .mg-rname{ font-size:15px; font-weight:800; line-height:1.05; color:#2C2416; }
+    #view-margenes .mg-rcat{ font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; color:#8A7B63; margin-top:2px; }
+    #view-margenes .mg-rprov{ font-size:11px; font-weight:600; color:#5C4F3A; margin-top:1px; }
+    #view-margenes .mg-rmarg{ text-align:right; flex-shrink:0; }
+    #view-margenes .mg-rmarg .mv{ font-size:22px; font-weight:900; line-height:1; }
+    #view-margenes .mg-rmarg .ml{ font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; color:#8A7B63; }
+    #view-margenes .m-rojo{ color:#C62828; } #view-margenes .m-nar{ color:#EF6C00; } #view-margenes .m-lima{ color:#9E9D24; } #view-margenes .m-ok{ color:#2E7D32; } #view-margenes .m-sin{ color:#9E9E9E; }
+    #view-margenes .mg-rmid{ display:flex; gap:12px; margin-top:9px; padding-top:9px; border-top:1px dashed #E8DEC8; }
+    #view-margenes .mg-cell{ flex:1; }
+    #view-margenes .mg-cell .cl{ font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.2px; color:#8A7B63; }
+    #view-margenes .mg-cell .cv{ font-size:13.5px; font-weight:800; margin-top:1px; color:#2C2416; }
+    #view-margenes .mg-cell .cv.gan{ color:#2E7D32; }
+    #view-margenes .mg-rbot{ display:flex; justify-content:space-between; align-items:center; margin-top:8px; background:#F4ECD8; border-radius:8px; padding:7px 11px; }
+    #view-margenes .mg-rbot .vol{ font-size:12px; font-weight:700; color:#5C4F3A; }
+    #view-margenes .mg-rbot .vol b{ font-size:13.5px; color:#2C2416; }
+    #view-margenes .mg-rbot .plata{ font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; color:#8A7B63; text-align:right; }
+    #view-margenes .mg-rbot .plata b{ display:block; font-size:16px; font-weight:900; color:#1B5E20; letter-spacing:0; }
+    #view-margenes .mg-iva-tag{ font-size:9px; font-weight:800; color:#EF6C00; }
+    #view-margenes .mg-badge-sin{ display:inline-block; background:#EEE; color:#8A7B63; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; padding:3px 8px; border-radius:20px; margin-top:6px; }
+    #view-margenes .mg-sec-sin{ text-align:center; font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; color:#8A7B63; margin:14px 0 8px; }
+    #view-margenes .mg-estado{ text-align:center; padding:30px 16px; color:#8A7B63; font-style:italic; font-size:13px; }
+  </style>
+  <div class="view" id="view-margenes">
+    <div class="mg-head">
+      <h2>📊 Márgenes por producto</h2>
+      <div class="mg-sub">Costo de reposición · margen neto · volumen 7/30 días</div>
+    </div>
+    <div class="mg-kpis" id="mg-kpis"></div>
+    <div class="mg-ctrl">
+      <span class="mg-lbl">Ordenar</span>
+      <div class="mg-toggle">
+        <button id="mg-o-gan" class="on" onclick="mgSetOrden('gan')">Ganancia $</button>
+        <button id="mg-o-mar" onclick="mgSetOrden('mar')">Margen %</button>
+      </div>
+      <div class="mg-toggle iva">
+        <button id="mg-i-sin" class="on" onclick="mgSetIva('sin')">Sin IVA</button>
+        <button id="mg-i-con" onclick="mgSetIva('con')">Con IVA</button>
+      </div>
+    </div>
+    <div class="mg-ctrl">
+      <div class="mg-toggle">
+        <button id="mg-t-caja" class="on" onclick="mgSetUnidad('caja')">/caja</button>
+        <button id="mg-t-kg" onclick="mgSetUnidad('kg')">/kg</button>
+      </div>
+      <select class="mg-filtro" id="mg-filtro" onchange="mgRender()"></select>
+    </div>
+    <div class="mg-nota-iva" id="mg-notaIva">Con IVA es para cotejar contra facturas. Tu ganancia real es la <b>sin IVA</b> — el IVA lo cobrás y lo devolvés. El margen % es el mismo en las dos vistas.</div>
+    <div class="mg-list" id="mg-list"><div class="mg-estado">Cargando márgenes…</div></div>
+  </div>
 
 </div>
 <nav class="tab-nav" id="tab-nav">
@@ -13196,6 +13273,10 @@ input.canales-exp-input[type="date"] {
     <span class="tab-icon">🏙️</span>
     <span class="tab-label">Ciudades</span>
   </button>
+  <button class="tab-btn" id="tab-btn-margenes" onclick="cambiarTab('margenes')" style="display:none !important;">
+    <span class="tab-icon">📊</span>
+    <span class="tab-label">Márgenes</span>
+  </button>
 </nav>
 
 <!-- MENÚ "MÁS" (sheet inferior) — solo Clientes + Visitas -->
@@ -13214,6 +13295,11 @@ input.canales-exp-input[type="date"] {
         <div class="menu-mas-icon">🛒</div>
         <div class="menu-mas-lbl">Compras</div>
         <div class="menu-mas-badge" id="menu-mas-compras-badge" style="display:none;background:#C62828;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;margin-top:3px;">0</div>
+      </button>
+      <!-- v12.29 — Tab Márgenes -->
+      <button class="menu-mas-item" id="menu-mas-margenes" onclick="cambiarTab('margenes');cerrarMenuMas()">
+        <div class="menu-mas-icon">📊</div>
+        <div class="menu-mas-lbl">Márgenes</div>
       </button>
       <!-- v12.20.0 — Tab Tesorería -->
       <button class="menu-mas-item" id="menu-mas-tesoreria" onclick="cambiarTab('tesoreria');cerrarMenuMas()">
@@ -17979,7 +18065,7 @@ function cambiarTab(tab) {
   _tabActual = tab;
 
   // Views — incluye logistica + stock (v12.15.0) + compras (v12.18.0) + tesoreria (v12.20.0)
-  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock','compras','tesoreria'].forEach(function(t) {
+  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock','compras','tesoreria','margenes'].forEach(function(t) {
     var v = document.getElementById('view-' + t);
     var b = document.getElementById('tab-btn-' + t);
     if (v) v.classList.toggle('active', t === tab);
@@ -17988,7 +18074,7 @@ function cambiarTab(tab) {
 
   // El botón "Más" se marca activo si estás en un tab oculto
   var btnMas = document.getElementById('tab-btn-mas');
-  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes' || tab === 'rendiciones' || tab === 'acc-dup' || tab === 'prod-canon' || tab === 'ccanon' || tab === 'stock' || tab === 'compras' || tab === 'tesoreria');
+  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes' || tab === 'rendiciones' || tab === 'acc-dup' || tab === 'prod-canon' || tab === 'ccanon' || tab === 'stock' || tab === 'compras' || tab === 'tesoreria' || tab === 'margenes');
 
   // v12.20.0 — Tesorería: cargar al abrir
   if (tab === 'tesoreria') {
@@ -18064,6 +18150,11 @@ function cambiarTab(tab) {
     if (typeof comprasInit === 'function') comprasInit();
     var v = document.getElementById('view-compras'); if (v) v.scrollTop = 0;
   }
+  // v12.29 — tab Márgenes
+  if (tab === 'margenes') {
+    if (typeof margenesInit === 'function') margenesInit();
+    var v = document.getElementById('view-margenes'); if (v) v.scrollTop = 0;
+  }
 }
 
 function mostrarTabs() {
@@ -18090,11 +18181,16 @@ function mostrarTabs() {
   var menuCC = document.getElementById('menu-mas-ccanon');
   if (menuCC) menuCC.style.display = esAdmin ? '' : 'none';
 
+  // v12.29: Item "Márgenes" del menú Más — solo Admin (info sensible: costos y ganancias)
+  var menuMrg = document.getElementById('menu-mas-margenes');
+  if (menuMrg) menuMrg.style.display = esAdmin ? '' : 'none';
+
   // Si el tab activo quedó oculto, ir a Pedidos
   if (_tabActual === 'gps' && !esCampo && !esAdmin) cambiarTab('pedidos');
   if (_tabActual === 'mapa' && !esAdmin) cambiarTab('pedidos');
   if (_tabActual === 'prod-canon' && !esAdmin) cambiarTab('pedidos');
   if (_tabActual === 'ccanon' && !esAdmin) cambiarTab('pedidos');
+  if (_tabActual === 'margenes' && !esAdmin) cambiarTab('pedidos');
 }
 
 function ocultarTabs() {
@@ -32313,6 +32409,146 @@ function _cprFmtHora(ts) {
 }
 
 // ════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// v12.29 — TAB MÁRGENES (lee vw_margen_producto por REST directo)
+// ═══════════════════════════════════════════════════════════════
+var _mgData = null;          // cache de la vista
+var _mgUnidad = 'caja';      // caja | kg
+var _mgOrden  = 'gan';       // gan | mar
+var _mgIva    = 'sin';       // sin | con
+var _mgCargando = false;
+
+async function margenesInit() {
+  if (_mgData !== null) { mgRender(); return; }   // ya estaba cargado
+  if (_mgCargando) return;
+  _mgCargando = true;
+  var cont = document.getElementById('mg-list');
+  if (cont) cont.innerHTML = '<div class="mg-estado">Cargando márgenes…</div>';
+  try {
+    var rows = await sbFetch('vw_margen_producto?select=*');
+    _mgData = Array.isArray(rows) ? rows : [];
+    mgInitFiltro();
+    mgRender();
+  } catch (e) {
+    if (cont) cont.innerHTML = '<div class="mg-estado" style="color:#C62828;">Error al cargar: ' + (e.message || e) + '</div>';
+  } finally {
+    _mgCargando = false;
+  }
+}
+
+function mgN(x){ return (x===null||x===undefined||x==='') ? null : Number(x); }
+function mgFmt(n){ if(n===null||n===undefined) return '—'; return '$' + Math.round(n).toLocaleString('es-AR'); }
+function mgFmtC(n){
+  if(n===null||n===undefined) return '—';
+  if(n >= 1000000) return '$' + (n/1000000).toFixed(2).replace('.',',') + 'M';
+  if(n >= 1000) return '$' + Math.round(n/1000) + 'k';
+  return '$' + Math.round(n);
+}
+function mgClase(m){
+  if(m===null||m===undefined) return 'sin';
+  if(m < 15) return 'rojo';
+  if(m < 22) return 'nar';
+  if(m < 30) return 'lima';
+  return 'ok';
+}
+function mgGanMes(d){ var g = mgN(d.ganancia_mes_est); return (g===null) ? 0 : g; }   // SIEMPRE neta
+
+function mgSetUnidad(u){ _mgUnidad=u; var a=document.getElementById('mg-t-caja'),b=document.getElementById('mg-t-kg'); if(a)a.className=(u==='caja')?'on':''; if(b)b.className=(u==='kg')?'on':''; mgRender(); }
+function mgSetOrden(o){ _mgOrden=o; var a=document.getElementById('mg-o-gan'),b=document.getElementById('mg-o-mar'); if(a)a.className=(o==='gan')?'on':''; if(b)b.className=(o==='mar')?'on':''; mgRender(); }
+function mgSetIva(v){ _mgIva=v; var a=document.getElementById('mg-i-sin'),b=document.getElementById('mg-i-con'); if(a)a.className=(v==='sin')?'on':''; if(b)b.className=(v==='con')?'on':''; var n=document.getElementById('mg-notaIva'); if(n)n.className='mg-nota-iva'+(v==='con'?' show':''); mgRender(); }
+
+function mgInitFiltro(){
+  var sel = document.getElementById('mg-filtro');
+  if(!sel || !_mgData) return;
+  var cats = [];
+  _mgData.forEach(function(d){ if(d.categoria && cats.indexOf(d.categoria)<0) cats.push(d.categoria); });
+  cats.sort();
+  sel.innerHTML = '<option value="">Todas las categorías</option>' +
+    cats.map(function(c){ return '<option value="'+c+'">'+c+'</option>'; }).join('');
+}
+
+function mgRender(){
+  if(!_mgData) return;
+  var selEl = document.getElementById('mg-filtro');
+  var f = selEl ? selEl.value : '';
+  var rows = _mgData.filter(function(d){ return !f || d.categoria===f; });
+
+  var conC = rows.filter(function(d){ return d.cobertura==='ok'; });
+  var sinCRows = rows.filter(function(d){ return d.cobertura==='sin_costo'; });
+
+  // KPIs
+  var ganTotal  = conC.reduce(function(a,d){ return a + mgGanMes(d); }, 0);
+  var ventaNeta = conC.reduce(function(a,d){ return a + (mgN(d.precio_neto_caja)||0)*(mgN(d.unid_30d)||0); }, 0);
+  var margenPond = ventaNeta>0 ? (ganTotal/ventaNeta*100) : 0;
+  var rojos = conC.filter(function(d){ var m=mgN(d.margen_pct); return m!==null && m<15; }).length;
+  var kp = document.getElementById('mg-kpis');
+  if(kp) kp.innerHTML =
+    '<div class="mg-kpi big"><div class="v">'+mgFmtC(ganTotal)+'</div><div class="l">Ganás/mes neto</div></div>' +
+    '<div class="mg-kpi"><div class="v">'+margenPond.toFixed(1)+'%</div><div class="l">Margen pond.</div></div>' +
+    '<div class="mg-kpi rojo"><div class="v">'+rojos+'</div><div class="l">Bajo 15%</div></div>' +
+    '<div class="mg-kpi gris"><div class="v">'+sinCRows.length+'</div><div class="l">Sin costo</div></div>';
+
+  // orden
+  conC.sort(function(a,b){
+    if(_mgOrden==='gan') return mgGanMes(b)-mgGanMes(a);
+    return (mgN(a.margen_pct)===null?999:mgN(a.margen_pct)) - (mgN(b.margen_pct)===null?999:mgN(b.margen_pct));
+  });
+  sinCRows.sort(function(a,b){ return (mgN(b.unid_30d)||0)-(mgN(a.unid_30d)||0); });
+
+  var html = '';
+  conC.forEach(function(d){ html += mgFila(d); });
+  if(sinCRows.length){
+    html += '<div class="mg-sec-sin">— Sin costo cargado ('+sinCRows.length+') · falta vincular factura —</div>';
+    sinCRows.forEach(function(d){ html += mgFila(d); });
+  }
+  var lst = document.getElementById('mg-list');
+  if(lst) lst.innerHTML = html || '<div class="mg-estado">Sin productos.</div>';
+}
+
+function mgFila(d){
+  var m = mgN(d.margen_pct);
+  var cls = mgClase(m);
+  var u30 = mgN(d.unid_30d)||0;
+  var u7  = mgN(d.unid_7d)||0;
+
+  if(d.cobertura==='sin_costo'){
+    var volTxt = (u30>0)
+      ? '<div class="mg-rbot"><div class="vol">📦 <b>'+u7+'</b> cajas/sem · <b>'+u30+'</b> /mes</div><div class="plata" style="color:#C62828;">sin costo<b style="color:#C62828;">cargá factura</b></div></div>'
+      : '';
+    return '<div class="mg-row r-sin">' +
+      '<div class="mg-rtop"><div><div class="mg-rname">'+d.producto+'</div><div class="mg-rcat">'+(d.categoria||'')+'</div>' +
+      '<span class="mg-badge-sin">⚠ falta vincular</span></div>' +
+      '<div class="mg-rmarg"><div class="mv m-sin">—</div><div class="ml">margen</div></div></div>' +
+      volTxt + '</div>';
+  }
+
+  var fac = (_mgIva==='con') ? (1 + (mgN(d.alicuota_iva)||0)/100) : 1;
+  var cc = mgN(d.costo_neto_caja), ck = mgN(d.costo_neto_kg), pc = mgN(d.precio_neto_caja);
+  var costoBase  = (_mgUnidad==='caja') ? cc : ck;
+  var precioBase = (_mgUnidad==='caja') ? pc : ((ck!==null && cc) ? pc*ck/cc : null);
+  var costo  = (costoBase!==null)  ? costoBase*fac  : null;
+  var precio = (precioBase!==null) ? precioBase*fac : null;
+  var gan    = (precio!==null && costo!==null) ? (precio-costo) : null;
+  var uLbl = (_mgUnidad==='caja') ? '/caja' : '/kg';
+  var ivaTag = (_mgIva==='con') ? ' <span class="mg-iva-tag">c/IVA '+(mgN(d.alicuota_iva)||0)+'%</span>' : '';
+
+  return '<div class="mg-row r-'+cls+'">' +
+    '<div class="mg-rtop">' +
+      '<div><div class="mg-rname">'+d.producto+'</div><div class="mg-rcat">'+(d.categoria||'')+'</div><div class="mg-rprov">📦 '+(d.proveedor_ultima||'')+'</div></div>' +
+      '<div class="mg-rmarg"><div class="mv m-'+cls+'">'+(m!==null?m.toFixed(1):'—')+'%</div><div class="ml">margen neto</div></div>' +
+    '</div>' +
+    '<div class="mg-rmid">' +
+      '<div class="mg-cell"><div class="cl">Costo '+uLbl+ivaTag+'</div><div class="cv">'+mgFmt(costo)+'</div></div>' +
+      '<div class="mg-cell"><div class="cl">Venta '+uLbl+ivaTag+'</div><div class="cv">'+mgFmt(precio)+'</div></div>' +
+      '<div class="mg-cell"><div class="cl">Ganás '+uLbl+'</div><div class="cv gan">'+mgFmt(gan)+'</div></div>' +
+    '</div>' +
+    '<div class="mg-rbot">' +
+      '<div class="vol">📦 <b>'+u7+'</b> cajas/sem · <b>'+u30+'</b> /mes</div>' +
+      '<div class="plata">Te deja (neto)<b>'+mgFmtC(mgGanMes(d))+'/mes</b></div>' +
+    '</div>' +
+  '</div>';
+}
+
 async function comprasInit() {
   if (!_comprasInitDone) {
     _comprasInitDone = true;
