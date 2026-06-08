@@ -20976,7 +20976,10 @@ async function avCargarVisitas(force) {
   try {
     var path = 'visitas?fecha=gte.' + ini.toISOString() + '&fecha=lte.' + fin.toISOString()
       + '&select=*,vendedores(nombre)&order=fecha.asc';
-    var data = await sbFetch(path);
+    // v14.x — paginar: la ventana del mes (±7d, todos los vendedores) supera
+    // las 1000 filas y PostgREST truncaba las visitas más nuevas (las de la
+    // tarde de hoy quedaban afuera → conteos cortados, ej. 23 en vez de 41).
+    var data = await sbFetchAll(path, 1000, 60);
     _avVisitas = Array.isArray(data) ? data : [];
     _avRangoMes = mesKey;
     _avUltimaCarga = new Date();
@@ -21929,7 +21932,9 @@ async function mapaCargarVisitas() {
     
     var query = 'visitas?fecha=gte.' + desde + '&fecha=lte.' + hasta + '&order=fecha.asc&select=*,vendedores(nombre)';
 
-    var visitas = await sbFetch(query);
+    // v14.x — paginar por consistencia con el tab Visitas (un día solo no suele
+    // superar 1000, pero evita truncados si un día se llena de visitas).
+    var visitas = await sbFetchAll(query, 1000, 60);
     _mapaVisitas = visitas || [];
     _mapaUltimaCarga = new Date();
     mapaActualizar();
