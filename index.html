@@ -15606,6 +15606,8 @@ setInterval(function() {
       return p.esDuplicado && !dupAntes.has(p.pedidoId);
     });
     if (dupNuevos.length > 0) notificarDuplicados(dupNuevos);
+    // v14.x — refrescar también el tab Visitas si el admin lo tiene abierto
+    adminVisitasRefrescar();
   });
 }, 20000);
 
@@ -20804,12 +20806,42 @@ async function adminVisitasCargar() {
   avRender();
 }
 
+// ── v14.x — Auto-refresh del tab Visitas (admin) ──────────────────────────
+// El tab Visitas cacheaba el mes y NO se re-consultaba mientras estaba abierto:
+// la lista quedaba congelada en la primera carga (un check-in en curso se veía
+// "(activo)" indefinidamente y las visitas posteriores no aparecían aunque el
+// header dijera "Actualizado HH:MM" —ese badge mide pedidos, no visitas—).
+// Esta función fuerza la re-consulta a Supabase en cada ciclo del auto-refresh,
+// SOLO si el admin está parado en el tab Visitas mirando el MES EN CURSO.
+async function adminVisitasRefrescar() {
+  try {
+    if (vendedorActual !== 'ADMIN') return;
+    if (typeof _tabActual === 'undefined' || _tabActual !== 'gps') return;
+    if (!_avMesRef) return;
+    var _h = new Date();
+    // No refrescar meses pasados: solo tiene sentido "en vivo" sobre el mes actual.
+    if (_avMesRef.getFullYear() !== _h.getFullYear() || _avMesRef.getMonth() !== _h.getMonth()) return;
+    _avAutoRefrescando = true;
+    await avCargarVisitas(true);   // force: ignora el cache del mes
+    avRenderResumen();
+    avRenderCalendario();
+    if (_avDiaSel) avRenderDetalle(_avDiaSel);   // repintar el día abierto sin tironear scroll
+  } catch (e) {
+    console.warn('[av] adminVisitasRefrescar:', e);
+  } finally {
+    _avAutoRefrescando = false;
+  }
+}
+
 // Estado del tab Visitas v2
 var _avVendedor  = 'Lisandro';
 var _avMesRef    = null;   // Date dia 1 del mes mostrado en el calendario
 var _avSemanaRef = null;   // Date lunes de la semana del resumen
 var _avVisitas   = [];     // cache de visitas del rango cargado
 var _avRangoMes  = '';     // 'YYYY-M' del mes cacheado
+var _avUltimaCarga = null; // v14.x — timestamp de la última consulta a visitas
+var _avDiaSel      = null; // v14.x — día (ISO) con el detalle abierto, para repintarlo en el auto-refresh
+var _avAutoRefrescando = false; // v14.x — true durante el refresco automático (suprime scrollIntoView)
 
 function avHoyAR() { var d = new Date(); d.setHours(0,0,0,0); return d; }
 function avLunesDe(date) {
@@ -20932,9 +20964,9 @@ function avSplitAlmuerzo(vis) {
   if (idx === -1) return null;
   return { idx: idx, finManana: vis[idx].salida || vis[idx].entrada, iniTarde: vis[idx + 1].entrada, gapMin: Math.round(maxGap) };
 }
-async function avCargarVisitas() {
+async function avCargarVisitas(force) {
   var mesKey = _avMesRef.getFullYear() + '-' + _avMesRef.getMonth();
-  if (mesKey === _avRangoMes && _avVisitas.length) return;   // cache hit
+  if (!force && mesKey === _avRangoMes && _avVisitas.length) return;   // cache hit (force=true lo ignora)
   var res = document.getElementById('av2-resumen');
   if (res) res.innerHTML = '<div class="av2-empty">⏳ Cargando...</div>';
   var y = _avMesRef.getFullYear(), m = _avMesRef.getMonth();
@@ -20946,6 +20978,7 @@ async function avCargarVisitas() {
     var data = await sbFetch(path);
     _avVisitas = Array.isArray(data) ? data : [];
     _avRangoMes = mesKey;
+    _avUltimaCarga = new Date();
   } catch (e) {
     console.error('Visitas v2 - error cargando:', e);
     _avVisitas = [];
@@ -21028,7 +21061,14 @@ function avRenderResumen() {
   });
   var dom = new Date(lunes); dom.setDate(dom.getDate()+6);
   var rango = lunes.getDate() + ' → ' + dom.getDate() + ' ' + dom.toLocaleDateString('es-AR',{month:'short'});
-  var navHtml = '<div class="av2-sem-hdr"><div class="av2-sem-t">Semana ' + rango + '</div>'
+  var liveTxt = '';
+  if (_avUltimaCarga) {
+    var _hh = String(_avUltimaCarga.getHours()).padStart(2,'0');
+    var _mm = String(_avUltimaCarga.getMinutes()).padStart(2,'0');
+    var _ss = String(_avUltimaCarga.getSeconds()).padStart(2,'0');
+    liveTxt = ' <span style="font-weight:700;font-size:9px;color:#2E7D32;">🟢 ' + _hh + ':' + _mm + ':' + _ss + '</span>';
+  }
+  var navHtml = '<div class="av2-sem-hdr"><div class="av2-sem-t">Semana ' + rango + liveTxt + '</div>'
     + '<div style="display:flex;gap:6px;"><div class="av2-arrow" onclick="avCambiarSemana(-1)">‹</div><div class="av2-arrow" onclick="avCambiarSemana(1)">›</div></div></div>';
   var pendTxt = totalPend>0 ? '<div class="av2-vend-ori" style="text-align:right;">+' + avMontoCorto(totalPend) + ' pend.</div>' : '';
   var html;
@@ -21144,6 +21184,7 @@ function avRenderCalendario() {
 }
 
 function avAbrirDia(iso) {
+  _avDiaSel = iso;
   var p = iso.split('-');
   var dd = new Date(+p[0], +p[1]-1, +p[2]);
   _avSemanaRef = avLunesDe(dd);
@@ -21197,7 +21238,7 @@ function avRenderDetalle(iso) {
     }).join('') : '<div class="av2-tl"><div style="flex:1;color:#999;font-size:12px;padding:4px 0;">Sin pedidos ese día</div></div>';
     det.innerHTML = '<div class="av2-det-hdr"><div class="av2-det-f">' + fechaTxt + '</div><div class="av2-det-j">🛒 Venta del día (sin visitas de campo)</div></div>'
       + filaVendido('') + listHtml;
-    det.style.display = 'block'; det.scrollIntoView({behavior:'smooth',block:'nearest'});
+    det.style.display = 'block'; if (!_avAutoRefrescando) det.scrollIntoView({behavior:'smooth',block:'nearest'});
     return;
   }
 
@@ -21205,7 +21246,7 @@ function avRenderDetalle(iso) {
   if (!info || !info.visitas.length) {
     var extra = (vendDia>0 || pendDia>0) ? filaVendido('') : '';
     det.innerHTML = '<div class="av2-det-hdr"><div class="av2-det-f">' + fechaTxt + '</div><div class="av2-det-j">Sin check-in registrado ese día</div></div>' + extra;
-    det.style.display = 'block'; det.scrollIntoView({behavior:'smooth',block:'nearest'});
+    det.style.display = 'block'; if (!_avAutoRefrescando) det.scrollIntoView({behavior:'smooth',block:'nearest'});
     return;
   }
 
