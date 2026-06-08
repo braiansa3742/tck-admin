@@ -15606,8 +15606,9 @@ setInterval(function() {
       return p.esDuplicado && !dupAntes.has(p.pedidoId);
     });
     if (dupNuevos.length > 0) notificarDuplicados(dupNuevos);
-    // v14.x — refrescar también el tab Visitas si el admin lo tiene abierto
+    // v14.x — refrescar también los tabs Visitas / Mapa si el admin los tiene abiertos
     adminVisitasRefrescar();
+    mapaRefrescar();
   });
 }, 20000);
 
@@ -21827,6 +21828,8 @@ var _mapaGrayMarkers = [];
 var _mapaTrackLines  = {};
 var _mapaTrackMarkers = [];
 var _mapaDiasAtras   = 0; // 0=hoy, 1=ayer, etc.
+var _mapaUltimaCarga = null;   // v14.x — timestamp de la última consulta del mapa
+var _mapaAutoRefrescando = false; // v14.x — true durante el auto-refresh (no reencuadra el mapa)
 
 // v12.24/12.25: capas del recorrido (toggle independiente). Estado y grupos.
 // v12.25: GPS apagado por defecto — el rastro GPS se cruzaba con la línea
@@ -21928,9 +21931,30 @@ async function mapaCargarVisitas() {
 
     var visitas = await sbFetch(query);
     _mapaVisitas = visitas || [];
+    _mapaUltimaCarga = new Date();
     mapaActualizar();
   } catch(e) {
     console.error('Error cargando mapa:', e);
+  }
+}
+
+// ── v14.x — Auto-refresh del tab Mapa (admin) ─────────────────────────────
+// Mismo problema que el tab Visitas: el mapa solo se consultaba al entrar al
+// tab o al cambiar el filtro de fecha, quedaba congelado mientras estaba abierto.
+// Refresca SOLO si el admin está en el tab Mapa mirando HOY (_mapaDiasAtras===0).
+// Con _mapaAutoRefrescando=true, mapaActualizar() no reencuadra (respeta zoom/pan).
+async function mapaRefrescar() {
+  try {
+    if (vendedorActual !== 'ADMIN') return;
+    if (typeof _tabActual === 'undefined' || _tabActual !== 'mapa') return;
+    if (_mapaDiasAtras !== 0) return;   // solo el día de hoy se refresca en vivo
+    if (!_mapaInstance) return;
+    _mapaAutoRefrescando = true;
+    await mapaCargarVisitas();
+  } catch (e) {
+    console.warn('[mapa] mapaRefrescar:', e);
+  } finally {
+    _mapaAutoRefrescando = false;
   }
 }
 
@@ -22329,11 +22353,15 @@ function mapaActualizar() {
     } else { leyendaEl.style.display = 'none'; }
   }
 
-  if (bounds.length > 0) {
-    if (bounds.length === 1) _mapaInstance.setView(bounds[0], 16);
-    else _mapaInstance.fitBounds(bounds, {padding: [40,40], maxZoom: 17});
-  } else {
-    _mapaInstance.setView([-36.375, -62.005], 13); // Trenque Lauquen
+  // v14.x — solo reencuadrar en cargas manuales (entrar al tab / cambiar fecha o
+  // vendedor). Durante el auto-refresh NO se toca el zoom/pan para no tironear.
+  if (!_mapaAutoRefrescando) {
+    if (bounds.length > 0) {
+      if (bounds.length === 1) _mapaInstance.setView(bounds[0], 16);
+      else _mapaInstance.fitBounds(bounds, {padding: [40,40], maxZoom: 17});
+    } else {
+      _mapaInstance.setView([-36.375, -62.005], 13); // Trenque Lauquen
+    }
   }
 
   mapaCargarClientesSinVisita(todosCheckins);
