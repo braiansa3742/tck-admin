@@ -1,5 +1,19 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.16 — 09/06/2026
+     v13.16: FIX PLANILLA DE CARGA / REMITO VET — "Pollo C" caia en Rebozados.
+       Sintoma: en la planilla de Joan del 09/06, "Pollo C" figuraba bajo
+       REBOZADOS (presentacion "Caja 6 kg") en vez de POLLO ENTERO; "Pollo C ·
+       calibre x6" caia en Otros. En el remito veterinario el Pollo C sumaba a
+       "Rebozados" en lugar de "Pollo entero".
+       Causa: "Pollo C" no estaba en VET_TABLA. vetBuscarMapeo tiene un fallback
+       por substring (tier 3) que matcheaba "pollo c" dentro de "medallon de
+       pollo clasico" → Rebozados, Caja 6 kg.
+       Fix: se agrega la clave exacta "Pollo C" → ["Pollo entero", 20,
+       "Caja 20 kg"]. Entra por el tier 1 (match exacto) y las variantes
+       "Pollo C · calibre xN" entran por el substring "pollo c" hacia la clave
+       correcta. Cero cambios en la logica de lookup. Sin SQL ni backend.
+     ───────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.15 — 03/06/2026
      v13.15: PERFORMANCE 2 — paralelizar las cargas de la lista de pedidos.
        Sintoma: admin tardaba mas que ventas en mostrar la lista (uno se queda
@@ -26837,6 +26851,12 @@ const VET_TABLA = {
   "Pollo B":                     ["Pollo entero",      20,   "Caja 20 kg"],
   "Pollo Ginosa":                ["Pollo entero",      20,   "Caja 20 kg"],
   "Pollo Optimo":                ["Pollo entero",      20,   "Caja 20 kg"],
+  // v13.16: Pollo C es pollo entero (calibre chico). Faltaba en VET_TABLA y el
+  // fallback por substring de vetBuscarMapeo lo matcheaba contra
+  // "Medallon de Pollo Clasico" → caia en Rebozados con "Caja 6 kg".
+  // Con la clave exacta entra por el tier 1; las variantes "Pollo C · calibre xN"
+  // entran por substring "pollo c" hacia esta clave (igual que "Pollo A · calibre x7").
+  "Pollo C":                     ["Pollo entero",      20,   "Caja 20 kg"],
   // TROZADOS
   "Suprema":                     ["Trozados",           5,   "Bolsa 5 kg"],
   "Suprema IQF":                 ["Trozados",          15,   "Caja 15 kg"],
