@@ -1,5 +1,20 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.18 — 10/06/2026
+     v13.18: MATCH AUTOMÁTICO CONTRA MERCADO PAGO en el tab 💸.
+       Cruza cada transferencia pendiente contra mp_movimientos (sync Apps
+       Script v25.44.1, trigger 30 min) por monto ±$1 y fecha ±3 días,
+       excluyendo fondeos propios (CUIT TCK) y movimientos ya vinculados:
+       · 1 candidato → ✅ "Acreditada en MP" + botón Conciliar (match MP)
+         que además marca mp_movimientos.match_entrega_id (vínculo 1-a-1).
+       · 2+ candidatos (montos repetidos, ej. $102.000 x5) → 🟡 aviso,
+         NUNCA auto-elige: decide Valentina con el comprobante.
+       · 0 candidatos y >=2 días → ❌ "Sin rastro en MP" (refuerza reclamo).
+       En RECLAMAR: si el movimiento aparece después, avisa "Ahora aparece
+       en MP". Deshacer conciliación libera el vínculo (_ltDesconciliar).
+       Chip "✅ En MP" en el resumen. Validado con datos reales 10/06:
+       ~45% match único, ~16% ambiguo, ~39% sin candidato (= aún no
+       transfirió o falta backfill histórico mpSync&horas=168).
      TCK ADMIN — v13.17 — 10/06/2026
      v13.17: TAB 💸 TRANSFERENCIAS COMPLETO — conciliación + reclamo + export.
        Opción A (decidida 10/06): las transferencias SALEN del Excel de
@@ -27964,7 +27979,7 @@ async function transferConciliar(id, conciliar) {
 // Columnas nuevas en entregas: transfer_exportada_en, transfer_disputa,
 // transfer_disputa_en (SQL corrido 10/06/2026).
 
-var _ltState = { rows: [], chofer: '', q: '', el: null };
+var _ltState = { rows: [], mp: [], chofer: '', q: '', el: null };
 
 function _ltMontoTransfer(e) {
   var m = parseFloat(e.monto) || 0;
@@ -28003,12 +28018,46 @@ async function renderLogisticaTransferencias(el) {
     var rows = Object.keys(_map).map(function(k) { return _map[k]; });
     rows.sort(function(a, b) { return String(b.fecha_entrega || '').localeCompare(String(a.fecha_entrega || '')); });
     _ltState.rows = rows;
+    // v13.18: movimientos MP de los últimos 14 días para el match automático.
+    // Excluye fondeos propios (CUIT TCK). Si falla, el tab sigue sin match.
+    try {
+      var d14 = new Date(Date.now() - 14 * 86400000).toISOString();
+      var mpRows = await sbFetch('mp_movimientos?fecha=gte.' + encodeURIComponent(d14) + '&order=fecha.desc&select=mp_id,fecha,monto,operation_type,status,payer_email,payer_doc,match_entrega_id&limit=1000') || [];
+      _ltState.mp = mpRows.filter(function(m) { return m && m.payer_doc !== '33717416959'; });
+    } catch (_eMp) { _ltState.mp = []; }
     _ltPintar();
     _ltBadge();
   } catch (e) {
     el.innerHTML = '<div class="planilla-empty">❌ Error cargando transferencias.<br><small style="color:var(--text3);">¿Corriste el SQL de v13.17 (transfer_exportada_en / transfer_disputa)?</small></div>';
     console.error('renderLogisticaTransferencias:', e);
   }
+}
+
+// v13.18: candidatos MP para una entrega — monto ±$1, fecha ±3 días,
+// no usados ya por otra entrega. Ordenados por cercanía de fecha.
+function _ltMatchPara(e) {
+  var monto = _ltMontoTransfer(e);
+  if (!(monto > 0) || !e.fecha_entrega) return [];
+  var fe = new Date(e.fecha_entrega).getTime();
+  if (isNaN(fe)) return [];
+  var DIA = 86400000;
+  var cands = _ltState.mp.filter(function(m) {
+    if (m.match_entrega_id && m.match_entrega_id !== e.id) return false;
+    var fm = new Date(m.fecha).getTime();
+    if (isNaN(fm) || Math.abs(fm - fe) > 3 * DIA) return false;
+    return Math.abs((parseFloat(m.monto) || 0) - monto) <= 1;
+  });
+  cands.sort(function(x, y) {
+    return Math.abs(new Date(x.fecha).getTime() - fe) - Math.abs(new Date(y.fecha).getTime() - fe);
+  });
+  return cands;
+}
+
+function _ltMovTxt(m) {
+  var f = new Date(m.fecha);
+  var ftxt = isNaN(f.getTime()) ? '' : (f.toLocaleDateString('es-AR') + ' ' + f.toTimeString().slice(0, 5));
+  var quien = m.payer_email || (m.payer_doc ? ('doc ' + m.payer_doc) : 'pagador sin datos');
+  return '$' + Math.round(parseFloat(m.monto) || 0).toLocaleString('es-AR') + ' · ' + quien + ' · ' + ftxt;
 }
 
 function _ltFiltroChofer(v) { _ltState.chofer = v || ''; _ltPintar(); }
@@ -28038,6 +28087,8 @@ function _ltPintar() {
   html += '<div style="flex:1;min-width:110px;text-align:center;"><div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;">A conciliar</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#1B5E20;">' + fmt(totalPend) + '</div><div style="font-size:11px;color:#2E7D32;">' + pend.length + ' transferencia' + (pend.length === 1 ? '' : 's') + '</div></div>';
   if (sinFoto.length) html += '<div style="flex:1;min-width:100px;text-align:center;background:#FFEBEE;border-radius:10px;padding:6px;"><div style="font-size:10px;color:#C62828;text-transform:uppercase;letter-spacing:.8px;">Sin comprobante</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#C62828;">' + sinFoto.length + '</div></div>';
   if (disputa.length) html += '<div style="flex:1;min-width:100px;text-align:center;background:#FFF3E0;border-radius:10px;padding:6px;"><div style="font-size:10px;color:#E65100;text-transform:uppercase;letter-spacing:.8px;">⚠️ Reclamar</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#E65100;">' + disputa.length + '</div></div>';
+  var conMatch = pend.filter(function(e) { return _ltMatchPara(e).length === 1; }).length;
+  if (conMatch) html += '<div style="flex:1;min-width:100px;text-align:center;background:#E8F5E9;border-radius:10px;padding:6px;"><div style="font-size:10px;color:#1B5E20;text-transform:uppercase;letter-spacing:.8px;">✅ En MP</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#1B5E20;">' + conMatch + '</div></div>';
   html += '</div>';
 
   if (exportables.length) {
@@ -28079,9 +28130,22 @@ function _ltPintar() {
     s += '<div style="text-align:right;flex-shrink:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:' + accent + ';">' + fmt(monto) + '</div>';
     if (agingTxt) s += '<div style="font-size:11px;font-weight:800;color:' + agingColor + ';">⏱ ' + agingTxt + '</div>';
     s += '</div></div>';
+    // v13.18: match automático contra mp_movimientos
+    var mm = _ltMatchPara(e);
+    if (mm.length === 1) {
+      s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:1.5px solid #66BB6A;border-radius:9px;font-size:12px;font-weight:700;color:#1B5E20;">✅ Acreditada en MP: ' + _ltMovTxt(mm[0]) + '</div>';
+    } else if (mm.length > 1) {
+      s += '<div style="margin-top:8px;padding:8px 10px;background:#FFF8E1;border:1.5px solid #FFCA28;border-radius:9px;font-size:12px;font-weight:700;color:#795500;">🟡 ' + mm.length + ' movimientos MP compatibles (' + _ltMovTxt(mm[0]) + ' es el más cercano) — verificá con el comprobante</div>';
+    } else if (dias !== null && dias >= 2) {
+      s += '<div style="margin-top:8px;padding:8px 10px;background:#FAFAFA;border:1.5px dashed #C62828;border-radius:9px;font-size:12px;font-weight:700;color:#C62828;">❌ Sin rastro en MP (monto/fecha ±3 días)</div>';
+    }
     s += '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">';
     s += btnFoto(e);
-    s += '<button onclick="transferConciliar(\'' + e.id + '\',true)" style="flex:1;min-width:120px;padding:9px;background:#2E7D32;color:#fff;border:none;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">✓ Conciliada</button>';
+    if (mm.length === 1) {
+      s += '<button onclick="transferConciliarConMatch(\'' + e.id + '\',\'' + mm[0].mp_id + '\')" style="flex:1;min-width:120px;padding:9px;background:#2E7D32;color:#fff;border:none;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 0 0 2px #A5D6A7;">✓ Conciliar (match MP)</button>';
+    } else {
+      s += '<button onclick="transferConciliar(\'' + e.id + '\',true)" style="flex:1;min-width:120px;padding:9px;background:#2E7D32;color:#fff;border:none;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">✓ Conciliada</button>';
+    }
     s += '<button onclick="transferDisputar(\'' + e.id + '\')" style="flex:1;min-width:120px;padding:9px;background:#fff;color:#E65100;border:1.5px solid #E65100;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">⚠️ No acreditó</button>';
     s += '</div></div>';
     return s;
@@ -28098,6 +28162,11 @@ function _ltPintar() {
     s += '<div style="font-size:12px;color:#E65100;font-weight:700;margin-top:4px;">⚠️ ' + String(e.transfer_disputa || '').replace(/</g, '&lt;') + (diasR !== null ? ' · en reclamo hace ' + diasR + ' día' + (diasR === 1 ? '' : 's') : '') + '</div></div>';
     s += '<div style="text-align:right;flex-shrink:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:#E65100;">' + fmt(monto) + '</div></div>';
     s += '</div>';
+    // v13.18: si el movimiento aparece en MP después del reclamo, avisar
+    var mmD = _ltMatchPara(e);
+    if (mmD.length >= 1) {
+      s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:1.5px solid #66BB6A;border-radius:9px;font-size:12px;font-weight:700;color:#1B5E20;">✅ Ahora aparece en MP: ' + _ltMovTxt(mmD[0]) + (mmD.length > 1 ? ' (+' + (mmD.length - 1) + ' más)' : '') + '</div>';
+    }
     s += '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">';
     s += btnFoto(e);
     s += '<button onclick="transferDisputaResolver(\'' + e.id + '\',true)" style="flex:1;min-width:120px;padding:9px;background:#2E7D32;color:#fff;border:none;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">✅ Se resolvió → conciliar</button>';
@@ -28110,6 +28179,8 @@ function _ltPintar() {
     var monto = _ltMontoTransfer(e);
     var fecha = e.fecha_entrega ? new Date(e.fecha_entrega).toLocaleDateString('es-AR') : '—';
     var cuando = e.transfer_conciliada_en ? new Date(e.transfer_conciliada_en).toLocaleDateString('es-AR') : '';
+    var movVinc = null;
+    for (var vi = 0; vi < _ltState.mp.length; vi++) { if (_ltState.mp[vi].match_entrega_id === e.id) { movVinc = _ltState.mp[vi]; break; } }
     var pillExp = e.transfer_exportada_en
       ? '<span style="font-size:11px;font-weight:800;color:#283593;background:#E8EAF6;border-radius:7px;padding:3px 8px;">📥 Exportada ' + new Date(e.transfer_exportada_en).toLocaleDateString('es-AR') + '</span>'
       : (_ltEsMixto(e)
@@ -28119,12 +28190,13 @@ function _ltPintar() {
     s += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">';
     s += '<div style="min-width:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:17px;font-weight:900;color:var(--text);">' + (e.cliente || '—') + '</div>';
     s += '<div style="font-size:11px;color:var(--text3);">🚚 ' + (e.chofer || '—') + ' · 📍 ' + (e.ciudad || '—') + ' · ' + fecha + '</div>';
-    s += '<div style="margin-top:5px;">' + pillExp + '</div></div>';
+    var pillMP = movVinc ? ' <span style="font-size:11px;font-weight:800;color:#283593;background:#E8EAF6;border-radius:7px;padding:3px 8px;">🔗 MP ' + new Date(movVinc.fecha).toLocaleDateString('es-AR') + '</span>' : '';
+    s += '<div style="margin-top:5px;">' + pillExp + pillMP + '</div></div>';
     s += '<div style="text-align:right;flex-shrink:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:#2E7D32;">' + fmt(monto) + '</div></div>';
     s += '</div>';
     s += '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">';
     s += btnFoto(e);
-    s += '<button onclick="transferConciliar(\'' + e.id + '\',false)" style="flex:1;min-width:120px;padding:9px;background:#fff;color:#2E7D32;border:1.5px solid #2E7D32;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">✅ Conciliada' + (cuando ? ' · ' + cuando : '') + ' · deshacer</button>';
+    s += '<button onclick="_ltDesconciliar(\'' + e.id + '\')" style="flex:1;min-width:120px;padding:9px;background:#fff;color:#2E7D32;border:1.5px solid #2E7D32;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">✅ Conciliada' + (cuando ? ' · ' + cuando : '') + ' · deshacer</button>';
     s += '</div></div>';
     return s;
   }
@@ -28148,6 +28220,54 @@ function _ltPintar() {
     html += '<div class="planilla-empty">📲 Nada que mostrar con estos filtros.</div>';
   }
   el.innerHTML = html;
+}
+
+// v13.18: conciliar Y vincular el movimiento MP (match_entrega_id)
+async function transferConciliarConMatch(entregaId, mpId) {
+  try {
+    await sbFetch('entregas?id=eq.' + entregaId, {
+      method: 'PATCH',
+      headers: { 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ transfer_conciliada: true, transfer_conciliada_en: new Date().toISOString() })
+    });
+    try {
+      await sbFetch('mp_movimientos?mp_id=eq.' + mpId, {
+        method: 'PATCH',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ match_entrega_id: entregaId })
+      });
+    } catch (_eV) { console.warn('vínculo MP no guardado', _eV); }
+    toast('✅ Conciliada · vinculada a MP', 'ok');
+    var el = document.getElementById('logistica-contenido');
+    if (el) renderLogisticaTransferencias(el);
+  } catch (e) {
+    console.error('transferConciliarConMatch:', e);
+    toast('❌ Error al conciliar', 'err');
+  }
+}
+
+// v13.18: deshacer conciliación + liberar el movimiento MP vinculado
+async function _ltDesconciliar(id) {
+  try {
+    await sbFetch('entregas?id=eq.' + id, {
+      method: 'PATCH',
+      headers: { 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ transfer_conciliada: false, transfer_conciliada_en: null })
+    });
+    try {
+      await sbFetch('mp_movimientos?match_entrega_id=eq.' + id, {
+        method: 'PATCH',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ match_entrega_id: null })
+      });
+    } catch (_eL) {}
+    toast('↩ Conciliación deshecha', 'ok');
+    var el = document.getElementById('logistica-contenido');
+    if (el) renderLogisticaTransferencias(el);
+  } catch (e) {
+    console.error('_ltDesconciliar:', e);
+    toast('❌ Error', 'err');
+  }
 }
 
 // ── ⚠️ No acreditó: modal de motivo ──
