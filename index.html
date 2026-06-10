@@ -1,5 +1,24 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.21 — 10/06/2026
+     v13.21: HUÉRFANOS + PAGADORES HABITUALES + FIX BANCARIAS (3 frentes):
+       1. FIX CRÍTICO: las transferencias BANCO→CVU llegan como account_fund
+          con payer = la propia cuenta TCK (MP no identifica al remitente).
+          NO son fondeos propios: 19 de 40 matchean entregas ($3,47M medido
+          10/06). Ahora entran al matching; su doc se ignora; se muestran
+          como "transferencia bancaria (CVU)".
+       2. Nivel ✅ HORA DEL COMPROBANTE: para bancarias, el OCR de la foto
+          trae fecha+hora → candidato único a ≤30 min = verde (caso
+          Agustina/Galicia: 43 segundos de diferencia).
+       3. 💰 INGRESOS SIN ASIGNAR: sección al final del tab con todo
+          movimiento entrante sin vincular que no es candidato de nadie.
+          Sugerencia "puede ser de: [cliente]" (CUIT→clientes_xubio o
+          alias) + botón Asignar a una entrega (buscador → vincula +
+          concilia + limpia reclamo + aprende). Resuelve "ya te pagué".
+       4. 🧠 mp_pagadores_alias: al conciliar un pago de un tercero, la
+          base recuerda "este CUIT paga por este cliente" (veces++). La
+          próxima matchea como "Pagador habitual del cliente (N pagos)".
+       REQUIERE SQL: tabla mp_pagadores_alias (pasado a Braian 10/06).
      TCK ADMIN — v13.20 — 10/06/2026
      v13.20: NIVEL EXACTO POR OCR + BANDERAS ANTI-FRAUDE en el tab 💸.
        Usa entregas.transfer_ocr (Apps Script v25.45.0: OCR de la foto del
@@ -28013,7 +28032,7 @@ async function transferConciliar(id, conciliar) {
 // Columnas nuevas en entregas: transfer_exportada_en, transfer_disputa,
 // transfer_disputa_en (SQL corrido 10/06/2026).
 
-var _ltState = { rows: [], mp: [], docPorEntrega: {}, match: {}, ocrDup: {}, chofer: '', q: '', el: null };
+var _ltState = { rows: [], mp: [], docPorEntrega: {}, xidPorEntrega: {}, alias: {}, nombrePorDoc: {}, nombrePorXid: {}, match: {}, ocrDup: {}, chofer: '', q: '', el: null };
 
 function _ltMontoTransfer(e) {
   var m = parseFloat(e.monto) || 0;
@@ -28057,7 +28076,15 @@ async function renderLogisticaTransferencias(el) {
     try {
       var d14 = new Date(Date.now() - 14 * 86400000).toISOString();
       var mpRows = await sbFetch('mp_movimientos?fecha=gte.' + encodeURIComponent(d14) + '&order=fecha.desc&select=mp_id,fecha,monto,operation_type,status,payer_email,payer_doc,match_entrega_id&limit=1000') || [];
-      _ltState.mp = mpRows.filter(function(m) { return m && m.payer_doc !== '33717416959'; });
+      // v13.21: las transferencias BANCO→CVU llegan como account_fund con
+      // payer = la propia cuenta TCK (MP no identifica al remitente). NO son
+      // fondeos propios: medido 10/06, 19 de 40 matchean entregas ($3,47M).
+      // Solo se excluye el doc TCK en movimientos que NO son account_fund.
+      _ltState.mp = mpRows.filter(function(m) {
+        if (!m) return false;
+        if (m.operation_type === 'account_fund') return true;
+        return m.payer_doc !== '33717416959';
+      });
     } catch (_eMp) { _ltState.mp = []; }
     // v13.19: CUIT/DNI del cliente Xubio por entrega (para el match por doc).
     // Fail-open: si falla, el match degrada a "unico bidireccional".
@@ -28080,10 +28107,42 @@ async function renderLogisticaTransferencias(el) {
       }
       noConc.forEach(function(e) {
         var xid = xidPorPedido[String(e.pedido_id || '')];
+        if (xid) _ltState.xidPorEntrega[e.id] = xid;
         if (xid && cuitPorXid[xid]) _ltState.docPorEntrega[e.id] = cuitPorXid[xid];
       });
     } catch (_eDoc) { _ltState.docPorEntrega = {}; }
+    // v13.21: alias de pagadores conocidos (la base aprende quién paga por quién)
+    _ltState.alias = {};
+    try {
+      var alRows = await sbFetch('mp_pagadores_alias?select=payer_doc,cliente_xubio_id,veces&limit=1000') || [];
+      alRows.forEach(function(al) {
+        var x = String(al.cliente_xubio_id);
+        (_ltState.alias[x] = _ltState.alias[x] || {})[String(al.payer_doc)] = al.veces || 1;
+      });
+    } catch (_eAl) { _ltState.alias = {}; }
     _ltCalcularMatches(rows.filter(function(e) { return !e.transfer_conciliada; }));
+    // v13.21: nombres de clientes para las sugerencias de huérfanos
+    // (CUIT del pagador → cliente directo; alias → nombre del cliente)
+    _ltState.nombrePorDoc = {}; _ltState.nombrePorXid = {};
+    try {
+      var hf = _ltHuerfanos();
+      var docsH = [];
+      hf.forEach(function(m) {
+        if (m.operation_type !== 'account_fund' && m.payer_doc) {
+          var d = _ltSoloDigitos(m.payer_doc);
+          if (d && docsH.indexOf(d) === -1) docsH.push(d);
+        }
+      });
+      for (var hi2 = 0; hi2 < docsH.length; hi2 += 40) {
+        var cxh = await _lzSbFetch('clientes_xubio?select=id,nombre,cuit&cuit=in.' + encodeURIComponent(_lzInList(docsH.slice(hi2, hi2 + 40)))) || [];
+        cxh.forEach(function(c) { var d2 = _ltSoloDigitos(c.cuit); if (d2) _ltState.nombrePorDoc[d2] = c.nombre || ''; });
+      }
+      var xidsAl = Object.keys(_ltState.alias);
+      for (var hj = 0; hj < xidsAl.length; hj += 40) {
+        var cxa = await _lzSbFetch('clientes_xubio?select=id,nombre&id=in.' + encodeURIComponent(_lzInList(xidsAl.slice(hj, hj + 40)))) || [];
+        cxa.forEach(function(c) { _ltState.nombrePorXid[String(c.id)] = c.nombre || ''; });
+      }
+    } catch (_eNom) {}
     _ltPintar();
     _ltBadge();
   } catch (e) {
@@ -28144,6 +28203,8 @@ function _ltCalcularMatches(entregas) {
     var fe = new Date(e.fecha_entrega).getTime();
     if (isNaN(fe)) return;
     var doc = _ltState.docPorEntrega[e.id] || '';
+    var xidE = _ltState.xidPorEntrega[e.id] || '';
+    var aliasDocs = (xidE && _ltState.alias[xidE]) ? _ltState.alias[xidE] : {};
     var cands = _ltState.mp.filter(function(m) {
       if (m.match_entrega_id && m.match_entrega_id !== e.id) return false;
       var fm = new Date(m.fecha).getTime();
@@ -28158,9 +28219,16 @@ function _ltCalcularMatches(entregas) {
     paresPorEntrega[e.id] = cands;
     cands.forEach(function(m) {
       (entregasPorMov[m.mp_id] = entregasPorMov[m.mp_id] || []).push(e.id);
-      if (doc && m.payer_doc && _ltSoloDigitos(m.payer_doc) === doc) {
-        (docMovsPorEntrega[e.id] = docMovsPorEntrega[e.id] || []).push(m);
-        docEntregasPorMov[m.mp_id] = (docEntregasPorMov[m.mp_id] || 0) + 1;
+      // v13.21: account_fund trae el doc de TCK (no informa); para el resto,
+      // vale tanto el CUIT del cliente como un pagador habitual aprendido.
+      if (m.operation_type !== 'account_fund' && m.payer_doc) {
+        var pdM = _ltSoloDigitos(m.payer_doc);
+        var esDocCliente = (doc && pdM === doc);
+        var vecesAlias = aliasDocs[pdM] || 0;
+        if (esDocCliente || vecesAlias > 0) {
+          (docMovsPorEntrega[e.id] = docMovsPorEntrega[e.id] || []).push({ mov: m, porAlias: (!esDocCliente && vecesAlias > 0), veces: vecesAlias });
+          docEntregasPorMov[m.mp_id] = (docEntregasPorMov[m.mp_id] || 0) + 1;
+        }
       }
     });
   });
@@ -28182,8 +28250,8 @@ function _ltCalcularMatches(entregas) {
       }
       if (movEx) { res[e.id] = { nivel: 'exacto', mov: movEx, n: cands.length, op: opE }; return; }
     }
-    if (docs.length === 1 && docEntregasPorMov[docs[0].mp_id] === 1) {
-      res[e.id] = { nivel: 'doc', mov: docs[0], n: cands.length };
+    if (docs.length === 1 && docEntregasPorMov[docs[0].mov.mp_id] === 1) {
+      res[e.id] = { nivel: 'doc', mov: docs[0].mov, n: cands.length, porAlias: docs[0].porAlias, veces: docs[0].veces };
       return;
     }
     // v13.20: el CUIT leído del comprobante (bancos: Galicia, etc.)
@@ -28197,6 +28265,25 @@ function _ltCalcularMatches(entregas) {
       if (porDocOcr.length === 1) {
         res[e.id] = { nivel: 'doc_comprobante', mov: porDocOcr[0], n: cands.length };
         return;
+      }
+    }
+    // v13.21: HORA DEL COMPROBANTE — el desambiguador para transferencias
+    // bancarias (account_fund no trae el doc del remitente, pero la foto
+    // trae fecha y hora: caso Agustina, 43 segundos de diferencia).
+    if (ocrE && ocrE.fecha && cands.length >= 1) {
+      var fOcr = new Date(ocrE.fecha).getTime();
+      if (!isNaN(fOcr)) {
+        var cerca = [];
+        for (var hi = 0; hi < cands.length; hi++) {
+          var fmH = new Date(cands[hi].fecha).getTime();
+          if (!isNaN(fmH) && Math.abs(fmH - fOcr) <= 30 * 60000) {
+            cerca.push({ mov: cands[hi], difMin: Math.round(Math.abs(fmH - fOcr) / 60000) });
+          }
+        }
+        if (cerca.length === 1) {
+          res[e.id] = { nivel: 'hora_comprobante', mov: cerca[0].mov, n: cands.length, difMin: cerca[0].difMin };
+          return;
+        }
       }
     }
     if (cands.length === 1 && (entregasPorMov[cands[0].mp_id] || []).length === 1) {
@@ -28219,7 +28306,11 @@ function _ltCalcularMatches(entregas) {
 function _ltMovTxt(m) {
   var f = new Date(m.fecha);
   var ftxt = isNaN(f.getTime()) ? '' : (f.toLocaleDateString('es-AR') + ' ' + f.toTimeString().slice(0, 5));
-  var quien = m.payer_email || (m.payer_doc ? ('doc ' + m.payer_doc) : 'pagador sin datos');
+  // v13.21: en account_fund el payer es siempre la cuenta TCK (MP no
+  // identifica al remitente bancario) — mostrar el tipo, no un dato falso.
+  var quien = (m.operation_type === 'account_fund')
+    ? 'transferencia bancaria (CVU)'
+    : (m.payer_email || (m.payer_doc ? ('doc ' + m.payer_doc) : 'pagador sin datos'));
   return '$' + Math.round(parseFloat(m.monto) || 0).toLocaleString('es-AR') + ' · ' + quien + ' · ' + ftxt;
 }
 
@@ -28250,7 +28341,7 @@ function _ltPintar() {
   html += '<div style="flex:1;min-width:110px;text-align:center;"><div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;">A conciliar</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#1B5E20;">' + fmt(totalPend) + '</div><div style="font-size:11px;color:#2E7D32;">' + pend.length + ' transferencia' + (pend.length === 1 ? '' : 's') + '</div></div>';
   if (sinFoto.length) html += '<div style="flex:1;min-width:100px;text-align:center;background:#FFEBEE;border-radius:10px;padding:6px;"><div style="font-size:10px;color:#C62828;text-transform:uppercase;letter-spacing:.8px;">Sin comprobante</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#C62828;">' + sinFoto.length + '</div></div>';
   if (disputa.length) html += '<div style="flex:1;min-width:100px;text-align:center;background:#FFF3E0;border-radius:10px;padding:6px;"><div style="font-size:10px;color:#E65100;text-transform:uppercase;letter-spacing:.8px;">⚠️ Reclamar</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#E65100;">' + disputa.length + '</div></div>';
-  var conMatch = pend.filter(function(e) { var m = _ltState.match[e.id]; return m && (m.nivel === 'exacto' || m.nivel === 'doc_comprobante' || m.nivel === 'doc' || m.nivel === 'unico'); }).length;
+  var conMatch = pend.filter(function(e) { var m = _ltState.match[e.id]; return m && (m.nivel === 'exacto' || m.nivel === 'doc_comprobante' || m.nivel === 'hora_comprobante' || m.nivel === 'doc' || m.nivel === 'unico'); }).length;
   if (conMatch) html += '<div style="flex:1;min-width:100px;text-align:center;background:#E8F5E9;border-radius:10px;padding:6px;"><div style="font-size:10px;color:#1B5E20;text-transform:uppercase;letter-spacing:.8px;">✅ En MP</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#1B5E20;">' + conMatch + '</div></div>';
   html += '</div>';
 
@@ -28311,8 +28402,13 @@ function _ltPintar() {
       s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:2.5px solid #1B5E20;border-radius:9px;font-size:12px;font-weight:800;color:#1B5E20;">🟢 EXACTO — el nº de operación del comprobante (' + mt.op + ') está en MP: ' + _ltMovTxt(mt.mov) + '</div>';
     } else if (mt.nivel === 'doc_comprobante') {
       s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:2px solid #2E7D32;border-radius:9px;font-size:12px;font-weight:700;color:#1B5E20;">✅ El CUIT del comprobante identifica el movimiento: ' + _ltMovTxt(mt.mov) + '</div>';
+    } else if (mt.nivel === 'hora_comprobante') {
+      s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:2px solid #2E7D32;border-radius:9px;font-size:12px;font-weight:700;color:#1B5E20;">✅ La <b>hora del comprobante</b> coincide con el movimiento (±' + mt.difMin + ' min): ' + _ltMovTxt(mt.mov) + '</div>';
     } else if (mt.nivel === 'doc') {
-      s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:2px solid #2E7D32;border-radius:9px;font-size:12px;font-weight:700;color:#1B5E20;">✅ Acreditada en MP — <b>coincide el CUIT/DNI del cliente</b>: ' + _ltMovTxt(mt.mov) + '</div>';
+      var docTxt = mt.porAlias
+        ? '✅ <b>Pagador habitual del cliente</b> (' + (mt.veces || 1) + ' pago' + ((mt.veces || 1) === 1 ? '' : 's') + ' previo' + ((mt.veces || 1) === 1 ? '' : 's') + '): '
+        : '✅ Acreditada en MP — <b>coincide el CUIT/DNI del cliente</b>: ';
+      s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:2px solid #2E7D32;border-radius:9px;font-size:12px;font-weight:700;color:#1B5E20;">' + docTxt + _ltMovTxt(mt.mov) + '</div>';
     } else if (mt.nivel === 'unico') {
       s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:1.5px solid #66BB6A;border-radius:9px;font-size:12px;font-weight:700;color:#1B5E20;">✅ Acreditada en MP: ' + _ltMovTxt(mt.mov) + '</div>';
     } else if (mt.nivel === 'ambiguo') {
@@ -28325,7 +28421,7 @@ function _ltPintar() {
     }
     s += '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">';
     s += btnFoto(e);
-    if (matchSeguro && (mt.nivel === 'exacto' || mt.nivel === 'doc_comprobante' || mt.nivel === 'doc' || mt.nivel === 'unico')) {
+    if (matchSeguro && (mt.nivel === 'exacto' || mt.nivel === 'doc_comprobante' || mt.nivel === 'hora_comprobante' || mt.nivel === 'doc' || mt.nivel === 'unico')) {
       s += '<button onclick="transferConciliarConMatch(\'' + e.id + '\',\'' + mt.mov.mp_id + '\')" style="flex:1;min-width:120px;padding:9px;background:#2E7D32;color:#fff;border:none;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 0 0 2px #A5D6A7;">✓ Conciliar (match MP)</button>';
     } else {
       s += '<button onclick="transferConciliar(\'' + e.id + '\',true)" style="flex:1;min-width:120px;padding:9px;background:#2E7D32;color:#fff;border:none;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">✓ Conciliada</button>';
@@ -28355,6 +28451,8 @@ function _ltPintar() {
       s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:2.5px solid #1B5E20;border-radius:9px;font-size:12px;font-weight:800;color:#1B5E20;">🟢 EXACTO — el nº de operación del comprobante está en MP: ' + _ltMovTxt(mtD.mov) + '</div>';
     } else if (mtD.nivel === 'doc_comprobante') {
       s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:2px solid #2E7D32;border-radius:9px;font-size:12px;font-weight:700;color:#1B5E20;">✅ El CUIT del comprobante identifica el movimiento: ' + _ltMovTxt(mtD.mov) + '</div>';
+    } else if (mtD.nivel === 'hora_comprobante') {
+      s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:2px solid #2E7D32;border-radius:9px;font-size:12px;font-weight:700;color:#1B5E20;">✅ La hora del comprobante coincide (±' + mtD.difMin + ' min): ' + _ltMovTxt(mtD.mov) + '</div>';
     } else if (mtD.nivel === 'doc') {
       s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:2px solid #2E7D32;border-radius:9px;font-size:12px;font-weight:700;color:#1B5E20;">✅ Ahora aparece en MP — <b>coincide el CUIT/DNI del cliente</b>: ' + _ltMovTxt(mtD.mov) + '</div>';
     } else if (mtD.nivel === 'unico') {
@@ -28414,7 +28512,163 @@ function _ltPintar() {
   if (!rows.length) {
     html += '<div class="planilla-empty">📲 Nada que mostrar con estos filtros.</div>';
   }
+
+  // ── v13.21: 💰 INGRESOS MP SIN ASIGNAR (huérfanos) ──
+  // Plata que entró (MP o banco) y no está vinculada a ninguna entrega ni
+  // es candidata de ninguna. Responde "ya te pagué": se busca acá, se
+  // asigna a la entrega y queda conciliada + aprendido el pagador.
+  var huerf = _ltHuerfanos();
+  if (huerf.length) {
+    var totH = huerf.reduce(function(s2, m) { return s2 + (parseFloat(m.monto) || 0); }, 0);
+    html += '<details style="margin-top:16px;"><summary style="cursor:pointer;font-family:Barlow Condensed,sans-serif;font-weight:900;font-size:15px;color:#795500;padding:8px 0;">💰 Ingresos MP sin asignar (' + huerf.length + ') · ' + fmt(totH) + '</summary>';
+    html += '<div style="font-size:12px;color:var(--text3);margin:4px 0 10px;line-height:1.4;">Transferencias que entraron y nadie reclamó (sin comprobante o sin registrar). Si un cliente dice "ya te pagué", buscalo acá por monto o CUIT y asignalo a su entrega.</div>';
+    huerf.slice(0, 30).forEach(function(m) {
+      var fH = new Date(m.fecha);
+      var fTxt = isNaN(fH.getTime()) ? '—' : (fH.toLocaleDateString('es-AR') + ' ' + fH.toTimeString().slice(0, 5));
+      var quien = (m.operation_type === 'account_fund')
+        ? '🏦 Transferencia bancaria (CVU) — remitente no identificado por MP'
+        : ('📱 MP de ' + (m.payer_email || ('doc ' + (m.payer_doc || '?'))));
+      var sug = '';
+      if (m.operation_type !== 'account_fund' && m.payer_doc) {
+        var pdH = _ltSoloDigitos(m.payer_doc);
+        var nom = _ltState.nombrePorDoc[pdH] || '';
+        if (!nom) {
+          for (var xk in _ltState.alias) {
+            if (_ltState.alias[xk][pdH]) { nom = _ltState.nombrePorXid[xk] || ''; if (nom) nom += ' (pagador habitual)'; break; }
+          }
+        }
+        if (nom) sug = '<div style="font-size:12px;font-weight:800;color:#1B5E20;margin-top:4px;">💡 Puede ser de: ' + nom.replace(/</g, '&lt;') + '</div>';
+      }
+      html += '<div style="background:#FFFDF5;border:1.5px solid #FFE082;border-radius:12px;padding:11px 13px;margin-bottom:9px;">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">';
+      html += '<div style="min-width:0;"><div style="font-size:13px;font-weight:700;color:var(--text);">' + quien + '</div>';
+      html += '<div style="font-size:11px;color:var(--text3);">' + fTxt + (m.status === 'in_process' ? ' · ⏳ en proceso' : '') + '</div>' + sug + '</div>';
+      html += '<div style="text-align:right;flex-shrink:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:#795500;">' + fmt(parseFloat(m.monto) || 0) + '</div></div>';
+      html += '</div>';
+      html += '<button onclick="ltAsignarAbrir(\'' + m.mp_id + '\')" style="width:100%;margin-top:9px;padding:9px;background:#fff;color:#795500;border:1.5px solid #FFB300;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">🔗 Asignar a una entrega</button>';
+      html += '</div>';
+    });
+    if (huerf.length > 30) html += '<div style="font-size:12px;color:var(--text3);text-align:center;padding:6px;">… y ' + (huerf.length - 30) + ' más (los más recientes primero)</div>';
+    html += '</details>';
+  }
   el.innerHTML = html;
+}
+
+// v13.21: movimientos entrantes sin vincular y que no son candidato de nadie
+function _ltHuerfanos() {
+  var usados = {};
+  Object.keys(_ltState.match).forEach(function(k) {
+    var m = _ltState.match[k];
+    if (m && m.mov) usados[String(m.mov.mp_id)] = true;
+  });
+  return _ltState.mp.filter(function(m) {
+    if (m.match_entrega_id) return false;
+    if (m.operation_type !== 'money_transfer' && m.operation_type !== 'account_fund') return false;
+    return !usados[String(m.mp_id)];
+  }).sort(function(a, b) { return String(b.fecha || '').localeCompare(String(a.fecha || '')); });
+}
+
+// v13.21: APRENDIZAJE — si el que pagó no es el cliente, recordarlo.
+// La próxima transferencia de ese CUIT matchea como pagador habitual.
+async function _ltAprenderAlias(entregaId, mov) {
+  try {
+    if (!mov || mov.operation_type !== 'money_transfer' || !mov.payer_doc) return;
+    var pd = _ltSoloDigitos(mov.payer_doc);
+    var xid = _ltState.xidPorEntrega[entregaId];
+    if (!pd || !xid) return;
+    if (pd === (_ltState.docPorEntrega[entregaId] || '')) return; // es el propio cliente
+    var q = 'mp_pagadores_alias?payer_doc=eq.' + pd + '&cliente_xubio_id=eq.' + encodeURIComponent(xid);
+    var ya = await sbFetch(q + '&select=veces') || [];
+    if (ya.length) {
+      await sbFetch(q, {
+        method: 'PATCH',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ veces: (parseInt(ya[0].veces, 10) || 1) + 1, actualizado_at: new Date().toISOString() })
+      });
+    } else {
+      await sbFetch('mp_pagadores_alias', {
+        method: 'POST',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ payer_doc: pd, cliente_xubio_id: String(xid), payer_nombre: mov.payer_email || null, veces: 1 })
+      });
+    }
+  } catch (_eAp) { /* aprendizaje nunca rompe la conciliación */ }
+}
+
+// v13.21: ASIGNADOR MANUAL — vincular un ingreso huérfano a una entrega
+function ltAsignarAbrir(mpId) {
+  var mov = null;
+  for (var i = 0; i < _ltState.mp.length; i++) { if (String(_ltState.mp[i].mp_id) === String(mpId)) { mov = _ltState.mp[i]; break; } }
+  if (!mov) { toast('No encontré el movimiento', 'err'); return; }
+  var noConc = _ltState.rows.filter(function(e) { return !e.transfer_conciliada; });
+  var prev = document.getElementById('lt-asignar-modal');
+  if (prev) prev.remove();
+  var m = document.createElement('div');
+  m.id = 'lt-asignar-modal';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100000;display:flex;align-items:center;justify-content:center;padding:18px;';
+  var inner = '<div style="background:#fff;border-radius:14px;max-width:430px;width:100%;max-height:80vh;display:flex;flex-direction:column;padding:18px;">';
+  inner += '<div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:#795500;margin-bottom:4px;">🔗 Asignar ' + _ltMovTxt(mov).replace(/</g, '&lt;') + '</div>';
+  inner += '<div style="font-size:12px;color:var(--text3);margin-bottom:10px;">Elegí la entrega que corresponde a esta plata. Queda conciliada y vinculada.</div>';
+  inner += '<input id="lt-asg-q" type="text" placeholder="🔍 Buscar cliente..." style="padding:10px;border:1.5px solid #E0E0E0;border-radius:10px;font-family:inherit;font-size:14px;margin-bottom:10px;">';
+  inner += '<div id="lt-asg-lista" style="overflow-y:auto;flex:1;min-height:120px;"></div>';
+  inner += '<button id="lt-asg-cerrar" style="margin-top:10px;padding:11px;background:#eee;color:#333;border:none;border-radius:10px;font-weight:700;cursor:pointer;">Cerrar</button>';
+  inner += '</div>';
+  m.innerHTML = inner;
+  document.body.appendChild(m);
+  function pintarLista(q2) {
+    var ql = (q2 || '').toLowerCase();
+    var lst = noConc.filter(function(e) { return !ql || String(e.cliente || '').toLowerCase().indexOf(ql) !== -1; });
+    var h = '';
+    lst.slice(0, 40).forEach(function(e) {
+      var mE = _ltMontoTransfer(e);
+      var fE = e.fecha_entrega ? new Date(e.fecha_entrega).toLocaleDateString('es-AR') : '—';
+      var igual = Math.abs(mE - (parseFloat(mov.monto) || 0)) <= 1;
+      h += '<div onclick="ltAsignarElegir(\'' + mpId + '\',\'' + e.id + '\')" style="padding:10px 12px;border:1.5px solid ' + (igual ? '#66BB6A' : '#E0E0E0') + ';border-radius:10px;margin-bottom:7px;cursor:pointer;background:' + (igual ? '#F1F8E9' : '#fff') + ';">';
+      h += '<div style="font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:800;color:var(--text);">' + (e.cliente || '—') + (igual ? ' <span style="font-size:11px;color:#2E7D32;">✓ mismo monto</span>' : '') + '</div>';
+      h += '<div style="font-size:11px;color:var(--text3);">$' + Math.round(mE).toLocaleString('es-AR') + ' · ' + fE + ' · 🚚 ' + (e.chofer || '—') + (e.transfer_disputa ? ' · ⚠️ en reclamo' : '') + '</div>';
+      h += '</div>';
+    });
+    if (!lst.length) h = '<div style="text-align:center;color:var(--text3);padding:14px;font-size:13px;">Sin entregas pendientes que coincidan.</div>';
+    document.getElementById('lt-asg-lista').innerHTML = h;
+  }
+  pintarLista('');
+  document.getElementById('lt-asg-q').oninput = function() { pintarLista(this.value); };
+  document.getElementById('lt-asg-cerrar').onclick = function() { m.remove(); };
+  m.onclick = function(ev) { if (ev.target === m) m.remove(); };
+}
+
+async function ltAsignarElegir(mpId, entregaId) {
+  var mov = null, ent = null;
+  for (var i = 0; i < _ltState.mp.length; i++) { if (String(_ltState.mp[i].mp_id) === String(mpId)) { mov = _ltState.mp[i]; break; } }
+  for (var j = 0; j < _ltState.rows.length; j++) { if (_ltState.rows[j].id === entregaId) { ent = _ltState.rows[j]; break; } }
+  if (!mov || !ent) { toast('❌ No encontré los datos', 'err'); return; }
+  var mE = _ltMontoTransfer(ent);
+  var mM = parseFloat(mov.monto) || 0;
+  if (Math.abs(mE - mM) > 1) {
+    var sigue = confirm('⚠️ Los montos NO coinciden:\n\nMovimiento MP: $' + Math.round(mM).toLocaleString('es-AR') + '\nEntrega de ' + (ent.cliente || '?') + ': $' + Math.round(mE).toLocaleString('es-AR') + '\n\n¿Asignar igual? (pago parcial / juntado)');
+    if (!sigue) return;
+  }
+  try {
+    await sbFetch('mp_movimientos?mp_id=eq.' + mpId, {
+      method: 'PATCH',
+      headers: { 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ match_entrega_id: entregaId })
+    });
+    await sbFetch('entregas?id=eq.' + entregaId, {
+      method: 'PATCH',
+      headers: { 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ transfer_conciliada: true, transfer_conciliada_en: new Date().toISOString(), transfer_disputa: null, transfer_disputa_en: null })
+    });
+    _ltAprenderAlias(entregaId, mov);
+    var md = document.getElementById('lt-asignar-modal');
+    if (md) md.remove();
+    toast('✅ Asignada y conciliada', 'ok');
+    var el = document.getElementById('logistica-contenido');
+    if (el) renderLogisticaTransferencias(el);
+  } catch (e) {
+    console.error('ltAsignarElegir:', e);
+    toast('❌ Error al asignar', 'err');
+  }
 }
 
 // v13.18: conciliar Y vincular el movimiento MP (match_entrega_id)
@@ -28432,6 +28686,12 @@ async function transferConciliarConMatch(entregaId, mpId) {
         body: JSON.stringify({ match_entrega_id: entregaId })
       });
     } catch (_eV) { console.warn('vínculo MP no guardado', _eV); }
+    // v13.21: aprender el pagador si no es el propio cliente
+    try {
+      var movAp = null;
+      for (var ai2 = 0; ai2 < _ltState.mp.length; ai2++) { if (String(_ltState.mp[ai2].mp_id) === String(mpId)) { movAp = _ltState.mp[ai2]; break; } }
+      if (movAp) _ltAprenderAlias(entregaId, movAp);
+    } catch (_eAp2) {}
     toast('✅ Conciliada · vinculada a MP', 'ok');
     var el = document.getElementById('logistica-contenido');
     if (el) renderLogisticaTransferencias(el);
