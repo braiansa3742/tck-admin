@@ -1,5 +1,22 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.19 — 10/06/2026
+     v13.19: MATCH MP v2 — FIABILIDAD (pedido de Braian: "que no muestre
+       algo que no es real"). Tres cambios sobre v13.18:
+       1. CLASIFICACIÓN GLOBAL bidireccional: un movimiento MP jamás
+          aparece verde en dos entregas (caso "compró dos veces el mismo
+          monto": medidos 5 movimientos disputados en 4 días). Verde solo
+          si entrega↔movimiento se eligen mutuamente en exclusiva.
+       2. DESAMBIGUADOR POR DOCUMENTO: payer_doc del movimiento vs CUIT
+          (solo dígitos) del cliente Xubio del pedido (lookup pedidos_zona
+          → clientes_xubio, lotes de 40, fail-open). Si coincide y es
+          exclusivo → verde reforzado "coincide el CUIT/DNI del cliente"
+          (resuelve montos repetidos; 12/29 entregas en la medición).
+       3. VENTANA REALISTA [-48h, +12h] (antes ±3 días): medición 10/06,
+          100% de transferencias legítimas dentro, 81% en ±12h. Menos
+          ventana = menos candidatos falsos.
+       Botón "Conciliar (match MP)" SOLO en niveles verdes; amarillo
+       muestra el motivo ("compartido con otra entrega del mismo monto").
      TCK ADMIN — v13.18 — 10/06/2026
      v13.18: MATCH AUTOMÁTICO CONTRA MERCADO PAGO en el tab 💸.
        Cruza cada transferencia pendiente contra mp_movimientos (sync Apps
@@ -27979,7 +27996,7 @@ async function transferConciliar(id, conciliar) {
 // Columnas nuevas en entregas: transfer_exportada_en, transfer_disputa,
 // transfer_disputa_en (SQL corrido 10/06/2026).
 
-var _ltState = { rows: [], mp: [], chofer: '', q: '', el: null };
+var _ltState = { rows: [], mp: [], docPorEntrega: {}, match: {}, chofer: '', q: '', el: null };
 
 function _ltMontoTransfer(e) {
   var m = parseFloat(e.monto) || 0;
@@ -28025,6 +28042,31 @@ async function renderLogisticaTransferencias(el) {
       var mpRows = await sbFetch('mp_movimientos?fecha=gte.' + encodeURIComponent(d14) + '&order=fecha.desc&select=mp_id,fecha,monto,operation_type,status,payer_email,payer_doc,match_entrega_id&limit=1000') || [];
       _ltState.mp = mpRows.filter(function(m) { return m && m.payer_doc !== '33717416959'; });
     } catch (_eMp) { _ltState.mp = []; }
+    // v13.19: CUIT/DNI del cliente Xubio por entrega (para el match por doc).
+    // Fail-open: si falla, el match degrada a "unico bidireccional".
+    _ltState.docPorEntrega = {};
+    try {
+      var noConc = rows.filter(function(e) { return !e.transfer_conciliada; });
+      var pidsLk = [];
+      noConc.forEach(function(e) { var p = String(e.pedido_id || ''); if (p && pidsLk.indexOf(p) === -1) pidsLk.push(p); });
+      var xidPorPedido = {};
+      for (var li = 0; li < pidsLk.length; li += 40) {
+        var pzl = await _lzSbFetch('pedidos_zona?select=pedido_id,cliente_xubio_id&pedido_id=in.' + encodeURIComponent(_lzInList(pidsLk.slice(li, li + 40)))) || [];
+        pzl.forEach(function(p) { if (p.cliente_xubio_id) xidPorPedido[String(p.pedido_id)] = String(p.cliente_xubio_id); });
+      }
+      var xidsLk = [];
+      Object.keys(xidPorPedido).forEach(function(k) { var v = xidPorPedido[k]; if (xidsLk.indexOf(v) === -1) xidsLk.push(v); });
+      var cuitPorXid = {};
+      for (var lj = 0; lj < xidsLk.length; lj += 40) {
+        var cxl = await _lzSbFetch('clientes_xubio?select=id,cuit&id=in.' + encodeURIComponent(_lzInList(xidsLk.slice(lj, lj + 40)))) || [];
+        cxl.forEach(function(c) { var d = _ltSoloDigitos(c.cuit); if (d) cuitPorXid[String(c.id)] = d; });
+      }
+      noConc.forEach(function(e) {
+        var xid = xidPorPedido[String(e.pedido_id || '')];
+        if (xid && cuitPorXid[xid]) _ltState.docPorEntrega[e.id] = cuitPorXid[xid];
+      });
+    } catch (_eDoc) { _ltState.docPorEntrega = {}; }
+    _ltCalcularMatches(rows.filter(function(e) { return !e.transfer_conciliada; }));
     _ltPintar();
     _ltBadge();
   } catch (e) {
@@ -28033,24 +28075,79 @@ async function renderLogisticaTransferencias(el) {
   }
 }
 
-// v13.18: candidatos MP para una entrega — monto ±$1, fecha ±3 días,
-// no usados ya por otra entrega. Ordenados por cercanía de fecha.
-function _ltMatchPara(e) {
-  var monto = _ltMontoTransfer(e);
-  if (!(monto > 0) || !e.fecha_entrega) return [];
-  var fe = new Date(e.fecha_entrega).getTime();
-  if (isNaN(fe)) return [];
-  var DIA = 86400000;
-  var cands = _ltState.mp.filter(function(m) {
-    if (m.match_entrega_id && m.match_entrega_id !== e.id) return false;
-    var fm = new Date(m.fecha).getTime();
-    if (isNaN(fm) || Math.abs(fm - fe) > 3 * DIA) return false;
-    return Math.abs((parseFloat(m.monto) || 0) - monto) <= 1;
+// v13.19: MOTOR DE MATCH — clasificación GLOBAL (no por entrega aislada).
+// Reglas, en orden:
+//   🟢 doc:    UN candidato cuyo payer_doc == CUIT/DNI del cliente Xubio
+//              del pedido, y ese movimiento no tiene doc-match con otra
+//              entrega → certeza máxima (resuelve montos repetidos).
+//   🟢 unico:  la entrega tiene UN solo candidato Y ese movimiento
+//              matchea UNA sola entrega (bidireccional). Mata el doble
+//              verde del caso "compró dos veces": un movimiento jamás
+//              aparece verde en dos entregas.
+//   🟡 ambiguo: candidatos compartidos o múltiples → decide Valentina.
+//   (nada):  sin candidatos.
+// Ventana realista [-48h, +12h] de la entrega (datos 10/06: el 100% de
+// las transferencias legítimas cae ahí; ±3 días solo sumaba ruido).
+function _ltSoloDigitos(s) { return String(s || '').replace(/[^0-9]/g, ''); }
+
+function _ltCalcularMatches(entregas) {
+  var H = 3600000;
+  var paresPorEntrega = {};
+  var entregasPorMov = {};
+  var docMovsPorEntrega = {};
+  var docEntregasPorMov = {};
+
+  entregas.forEach(function(e) {
+    paresPorEntrega[e.id] = [];
+    var monto = _ltMontoTransfer(e);
+    if (!(monto > 0) || !e.fecha_entrega) return;
+    var fe = new Date(e.fecha_entrega).getTime();
+    if (isNaN(fe)) return;
+    var doc = _ltState.docPorEntrega[e.id] || '';
+    var cands = _ltState.mp.filter(function(m) {
+      if (m.match_entrega_id && m.match_entrega_id !== e.id) return false;
+      var fm = new Date(m.fecha).getTime();
+      if (isNaN(fm)) return false;
+      var dif = fm - fe;
+      if (dif < -48 * H || dif > 12 * H) return false;
+      return Math.abs((parseFloat(m.monto) || 0) - monto) <= 1;
+    });
+    cands.sort(function(x, y) {
+      return Math.abs(new Date(x.fecha).getTime() - fe) - Math.abs(new Date(y.fecha).getTime() - fe);
+    });
+    paresPorEntrega[e.id] = cands;
+    cands.forEach(function(m) {
+      (entregasPorMov[m.mp_id] = entregasPorMov[m.mp_id] || []).push(e.id);
+      if (doc && m.payer_doc && _ltSoloDigitos(m.payer_doc) === doc) {
+        (docMovsPorEntrega[e.id] = docMovsPorEntrega[e.id] || []).push(m);
+        docEntregasPorMov[m.mp_id] = (docEntregasPorMov[m.mp_id] || 0) + 1;
+      }
+    });
   });
-  cands.sort(function(x, y) {
-    return Math.abs(new Date(x.fecha).getTime() - fe) - Math.abs(new Date(y.fecha).getTime() - fe);
+
+  var res = {};
+  entregas.forEach(function(e) {
+    var cands = paresPorEntrega[e.id] || [];
+    var docs = docMovsPorEntrega[e.id] || [];
+    if (docs.length === 1 && docEntregasPorMov[docs[0].mp_id] === 1) {
+      res[e.id] = { nivel: 'doc', mov: docs[0], n: cands.length };
+      return;
+    }
+    if (cands.length === 1 && (entregasPorMov[cands[0].mp_id] || []).length === 1) {
+      res[e.id] = { nivel: 'unico', mov: cands[0], n: 1 };
+      return;
+    }
+    if (cands.length >= 1) {
+      var disputado = false;
+      for (var di = 0; di < cands.length; di++) {
+        if ((entregasPorMov[cands[di].mp_id] || []).length > 1) { disputado = true; break; }
+      }
+      res[e.id] = { nivel: 'ambiguo', mov: cands[0], n: cands.length, disputado: disputado };
+      return;
+    }
+    res[e.id] = { nivel: 'nada', n: 0 };
   });
-  return cands;
+  _ltState.match = res;
 }
 
 function _ltMovTxt(m) {
@@ -28087,7 +28184,7 @@ function _ltPintar() {
   html += '<div style="flex:1;min-width:110px;text-align:center;"><div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;">A conciliar</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#1B5E20;">' + fmt(totalPend) + '</div><div style="font-size:11px;color:#2E7D32;">' + pend.length + ' transferencia' + (pend.length === 1 ? '' : 's') + '</div></div>';
   if (sinFoto.length) html += '<div style="flex:1;min-width:100px;text-align:center;background:#FFEBEE;border-radius:10px;padding:6px;"><div style="font-size:10px;color:#C62828;text-transform:uppercase;letter-spacing:.8px;">Sin comprobante</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#C62828;">' + sinFoto.length + '</div></div>';
   if (disputa.length) html += '<div style="flex:1;min-width:100px;text-align:center;background:#FFF3E0;border-radius:10px;padding:6px;"><div style="font-size:10px;color:#E65100;text-transform:uppercase;letter-spacing:.8px;">⚠️ Reclamar</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#E65100;">' + disputa.length + '</div></div>';
-  var conMatch = pend.filter(function(e) { return _ltMatchPara(e).length === 1; }).length;
+  var conMatch = pend.filter(function(e) { var m = _ltState.match[e.id]; return m && (m.nivel === 'doc' || m.nivel === 'unico'); }).length;
   if (conMatch) html += '<div style="flex:1;min-width:100px;text-align:center;background:#E8F5E9;border-radius:10px;padding:6px;"><div style="font-size:10px;color:#1B5E20;text-transform:uppercase;letter-spacing:.8px;">✅ En MP</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#1B5E20;">' + conMatch + '</div></div>';
   html += '</div>';
 
@@ -28130,19 +28227,24 @@ function _ltPintar() {
     s += '<div style="text-align:right;flex-shrink:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:' + accent + ';">' + fmt(monto) + '</div>';
     if (agingTxt) s += '<div style="font-size:11px;font-weight:800;color:' + agingColor + ';">⏱ ' + agingTxt + '</div>';
     s += '</div></div>';
-    // v13.18: match automático contra mp_movimientos
-    var mm = _ltMatchPara(e);
-    if (mm.length === 1) {
-      s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:1.5px solid #66BB6A;border-radius:9px;font-size:12px;font-weight:700;color:#1B5E20;">✅ Acreditada en MP: ' + _ltMovTxt(mm[0]) + '</div>';
-    } else if (mm.length > 1) {
-      s += '<div style="margin-top:8px;padding:8px 10px;background:#FFF8E1;border:1.5px solid #FFCA28;border-radius:9px;font-size:12px;font-weight:700;color:#795500;">🟡 ' + mm.length + ' movimientos MP compatibles (' + _ltMovTxt(mm[0]) + ' es el más cercano) — verificá con el comprobante</div>';
+    // v13.19: match clasificado globalmente (_ltCalcularMatches)
+    var mt = _ltState.match[e.id] || { nivel: 'nada', n: 0 };
+    if (mt.nivel === 'doc') {
+      s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:2px solid #2E7D32;border-radius:9px;font-size:12px;font-weight:700;color:#1B5E20;">✅ Acreditada en MP — <b>coincide el CUIT/DNI del cliente</b>: ' + _ltMovTxt(mt.mov) + '</div>';
+    } else if (mt.nivel === 'unico') {
+      s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:1.5px solid #66BB6A;border-radius:9px;font-size:12px;font-weight:700;color:#1B5E20;">✅ Acreditada en MP: ' + _ltMovTxt(mt.mov) + '</div>';
+    } else if (mt.nivel === 'ambiguo') {
+      var txtAmb = mt.disputado
+        ? '🟡 $' + Math.round(_ltMontoTransfer(e)).toLocaleString('es-AR') + ' figura en MP pero <b>compartido con otra entrega del mismo monto</b> — verificá con el comprobante cuál es cuál'
+        : '🟡 ' + mt.n + ' movimientos MP compatibles (' + _ltMovTxt(mt.mov) + ' es el más cercano) — verificá con el comprobante';
+      s += '<div style="margin-top:8px;padding:8px 10px;background:#FFF8E1;border:1.5px solid #FFCA28;border-radius:9px;font-size:12px;font-weight:700;color:#795500;">' + txtAmb + '</div>';
     } else if (dias !== null && dias >= 2) {
-      s += '<div style="margin-top:8px;padding:8px 10px;background:#FAFAFA;border:1.5px dashed #C62828;border-radius:9px;font-size:12px;font-weight:700;color:#C62828;">❌ Sin rastro en MP (monto/fecha ±3 días)</div>';
+      s += '<div style="margin-top:8px;padding:8px 10px;background:#FAFAFA;border:1.5px dashed #C62828;border-radius:9px;font-size:12px;font-weight:700;color:#C62828;">❌ Sin rastro en MP (monto ±$1, desde 48h antes de la entrega)</div>';
     }
     s += '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">';
     s += btnFoto(e);
-    if (mm.length === 1) {
-      s += '<button onclick="transferConciliarConMatch(\'' + e.id + '\',\'' + mm[0].mp_id + '\')" style="flex:1;min-width:120px;padding:9px;background:#2E7D32;color:#fff;border:none;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 0 0 2px #A5D6A7;">✓ Conciliar (match MP)</button>';
+    if (mt.nivel === 'doc' || mt.nivel === 'unico') {
+      s += '<button onclick="transferConciliarConMatch(\'' + e.id + '\',\'' + mt.mov.mp_id + '\')" style="flex:1;min-width:120px;padding:9px;background:#2E7D32;color:#fff;border:none;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 0 0 2px #A5D6A7;">✓ Conciliar (match MP)</button>';
     } else {
       s += '<button onclick="transferConciliar(\'' + e.id + '\',true)" style="flex:1;min-width:120px;padding:9px;background:#2E7D32;color:#fff;border:none;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">✓ Conciliada</button>';
     }
@@ -28162,10 +28264,14 @@ function _ltPintar() {
     s += '<div style="font-size:12px;color:#E65100;font-weight:700;margin-top:4px;">⚠️ ' + String(e.transfer_disputa || '').replace(/</g, '&lt;') + (diasR !== null ? ' · en reclamo hace ' + diasR + ' día' + (diasR === 1 ? '' : 's') : '') + '</div></div>';
     s += '<div style="text-align:right;flex-shrink:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:#E65100;">' + fmt(monto) + '</div></div>';
     s += '</div>';
-    // v13.18: si el movimiento aparece en MP después del reclamo, avisar
-    var mmD = _ltMatchPara(e);
-    if (mmD.length >= 1) {
-      s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:1.5px solid #66BB6A;border-radius:9px;font-size:12px;font-weight:700;color:#1B5E20;">✅ Ahora aparece en MP: ' + _ltMovTxt(mmD[0]) + (mmD.length > 1 ? ' (+' + (mmD.length - 1) + ' más)' : '') + '</div>';
+    // v13.19: si el movimiento aparece en MP después del reclamo, avisar
+    var mtD = _ltState.match[e.id] || { nivel: 'nada' };
+    if (mtD.nivel === 'doc') {
+      s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:2px solid #2E7D32;border-radius:9px;font-size:12px;font-weight:700;color:#1B5E20;">✅ Ahora aparece en MP — <b>coincide el CUIT/DNI del cliente</b>: ' + _ltMovTxt(mtD.mov) + '</div>';
+    } else if (mtD.nivel === 'unico') {
+      s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:1.5px solid #66BB6A;border-radius:9px;font-size:12px;font-weight:700;color:#1B5E20;">✅ Ahora aparece en MP: ' + _ltMovTxt(mtD.mov) + '</div>';
+    } else if (mtD.nivel === 'ambiguo') {
+      s += '<div style="margin-top:8px;padding:8px 10px;background:#FFF8E1;border:1.5px solid #FFCA28;border-radius:9px;font-size:12px;font-weight:700;color:#795500;">🟡 Hay ' + mtD.n + ' movimiento' + (mtD.n === 1 ? '' : 's') + ' MP compatible' + (mtD.n === 1 ? '' : 's') + (mtD.disputado ? ' (compartido con otra entrega)' : '') + ' — verificá con el comprobante</div>';
     }
     s += '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">';
     s += btnFoto(e);
