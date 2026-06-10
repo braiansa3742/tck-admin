@@ -1,5 +1,22 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.17 — 10/06/2026
+     v13.17: TAB 💸 TRANSFERENCIAS COMPLETO — conciliación + reclamo + export.
+       Opción A (decidida 10/06): las transferencias SALEN del Excel de
+       cobranzas del viaje (queda efectivo + cheques) y se exportan a Xubio
+       únicamente al conciliarse, desde el tab.
+       1. 📥 Exportar conciliadas: botón arriba del tab. Toma conciliadas
+          sin exportar (excluye mixtos), reserva números correlativos
+          (cobranzaReservarNumeros), arma el .xlsx con el MISMO formato del
+          Excel del viaje (LZ_COB_HEADERS, cuenta Mercadopago, fecha serial)
+          y marca transfer_exportada_en (batch) para no duplicar jamás.
+       2. ⚠️ No acreditó: tercer estado con motivo (transfer_disputa).
+          Sección RECLAMAR arriba con días en reclamo; acciones
+          ✅ Se resolvió → conciliar / ↩ Volver a pendiente.
+       3. Aging (⏱ hace N días, rojo >3) + filtro por chofer + buscador
+          por cliente + badge contador en el botón del tab (_ltBadge).
+       REQUIERE SQL (corrido 10/06): transfer_exportada_en, transfer_disputa,
+       transfer_disputa_en en entregas. AS sin cambios (reusa v25.40).
      TCK ADMIN — v13.16 — 09/06/2026
      v13.16: FIX PLANILLA DE CARGA / REMITO VET — "Pollo C" caia en Rebozados.
        Sintoma: en la planilla de Joan del 09/06, "Pollo C" figuraba bajo
@@ -25621,7 +25638,9 @@ async function lzConfirmarRendicionViaje() {
 // (Ventas → Cobranzas → Importar). Una fila por cobranza simple.
 //
 // Reglas (validadas contra datos reales):
-//   · Incluye entregas con forma_cobro IN (efectivo, transferencia).
+//   · Incluye entregas con forma_cobro IN (efectivo). v13.17: las
+//     TRANSFERENCIAS salen del Excel del viaje — se exportan desde el tab
+//     💸 Transferencias recién al conciliarse (Opción A, 10/06/2026).
 //   · Cheques: salen SOLO de cheques_recibidos (fuente con banco/número).
 //     Las entregas forma_cobro='cheque' NO generan línea propia.
 //   · Cobros MIXTOS (detalle_cobro con ≥2 medios) → carga manual (afuera).
@@ -25799,13 +25818,18 @@ async function lzArmarExcelCobranzas(btn) {
 
     // ── Clasificación ──
     var lineas = [];
-    var exc = { mixtas: 0, sinCliente: 0, importeCero: 0, chequeSinCliente: 0, chequeManual: 0, chequeCero: 0 };
+    var exc = { mixtas: 0, sinCliente: 0, importeCero: 0, chequeSinCliente: 0, chequeManual: 0, chequeCero: 0, transfersTab: 0 };
     var pedidosMixtos = {};
 
     entregas.forEach(function (e) {
       var pid = String(e.pedido_id);
       var parsed = _lzParseMixto(e.detalle_cobro);
       if (parsed.mixto) { exc.mixtas++; pedidosMixtos[pid] = true; return; }
+      // v13.17 (Opción A): las transferencias YA NO salen en el Excel del
+      // viaje. Se exportan desde el tab 💸 Transferencias recién cuando
+      // Valentina las concilia contra el banco/MP. Evita registrar en Xubio
+      // cobranzas de plata que nunca acreditó (y el doble export).
+      if (e.forma_cobro === 'transferencia') { exc.transfersTab++; return; }
       if (e.forma_cobro === 'cheque') return; // los cheques salen de cheques_recibidos
 
       var xid = xubioIdPorPedido[pid];
@@ -25926,7 +25950,8 @@ function lzModalCobranzas(d) {
   _lzCobInyectarCSS();
   var exc = d.exc || {};
   var totalAfuera = (exc.mixtas || 0) + (exc.sinCliente || 0) + (exc.importeCero || 0) +
-                    (exc.chequeSinCliente || 0) + (exc.chequeManual || 0) + (exc.chequeCero || 0);
+                    (exc.chequeSinCliente || 0) + (exc.chequeManual || 0) + (exc.chequeCero || 0) +
+                    (exc.transfersTab || 0);
 
   var html = '<div class="lz-cob-overlay" id="lz-cob-overlay" onclick="if(event.target===this)lzCerrarModalCobranzas()">';
   html += '<div class="lz-cob-card">';
@@ -25939,12 +25964,13 @@ function lzModalCobranzas(d) {
     html += '<div class="lz-cob-file">📄 ' + lzEsc(d.fname) + '</div>';
   } else {
     html += '<div class="lz-cob-title">⚠️ Sin cobranzas para exportar</div>';
-    html += '<div class="lz-cob-sub">No hubo entregas con cobro válido (efectivo / transferencia / cheque) en este viaje.</div>';
+    html += '<div class="lz-cob-sub">No hubo entregas con cobro válido (efectivo / cheque) en este viaje. Las transferencias se exportan desde el tab 💸 Transferencias al conciliarse.</div>';
   }
 
   if (totalAfuera > 0) {
     html += '<div class="lz-cob-excl-title">Quedaron afuera (carga manual):</div>';
     html += '<ul class="lz-cob-excl">';
+    if (exc.transfersTab)    html += '<li>💸 Transferencias: <b>' + exc.transfersTab + '</b> — se exportan desde el tab Transferencias al conciliarse (v13.17)</li>';
     if (exc.mixtas)          html += '<li>🔀 Cobros mixtos: <b>' + exc.mixtas + '</b></li>';
     if (exc.sinCliente)      html += '<li>👤 Sin cliente Xubio: <b>' + exc.sinCliente + '</b></li>';
     if (exc.importeCero)     html += '<li>⚠️ Importe en cero: <b>' + exc.importeCero + '</b></li>';
@@ -27656,6 +27682,7 @@ function logisticaSelTab(tab, btn) {
   document.querySelectorAll('.planilla-chofer-tab').forEach(b => b.classList.remove('sel'));
   if (btn) btn.classList.add('sel');
   renderLogistica();
+  _ltBadge(); // v13.17: refrescar contador de transferencias pendientes
 }
 
 // ── PARSEAR PRODUCTOS DEL DETALLE ─────────────────────────────
@@ -27926,87 +27953,411 @@ async function transferConciliar(id, conciliar) {
 // ══════════════════════════════════════════════════════════
 // v13.12 — PANEL DE TRANSFERENCIAS A CONCILIAR
 // ══════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════
+// v13.17 — TAB TRANSFERENCIAS: conciliación + reclamo + export Xubio
+// ══════════════════════════════════════════════════════
+// Flujo (Opción A, 10/06/2026):
+//   chofer cobra transferencia → foto → Valentina cruza contra banco/MP →
+//   ✓ Conciliada (la plata entró)  → 📥 Exportar a Excel Xubio (este tab)
+//   ⚠️ No acreditó (no entró)     → sección RECLAMAR hasta resolverse
+// El Excel del viaje YA NO incluye transferencias (solo efectivo + cheques).
+// Columnas nuevas en entregas: transfer_exportada_en, transfer_disputa,
+// transfer_disputa_en (SQL corrido 10/06/2026).
+
+var _ltState = { rows: [], chofer: '', q: '', el: null };
+
+function _ltMontoTransfer(e) {
+  var m = parseFloat(e.monto) || 0;
+  if (e.detalle_cobro) {
+    try { var d = JSON.parse(e.detalle_cobro); if (d && typeof d.transferencia !== 'undefined') return parseFloat(d.transferencia) || 0; } catch (_) {}
+  }
+  if (m > 0 && m < 1000) m = m * 1000;
+  return m;
+}
+
+function _ltDias(ts) {
+  if (!ts) return null;
+  var d = new Date(ts); if (isNaN(d.getTime())) return null;
+  return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000));
+}
+
+function _ltEsMixto(e) {
+  if (!e.detalle_cobro) return false;
+  try {
+    var obj = JSON.parse(e.detalle_cobro);
+    if (!obj || typeof obj !== 'object') return false;
+    var c = 0; for (var k in obj) { if (Object.prototype.hasOwnProperty.call(obj, k) && (Number(obj[k]) || 0) > 0) c++; }
+    return c >= 2;
+  } catch (_) { return false; }
+}
+
 async function renderLogisticaTransferencias(el) {
+  _ltState.el = el;
   el.innerHTML = '<div class="planilla-empty"><div class="loading-spinner" style="margin:0 auto 12px;"></div>Cargando transferencias...</div>';
   try {
-    var SEL = 'id,cliente,comercio,ciudad,monto,forma_cobro,detalle_cobro,comprobante_transfer,transfer_conciliada,transfer_conciliada_en,chofer,fecha_entrega,pedido_id';
-    // Dos consultas estándar (más robusto que un or):
-    //  q1 = cobradas por transferencia (incluye las que vienen SIN comprobante → rojo)
-    //  q2 = cualquier entrega con comprobante de transferencia (cobros mixtos)
+    var SEL = 'id,cliente,comercio,ciudad,monto,forma_cobro,detalle_cobro,comprobante_transfer,transfer_conciliada,transfer_conciliada_en,transfer_exportada_en,transfer_disputa,transfer_disputa_en,chofer,fecha_entrega,pedido_id';
     var q1 = await sbFetch('entregas?forma_cobro=eq.transferencia&estado=eq.entregado&order=fecha_entrega.desc&select=' + SEL + '&limit=400') || [];
     var q2 = await sbFetch('entregas?comprobante_transfer=not.is.null&estado=eq.entregado&order=fecha_entrega.desc&select=' + SEL + '&limit=400') || [];
     var _map = {};
     q1.concat(q2).forEach(function(e) { if (e && e.id) _map[e.id] = e; });
     var rows = Object.keys(_map).map(function(k) { return _map[k]; });
     rows.sort(function(a, b) { return String(b.fecha_entrega || '').localeCompare(String(a.fecha_entrega || '')); });
-    var fmt = function(n) { return '$' + Math.round(n).toLocaleString('es-AR'); };
-    function montoTransfer(e) {
-      var m = parseFloat(e.monto) || 0;
-      if (e.detalle_cobro) {
-        try { var d = JSON.parse(e.detalle_cobro); if (d && typeof d.transferencia !== 'undefined') return parseFloat(d.transferencia) || 0; } catch(_) {}
-      }
-      if (m > 0 && m < 1000) m = m * 1000;
-      return m;
-    }
-    if (!rows.length) {
-      el.innerHTML = '<div class="planilla-empty">📲 No hay transferencias registradas.<br><small style="color:var(--text3);">Aparecen acá cuando el chofer cobra por transferencia.</small></div>';
-      return;
-    }
-    var pend = rows.filter(function(e) { return !e.transfer_conciliada; });
-    var conc = rows.filter(function(e) { return e.transfer_conciliada; });
-    var sinFoto = pend.filter(function(e) { return !e.comprobante_transfer; });
-    var totalPend = pend.reduce(function(s, e) { return s + montoTransfer(e); }, 0);
-
-    var html = '';
-    html += '<div style="background:#E8F5E9;border-radius:12px;padding:12px 16px;margin-bottom:14px;display:flex;gap:12px;">';
-    html += '<div style="flex:1;text-align:center;"><div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;">A conciliar</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#1B5E20;">' + fmt(totalPend) + '</div><div style="font-size:11px;color:#2E7D32;">' + pend.length + ' transferencia' + (pend.length === 1 ? '' : 's') + '</div></div>';
-    if (sinFoto.length) html += '<div style="flex:1;text-align:center;background:#FFEBEE;border-radius:10px;padding:6px;"><div style="font-size:10px;color:#C62828;text-transform:uppercase;letter-spacing:.8px;">Sin comprobante</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#C62828;">' + sinFoto.length + '</div></div>';
-    html += '</div>';
-    html += '<div style="font-size:12px;color:var(--text3);margin-bottom:12px;line-height:1.4;">Mirá el comprobante y cruzalo contra el banco / Mercado Pago. Cuando confirmes que entró la plata, marcá <b>Conciliada</b>.</div>';
-
-    function card(e, esConc) {
-      var monto = montoTransfer(e);
-      var fecha = e.fecha_entrega ? new Date(e.fecha_entrega).toLocaleDateString('es-AR') : '—';
-      var tieneFoto = !!e.comprobante_transfer;
-      var accent = esConc ? '#2E7D32' : (tieneFoto ? '#1B5E20' : '#C62828');
-      var bg = esConc ? '#F1F8E9' : '#fff';
-      var s = '<div style="background:' + bg + ';border:1.5px solid #E0E0E0;border-left:4px solid ' + accent + ';border-radius:12px;padding:12px 14px;margin-bottom:10px;">';
-      s += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">';
-      s += '<div style="min-width:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:17px;font-weight:900;color:var(--text);">' + (e.cliente || '—') + '</div>';
-      s += '<div style="font-size:11px;color:var(--text3);">🚚 ' + (e.chofer || '—') + ' · 📍 ' + (e.ciudad || '—') + ' · ' + fecha + '</div></div>';
-      s += '<div style="text-align:right;flex-shrink:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:' + accent + ';">' + fmt(monto) + '</div></div>';
-      s += '</div>';
-      s += '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">';
-      if (tieneFoto) {
-        s += '<button onclick="_verComprobanteAdmin(\'' + String(e.comprobante_transfer).replace(/\x27/g, "%27") + '\',this)" style="flex:1;min-width:130px;padding:9px;background:#E8EAF6;color:#283593;border:none;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">📷 Ver comprobante</button>';
-      } else {
-        s += '<div style="flex:1;min-width:130px;padding:9px;background:#FFEBEE;color:#C62828;border-radius:9px;font-size:12px;font-weight:800;text-align:center;">⚠️ Sin comprobante</div>';
-      }
-      if (!esConc) {
-        s += '<button onclick="transferConciliar(\'' + e.id + '\',true)" style="flex:1;min-width:130px;padding:9px;background:#2E7D32;color:#fff;border:none;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">✓ Marcar conciliada</button>';
-      } else {
-        var cuando = e.transfer_conciliada_en ? new Date(e.transfer_conciliada_en).toLocaleDateString('es-AR') : '';
-        s += '<button onclick="transferConciliar(\'' + e.id + '\',false)" style="flex:1;min-width:130px;padding:9px;background:#fff;color:#2E7D32;border:1.5px solid #2E7D32;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">✅ Conciliada' + (cuando ? ' · ' + cuando : '') + ' · deshacer</button>';
-      }
-      s += '</div></div>';
-      return s;
-    }
-
-    if (pend.length) {
-      html += pend.map(function(e) { return card(e, false); }).join('');
-    } else {
-      html += '<div style="background:#E8F5E9;border-radius:12px;padding:18px;text-align:center;color:#2E7D32;font-weight:700;margin-bottom:14px;">✅ Todo conciliado</div>';
-    }
-    if (conc.length) {
-      html += '<details style="margin-top:8px;"><summary style="cursor:pointer;font-family:Barlow Condensed,sans-serif;font-weight:800;color:var(--text3);padding:8px 0;">✅ Conciliadas (' + conc.length + ')</summary>';
-      html += conc.slice(0, 50).map(function(e) { return card(e, true); }).join('');
-      html += '</details>';
-    }
-    el.innerHTML = html;
-  } catch(e) {
-    el.innerHTML = '<div class="planilla-empty">❌ Error cargando transferencias.<br><small style="color:var(--text3);">¿Corriste el SQL de v13.12 (columna transfer_conciliada + policy de lectura del bucket)?</small></div>';
+    _ltState.rows = rows;
+    _ltPintar();
+    _ltBadge();
+  } catch (e) {
+    el.innerHTML = '<div class="planilla-empty">❌ Error cargando transferencias.<br><small style="color:var(--text3);">¿Corriste el SQL de v13.17 (transfer_exportada_en / transfer_disputa)?</small></div>';
     console.error('renderLogisticaTransferencias:', e);
   }
+}
+
+function _ltFiltroChofer(v) { _ltState.chofer = v || ''; _ltPintar(); }
+function _ltFiltroQ(v) { _ltState.q = (v || '').toLowerCase(); _ltPintar(); }
+
+function _ltPintar() {
+  var el = _ltState.el; if (!el) return;
+  var fmt = function(n) { return '$' + Math.round(n).toLocaleString('es-AR'); };
+  var all = _ltState.rows;
+
+  var rows = all.filter(function(e) {
+    if (_ltState.chofer && (e.chofer || '') !== _ltState.chofer) return false;
+    if (_ltState.q && String(e.cliente || '').toLowerCase().indexOf(_ltState.q) === -1) return false;
+    return true;
+  });
+
+  var disputa = rows.filter(function(e) { return e.transfer_disputa && !e.transfer_conciliada; });
+  var pend    = rows.filter(function(e) { return !e.transfer_conciliada && !e.transfer_disputa; });
+  var conc    = rows.filter(function(e) { return e.transfer_conciliada; });
+  var sinFoto = pend.filter(function(e) { return !e.comprobante_transfer; });
+  var totalPend = pend.reduce(function(s, e) { return s + _ltMontoTransfer(e); }, 0);
+  var exportables = all.filter(function(e) { return e.transfer_conciliada && !e.transfer_exportada_en && !_ltEsMixto(e) && _ltMontoTransfer(e) > 0; });
+
+  var html = '';
+
+  html += '<div style="background:#E8F5E9;border-radius:12px;padding:12px 16px;margin-bottom:10px;display:flex;gap:10px;flex-wrap:wrap;">';
+  html += '<div style="flex:1;min-width:110px;text-align:center;"><div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;">A conciliar</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#1B5E20;">' + fmt(totalPend) + '</div><div style="font-size:11px;color:#2E7D32;">' + pend.length + ' transferencia' + (pend.length === 1 ? '' : 's') + '</div></div>';
+  if (sinFoto.length) html += '<div style="flex:1;min-width:100px;text-align:center;background:#FFEBEE;border-radius:10px;padding:6px;"><div style="font-size:10px;color:#C62828;text-transform:uppercase;letter-spacing:.8px;">Sin comprobante</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#C62828;">' + sinFoto.length + '</div></div>';
+  if (disputa.length) html += '<div style="flex:1;min-width:100px;text-align:center;background:#FFF3E0;border-radius:10px;padding:6px;"><div style="font-size:10px;color:#E65100;text-transform:uppercase;letter-spacing:.8px;">⚠️ Reclamar</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#E65100;">' + disputa.length + '</div></div>';
+  html += '</div>';
+
+  if (exportables.length) {
+    var totalExp = exportables.reduce(function(s, e) { return s + _ltMontoTransfer(e); }, 0);
+    html += '<button onclick="ltExportarConciliadas(this)" style="width:100%;padding:13px;margin-bottom:10px;background:var(--blue);color:#fff;border:none;border-radius:12px;font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:900;cursor:pointer;">📥 Exportar a Excel Xubio — ' + exportables.length + ' conciliada' + (exportables.length === 1 ? '' : 's') + ' · ' + fmt(totalExp) + '</button>';
+  }
+
+  var choferes = [];
+  all.forEach(function(e) { var c = e.chofer || ''; if (c && choferes.indexOf(c) === -1) choferes.push(c); });
+  choferes.sort();
+  html += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
+  html += '<select onchange="_ltFiltroChofer(this.value)" style="flex:1;padding:9px 10px;border:1.5px solid #E0E0E0;border-radius:9px;font-family:inherit;font-size:13px;background:#fff;">';
+  html += '<option value=""' + (!_ltState.chofer ? ' selected' : '') + '>🚚 Todos los choferes</option>';
+  choferes.forEach(function(c) { html += '<option value="' + c.replace(/"/g, '') + '"' + (_ltState.chofer === c ? ' selected' : '') + '>' + c + '</option>'; });
+  html += '</select>';
+  html += '<input type="text" placeholder="🔍 Cliente..." value="' + (_ltState.q || '').replace(/"/g, '') + '" oninput="_ltFiltroQ(this.value)" style="flex:1.4;padding:9px 10px;border:1.5px solid #E0E0E0;border-radius:9px;font-family:inherit;font-size:13px;">';
+  html += '</div>';
+
+  html += '<div style="font-size:12px;color:var(--text3);margin-bottom:12px;line-height:1.4;">Mirá el comprobante y cruzalo contra el banco / Mercado Pago. Si la plata entró → <b>Conciliada</b>. Si NO figura → <b>⚠️ No acreditó</b> y queda en Reclamar.</div>';
+
+  function btnFoto(e) {
+    if (e.comprobante_transfer) {
+      return '<button onclick="_verComprobanteAdmin(\'' + String(e.comprobante_transfer).replace(/\x27/g, "%27") + '\',this)" style="flex:1;min-width:120px;padding:9px;background:#E8EAF6;color:#283593;border:none;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">📷 Ver comprobante</button>';
+    }
+    return '<div style="flex:1;min-width:120px;padding:9px;background:#FFEBEE;color:#C62828;border-radius:9px;font-size:12px;font-weight:800;text-align:center;">⚠️ Sin comprobante</div>';
+  }
+
+  function cardPend(e) {
+    var monto = _ltMontoTransfer(e);
+    var fecha = e.fecha_entrega ? new Date(e.fecha_entrega).toLocaleDateString('es-AR') : '—';
+    var dias = _ltDias(e.fecha_entrega);
+    var agingColor = dias === null ? '#999' : (dias > 3 ? '#C62828' : (dias >= 2 ? '#E65100' : '#777'));
+    var agingTxt = dias === null ? '' : (dias === 0 ? 'hoy' : (dias === 1 ? 'hace 1 día' : 'hace ' + dias + ' días'));
+    var accent = e.comprobante_transfer ? '#1B5E20' : '#C62828';
+    var s = '<div style="background:#fff;border:1.5px solid #E0E0E0;border-left:4px solid ' + accent + ';border-radius:12px;padding:12px 14px;margin-bottom:10px;">';
+    s += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">';
+    s += '<div style="min-width:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:17px;font-weight:900;color:var(--text);">' + (e.cliente || '—') + '</div>';
+    s += '<div style="font-size:11px;color:var(--text3);">🚚 ' + (e.chofer || '—') + ' · 📍 ' + (e.ciudad || '—') + ' · ' + fecha + '</div></div>';
+    s += '<div style="text-align:right;flex-shrink:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:' + accent + ';">' + fmt(monto) + '</div>';
+    if (agingTxt) s += '<div style="font-size:11px;font-weight:800;color:' + agingColor + ';">⏱ ' + agingTxt + '</div>';
+    s += '</div></div>';
+    s += '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">';
+    s += btnFoto(e);
+    s += '<button onclick="transferConciliar(\'' + e.id + '\',true)" style="flex:1;min-width:120px;padding:9px;background:#2E7D32;color:#fff;border:none;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">✓ Conciliada</button>';
+    s += '<button onclick="transferDisputar(\'' + e.id + '\')" style="flex:1;min-width:120px;padding:9px;background:#fff;color:#E65100;border:1.5px solid #E65100;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">⚠️ No acreditó</button>';
+    s += '</div></div>';
+    return s;
+  }
+
+  function cardDisputa(e) {
+    var monto = _ltMontoTransfer(e);
+    var fecha = e.fecha_entrega ? new Date(e.fecha_entrega).toLocaleDateString('es-AR') : '—';
+    var diasR = _ltDias(e.transfer_disputa_en);
+    var s = '<div style="background:#FFF8F0;border:1.5px solid #FFCC80;border-left:4px solid #E65100;border-radius:12px;padding:12px 14px;margin-bottom:10px;">';
+    s += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">';
+    s += '<div style="min-width:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:17px;font-weight:900;color:var(--text);">' + (e.cliente || '—') + '</div>';
+    s += '<div style="font-size:11px;color:var(--text3);">🚚 ' + (e.chofer || '—') + ' · 📍 ' + (e.ciudad || '—') + ' · ' + fecha + '</div>';
+    s += '<div style="font-size:12px;color:#E65100;font-weight:700;margin-top:4px;">⚠️ ' + String(e.transfer_disputa || '').replace(/</g, '&lt;') + (diasR !== null ? ' · en reclamo hace ' + diasR + ' día' + (diasR === 1 ? '' : 's') : '') + '</div></div>';
+    s += '<div style="text-align:right;flex-shrink:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:#E65100;">' + fmt(monto) + '</div></div>';
+    s += '</div>';
+    s += '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">';
+    s += btnFoto(e);
+    s += '<button onclick="transferDisputaResolver(\'' + e.id + '\',true)" style="flex:1;min-width:120px;padding:9px;background:#2E7D32;color:#fff;border:none;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">✅ Se resolvió → conciliar</button>';
+    s += '<button onclick="transferDisputaResolver(\'' + e.id + '\',false)" style="flex:1;min-width:120px;padding:9px;background:#fff;color:#777;border:1.5px solid #BDBDBD;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">↩ Volver a pendiente</button>';
+    s += '</div></div>';
+    return s;
+  }
+
+  function cardConc(e) {
+    var monto = _ltMontoTransfer(e);
+    var fecha = e.fecha_entrega ? new Date(e.fecha_entrega).toLocaleDateString('es-AR') : '—';
+    var cuando = e.transfer_conciliada_en ? new Date(e.transfer_conciliada_en).toLocaleDateString('es-AR') : '';
+    var pillExp = e.transfer_exportada_en
+      ? '<span style="font-size:11px;font-weight:800;color:#283593;background:#E8EAF6;border-radius:7px;padding:3px 8px;">📥 Exportada ' + new Date(e.transfer_exportada_en).toLocaleDateString('es-AR') + '</span>'
+      : (_ltEsMixto(e)
+        ? '<span style="font-size:11px;font-weight:800;color:#E65100;background:#FFF3E0;border-radius:7px;padding:3px 8px;">🔀 Mixto — carga manual en Xubio</span>'
+        : '<span style="font-size:11px;font-weight:800;color:#1B5E20;background:#E8F5E9;border-radius:7px;padding:3px 8px;">📥 Va en el próximo export</span>');
+    var s = '<div style="background:#F1F8E9;border:1.5px solid #E0E0E0;border-left:4px solid #2E7D32;border-radius:12px;padding:12px 14px;margin-bottom:10px;">';
+    s += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">';
+    s += '<div style="min-width:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:17px;font-weight:900;color:var(--text);">' + (e.cliente || '—') + '</div>';
+    s += '<div style="font-size:11px;color:var(--text3);">🚚 ' + (e.chofer || '—') + ' · 📍 ' + (e.ciudad || '—') + ' · ' + fecha + '</div>';
+    s += '<div style="margin-top:5px;">' + pillExp + '</div></div>';
+    s += '<div style="text-align:right;flex-shrink:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:#2E7D32;">' + fmt(monto) + '</div></div>';
+    s += '</div>';
+    s += '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">';
+    s += btnFoto(e);
+    s += '<button onclick="transferConciliar(\'' + e.id + '\',false)" style="flex:1;min-width:120px;padding:9px;background:#fff;color:#2E7D32;border:1.5px solid #2E7D32;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">✅ Conciliada' + (cuando ? ' · ' + cuando : '') + ' · deshacer</button>';
+    s += '</div></div>';
+    return s;
+  }
+
+  if (disputa.length) {
+    html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:900;color:#E65100;margin:6px 0 8px;">⚠️ RECLAMAR (' + disputa.length + ')</div>';
+    html += disputa.map(cardDisputa).join('');
+  }
+  if (pend.length) {
+    if (disputa.length) html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:900;color:#1B5E20;margin:14px 0 8px;">⏳ A CONCILIAR (' + pend.length + ')</div>';
+    html += pend.map(cardPend).join('');
+  } else if (!disputa.length) {
+    html += '<div style="background:#E8F5E9;border-radius:12px;padding:18px;text-align:center;color:#2E7D32;font-weight:700;margin-bottom:14px;">✅ Todo conciliado</div>';
+  }
+  if (conc.length) {
+    html += '<details style="margin-top:8px;"><summary style="cursor:pointer;font-family:Barlow Condensed,sans-serif;font-weight:800;color:var(--text3);padding:8px 0;">✅ Conciliadas (' + conc.length + ')</summary>';
+    html += conc.slice(0, 60).map(cardConc).join('');
+    html += '</details>';
+  }
+  if (!rows.length) {
+    html += '<div class="planilla-empty">📲 Nada que mostrar con estos filtros.</div>';
+  }
+  el.innerHTML = html;
+}
+
+// ── ⚠️ No acreditó: modal de motivo ──
+function transferDisputar(id) {
+  var prev = document.getElementById('lt-disputa-modal');
+  if (prev) prev.remove();
+  var m = document.createElement('div');
+  m.id = 'lt-disputa-modal';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100000;display:flex;align-items:center;justify-content:center;padding:18px;';
+  m.innerHTML =
+    '<div style="background:#fff;border-radius:14px;max-width:400px;width:100%;padding:20px;">' +
+      '<div style="font-family:Barlow Condensed,sans-serif;font-size:19px;font-weight:900;color:#E65100;margin-bottom:12px;">⚠️ No acreditó — ¿por qué?</div>' +
+      '<button class="lt-disp-op" data-m="No figura en el banco / MP" style="display:block;width:100%;padding:12px;margin-bottom:8px;background:#FAFAFA;border:1.5px solid #E0E0E0;border-radius:10px;font-family:inherit;font-size:14px;font-weight:700;text-align:left;cursor:pointer;">🔍 No figura en el banco / MP</button>' +
+      '<button class="lt-disp-op" data-m="Importe distinto al declarado" style="display:block;width:100%;padding:12px;margin-bottom:8px;background:#FAFAFA;border:1.5px solid #E0E0E0;border-radius:10px;font-family:inherit;font-size:14px;font-weight:700;text-align:left;cursor:pointer;">💰 Importe distinto al declarado</button>' +
+      '<input id="lt-disp-otro" type="text" maxlength="180" placeholder="Otro motivo..." style="width:100%;padding:11px;border:1.5px solid #E0E0E0;border-radius:10px;font-family:inherit;font-size:14px;box-sizing:border-box;margin-bottom:8px;">' +
+      '<div style="display:flex;gap:8px;">' +
+        '<button id="lt-disp-volver" style="flex:1;padding:11px;background:#eee;color:#333;border:none;border-radius:10px;font-weight:700;cursor:pointer;">Volver</button>' +
+        '<button id="lt-disp-conf" style="flex:1.6;padding:11px;background:#E65100;color:#fff;border:none;border-radius:10px;font-weight:900;cursor:pointer;">Marcar en reclamo</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(m);
+  var motivo = '';
+  m.querySelectorAll('.lt-disp-op').forEach(function(b) {
+    b.onclick = function() {
+      motivo = b.getAttribute('data-m');
+      m.querySelectorAll('.lt-disp-op').forEach(function(x) { x.style.background = '#FAFAFA'; x.style.borderColor = '#E0E0E0'; });
+      b.style.background = '#FFF3E0'; b.style.borderColor = '#E65100';
+      document.getElementById('lt-disp-otro').value = '';
+    };
+  });
+  document.getElementById('lt-disp-volver').onclick = function() { m.remove(); };
+  document.getElementById('lt-disp-conf').onclick = function() {
+    var libre = (document.getElementById('lt-disp-otro').value || '').trim();
+    var motivoFinal = libre || motivo;
+    if (!motivoFinal) { toast('Elegí o escribí un motivo', 'err'); return; }
+    m.remove();
+    _transferDisputarGuardar(id, motivoFinal);
+  };
+}
+
+async function _transferDisputarGuardar(id, motivo) {
+  try {
+    await sbFetch('entregas?id=eq.' + id, {
+      method: 'PATCH',
+      headers: { 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ transfer_disputa: String(motivo).substring(0, 200), transfer_disputa_en: new Date().toISOString() })
+    });
+    toast('⚠️ Marcada en reclamo', 'ok');
+    var el = document.getElementById('logistica-contenido');
+    if (el) renderLogisticaTransferencias(el);
+  } catch (e) {
+    console.error('transferDisputar:', e);
+    toast('❌ Error al guardar', 'err');
+  }
+}
+
+async function transferDisputaResolver(id, conciliar) {
+  try {
+    var payload = conciliar
+      ? { transfer_conciliada: true, transfer_conciliada_en: new Date().toISOString(), transfer_disputa: null, transfer_disputa_en: null }
+      : { transfer_disputa: null, transfer_disputa_en: null };
+    await sbFetch('entregas?id=eq.' + id, {
+      method: 'PATCH',
+      headers: { 'Prefer': 'return=minimal' },
+      body: JSON.stringify(payload)
+    });
+    toast(conciliar ? '✅ Resuelta y conciliada' : '↩ Vuelta a pendiente', 'ok');
+    var el = document.getElementById('logistica-contenido');
+    if (el) renderLogisticaTransferencias(el);
+  } catch (e) {
+    console.error('transferDisputaResolver:', e);
+    toast('❌ Error al guardar', 'err');
+  }
+}
+
+// ── 📥 Export de conciliadas a Excel Xubio ──
+// Mismo formato que el Excel del viaje (LZ_COB_HEADERS, cuenta Mercadopago,
+// fecha serial, números correlativos del Apps Script). Marca
+// transfer_exportada_en para no exportar dos veces.
+async function ltExportarConciliadas(btn) {
+  var txtOrig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Armando Excel...'; }
+  try {
+    var cand = _ltState.rows.filter(function(e) { return e.transfer_conciliada && !e.transfer_exportada_en && !_ltEsMixto(e) && _ltMontoTransfer(e) > 0; });
+    if (!cand.length) { toast('No hay conciliadas sin exportar', 'err'); return; }
+
+    var XLSXlib = await _cargarSheetJS();
+
+    var pids = []; cand.forEach(function(e) { var p = String(e.pedido_id || ''); if (p && pids.indexOf(p) === -1) pids.push(p); });
+    var xubioIdPorPedido = {};
+    for (var i = 0; i < pids.length; i += 40) {
+      var lote = pids.slice(i, i + 40);
+      var pz = await _lzSbFetch('pedidos_zona?select=pedido_id,cliente_xubio_id&pedido_id=in.' + encodeURIComponent(_lzInList(lote))) || [];
+      pz.forEach(function(p) { if (p.cliente_xubio_id) xubioIdPorPedido[String(p.pedido_id)] = String(p.cliente_xubio_id); });
+    }
+    var xids = []; Object.keys(xubioIdPorPedido).forEach(function(k) { var id = xubioIdPorPedido[k]; if (xids.indexOf(id) === -1) xids.push(id); });
+    var nombrePorXubioId = {};
+    for (var j = 0; j < xids.length; j += 40) {
+      var loteX = xids.slice(j, j + 40);
+      var cls = await _lzSbFetch('clientes_xubio?select=id,nombre&id=in.' + encodeURIComponent(_lzInList(loteX))) || [];
+      cls.forEach(function(c) { nombrePorXubioId[String(c.id)] = c.nombre || ''; });
+    }
+
+    var lineas = [];
+    var sinCliente = [];
+    cand.forEach(function(e) {
+      var pid = String(e.pedido_id || '');
+      var xid = xubioIdPorPedido[pid];
+      var nombre = xid ? nombrePorXubioId[xid] : '';
+      if (!xid || !nombre) { sinCliente.push(e); return; }
+      var f = _lzFechaCobranza(e.fecha_entrega);
+      lineas.push({ id: e.id, serial: f.serial, nombre: nombre, importe: _ltMontoTransfer(e), obs: 'Transferencia conciliada · Pedido ' + pid });
+    });
+    if (!lineas.length) {
+      _ltModalExport({ ok: false, sinCliente: sinCliente.length });
+      return;
+    }
+    lineas.sort(function(a, b) { if (a.serial !== b.serial) return a.serial - b.serial; return a.nombre.localeCompare(b.nombre, 'es'); });
+
+    var numResp = await fetch(APPS_SCRIPT_URL + '?accion=cobranzaReservarNumeros&cantidad=' + lineas.length);
+    var numData = await numResp.json();
+    if (!numData || numData.status !== 'ok' || !Array.isArray(numData.numeros) || numData.numeros.length < lineas.length) {
+      throw new Error('No se pudieron reservar números: ' + ((numData && numData.message) || 'respuesta inválida'));
+    }
+    var numeros = numData.numeros;
+
+    var aoa = [LZ_COB_HEADERS.slice()];
+    lineas.forEach(function(ln, i) {
+      aoa.push([ln.serial, ln.nombre, numeros[i], LZ_COB_CUENTA.transferencia, ln.importe, '', '', '', '', ln.obs, '']);
+    });
+    var ws = XLSXlib.utils.aoa_to_sheet(aoa);
+    for (var r = 1; r <= lineas.length; r++) {
+      var addr = XLSXlib.utils.encode_cell({ r: r, c: 0 });
+      if (ws[addr]) { ws[addr].t = 'n'; ws[addr].z = 'dd/mm/yyyy'; }
+    }
+    ws['!cols'] = [{ wch: 12 }, { wch: 34 }, { wch: 20 }, { wch: 22 }, { wch: 14 }, { wch: 10 }, { wch: 20 }, { wch: 12 }, { wch: 14 }, { wch: 38 }, { wch: 20 }];
+    var wb = XLSXlib.utils.book_new();
+    XLSXlib.utils.book_append_sheet(wb, ws, 'Cobranzas');
+
+    var hoy = _lzFechaCobranza(null);
+    var hhmm = new Date().toTimeString().slice(0, 5).replace(':', '');
+    var fname = 'cobranzas_transferencias_' + hoy.y + '-' + String(hoy.m).padStart(2, '0') + '-' + String(hoy.d).padStart(2, '0') + '_' + hhmm + '.xlsx';
+    XLSXlib.writeFile(wb, fname);
+
+    var ids = lineas.map(function(l) { return '"' + l.id + '"'; }).join(',');
+    var marcadas = true;
+    try {
+      await sbFetch('entregas?id=in.(' + encodeURIComponent(ids) + ')', {
+        method: 'PATCH',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ transfer_exportada_en: new Date().toISOString() })
+      });
+    } catch (eMark) {
+      marcadas = false;
+      console.error('[ltExport] marcado falló. IDs:', ids, eMark);
+    }
+
+    var total = lineas.reduce(function(s, l) { return s + l.importe; }, 0);
+    _ltModalExport({ ok: true, cantidad: lineas.length, total: total, fname: fname, desde: numeros[0], hasta: numeros[lineas.length - 1], sinCliente: sinCliente.length, marcadas: marcadas });
+    var el = document.getElementById('logistica-contenido');
+    if (el) renderLogisticaTransferencias(el);
+  } catch (err) {
+    console.error('[ltExportarConciliadas]', err);
+    toast('❌ ' + (err && err.message ? err.message : 'Error armando el Excel'), 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = txtOrig; }
+  }
+}
+
+function _ltModalExport(d) {
+  _lzCobInyectarCSS();
+  var html = '<div class="lz-cob-overlay" id="lz-cob-overlay" onclick="if(event.target===this)lzCerrarModalCobranzas()">';
+  html += '<div class="lz-cob-card">';
+  if (d.ok) {
+    html += '<div class="lz-cob-title">✅ Excel de transferencias generado</div>';
+    html += '<div class="lz-cob-row"><span>Cobranzas incluidas</span><b>' + d.cantidad + '</b></div>';
+    html += '<div class="lz-cob-row"><span>Total</span><b>' + _lzPesos(d.total) + '</b></div>';
+    html += '<div class="lz-cob-row"><span>Números</span><b>' + lzEsc(d.desde) + ' → ' + lzEsc(d.hasta) + '</b></div>';
+    html += '<div class="lz-cob-file">📄 ' + lzEsc(d.fname) + '</div>';
+    if (!d.marcadas) {
+      html += '<div style="margin-top:12px;padding:10px 12px;background:#FFEBEE;border:1.5px solid #C62828;border-radius:10px;font-size:13px;color:#C62828;font-weight:700;">⚠️ El Excel se descargó pero NO se pudieron marcar como exportadas. NO vuelvas a exportar sin avisar — quedarían duplicadas. Recargá y reintentá, o avisale a Braian.</div>';
+    }
+  } else {
+    html += '<div class="lz-cob-title">⚠️ Sin líneas para exportar</div>';
+    html += '<div class="lz-cob-sub">Las conciliadas pendientes no tienen cliente Xubio asociado.</div>';
+  }
+  if (d.sinCliente) {
+    html += '<div class="lz-cob-excl-title">Quedaron afuera (carga manual):</div>';
+    html += '<ul class="lz-cob-excl"><li>👤 Sin cliente Xubio: <b>' + d.sinCliente + '</b></li></ul>';
+  }
+  html += '<button class="lz-cob-btn" onclick="lzCerrarModalCobranzas()">Cerrar</button>';
+  html += '</div></div>';
+  var prev = document.getElementById('lz-cob-overlay');
+  if (prev) prev.remove();
+  var wrap = document.createElement('div');
+  wrap.innerHTML = html;
+  document.body.appendChild(wrap.firstChild);
+}
+
+// ── Badge: contador de pendientes en el botón del tab ──
+async function _ltBadge() {
+  try {
+    var resp = await fetch(SUPABASE_URL + '/rest/v1/entregas?forma_cobro=eq.transferencia&estado=eq.entregado&transfer_conciliada=not.is.true&transfer_disputa=is.null&select=id&limit=1', {
+      headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY, 'Prefer': 'count=exact', 'Range': '0-0' }
+    });
+    var cr = resp.headers.get('content-range') || '';
+    var total = parseInt(cr.split('/')[1], 10);
+    var b = document.getElementById('log-tab-transferencias');
+    if (b && isFinite(total)) b.textContent = '💸 Transferencias' + (total > 0 ? ' (' + total + ')' : '');
+  } catch (e) { /* badge es cosmético: nunca rompe */ }
 }
 
 // ══════════════════════════════════════════════════════════
