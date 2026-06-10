@@ -1,5 +1,22 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.20 — 10/06/2026
+     v13.20: NIVEL EXACTO POR OCR + BANDERAS ANTI-FRAUDE en el tab 💸.
+       Usa entregas.transfer_ocr (Apps Script v25.45.0: OCR de la foto del
+       comprobante, verificado 5/5 contra mp_movimientos el 10/06):
+       · 🟢 EXACTO (nivel máximo): el nº de operación de MP leído del
+         comprobante coincide con un movimiento entrante → certeza
+         matemática, inmune a montos repetidos y titulares terceros.
+       · ✅ doc_comprobante: el CUIT leído del comprobante (bancos:
+         Galicia, Cuenta DNI...) identifica UN candidato entre varios del
+         mismo monto (resuelve el caso $102.000 ×5 con comprobante).
+       · 🚨 Comprobante repetido: mismo nº de operación / COELSA en 2+
+         entregas → bandera roja en ambas (anti comprobante reciclado).
+       · ⚠️ Monto distinto: el comprobante dice $X pero se registró $Y →
+         bandera roja. Ambas banderas DEGRADAN el botón de match: nunca
+         se ofrece conciliación automática sobre algo dudoso.
+       Orden final de certeza: EXACTO > doc_comprobante > doc cliente >
+       único bidireccional > ambiguo > sin rastro.
      TCK ADMIN — v13.19 — 10/06/2026
      v13.19: MATCH MP v2 — FIABILIDAD (pedido de Braian: "que no muestre
        algo que no es real"). Tres cambios sobre v13.18:
@@ -27996,7 +28013,7 @@ async function transferConciliar(id, conciliar) {
 // Columnas nuevas en entregas: transfer_exportada_en, transfer_disputa,
 // transfer_disputa_en (SQL corrido 10/06/2026).
 
-var _ltState = { rows: [], mp: [], docPorEntrega: {}, match: {}, chofer: '', q: '', el: null };
+var _ltState = { rows: [], mp: [], docPorEntrega: {}, match: {}, ocrDup: {}, chofer: '', q: '', el: null };
 
 function _ltMontoTransfer(e) {
   var m = parseFloat(e.monto) || 0;
@@ -28027,7 +28044,7 @@ async function renderLogisticaTransferencias(el) {
   _ltState.el = el;
   el.innerHTML = '<div class="planilla-empty"><div class="loading-spinner" style="margin:0 auto 12px;"></div>Cargando transferencias...</div>';
   try {
-    var SEL = 'id,cliente,comercio,ciudad,monto,forma_cobro,detalle_cobro,comprobante_transfer,transfer_conciliada,transfer_conciliada_en,transfer_exportada_en,transfer_disputa,transfer_disputa_en,chofer,fecha_entrega,pedido_id';
+    var SEL = 'id,cliente,comercio,ciudad,monto,forma_cobro,detalle_cobro,comprobante_transfer,transfer_conciliada,transfer_conciliada_en,transfer_exportada_en,transfer_disputa,transfer_disputa_en,transfer_ocr,chofer,fecha_entrega,pedido_id';
     var q1 = await sbFetch('entregas?forma_cobro=eq.transferencia&estado=eq.entregado&order=fecha_entrega.desc&select=' + SEL + '&limit=400') || [];
     var q2 = await sbFetch('entregas?comprobante_transfer=not.is.null&estado=eq.entregado&order=fecha_entrega.desc&select=' + SEL + '&limit=400') || [];
     var _map = {};
@@ -28092,6 +28109,29 @@ function _ltSoloDigitos(s) { return String(s || '').replace(/[^0-9]/g, ''); }
 
 function _ltCalcularMatches(entregas) {
   var H = 3600000;
+  // v13.20: COMPROBANTE RECICLADO — si el mismo identificador (nº op MP,
+  // nº bancario o COELSA) aparece en 2+ entregas, bandera roja en todas.
+  _ltState.ocrDup = {};
+  var _idsPorIdent = {};
+  _ltState.rows.forEach(function(r) {
+    var o = r.transfer_ocr || null; if (!o) return;
+    ['mp_op', 'banco_op', 'coelsa'].forEach(function(k) {
+      var v = o[k] ? String(o[k]) : ''; if (!v) return;
+      var key = k + ':' + v;
+      (_idsPorIdent[key] = _idsPorIdent[key] || []).push(r);
+    });
+  });
+  Object.keys(_idsPorIdent).forEach(function(k) {
+    var lst = _idsPorIdent[k];
+    if (lst.length > 1) {
+      lst.forEach(function(r) {
+        var otro = null;
+        for (var oi = 0; oi < lst.length; oi++) { if (lst[oi].id !== r.id) { otro = lst[oi]; break; } }
+        _ltState.ocrDup[r.id] = (otro && otro.cliente) ? otro.cliente : 'otra entrega';
+      });
+    }
+  });
+
   var paresPorEntrega = {};
   var entregasPorMov = {};
   var docMovsPorEntrega = {};
@@ -28129,9 +28169,35 @@ function _ltCalcularMatches(entregas) {
   entregas.forEach(function(e) {
     var cands = paresPorEntrega[e.id] || [];
     var docs = docMovsPorEntrega[e.id] || [];
+    // v13.20 nivel EXACTO: el nº de operación leído del comprobante (OCR)
+    // coincide con un movimiento MP entrante → certeza matemática, inmune
+    // a montos repetidos y a titulares terceros.
+    var ocrE = e.transfer_ocr || null;
+    var opE = (ocrE && ocrE.mp_op) ? String(ocrE.mp_op) : '';
+    if (opE) {
+      var movEx = null;
+      for (var xi = 0; xi < _ltState.mp.length; xi++) {
+        var mx = _ltState.mp[xi];
+        if (String(mx.mp_id) === opE && (!mx.match_entrega_id || mx.match_entrega_id === e.id)) { movEx = mx; break; }
+      }
+      if (movEx) { res[e.id] = { nivel: 'exacto', mov: movEx, n: cands.length, op: opE }; return; }
+    }
     if (docs.length === 1 && docEntregasPorMov[docs[0].mp_id] === 1) {
       res[e.id] = { nivel: 'doc', mov: docs[0], n: cands.length };
       return;
+    }
+    // v13.20: el CUIT leído del comprobante (bancos: Galicia, etc.)
+    // identifica UN candidato entre varios del mismo monto.
+    if (ocrE && ocrE.docs && ocrE.docs.length && cands.length >= 1) {
+      var porDocOcr = [];
+      for (var pi = 0; pi < cands.length; pi++) {
+        var pm = cands[pi];
+        if (pm.payer_doc && ocrE.docs.indexOf(String(pm.payer_doc)) !== -1) porDocOcr.push(pm);
+      }
+      if (porDocOcr.length === 1) {
+        res[e.id] = { nivel: 'doc_comprobante', mov: porDocOcr[0], n: cands.length };
+        return;
+      }
     }
     if (cands.length === 1 && (entregasPorMov[cands[0].mp_id] || []).length === 1) {
       res[e.id] = { nivel: 'unico', mov: cands[0], n: 1 };
@@ -28184,7 +28250,7 @@ function _ltPintar() {
   html += '<div style="flex:1;min-width:110px;text-align:center;"><div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;">A conciliar</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#1B5E20;">' + fmt(totalPend) + '</div><div style="font-size:11px;color:#2E7D32;">' + pend.length + ' transferencia' + (pend.length === 1 ? '' : 's') + '</div></div>';
   if (sinFoto.length) html += '<div style="flex:1;min-width:100px;text-align:center;background:#FFEBEE;border-radius:10px;padding:6px;"><div style="font-size:10px;color:#C62828;text-transform:uppercase;letter-spacing:.8px;">Sin comprobante</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#C62828;">' + sinFoto.length + '</div></div>';
   if (disputa.length) html += '<div style="flex:1;min-width:100px;text-align:center;background:#FFF3E0;border-radius:10px;padding:6px;"><div style="font-size:10px;color:#E65100;text-transform:uppercase;letter-spacing:.8px;">⚠️ Reclamar</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#E65100;">' + disputa.length + '</div></div>';
-  var conMatch = pend.filter(function(e) { var m = _ltState.match[e.id]; return m && (m.nivel === 'doc' || m.nivel === 'unico'); }).length;
+  var conMatch = pend.filter(function(e) { var m = _ltState.match[e.id]; return m && (m.nivel === 'exacto' || m.nivel === 'doc_comprobante' || m.nivel === 'doc' || m.nivel === 'unico'); }).length;
   if (conMatch) html += '<div style="flex:1;min-width:100px;text-align:center;background:#E8F5E9;border-radius:10px;padding:6px;"><div style="font-size:10px;color:#1B5E20;text-transform:uppercase;letter-spacing:.8px;">✅ En MP</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#1B5E20;">' + conMatch + '</div></div>';
   html += '</div>';
 
@@ -28227,9 +28293,25 @@ function _ltPintar() {
     s += '<div style="text-align:right;flex-shrink:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:' + accent + ';">' + fmt(monto) + '</div>';
     if (agingTxt) s += '<div style="font-size:11px;font-weight:800;color:' + agingColor + ';">⏱ ' + agingTxt + '</div>';
     s += '</div></div>';
-    // v13.19: match clasificado globalmente (_ltCalcularMatches)
+    // v13.19/v13.20: match clasificado globalmente (_ltCalcularMatches)
     var mt = _ltState.match[e.id] || { nivel: 'nada', n: 0 };
-    if (mt.nivel === 'doc') {
+    // v13.20: banderas de seguridad — degradan el botón de match
+    var ocrC = e.transfer_ocr || null;
+    var montoOcr = (ocrC && ocrC.monto) ? parseFloat(ocrC.monto) : 0;
+    var montoDelta = (montoOcr > 0 && Math.abs(montoOcr - monto) > 1);
+    var dupCon = _ltState.ocrDup[e.id] || null;
+    var matchSeguro = !montoDelta && !dupCon;
+    if (dupCon) {
+      s += '<div style="margin-top:8px;padding:8px 10px;background:#FFEBEE;border:2px solid #C62828;border-radius:9px;font-size:12px;font-weight:800;color:#C62828;">🚨 Comprobante repetido: el mismo nº de operación aparece también en la entrega de <b>' + String(dupCon).replace(/</g, '&lt;') + '</b> — revisar antes de conciliar</div>';
+    }
+    if (montoDelta) {
+      s += '<div style="margin-top:8px;padding:8px 10px;background:#FFEBEE;border:2px solid #C62828;border-radius:9px;font-size:12px;font-weight:800;color:#C62828;">⚠️ El comprobante dice $' + Math.round(montoOcr).toLocaleString('es-AR') + ' pero se registró $' + Math.round(monto).toLocaleString('es-AR') + ' — revisar antes de conciliar</div>';
+    }
+    if (mt.nivel === 'exacto') {
+      s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:2.5px solid #1B5E20;border-radius:9px;font-size:12px;font-weight:800;color:#1B5E20;">🟢 EXACTO — el nº de operación del comprobante (' + mt.op + ') está en MP: ' + _ltMovTxt(mt.mov) + '</div>';
+    } else if (mt.nivel === 'doc_comprobante') {
+      s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:2px solid #2E7D32;border-radius:9px;font-size:12px;font-weight:700;color:#1B5E20;">✅ El CUIT del comprobante identifica el movimiento: ' + _ltMovTxt(mt.mov) + '</div>';
+    } else if (mt.nivel === 'doc') {
       s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:2px solid #2E7D32;border-radius:9px;font-size:12px;font-weight:700;color:#1B5E20;">✅ Acreditada en MP — <b>coincide el CUIT/DNI del cliente</b>: ' + _ltMovTxt(mt.mov) + '</div>';
     } else if (mt.nivel === 'unico') {
       s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:1.5px solid #66BB6A;border-radius:9px;font-size:12px;font-weight:700;color:#1B5E20;">✅ Acreditada en MP: ' + _ltMovTxt(mt.mov) + '</div>';
@@ -28243,7 +28325,7 @@ function _ltPintar() {
     }
     s += '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">';
     s += btnFoto(e);
-    if (mt.nivel === 'doc' || mt.nivel === 'unico') {
+    if (matchSeguro && (mt.nivel === 'exacto' || mt.nivel === 'doc_comprobante' || mt.nivel === 'doc' || mt.nivel === 'unico')) {
       s += '<button onclick="transferConciliarConMatch(\'' + e.id + '\',\'' + mt.mov.mp_id + '\')" style="flex:1;min-width:120px;padding:9px;background:#2E7D32;color:#fff;border:none;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 0 0 2px #A5D6A7;">✓ Conciliar (match MP)</button>';
     } else {
       s += '<button onclick="transferConciliar(\'' + e.id + '\',true)" style="flex:1;min-width:120px;padding:9px;background:#2E7D32;color:#fff;border:none;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">✓ Conciliada</button>';
@@ -28266,7 +28348,14 @@ function _ltPintar() {
     s += '</div>';
     // v13.19: si el movimiento aparece en MP después del reclamo, avisar
     var mtD = _ltState.match[e.id] || { nivel: 'nada' };
-    if (mtD.nivel === 'doc') {
+    if (_ltState.ocrDup[e.id]) {
+      s += '<div style="margin-top:8px;padding:8px 10px;background:#FFEBEE;border:2px solid #C62828;border-radius:9px;font-size:12px;font-weight:800;color:#C62828;">🚨 Comprobante repetido (también en la entrega de ' + String(_ltState.ocrDup[e.id]).replace(/</g, '&lt;') + ')</div>';
+    }
+    if (mtD.nivel === 'exacto') {
+      s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:2.5px solid #1B5E20;border-radius:9px;font-size:12px;font-weight:800;color:#1B5E20;">🟢 EXACTO — el nº de operación del comprobante está en MP: ' + _ltMovTxt(mtD.mov) + '</div>';
+    } else if (mtD.nivel === 'doc_comprobante') {
+      s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:2px solid #2E7D32;border-radius:9px;font-size:12px;font-weight:700;color:#1B5E20;">✅ El CUIT del comprobante identifica el movimiento: ' + _ltMovTxt(mtD.mov) + '</div>';
+    } else if (mtD.nivel === 'doc') {
       s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:2px solid #2E7D32;border-radius:9px;font-size:12px;font-weight:700;color:#1B5E20;">✅ Ahora aparece en MP — <b>coincide el CUIT/DNI del cliente</b>: ' + _ltMovTxt(mtD.mov) + '</div>';
     } else if (mtD.nivel === 'unico') {
       s += '<div style="margin-top:8px;padding:8px 10px;background:#E8F5E9;border:1.5px solid #66BB6A;border-radius:9px;font-size:12px;font-weight:700;color:#1B5E20;">✅ Ahora aparece en MP: ' + _ltMovTxt(mtD.mov) + '</div>';
