@@ -1,5 +1,12 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.22 — 10/06/2026
+     v13.22: botón "✕ No es de un cliente" en Ingresos sin asignar.
+       Braian fondea la cuenta MP desde Galicia a veces; esos ingresos
+       llegan idénticos a las transferencias bancarias de clientes
+       (account_fund anónimo). El botón los marca (descartado_motivo)
+       y salen de la lista. REQUIERE SQL: columna descartado_motivo
+       en mp_movimientos.
      TCK ADMIN — v13.21 — 10/06/2026
      v13.21: HUÉRFANOS + PAGADORES HABITUALES + FIX BANCARIAS (3 frentes):
        1. FIX CRÍTICO: las transferencias BANCO→CVU llegan como account_fund
@@ -28075,7 +28082,7 @@ async function renderLogisticaTransferencias(el) {
     // Excluye fondeos propios (CUIT TCK). Si falla, el tab sigue sin match.
     try {
       var d14 = new Date(Date.now() - 14 * 86400000).toISOString();
-      var mpRows = await sbFetch('mp_movimientos?fecha=gte.' + encodeURIComponent(d14) + '&order=fecha.desc&select=mp_id,fecha,monto,operation_type,status,payer_email,payer_doc,match_entrega_id&limit=1000') || [];
+      var mpRows = await sbFetch('mp_movimientos?fecha=gte.' + encodeURIComponent(d14) + '&order=fecha.desc&select=mp_id,fecha,monto,operation_type,status,payer_email,payer_doc,match_entrega_id,descartado_motivo&limit=1000') || [];
       // v13.21: las transferencias BANCO→CVU llegan como account_fund con
       // payer = la propia cuenta TCK (MP no identifica al remitente). NO son
       // fondeos propios: medido 10/06, 19 de 40 matchean entregas ($3,47M).
@@ -28545,7 +28552,10 @@ function _ltPintar() {
       html += '<div style="font-size:11px;color:var(--text3);">' + fTxt + (m.status === 'in_process' ? ' · ⏳ en proceso' : '') + '</div>' + sug + '</div>';
       html += '<div style="text-align:right;flex-shrink:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:#795500;">' + fmt(parseFloat(m.monto) || 0) + '</div></div>';
       html += '</div>';
-      html += '<button onclick="ltAsignarAbrir(\'' + m.mp_id + '\')" style="width:100%;margin-top:9px;padding:9px;background:#fff;color:#795500;border:1.5px solid #FFB300;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">🔗 Asignar a una entrega</button>';
+      html += '<div style="display:flex;gap:8px;margin-top:9px;">';
+      html += '<button onclick="ltAsignarAbrir(\'' + m.mp_id + '\')" style="flex:2;padding:9px;background:#fff;color:#795500;border:1.5px solid #FFB300;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">🔗 Asignar a una entrega</button>';
+      html += '<button onclick="ltDescartarMov(\'' + m.mp_id + '\')" style="flex:1;padding:9px;background:#fff;color:#777;border:1.5px solid #BDBDBD;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">✕ No es de un cliente</button>';
+      html += '</div>';
       html += '</div>';
     });
     if (huerf.length > 30) html += '<div style="font-size:12px;color:var(--text3);text-align:center;padding:6px;">… y ' + (huerf.length - 30) + ' más (los más recientes primero)</div>';
@@ -28563,6 +28573,7 @@ function _ltHuerfanos() {
   });
   return _ltState.mp.filter(function(m) {
     if (m.match_entrega_id) return false;
+    if (m.descartado_motivo) return false; // v13.22: fondeos propios descartados a mano
     if (m.operation_type !== 'money_transfer' && m.operation_type !== 'account_fund') return false;
     return !usados[String(m.mp_id)];
   }).sort(function(a, b) { return String(b.fecha || '').localeCompare(String(a.fecha || '')); });
@@ -28593,6 +28604,25 @@ async function _ltAprenderAlias(entregaId, mov) {
       });
     }
   } catch (_eAp) { /* aprendizaje nunca rompe la conciliación */ }
+}
+
+// v13.22: descartar un ingreso que NO es de un cliente (fondeo propio
+// Galicia→MP de Braian, u otro). Sale de la lista de sin-asignar.
+async function ltDescartarMov(mpId) {
+  if (!confirm('¿Seguro que este ingreso NO es de un cliente?\n\n(Ej.: plata que Braian pasó del banco a Mercado Pago.)\nSale de la lista de sin asignar.')) return;
+  try {
+    await sbFetch('mp_movimientos?mp_id=eq.' + mpId, {
+      method: 'PATCH',
+      headers: { 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ descartado_motivo: 'no_cliente' })
+    });
+    toast('✕ Descartado de la lista', 'ok');
+    var el = document.getElementById('logistica-contenido');
+    if (el) renderLogisticaTransferencias(el);
+  } catch (e) {
+    console.error('ltDescartarMov:', e);
+    toast('❌ Error al descartar', 'err');
+  }
 }
 
 // v13.21: ASIGNADOR MANUAL — vincular un ingreso huérfano a una entrega
