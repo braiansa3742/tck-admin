@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.24 — 11/06/2026
+     TCK ADMIN — v13.25 — 11/06/2026
+     v13.25: cambio de precio desde TODA la lista de márgenes — la celda
+       "Venta" de cada producto es tocable (✏️) y abre el mismo modal del
+       v13.24. Siempre edita el precio por caja/bolsa c/IVA (el del Sheet),
+       sin importar el toggle sin/con IVA o caja/kg del panel.
      v13.24: cambio de precios desde "Costos que se movieron": botón 💲 en
        cada card → modal → AS actualizarPrecioVenta (escribe Sheet + Historial
        + productos_canonicos + lista Xubio Zonal; catálogo/ventas lo toman en
@@ -13459,6 +13463,11 @@ input.canales-exp-input[type="date"] {
     #view-margenes .mg-var-sug.dn{ background:#E8F5E9; color:#1B5E20; }
     #view-margenes .mg-var-btn{ border:1.5px solid #EF6C00; background:#fff; color:#E65100; font-family:inherit; font-size:11px; font-weight:900; border-radius:8px; padding:5px 10px; cursor:pointer; white-space:nowrap; }
     #view-margenes .mg-var-btn:active{ background:#FFF3E0; }
+    /* v13.25 — celda Venta tocable en la lista de márgenes */
+    #view-margenes .mg-cell-edit{ cursor:pointer; border-radius:8px; }
+    #view-margenes .mg-cell-edit:active{ background:#FFF3E0; }
+    #view-margenes .mg-cell-edit .cv{ color:#E65100; text-decoration:underline dotted; text-underline-offset:3px; }
+    #view-margenes .mg-cell-edit .edit-ic{ font-size:10px; vertical-align:middle; }
     #view-margenes .mg-var-more{ display:block; width:100%; border:none; background:#FAF6EC; font-family:inherit; font-size:11.5px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; color:#8A7B63; padding:9px; cursor:pointer; border-top:1px solid #F2EDE3; }
   </style>
   <div class="view" id="view-margenes">
@@ -33853,7 +33862,7 @@ function mgPrecioAbrir(el){
   if(!_mgpProd) return;
   document.getElementById('mgp-titulo').textContent = _mgpProd;
   document.getElementById('mgp-info').textContent =
-    'Hoy: ' + mgFmt(pAct) + (sug > 0 ? ' · Sugerido: ' + mgFmt(sug) : '');
+    'Hoy: ' + mgFmt(pAct) + (sug > 0 ? ' · Sugerido: ' + mgFmt(sug) : ' · precio caja/bolsa c/IVA');
   var inp = document.getElementById('mgp-input');
   inp.value = sug > 0 ? sug : (pAct || '');
   document.getElementById('mgp-status').textContent = '';
@@ -33928,7 +33937,7 @@ function mgFila(d){
     '</div>' +
     '<div class="mg-rmid">' +
       '<div class="mg-cell"><div class="cl">Costo '+uLbl+ivaTag+'</div><div class="cv">'+mgFmt(costo)+'</div></div>' +
-      '<div class="mg-cell"><div class="cl">Venta '+uLbl+ivaTag+'</div><div class="cv">'+mgFmt(precio)+'</div></div>' +
+      '<div class="mg-cell mg-cell-edit" data-prod="'+encodeURIComponent(d.producto||'')+'" data-pact="'+(mgN(d.precio_venta_civa)||0)+'" data-sug="0" onclick="mgPrecioAbrir(this)"><div class="cl">Venta '+uLbl+ivaTag+'</div><div class="cv">'+mgFmt(precio)+' <span class="edit-ic">✏️</span></div></div>' +
       '<div class="mg-cell"><div class="cl">Ganás '+uLbl+'</div><div class="cv gan">'+mgFmt(gan)+'</div></div>' +
     '</div>' +
     '<div class="mg-rbot">' +
