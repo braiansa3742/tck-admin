@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.23 — 10/06/2026
+     TCK ADMIN — v13.24 — 11/06/2026
+     v13.24: cambio de precios desde "Costos que se movieron": botón 💲 en
+       cada card → modal → AS actualizarPrecioVenta (escribe Sheet + Historial
+       + productos_canonicos + lista Xubio Zonal; catálogo/ventas lo toman en
+       ~5 min vía CSV). Sugerido también en BAJAS (mantener = más margen, o
+       trasladar la baja). Fix jsPDF: si el CDN falla una vez ya no queda
+       muerto para toda la sesión (reintento al volver a tocar el botón).
      v13.23: sección "⚠️ Costos que se movieron" arriba del tab Márgenes.
        Lee vw_variacion_costos (SQL aplicado 10/06: última factura vs
        último precio DISTINTO, umbral 0,5% anti-ruido decimal del sync),
@@ -12778,6 +12784,21 @@ input.canales-exp-input[type="date"] {
     </div>
   </div>
 
+  <!-- v13.24 — Modal cambio de precio (tab Márgenes) -->
+  <div id="mgp-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:9999; align-items:center; justify-content:center; padding:18px;">
+    <div style="background:#fff; border-radius:14px; max-width:340px; width:100%; padding:16px; box-shadow:0 8px 30px rgba(0,0,0,.25);">
+      <h3 id="mgp-titulo" style="margin:0 0 4px; font-size:15px; color:#2C2416;"></h3>
+      <div id="mgp-info" style="font-size:12px; font-weight:600; color:#5C4F3A; margin-bottom:10px;"></div>
+      <label style="display:block; font-size:10.5px; font-weight:800; text-transform:uppercase; color:#8A7B63; margin-bottom:4px;">Precio nuevo (c/IVA)</label>
+      <input id="mgp-input" type="number" inputmode="numeric" min="1" style="width:100%; box-sizing:border-box; font-family:inherit; font-size:18px; font-weight:900; padding:9px 10px; border:2px solid #EF6C00; border-radius:9px; color:#2C2416;">
+      <div id="mgp-status" style="font-size:11.5px; font-weight:700; margin-top:8px; min-height:15px; color:#5C4F3A;"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button onclick="mgPrecioCerrar()" style="flex:1; font-family:inherit; font-size:12.5px; font-weight:800; padding:10px; border:none; border-radius:9px; background:#F2EDE3; color:#5C4F3A; cursor:pointer;">Cancelar</button>
+        <button id="mgp-ok" onclick="mgPrecioConfirmar()" style="flex:1.4; font-family:inherit; font-size:12.5px; font-weight:900; padding:10px; border:none; border-radius:9px; background:#EF6C00; color:#fff; cursor:pointer;">💲 Aplicar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal veterinaria -->
   <div class="vet-modal-overlay hidden" id="vet-modal" class="hidden">
     <div class="vet-sheet">
@@ -13432,6 +13453,12 @@ input.canales-exp-input[type="date"] {
     #view-margenes .mg-var-l2{ font-size:11.5px; font-weight:600; color:#5C4F3A; margin-top:3px; }
     #view-margenes .mg-var-l2 b{ color:#2C2416; }
     #view-margenes .mg-var-sug{ margin-top:4px; font-size:11.5px; font-weight:800; background:#FFF3E0; color:#E65100; border-radius:7px; padding:5px 9px; display:inline-block; }
+    /* v13.24 — acciones de precio en cada variación */
+    #view-margenes .mg-var-acc{ display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin-top:4px; }
+    #view-margenes .mg-var-acc .mg-var-sug{ margin-top:0; }
+    #view-margenes .mg-var-sug.dn{ background:#E8F5E9; color:#1B5E20; }
+    #view-margenes .mg-var-btn{ border:1.5px solid #EF6C00; background:#fff; color:#E65100; font-family:inherit; font-size:11px; font-weight:900; border-radius:8px; padding:5px 10px; cursor:pointer; white-space:nowrap; }
+    #view-margenes .mg-var-btn:active{ background:#FFF3E0; }
     #view-margenes .mg-var-more{ display:block; width:100%; border:none; background:#FAF6EC; font-family:inherit; font-size:11.5px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; color:#8A7B63; padding:9px; cursor:pointer; border-top:1px solid #F2EDE3; }
   </style>
   <div class="view" id="view-margenes">
@@ -29737,9 +29764,9 @@ function _cargarJsPDF() {
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
     script.onload = function() {
       if (window.jspdf && window.jspdf.jsPDF) resolve(window.jspdf.jsPDF);
-      else reject(new Error('jsPDF no disponible tras carga'));
+      else { _jsPDFPromise = null; reject(new Error('jsPDF no disponible tras carga')); }   // v13.24: reintento
     };
-    script.onerror = function() { reject(new Error('No se pudo cargar jsPDF')); };
+    script.onerror = function() { _jsPDFPromise = null; reject(new Error('No se pudo cargar jsPDF')); };   // v13.24: reintento
     document.head.appendChild(script);
   });
   return _jsPDFPromise;
@@ -33798,7 +33825,14 @@ function mgVarFila(d){
   var sugHtml = '';
   if(up && sug !== null && pAct !== null && sug > pAct){
     sugHtml = '<div class="mg-var-sug">Para sostener margen: ' + mgFmt(sug) + ' <span style="font-weight:600;">(hoy ' + mgFmt(pAct) + ')</span></div>';
+  } else if(!up && sug !== null && pAct !== null && sug < pAct){
+    // v13.24 — bajas: mantener precio = ganar margen; trasladar = sostener el de antes
+    sugHtml = '<div class="mg-var-sug dn">Mantenés ' + mgFmt(pAct) + ' = más margen · trasladar la baja: ' + mgFmt(sug) + '</div>';
   }
+  // v13.24 — botón de cambio de precio (AS actualizarPrecioVenta)
+  var accion = (pAct !== null && pAct > 0)
+    ? '<button class="mg-var-btn" data-prod="' + encodeURIComponent(d.producto||'') + '" data-pact="' + (pAct||0) + '" data-sug="' + (sug||0) + '" onclick="mgPrecioAbrir(this)">💲 Cambiar precio</button>'
+    : '';
   return '<div class="mg-var-row">' +
     '<div class="mg-var-l1">' +
       '<div><div class="mg-var-nom">' + (d.producto||'') + '</div>' +
@@ -33806,9 +33840,59 @@ function mgVarFila(d){
       '<div class="mg-var-pct ' + (up?'up':'dn') + '">' + (up?'▲ +':'▼ ') + v.toFixed(1).replace('.',',') + '%</div>' +
     '</div>' +
     '<div class="mg-var-l2">' + l2 + '</div>' +
-    sugHtml +
+    ((sugHtml || accion) ? '<div class="mg-var-acc">' + sugHtml + accion + '</div>' : '') +
   '</div>';
 }
+
+// ── v13.24 — Cambio de precio desde el panel (AS actualizarPrecioVenta) ──
+var _mgpProd = null;
+function mgPrecioAbrir(el){
+  _mgpProd = decodeURIComponent(el.getAttribute('data-prod') || '');
+  var pAct = Number(el.getAttribute('data-pact')) || 0;
+  var sug  = Number(el.getAttribute('data-sug')) || 0;
+  if(!_mgpProd) return;
+  document.getElementById('mgp-titulo').textContent = _mgpProd;
+  document.getElementById('mgp-info').textContent =
+    'Hoy: ' + mgFmt(pAct) + (sug > 0 ? ' · Sugerido: ' + mgFmt(sug) : '');
+  var inp = document.getElementById('mgp-input');
+  inp.value = sug > 0 ? sug : (pAct || '');
+  document.getElementById('mgp-status').textContent = '';
+  var ok = document.getElementById('mgp-ok');
+  ok.disabled = false; ok.textContent = '💲 Aplicar';
+  document.getElementById('mgp-modal').style.display = 'flex';
+  setTimeout(function(){ try{ inp.focus(); inp.select(); }catch(e){} }, 60);
+}
+function mgPrecioCerrar(){ document.getElementById('mgp-modal').style.display = 'none'; }
+async function mgPrecioConfirmar(){
+  var inp = document.getElementById('mgp-input');
+  var precio = Math.round(Number(inp.value) || 0);
+  var st = document.getElementById('mgp-status');
+  if(!(precio > 0 && precio <= 5000000)){ st.textContent = '⚠️ Precio inválido'; return; }
+  if(!confirm('Cambiar "' + _mgpProd + '" a ' + mgFmt(precio) + '?\nSe aplica en Sheet, catálogo, ventas, Márgenes y lista Xubio.')) return;
+  var ok = document.getElementById('mgp-ok');
+  ok.disabled = true; ok.textContent = '⏳ Aplicando…';
+  st.textContent = 'Escribiendo Sheet + Márgenes + Xubio (tarda unos segundos)…';
+  try {
+    var r = await fetch(APPS_SCRIPT_URL + '?accion=actualizarPrecioVenta&producto=' + encodeURIComponent(_mgpProd) + '&precioNuevo=' + precio + '&porQuien=' + encodeURIComponent('admin panel'));
+    var j = await r.json();
+    if(j && j.status === 'ok'){
+      var extra = (j.xubio_lista && String(j.xubio_lista).indexOf('actualizado') === 0) ? ' · Xubio ✓' : '';
+      toast('✅ ' + (j.producto || _mgpProd) + ': ' + mgFmt(j.precioAnterior) + ' → ' + mgFmt(j.precioNuevo) + extra, 'ok');
+      mgPrecioCerrar();
+      mgRecargar();
+    } else if(j && j.status === 'sin_cambio'){
+      st.textContent = 'ℹ️ ' + (j.message || 'El precio ya estaba así.');
+      ok.disabled = false; ok.textContent = '💲 Aplicar';
+    } else {
+      st.textContent = '❌ ' + ((j && j.message) || 'Error desconocido');
+      ok.disabled = false; ok.textContent = '💲 Aplicar';
+    }
+  } catch(e){
+    st.textContent = '❌ Sin conexión con el Apps Script: ' + (e.message || e);
+    ok.disabled = false; ok.textContent = '💲 Aplicar';
+  }
+}
+function mgRecargar(){ _mgData = null; _mgVarData = null; margenesInit(); }
 
 function mgFila(d){
   var m = mgN(d.margen_pct);
