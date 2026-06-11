@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.25 — 11/06/2026
+     TCK ADMIN — v13.26 — 11/06/2026
+     v13.26: card "✓ Precio ya ajustado" — cuando el precio se cambió
+       DESPUÉS de la factura del costo nuevo (flag precio_ya_ajustado de la
+       vista v2), la card deja de sugerir (corta la cadena 40.5→42.6→44.x→∞)
+       y muestra el check verde con la fecha del ajuste.
      v13.25: cambio de precio desde TODA la lista de márgenes — la celda
        "Venta" de cada producto es tocable (✏️) y abre el mismo modal del
        v13.24. Siempre edita el precio por caja/bolsa c/IVA (el del Sheet),
@@ -13468,6 +13472,8 @@ input.canales-exp-input[type="date"] {
     #view-margenes .mg-cell-edit:active{ background:#FFF3E0; }
     #view-margenes .mg-cell-edit .cv{ color:#E65100; text-decoration:underline dotted; text-underline-offset:3px; }
     #view-margenes .mg-cell-edit .edit-ic{ font-size:10px; vertical-align:middle; }
+    /* v13.26 — precio ya ajustado tras el cambio de costo */
+    #view-margenes .mg-var-sug.ok{ background:#E8F5E9; color:#1B5E20; }
     #view-margenes .mg-var-more{ display:block; width:100%; border:none; background:#FAF6EC; font-family:inherit; font-size:11.5px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; color:#8A7B63; padding:9px; cursor:pointer; border-top:1px solid #F2EDE3; }
   </style>
   <div class="view" id="view-margenes">
@@ -33832,7 +33838,14 @@ function mgVarFila(d){
     l2 += ' · Margen ' + mAnt.toFixed(1).replace('.',',') + '% → <b>' + mNue.toFixed(1).replace('.',',') + '%</b>';
   }
   var sugHtml = '';
-  if(up && sug !== null && pAct !== null && sug > pAct){
+  if(d.precio_ya_ajustado === true){
+    // v13.26 — el precio se tocó después de la factura: no perseguir con sugerencias
+    var fAj = '';
+    if(d.precio_ajustado_at){
+      try { var dAj = new Date(d.precio_ajustado_at); fAj = ' el ' + String(dAj.getDate()).padStart(2,'0') + '/' + String(dAj.getMonth()+1).padStart(2,'0'); } catch(e){}
+    }
+    sugHtml = '<div class="mg-var-sug ok">✓ Precio ya ajustado' + fAj + ' (hoy ' + mgFmt(pAct) + ')</div>';
+  } else if(up && sug !== null && pAct !== null && sug > pAct){
     sugHtml = '<div class="mg-var-sug">Para sostener margen: ' + mgFmt(sug) + ' <span style="font-weight:600;">(hoy ' + mgFmt(pAct) + ')</span></div>';
   } else if(!up && sug !== null && pAct !== null && sug < pAct){
     // v13.24 — bajas: mantener precio = ganar margen; trasladar = sostener el de antes
