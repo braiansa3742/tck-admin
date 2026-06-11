@@ -1,5 +1,14 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.23 — 10/06/2026
+     v13.23: sección "⚠️ Costos que se movieron" arriba del tab Márgenes.
+       Lee vw_variacion_costos (SQL aplicado 10/06: última factura vs
+       último precio DISTINTO, umbral 0,5% anti-ruido decimal del sync),
+       ventana 30 días. Subas primero: margen viejo → nuevo + precio
+       sugerido para sostener el margen (redondeado ↑ a centena). Bajas
+       en verde. Dedupe por producto+proveedor (vínculos SoyChu
+       duplicados de Pollo B). Muestra 4 + expansor. Fail-soft: si la
+       vista no existe o falla, el tab Márgenes funciona igual que antes.
      TCK ADMIN — v13.22 — 10/06/2026
      v13.22: botón "✕ No es de un cliente" en Ingresos sin asignar.
        Braian fondea la cuenta MP desde Galicia a veces; esos ingresos
@@ -13409,6 +13418,21 @@ input.canales-exp-input[type="date"] {
     #view-margenes .mg-badge-sin{ display:inline-block; background:#EEE; color:#8A7B63; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; padding:3px 8px; border-radius:20px; margin-top:6px; }
     #view-margenes .mg-sec-sin{ text-align:center; font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; color:#8A7B63; margin:14px 0 8px; }
     #view-margenes .mg-estado{ text-align:center; padding:30px 16px; color:#8A7B63; font-style:italic; font-size:13px; }
+    /* v13.23 — Costos que se movieron */
+    #view-margenes .mg-var-wrap{ margin:10px 12px 0; background:#fff; border-radius:11px; box-shadow:0 1px 4px rgba(0,0,0,.07); border-left:5px solid #EF6C00; overflow:hidden; }
+    #view-margenes .mg-var-head{ display:flex; justify-content:space-between; align-items:center; gap:8px; padding:10px 12px 7px; }
+    #view-margenes .mg-var-head .t{ font-size:12.5px; font-weight:900; text-transform:uppercase; letter-spacing:.3px; color:#2C2416; }
+    #view-margenes .mg-var-head .s{ font-size:10px; font-weight:700; color:#8A7B63; text-transform:uppercase; letter-spacing:.2px; white-space:nowrap; }
+    #view-margenes .mg-var-row{ padding:9px 12px; border-top:1px solid #F2EDE3; }
+    #view-margenes .mg-var-l1{ display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+    #view-margenes .mg-var-nom{ font-size:13.5px; font-weight:800; color:#2C2416; line-height:1.1; }
+    #view-margenes .mg-var-prov{ font-size:10.5px; font-weight:600; color:#8A7B63; margin-top:1px; }
+    #view-margenes .mg-var-pct{ font-size:15px; font-weight:900; white-space:nowrap; }
+    #view-margenes .mg-var-pct.up{ color:#C62828; } #view-margenes .mg-var-pct.dn{ color:#2E7D32; }
+    #view-margenes .mg-var-l2{ font-size:11.5px; font-weight:600; color:#5C4F3A; margin-top:3px; }
+    #view-margenes .mg-var-l2 b{ color:#2C2416; }
+    #view-margenes .mg-var-sug{ margin-top:4px; font-size:11.5px; font-weight:800; background:#FFF3E0; color:#E65100; border-radius:7px; padding:5px 9px; display:inline-block; }
+    #view-margenes .mg-var-more{ display:block; width:100%; border:none; background:#FAF6EC; font-family:inherit; font-size:11.5px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; color:#8A7B63; padding:9px; cursor:pointer; border-top:1px solid #F2EDE3; }
   </style>
   <div class="view" id="view-margenes">
     <div class="mg-head">
@@ -13416,6 +13440,11 @@ input.canales-exp-input[type="date"] {
       <div class="mg-sub">Costo de reposición · margen neto · volumen 7/30 días</div>
     </div>
     <div class="mg-kpis" id="mg-kpis"></div>
+    <div class="mg-var-wrap" id="mg-var-wrap" style="display:none;">
+      <div class="mg-var-head"><span class="t" id="mg-var-tit">⚠️ Costos que se movieron</span><span class="s">últ. 30 días</span></div>
+      <div id="mg-var-list"></div>
+      <button class="mg-var-more" id="mg-var-more" style="display:none;" onclick="mgVarToggle()"></button>
+    </div>
     <div class="mg-ctrl">
       <span class="mg-lbl">Ordenar</span>
       <div class="mg-toggle">
@@ -33603,6 +33632,8 @@ function _cprFmtHora(ts) {
 // v12.29 — TAB MÁRGENES (lee vw_margen_producto por REST directo)
 // ═══════════════════════════════════════════════════════════════
 var _mgData = null;          // cache de la vista
+var _mgVarData = null;       // v13.23 — cache vw_variacion_costos (30 días)
+var _mgVarExpand = false;    // v13.23 — expansor de la lista de variaciones
 var _mgUnidad = 'caja';      // caja | kg
 var _mgOrden  = 'gan';       // gan | mar
 var _mgIva    = 'sin';       // sin | con
@@ -33615,9 +33646,16 @@ async function margenesInit() {
   var cont = document.getElementById('mg-list');
   if (cont) cont.innerHTML = '<div class="mg-estado">Cargando márgenes…</div>';
   try {
-    var rows = await sbFetch('vw_margen_producto?select=*');
-    _mgData = Array.isArray(rows) ? rows : [];
+    // v13.23 — variaciones en paralelo, fail-soft (si la vista no existe, el tab sigue)
+    var res = await Promise.all([
+      sbFetch('vw_margen_producto?select=*'),
+      sbFetch('vw_variacion_costos?select=*&var_pct=not.is.null&dias_desde_cambio=lte.30&order=fecha_cambio.desc')
+        .catch(function(e){ console.warn('[margenes] vw_variacion_costos:', e.message || e); return []; })
+    ]);
+    _mgData = Array.isArray(res[0]) ? res[0] : [];
+    _mgVarData = Array.isArray(res[1]) ? res[1] : [];
     mgInitFiltro();
+    mgRenderVariaciones();
     mgRender();
   } catch (e) {
     if (cont) cont.innerHTML = '<div class="mg-estado" style="color:#C62828;">Error al cargar: ' + (e.message || e) + '</div>';
@@ -33693,6 +33731,83 @@ function mgRender(){
   }
   var lst = document.getElementById('mg-list');
   if(lst) lst.innerHTML = html || '<div class="mg-estado">Sin productos.</div>';
+}
+
+// v13.23 — Costos que se movieron (vw_variacion_costos, ventana 30 días)
+function mgVarToggle(){ _mgVarExpand = !_mgVarExpand; mgRenderVariaciones(); }
+
+function mgRenderVariaciones(){
+  var wrap = document.getElementById('mg-var-wrap');
+  var list = document.getElementById('mg-var-list');
+  var more = document.getElementById('mg-var-more');
+  if(!wrap || !list) return;
+  var data = _mgVarData || [];
+
+  // Dedupe por producto+proveedor: hay vínculos duplicados en
+  // productos_proveedores (ej. 3 filas SoyChu de Pollo B por SKU/calibre).
+  // La data viene order=fecha_cambio.desc → queda el cambio más reciente.
+  var seen = {}, rows = [];
+  data.forEach(function(d){
+    var k = (d.producto||'') + '|' + (d.proveedor||'');
+    if(seen[k]) return;
+    seen[k] = 1; rows.push(d);
+  });
+  if(!rows.length){ wrap.style.display = 'none'; return; }
+
+  // Subas primero (duelen), bajas después; dentro de cada grupo, reciente arriba
+  rows.sort(function(a,b){
+    var sa = (mgN(a.var_pct)||0) > 0 ? 0 : 1;
+    var sb = (mgN(b.var_pct)||0) > 0 ? 0 : 1;
+    if(sa !== sb) return sa - sb;
+    return String(b.fecha_cambio||'').localeCompare(String(a.fecha_cambio||''));
+  });
+
+  var subas = rows.filter(function(d){ return (mgN(d.var_pct)||0) > 0; }).length;
+  var tit = document.getElementById('mg-var-tit');
+  if(tit) tit.textContent = (subas>0 ? '⚠️' : '✅') + ' Costos que se movieron (' + rows.length + ')';
+
+  var VISIBLES = 4;
+  var mostrar = _mgVarExpand ? rows : rows.slice(0, VISIBLES);
+  var html = '';
+  mostrar.forEach(function(d){ html += mgVarFila(d); });
+  list.innerHTML = html;
+
+  if(more){
+    if(rows.length > VISIBLES){
+      more.style.display = 'block';
+      more.textContent = _mgVarExpand ? '▲ Ver menos' : '▼ Ver los ' + (rows.length - VISIBLES) + ' restantes';
+    } else {
+      more.style.display = 'none';
+    }
+  }
+  wrap.style.display = 'block';
+}
+
+function mgVarFila(d){
+  var v = mgN(d.var_pct) || 0;
+  var up = v > 0;
+  var dias = mgN(d.dias_desde_cambio);
+  var cuando = (dias===null) ? '' : (dias<=0 ? 'hoy' : (dias===1 ? 'ayer' : 'hace '+dias+' días'));
+  var mAnt = mgN(d.margen_anterior_pct), mNue = mgN(d.margen_nuevo_pct);
+  var sug = mgN(d.precio_sugerido_civa), pAct = mgN(d.precio_venta_civa);
+
+  var l2 = 'Costo ' + mgFmt(mgN(d.costo_anterior)) + ' → <b>' + mgFmt(mgN(d.costo_nuevo)) + '</b>';
+  if(mAnt !== null && mNue !== null){
+    l2 += ' · Margen ' + mAnt.toFixed(1).replace('.',',') + '% → <b>' + mNue.toFixed(1).replace('.',',') + '%</b>';
+  }
+  var sugHtml = '';
+  if(up && sug !== null && pAct !== null && sug > pAct){
+    sugHtml = '<div class="mg-var-sug">Para sostener margen: ' + mgFmt(sug) + ' <span style="font-weight:600;">(hoy ' + mgFmt(pAct) + ')</span></div>';
+  }
+  return '<div class="mg-var-row">' +
+    '<div class="mg-var-l1">' +
+      '<div><div class="mg-var-nom">' + (d.producto||'') + '</div>' +
+      '<div class="mg-var-prov">' + (d.proveedor||'') + (cuando ? ' · ' + cuando : '') + '</div></div>' +
+      '<div class="mg-var-pct ' + (up?'up':'dn') + '">' + (up?'▲ +':'▼ ') + v.toFixed(1).replace('.',',') + '%</div>' +
+    '</div>' +
+    '<div class="mg-var-l2">' + l2 + '</div>' +
+    sugHtml +
+  '</div>';
 }
 
 function mgFila(d){
