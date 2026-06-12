@@ -1,5 +1,11 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.30.1 — 12/06/2026
+     v13.30.1: BUMP DE SESSION_KEY (tck_session → tck_session_v2).
+       Invalida sesiones pre-JWT: el próximo ingreso pide PIN (el de
+       siempre, ahora validado server-side) y emite el token.
+       Prerrequisito de la Fase B.
+     ──────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.30 — 12/06/2026
      v13.30: PIN SERVER-SIDE + IDENTIDAD JWT (Fase A, igual que ventas v14.64.0).
        · SEGURIDAD: se elimina el objeto PINS hardcodeado en el HTML — los
@@ -13843,7 +13849,7 @@ const NUM_ADMIN = '5492314475357';
 // v13.30: PINs ELIMINADOS del HTML (estaban legibles en el código fuente).
 // La validación es server-side (rpc/login_vendedor → app_usuarios + bcrypt).
 const USUARIOS_ADMIN = ['Miguel', 'Juan', 'Lisandro', 'ADMIN'];
-const SESSION_KEY   = 'tck_session';
+const SESSION_KEY   = 'tck_session_v2'; // v13.30.1: bump — invalida sesiones pre-JWT y fuerza re-login (emisión de token)
 const SESSION_HORAS = 720; // 30 días — cada vendedor tiene su propio celular
 
 function guardarSesion(nombre) {
