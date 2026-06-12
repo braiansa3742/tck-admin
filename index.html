@@ -1,5 +1,18 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.30 — 12/06/2026
+     v13.30: PIN SERVER-SIDE + IDENTIDAD JWT (Fase A, igual que ventas v14.64.0).
+       · SEGURIDAD: se elimina el objeto PINS hardcodeado en el HTML — los
+         PINs del admin estaban legibles en el código fuente público desde
+         siempre. El login ahora valida server-side (rpc/login_vendedor,
+         bcrypt contra app_usuarios) con fallback a verificar_pin.
+       · El login devuelve además el JWT de identidad (HS256, 30 días);
+         sbFetch lo manda como Authorization con fallback a anon y
+         reintento automático ante 401 — no puede romper nada.
+       · Las POLICIES NO CAMBIAN en esta fase (Fase B = fin de semana).
+       · ⚠️ Tras desplegar, TODOS deben salir y volver a entrar (los PINs
+         son los mismos de siempre — solo cambia dónde se validan).
+     ──────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.29 — 11/06/2026
      v13.29: CIERRE DEL CICLO DE DEVOLUCIONES + visibilidad de depósito.
        (a) Devoluciones: badge del ciclo de depósito en cada card
@@ -13827,7 +13840,9 @@ const SHEET_CSV = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQDZk6Z5pejrI
 // El calculo de cobertura sigue usando SHEET_CSV (gid=0). Para volver atras: gid=0.
 const SHEET_CSV_RECIENTES = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQDZk6Z5pejrI_djbUYBLEvh-X7H_sLF5ZCW2RQr0Bc03r8LOL17_C3pCmwwyLe2iXf3Fan0tgl7IJG/pub?gid=1792723858&single=true&output=csv';
 const NUM_ADMIN = '5492314475357';
-const PINS = { 'Miguel':'3356', 'Juan':'4256', 'Lisandro':'8020', 'ADMIN':'3050' };
+// v13.30: PINs ELIMINADOS del HTML (estaban legibles en el código fuente).
+// La validación es server-side (rpc/login_vendedor → app_usuarios + bcrypt).
+const USUARIOS_ADMIN = ['Miguel', 'Juan', 'Lisandro', 'ADMIN'];
 const SESSION_KEY   = 'tck_session';
 const SESSION_HORAS = 720; // 30 días — cada vendedor tiene su propio celular
 
@@ -13852,7 +13867,16 @@ function recuperarSesion() {
 
 function limpiarSesion() {
   try { localStorage.removeItem(SESSION_KEY); } catch(e) {}
+  jwtLimpiar(); // v13.30: el token muere con la sesión
 }
+
+// ── v13.30: IDENTIDAD JWT (Fase A — espejo de ventas v14.64.0) ───
+const JWT_KEY = 'tck_jwt_admin';
+var _JWT = null;
+function jwtGuardar(t) { _JWT = t || null; try { if (t) localStorage.setItem(JWT_KEY, t); } catch(e) {} }
+function jwtLeer() { try { return localStorage.getItem(JWT_KEY) || null; } catch(e) { return null; } }
+function jwtLimpiar() { _JWT = null; try { localStorage.removeItem(JWT_KEY); } catch(e) {} }
+_JWT = jwtLeer();
 
 
 // ── SUPABASE CONFIG ──────────────────────────────────────────────
@@ -14298,12 +14322,19 @@ async function sbFetch(path, options = {}) {
   const url = SUPABASE_URL + '/rest/v1/' + path;
   const headers = {
     'apikey': SUPABASE_KEY,
-    'Authorization': 'Bearer ' + SUPABASE_KEY,
+    'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY), // v13.30: identidad JWT
     'Content-Type': 'application/json',
     'Prefer': options.prefer || 'return=representation',
     ...options.headers
   };
-  const resp = await fetch(url, { ...options, headers });
+  let resp = await fetch(url, { ...options, headers });
+  // v13.30: token vencido/rechazado → limpiar y reintentar 1 vez con anon
+  if (resp.status === 401 && _JWT) {
+    console.warn('[sbFetch] JWT rechazado (401): limpio token y reintento con anon');
+    jwtLimpiar();
+    headers['Authorization'] = 'Bearer ' + SUPABASE_KEY;
+    resp = await fetch(url, { ...options, headers });
+  }
   if (!resp.ok) {
     const err = await resp.text();
     throw new Error('Supabase error: ' + resp.status + ' ' + err);
@@ -15885,7 +15916,7 @@ var _modoCampo = new URLSearchParams(window.location.search).get('modo') === 'ca
 // Recuperar sesión si existe
 (function() {
   var sesion = recuperarSesion();
-  if (sesion && PINS[sesion]) {
+  if (sesion && USUARIOS_ADMIN.indexOf(sesion) !== -1) {
     login(sesion);
     // Si viene con ?modo=campo, ir directo al tab Visitas
     if (_modoCampo) {
@@ -15996,11 +16027,40 @@ function actualizarDots() {
   });
 }
 
-function verificarPin() {
-  if (pinActual === PINS[pinVendedorTemp]) {
-    login(pinVendedorTemp);
-  } else {
-    document.getElementById('pin-error').textContent = 'PIN incorrecto. Intentá de nuevo.';
+async function verificarPin() {
+  // v13.30 — validación server-side: el PIN ya no vive en el cliente.
+  // login_vendedor devuelve además el JWT de identidad (Fase A).
+  var nombre = pinVendedorTemp;
+  var pin = pinActual;
+  var errEl = document.getElementById('pin-error');
+  errEl.textContent = 'Verificando…';
+  try {
+    var data;
+    try {
+      data = await sbFetch('rpc/login_vendedor', {
+        method: 'POST',
+        body: JSON.stringify({ p_nombre: nombre, p_pin: pin })
+      });
+    } catch (eRpc) {
+      if (String(eRpc).indexOf('404') !== -1) {
+        data = await sbFetch('rpc/verificar_pin', {
+          method: 'POST',
+          body: JSON.stringify({ p_nombre: nombre, p_pin: pin })
+        });
+      } else { throw eRpc; }
+    }
+    if (data && data.ok) {
+      if (data.token) jwtGuardar(data.token); // v13.30: identidad JWT
+      errEl.textContent = '';
+      login(nombre);
+    } else {
+      errEl.textContent = 'PIN incorrecto. Intentá de nuevo.';
+      pinActual = '';
+      actualizarDots();
+    }
+  } catch (e) {
+    console.error('[login] login_vendedor:', e);
+    errEl.textContent = 'Error de conexión. Reintentá.';
     pinActual = '';
     actualizarDots();
   }
