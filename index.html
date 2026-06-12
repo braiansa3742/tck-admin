@@ -1,5 +1,21 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.29 — 11/06/2026
+     v13.29: CIERRE DEL CICLO DE DEVOLUCIONES + visibilidad de depósito.
+       (a) Devoluciones: badge del ciclo de depósito en cada card
+           (⏳ sin recibir / 📦 recibida—falta NC ⚠️dif / 🧾 NC emitida) +
+           sección "📦 Ciclo de depósito" en el modal con la recepción de
+           Pancho (quién/cuándo, diferencia+nota, items recibidos) y botón
+           "🧾 MARCAR NC EMITIDA" (pide n° de NC opcional; PATCH estado=
+           nc_emitida + nc_numero/en/por con verificación anti-RLS).
+           Cierra la triple conformidad chofer→depósito→administración.
+       (b) Alertas hub: chip 🧾 "Emitir NC" (devoluciones recibida_deposito).
+       (c) Subtab "📦 Depósito" en Logística (solo lectura): conformidades
+           de carga de los últimos 7 días (firma de Pancho, diferencias) +
+           últimos 10 recuentos de stock + aviso de NC pendientes.
+       REQUIERE: sql_admin_nc_v1.sql (columnas nc_* en devoluciones) y las
+       tablas de sql_deposito_bloques_BC_v1.sql (ventas v14.62.0).
+// ═══════════════════════════════════════════════════════════════════
      TCK ADMIN — v13.28 — 11/06/2026
      v13.28: tab Márgenes — (a) defaults pedidos: orden por MARGEN % y
        precios CON IVA; la elección del usuario persiste en localStorage.
@@ -12790,6 +12806,7 @@ input.canales-exp-input[type="date"] {
         <button class="planilla-chofer-tab" id="log-tab-cheques" onclick="logisticaSelTab('cheques',this)">📋 Cheques</button>
         <button class="planilla-chofer-tab" id="log-tab-transferencias" onclick="logisticaSelTab('transferencias',this)">💸 Transferencias</button>
         <button class="planilla-chofer-tab" id="log-tab-devoluciones" onclick="logisticaSelTab('devoluciones',this)">↩️ Devoluciones</button>
+        <button class="planilla-chofer-tab" id="log-tab-deposito" onclick="logisticaSelTab('deposito',this)">📦 Depósito</button>
       </div>
 
       <!-- Contenido dinámico -->
@@ -16453,15 +16470,18 @@ async function renderAlertasBanner() {
     var manana = new Date(hoy); manana.setDate(manana.getDate() + 1);
     var mananaISO = manana.toISOString();
 
-    var [devsRes, entRes] = await Promise.all([
+    var [devsRes, entRes, devsNCRes] = await Promise.all([
       // Devoluciones pendientes de reclamar (cualquier fecha)
       sbFetch('devoluciones?reclamo_estado=eq.por_reclamar&select=id').catch(function() { return []; }),
       // Entregas "no estaba" del día
-      sbFetch('entregas?estado=eq.no_encontrado&fecha_no_encontrado=gte.' + hoyISO + '&fecha_no_encontrado=lt.' + mananaISO + '&select=id').catch(function() { return []; })
+      sbFetch('entregas?estado=eq.no_encontrado&fecha_no_encontrado=gte.' + hoyISO + '&fecha_no_encontrado=lt.' + mananaISO + '&select=id').catch(function() { return []; }),
+      // v13.29: devoluciones recibidas por Pancho, pendientes de NC
+      sbFetch('devoluciones?estado=eq.recibida_deposito&select=id').catch(function() { return []; })
     ]);
 
     _alertasCache.devolucionesPorReclamar = (devsRes || []).length;
     _alertasCache.noEstaba = (entRes || []).length;
+    _alertasCache.devolucionesSinNC = (devsNCRes || []).length;
 
     // Re-render con la data completa
     _renderChipsAlertas();
@@ -16495,6 +16515,16 @@ function _renderChipsAlertas() {
       icon: '📞',
       label: 'Reclamar',
       count: _alertasCache.devolucionesPorReclamar,
+      onclick: "_alertaIrA('devoluciones')"
+    });
+  }
+  // 🧾 v13.29: devoluciones recibidas en depósito, falta emitir la NC
+  if (_alertasCache.devolucionesSinNC > 0) {
+    chips.push({
+      cls: 'amarillo',
+      icon: '🧾',
+      label: 'Emitir NC',
+      count: _alertasCache.devolucionesSinNC,
       onclick: "_alertaIrA('devoluciones')"
     });
   }
@@ -27976,6 +28006,7 @@ function renderLogistica() {
   if (_logTab === 'cheques')      { renderLogisticaCheques(el); return; }
   if (_logTab === 'transferencias') { renderLogisticaTransferencias(el); return; }
   if (_logTab === 'devoluciones') { renderLogisticaDevoluciones(el); return; }
+  if (_logTab === 'deposito')     { renderLogisticaDeposito(el); return; }   // v13.29
   // Tabs viejos (joan, luis, asignar) caen al fallback de viajes
   lzRenderViajes(el);
 }
@@ -29447,6 +29478,10 @@ async function renderLogisticaDevoluciones(el) {
       html += '<div style="text-align:right;flex-shrink:0;">';
       html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:17px;font-weight:900;color:#C62828;">-' + fmt(d.monto_devuelto) + '</div>';
       html += '<div style="display:inline-block;background:' + recInfo.bg + ';color:' + recInfo.color + ';padding:2px 8px;border-radius:12px;font-size:10px;font-weight:800;margin-top:2px;">' + recInfo.emoji + ' ' + recInfo.label + '</div>';
+      // v13.29: badge del ciclo de depósito (registrada → recibida → NC)
+      var cicInfo = DEV_CICLO_LABELS[d.estado] || DEV_CICLO_LABELS.registrada;
+      var cicExtra = (d.estado === 'recibida_deposito' && d.recepcion_diferencia) ? ' ⚠️' : '';
+      html += '<br><div style="display:inline-block;background:' + cicInfo.bg + ';color:' + cicInfo.color + ';padding:2px 8px;border-radius:12px;font-size:10px;font-weight:800;margin-top:3px;">' + cicInfo.emoji + ' ' + cicInfo.label + cicExtra + '</div>';
       html += '</div>';
       html += '</div>';
 
@@ -29473,6 +29508,123 @@ async function renderLogisticaDevoluciones(el) {
 
 // ID de la devolución actualmente abierta en el modal
 var _devModalId = null;
+
+// ═══ v13.29 — SUBTAB 📦 DEPÓSITO (solo lectura): conformidades + recuentos ═══
+async function renderLogisticaDeposito(el) {
+  el.innerHTML = '<div class="planilla-empty"><div class="loading-spinner" style="margin:0 auto 12px;"></div>Cargando depósito...</div>';
+  var esc = function(s) { return String(s == null ? '' : s).replace(/</g, '&lt;'); };
+  var fmt = function(n) { return '$' + Math.round(Number(n) || 0).toLocaleString('es-AR'); };
+  try {
+    var desde7 = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    var [confs, recuentos, sinNC] = await Promise.all([
+      sbFetch('cargas_conformidad?select=*&fecha=gte.' + desde7 + '&order=conformado_en.desc&limit=40').catch(function() { return []; }),
+      sbFetch('deposito_recuentos?select=*&order=creado_at.desc&limit=10').catch(function() { return []; }),
+      sbFetch('devoluciones?estado=eq.recibida_deposito&select=id').catch(function() { return []; })
+    ]);
+
+    var html = '';
+    if ((sinNC || []).length) {
+      html += '<div style="background:#FFF3E0;border:1.5px solid #FFB74D;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px;font-weight:800;color:#E65100;">'
+        + '🧾 ' + sinNC.length + ' devolución' + (sinNC.length === 1 ? '' : 'es') + ' recibida' + (sinNC.length === 1 ? '' : 's')
+        + ' por Pancho esperando NC — están en el subtab ↩️ Devoluciones</div>';
+    }
+
+    // Conformidades de carga (7 días)
+    html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:900;color:var(--text3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px;">🚚 Conformidades de carga · últimos 7 días</div>';
+    if (!(confs || []).length) {
+      html += '<div class="planilla-empty">Sin conformidades registradas (Pancho las firma desde su panel en tckventas).</div>';
+    } else {
+      confs.forEach(function(c) {
+        var ok = c.estado === 'conforme';
+        var fc = c.conformado_en ? new Date(c.conformado_en) : null;
+        html += '<div style="background:#fff;border:1.5px solid var(--cream3);border-radius:12px;padding:11px 13px;margin-bottom:8px;">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">';
+        html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:900;color:var(--text);">🚚 ' + esc(c.zona || 'Viaje') + ' · ' + esc(c.fecha || '') + '</div>';
+        html += ok
+          ? '<span style="background:#E8F5E9;color:#2E7D32;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:800;">✅ Conforme</span>'
+          : '<span style="background:#FFF3E0;color:#E65100;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:800;">⚠️ Con diferencia</span>';
+        html += '</div>';
+        html += '<div style="font-size:12px;color:var(--text3);margin-top:2px;">' + esc(c.chofer || '—') + ' · ' + esc(c.vehiculo || '—') + ' · ' + (c.total_pedidos || 0) + ' entregas · firmó ' + esc(c.conformado_por || '—')
+          + (fc ? ' ' + String(fc.getHours()).padStart(2, '0') + ':' + String(fc.getMinutes()).padStart(2, '0') : '') + '</div>';
+        if (c.nota) html += '<div style="font-size:12px;color:#E65100;font-weight:700;margin-top:4px;">📝 ' + esc(c.nota) + '</div>';
+        html += '</div>';
+      });
+    }
+
+    // Recuentos de stock
+    html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:900;color:var(--text3);text-transform:uppercase;letter-spacing:.6px;margin:14px 0 8px;">📋 Recuentos de stock · últimos 10</div>';
+    if (!(recuentos || []).length) {
+      html += '<div class="planilla-empty">Sin recuentos guardados todavía.</div>';
+    } else {
+      recuentos.forEach(function(r) {
+        var items = Array.isArray(r.items) ? r.items : [];
+        html += '<div style="background:#fff;border:1.5px solid var(--cream3);border-radius:12px;padding:11px 13px;margin-bottom:8px;">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+        html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;color:var(--text);">📋 ' + esc(r.fecha || '') + '</div>';
+        html += '<div style="font-size:11px;color:var(--text3);">' + items.length + ' productos · ' + esc(r.creado_por || '') + '</div>';
+        html += '</div>';
+        html += '<div style="font-size:12px;color:var(--text2);margin-top:4px;">' + items.map(function(it) {
+          return esc((it.cantidad != null ? it.cantidad : '?') + '× ' + (it.producto || ''));
+        }).join(' · ') + '</div>';
+        if (r.nota) html += '<div style="font-size:11px;color:var(--text3);margin-top:3px;">📝 ' + esc(r.nota) + '</div>';
+        html += '</div>';
+      });
+    }
+
+    el.innerHTML = html;
+  } catch (err) {
+    console.error('renderLogisticaDeposito:', err);
+    el.innerHTML = '<div class="planilla-empty">❌ Error al cargar. ¿Corriste el SQL de las tablas cargas_conformidad / deposito_recuentos?</div>';
+  }
+}
+
+// v13.29 — Ciclo de depósito (Pancho): registrada → recibida_deposito → nc_emitida
+var DEV_CICLO_LABELS = {
+  registrada:        { label: 'Sin recibir en depósito', emoji: '⏳', color: '#E65100', bg: '#FFF3E0' },
+  recibida_deposito: { label: 'Recibida — falta NC',     emoji: '📦', color: '#1565C0', bg: '#E3F2FD' },
+  nc_emitida:        { label: 'NC emitida',              emoji: '🧾', color: '#2E7D32', bg: '#E8F5E9' },
+  revisada:          { label: 'Revisada',                emoji: '✅', color: '#2E7D32', bg: '#E8F5E9' },
+  archivada:         { label: 'Archivada',               emoji: '🗄️', color: '#757575', bg: '#F5F5F5' }
+};
+
+// v13.29 — Marcar NC emitida (cierre del ciclo de devolución)
+async function devMarcarNC() {
+  var d = _devCache.find(function(x) { return x.id === _devModalId; });
+  if (!d) return;
+  if (d.estado === 'registrada') {
+    if (!confirm('⚠️ Pancho todavía NO registró la recepción de esta mercadería en el depósito.\n\n¿Marcar la NC como emitida igual?')) return;
+  }
+  var nro = prompt('N° de la Nota de Crédito en Xubio (opcional, podés dejarlo vacío):');
+  if (nro === null) return; // canceló
+  try {
+    var resp = await fetch(SUPABASE_URL + '/rest/v1/devoluciones?id=eq.' + encodeURIComponent(d.id), {
+      method: 'PATCH',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
+      },
+      body: JSON.stringify({
+        estado: 'nc_emitida',
+        nc_numero: (nro || '').trim() || null,
+        nc_emitida_en: new Date().toISOString(),
+        nc_emitida_por: 'ADMIN'
+      })
+    });
+    var filas = await resp.json();
+    if (!resp.ok || !Array.isArray(filas) || !filas.length) throw new Error('PATCH vacío (¿RLS?)');
+    d.estado = 'nc_emitida';
+    d.nc_numero = filas[0].nc_numero;
+    d.nc_emitida_en = filas[0].nc_emitida_en;
+    toast('🧾 NC marcada como emitida', 'ok');
+    devAbrirModal(d.id);   // re-render del modal
+    if (typeof renderAlertasBanner === 'function') renderAlertasBanner();
+  } catch (e) {
+    console.error('[devMarcarNC]', e);
+    toast('❌ No se pudo marcar la NC — reintentá', 'err');
+  }
+}
 
 function devAbrirModal(devolucionId) {
   var d = _devCache.find(function(x) { return x.id === devolucionId; });
@@ -29597,6 +29749,41 @@ function devAbrirModal(devolucionId) {
     html += '<option value="' + p + '"' + sel + '>' + p + sugerida + '</option>';
   });
   html += '</select>';
+  html += '</div>';
+
+  // v13.29 — Sección: Ciclo de depósito (recepción de Pancho + NC)
+  html += '<div class="dev-modal-sec">';
+  html += '<div class="dev-modal-sec-label">📦 Ciclo de depósito</div>';
+  var cic = DEV_CICLO_LABELS[d.estado] || DEV_CICLO_LABELS.registrada;
+  html += '<div style="display:inline-block;background:' + cic.bg + ';color:' + cic.color + ';padding:3px 10px;border-radius:12px;font-size:11px;font-weight:800;">' + cic.emoji + ' ' + cic.label + '</div>';
+  if (d.recibida_en) {
+    var fr = new Date(d.recibida_en);
+    html += '<div style="font-size:12px;color:var(--text2);margin-top:6px;">Recibida por <strong>' + (d.recibida_por || 'Depósito') + '</strong> el '
+      + String(fr.getDate()).padStart(2,'0') + '/' + String(fr.getMonth()+1).padStart(2,'0') + ' '
+      + String(fr.getHours()).padStart(2,'0') + ':' + String(fr.getMinutes()).padStart(2,'0') + '</div>';
+    if (d.recepcion_diferencia) {
+      html += '<div style="font-size:12px;color:#E65100;font-weight:700;margin-top:3px;">⚠️ Recepción CON diferencia' + (d.recepcion_nota ? ': ' + String(d.recepcion_nota).replace(/</g,'&lt;') : '') + '</div>';
+    }
+    if (d.recibido_json) {
+      try {
+        var rj = (typeof d.recibido_json === 'string') ? JSON.parse(d.recibido_json) : d.recibido_json;
+        if (Array.isArray(rj) && rj.length) {
+          html += '<div style="font-size:11.5px;color:var(--text3);margin-top:3px;">Recibido: ' + rj.map(function(it) {
+            return (it.recibido != null ? it.recibido : it.cantidad) + '× ' + (it.producto || it.nombre || '');
+          }).join(' · ').replace(/</g,'&lt;') + '</div>';
+        }
+      } catch (eRJ) {}
+    }
+  } else {
+    html += '<div style="font-size:12px;color:var(--text3);margin-top:6px;">Pancho todavía no registró la recepción en su panel.</div>';
+  }
+  if (d.estado === 'nc_emitida') {
+    var fnc = d.nc_emitida_en ? new Date(d.nc_emitida_en) : null;
+    html += '<div style="font-size:12px;color:#2E7D32;font-weight:700;margin-top:6px;">🧾 NC ' + (d.nc_numero ? '#' + String(d.nc_numero).replace(/</g,'&lt;') : 'emitida')
+      + (fnc ? ' · ' + String(fnc.getDate()).padStart(2,'0') + '/' + String(fnc.getMonth()+1).padStart(2,'0') : '') + '</div>';
+  } else {
+    html += '<button onclick="devMarcarNC()" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#1B5E20,#2E7D32);color:#fff;border:none;border-radius:10px;padding:11px;font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:900;cursor:pointer;touch-action:manipulation;">🧾 MARCAR NC EMITIDA</button>';
+  }
   html += '</div>';
 
   // Sección: Estado del reclamo
