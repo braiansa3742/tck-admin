@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.32.0 — 12/06/2026
+     TCK ADMIN — v13.33.0 — 12/06/2026
+     v13.33.0: MARGEN A SIMPLE VISTA (SOLO ADMIN).
+       - Chip de margen ponderado en cada card sin abrirla (semaforo:
+         rojo <5, naranja <12, verde >=12; con aviso si hay perdida).
+       - Banner arriba de la lista: cuantos pedidos de la vista tienen
+         margen bajo (<12%) o lineas en perdida.
+       - Todo calculado LOCAL (parser de detalle + mapa de costos,
+         cero fetch extra por pedido). Cancelados excluidos.
      v13.32.0: MARGEN EN PENDIENTES (fallback). pedidos_items se llena
        recien al confirmar; los Pendientes mostraban vacio. Ahora si
        vw_pedido_margen no devuelve filas, se parsea el detalle de texto
@@ -17774,6 +17781,7 @@ function pedidosFiltrados() {
 // ── RENDER ────────────────────────────────────────────────────────
 function renderPedidos() {
   acuCargarClientes();   // v13.31.0: cache de clientes con acuerdo (1 sola vez)
+  acuCargarCostosBg();   // v13.33.0: mapa de costos para chip/banner (1 sola vez)
   actualizarStats();
   actualizarTitle();
   actualizarBadgePendientes();
@@ -17794,7 +17802,7 @@ function renderPedidos() {
     cont.innerHTML = '<div class="empty">📭 No hay pedidos para mostrar' + dbgMsg + '</div>';
     return;
   }
-  cont.innerHTML = lista.map(function(p){ return renderCard(p); }).join('');
+  cont.innerHTML = acuResumenBannerHtml(lista) + lista.map(function(p){ return renderCard(p); }).join('');
   // v11 admin: actualizar barras de sync Xubio recién insertadas en el DOM
   if (typeof xubioActualizarBarrasSync === 'function') xubioActualizarBarrasSync();
 }
@@ -17965,6 +17973,7 @@ function renderCard(p) {
       '<div class="pedido-head-right">' +
         '<div class="pedido-total">' + fmtTotal(p.total) + '</div>' +
         badgeHtml(p) +
+        acuChipHtml(p) +
         '<div class="pedido-hora">' + hora + '</div>' +
       '</div>' +
     '</div>' +
@@ -18209,6 +18218,78 @@ async function acuCargarMargen(id){
   var html2 = acuRenderBloque(lineas2, hayAcuerdo2, hayAlerta2, ganTotal2, sinCosto2, notas);
   _acuMargenCache[pedidoId] = html2;
   cont.innerHTML = html2;
+}
+
+
+// ── v13.33.0: margen a simple vista (chip en card + banner resumen) ──
+var _acuRapidoCache = {};   // pedidoId -> {m, perdida} | null
+
+function acuCargarCostosBg(){
+  if (_acuCostos || window._acuCostosEnVuelo) return;
+  window._acuCostosEnVuelo = true;
+  acuCargarCostos().then(function(){
+    if (document.getElementById('lista-pedidos') && typeof renderPedidos === 'function') {
+      try { renderPedidos(); } catch(e){}
+    }
+  }).catch(function(e){ console.warn('[acuerdos] costos no disponibles:', e.message); });
+}
+
+// Margen ponderado del pedido completo, calculado LOCAL del detalle.
+// Devuelve {m: % ponderado | null, perdida: bool} o null si no hay datos.
+function acuMargenPedido(p){
+  if (!_acuCostos || !p || !p.pedidoId) return null;
+  if (_acuRapidoCache[p.pedidoId] !== undefined) return _acuRapidoCache[p.pedidoId];
+  var det = p.detalle || p.resumen || '';
+  var parsed = (typeof _dupParsearDetalle === 'function' && det) ? _dupParsearDetalle(det) : null;
+  var out = null;
+  if (parsed && parsed.productos && parsed.productos.length) {
+    var ganTot = 0, netoTot = 0, perdida = false, conCosto = 0;
+    parsed.productos.forEach(function(pr){
+      var cant = Number(pr.qty) || 1;
+      var unit = (pr.total && cant) ? (Number(pr.total) / cant) : (Number(pr.precio_unit) || 0);
+      var c = _acuCostos.get(acuNormProd(pr.nombre));
+      if (!unit && c && c.lista) unit = c.lista;
+      if (!c || c.ali === null || c.costo === null || !unit) return;
+      var neto = unit / (1 + c.ali/100);
+      var gan = neto - c.costo - 0.05 * neto;
+      ganTot += gan * cant; netoTot += neto * cant; conCosto++;
+      if (gan <= 0) perdida = true;
+    });
+    if (conCosto > 0 && netoTot > 0) out = { m: 100 * ganTot / netoTot, perdida: perdida };
+  }
+  _acuRapidoCache[p.pedidoId] = out;
+  return out;
+}
+
+function acuChipHtml(p){
+  if (vendedorActual !== 'ADMIN') return '';
+  if (p.estado === 'Cancelado') return '';
+  var r = acuMargenPedido(p);
+  if (!r || r.m === null) return '';
+  var col = acuSemColor(r.m);
+  var txt = (r.perdida ? '\u26A0\uFE0F ' : '') + r.m.toFixed(1).replace('.', ',') + '%';
+  return '<div style="display:inline-block;background:' + col + '1A;color:' + col + ';border:1px solid ' + col +
+    ';border-radius:20px;padding:1px 9px;font-family:\'Barlow Condensed\',sans-serif;font-size:12px;font-weight:900;margin-top:3px;">' + txt + '</div>';
+}
+
+function acuResumenBannerHtml(lista){
+  if (vendedorActual !== 'ADMIN' || !_acuCostos || !lista || !lista.length) return '';
+  var bajos = 0, perdidas = 0;
+  lista.forEach(function(p){
+    if (p.estado === 'Cancelado') return;
+    var r = acuMargenPedido(p);
+    if (!r || r.m === null) return;
+    if (r.perdida) perdidas++;
+    else if (r.m < 12) bajos++;
+  });
+  if (!bajos && !perdidas) return '';
+  var partes = [];
+  if (perdidas) partes.push('<strong>' + perdidas + '</strong> con l\u00EDneas en P\u00C9RDIDA');
+  if (bajos) partes.push('<strong>' + bajos + '</strong> con margen bajo (&lt;12%)');
+  var col = perdidas ? '#C62828' : '#E65100';
+  return '<div style="background:' + col + '14;border:1.5px solid ' + col + ';border-radius:12px;padding:9px 14px;margin-bottom:12px;' +
+    'font-family:\'Barlow Condensed\',sans-serif;font-size:14px;font-weight:800;color:' + col + ';">' +
+    '\u26A0\uFE0F MARGEN POST-IIBB: ' + partes.join(' \u00B7 ') + ' en esta vista</div>';
 }
 
 function toggleCard(id) {
