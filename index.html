@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.30.2 — 12/06/2026
+     TCK ADMIN — v13.31.0 — 12/06/2026
+     v13.31.0: ACUERDOS DE PRECIO en tab Pedidos (SOLO ADMIN).
+       — Badge ACUERDO en la card si el cliente tiene acuerdo activo
+         (tabla acuerdos_precio, match por nombre normalizado).
+       — Al expandir una card: bloque de margen post-IIBB linea por
+         linea desde vw_pedido_margen (lazy, 1 fetch por pedido, cache).
+         Alerta roja si margen <=0 o si se cobro abajo del precio acordado.
      v13.30.2: TOKEN EN LOS FETCH DIRECTOS (cierre Fase B aplicado en BD).
        · Auditoría 12/6 tarde: 29 fetch a Supabase NO pasaban por sbFetch
          y mandaban la anon key fija. Con el candado puesto (anon sin
@@ -17760,6 +17766,7 @@ function pedidosFiltrados() {
 
 // ── RENDER ────────────────────────────────────────────────────────
 function renderPedidos() {
+  acuCargarClientes();   // v13.31.0: cache de clientes con acuerdo (1 sola vez)
   actualizarStats();
   actualizarTitle();
   actualizarBadgePendientes();
@@ -17937,7 +17944,7 @@ function renderCard(p) {
     '<div class="pedido-head" onclick="toggleCard(\'' + id + '\')">' +
       '<div class="pedido-head-left">' +
         '<div class="pedido-id">' + p.pedidoId + '</div>' +
-        '<div class="pedido-cliente">' + origenIconHtml(p) + (p.cliente||'(sin nombre)') + '</div>' +
+        '<div class="pedido-cliente">' + origenIconHtml(p) + (p.cliente||'(sin nombre)') + acuBadgeHtml(p) + '</div>' +
         (p.fechaEntrega ? '<div style="display:inline-flex;align-items:center;gap:4px;background:' + (p.turnoEntrega==='Mañana'?'#E3F2FD':'#FFF3E0') + ';color:' + (p.turnoEntrega==='Mañana'?'#1565C0':'#E65100') + ';border-radius:20px;padding:2px 8px;font-family:Barlow Condensed,sans-serif;font-size:11px;font-weight:800;margin-top:3px;">' + (p.turnoEntrega==='Mañana'?'🌅':'🌆') + ' ' + p.fechaEntrega + ' · ' + (p.turnoEntrega||'') + '</div>' : '') +
         '<div class="pedido-comercio">' + (p.comercio ? '🏪 '+p.comercio+' · ' : '') + (function(){
           // v8.2 admin: si el pedido tiene sucursal vinculada, mostrarla
@@ -17973,6 +17980,7 @@ function renderCard(p) {
       (detalle ? '<div class="pedido-productos">' + detalle + '</div>' : '') +
       (p.estado === 'En revisión' && p.nota && p.nota.includes('DESCUENTOS:') ? (function(){ var m = p.nota.match(/DESCUENTOS: (.+?)(?:\|\||$)/); return '<div class="revision-info"><strong>🔍 Pedido con descuento — requiere aprobación</strong>' + (m ? m[1].trim() : '') + '</div>'; })() : '') +
       dupAlert +
+      acuMargenContainerHtml(p, id) +
       '<div class="pedido-acciones">' + btns + '</div>' +
       asignarHtml +
       verOtrosHtml +
@@ -17989,9 +17997,106 @@ function renderCard(p) {
   '</div>';
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+// v13.31.0: ACUERDOS DE PRECIO — badge en card + control de margen
+// post-IIBB por pedido. SOLO ADMIN. Lee acuerdos_precio y
+// vw_pedido_margen por sbFetch (REST directo, no toca Apps Script).
+// ═══════════════════════════════════════════════════════════════
+var _acuClientes = null;      // Set de nombres normalizados con acuerdo activo
+var _acuMargenCache = {};     // pedidoId -> html renderizado
+
+function acuNorm(x){ return (x||'').toString().toLowerCase().replace(/\s+/g,' ').trim(); }
+
+function acuCargarClientes(){
+  if (_acuClientes !== null) return;          // ya cargado o en vuelo
+  _acuClientes = new Set();
+  sbFetch('acuerdos_precio?estado=eq.activo&select=cliente').then(function(rows){
+    (rows||[]).forEach(function(r){ _acuClientes.add(acuNorm(r.cliente)); });
+    // si llegó tarde y la lista ya estaba pintada, repintar para que aparezcan los badges
+    if (_acuClientes.size && document.getElementById('lista-pedidos') && typeof renderPedidos === 'function') {
+      try { renderPedidos(); } catch(e){}
+    }
+  }).catch(function(e){ console.warn('[acuerdos] no se pudo cargar lista:', e.message); });
+}
+
+function acuEsClienteAcuerdo(p){
+  return !!(_acuClientes && p && _acuClientes.has(acuNorm(p.cliente)));
+}
+
+function acuBadgeHtml(p){
+  if (vendedorActual !== 'ADMIN' || !acuEsClienteAcuerdo(p)) return '';
+  return ' <span style="display:inline-block;background:#FFF3E0;color:#B45309;border:1px solid #D4A574;border-radius:20px;padding:1px 8px;font-family:\'Barlow Condensed\',sans-serif;font-size:11px;font-weight:800;vertical-align:middle;">\u2B50 ACUERDO</span>';
+}
+
+function acuMargenContainerHtml(p, id){
+  if (vendedorActual !== 'ADMIN') return '';
+  return '<div id="acu-margen-' + id + '" data-pedido="' + (p.pedidoId||'') + '"></div>';
+}
+
+function acuSemColor(m){
+  if (m === null || m === undefined || isNaN(m)) return '#9E9E9E';
+  if (m < 5)  return '#C62828';
+  if (m < 12) return '#E65100';
+  return '#1E8449';
+}
+
+function acuFmt(n){
+  var x = Math.round(Number(n));
+  return isNaN(x) ? '\u2014' : '$' + x.toLocaleString('es-AR');
+}
+
+async function acuCargarMargen(id){
+  var cont = document.getElementById('acu-margen-' + id);
+  if (!cont || vendedorActual !== 'ADMIN') return;
+  var pedidoId = cont.getAttribute('data-pedido');
+  if (!pedidoId) return;
+  if (_acuMargenCache[pedidoId] !== undefined) { cont.innerHTML = _acuMargenCache[pedidoId]; return; }
+  cont.innerHTML = '<div style="font-size:11px;color:#8B6F50;padding:6px 2px;">Calculando margen\u2026</div>';
+  try {
+    var rows = await sbFetch('vw_pedido_margen?pedido_id=eq.' + encodeURIComponent(pedidoId) +
+      '&select=producto_tck_nombre,cantidad,precio_unitario,margen_post_iibb_pct,ganancia_caja_post_iibb,es_acuerdo,precio_acordado,diferencia_vs_acordado');
+    if (!rows || !rows.length) { _acuMargenCache[pedidoId] = ''; cont.innerHTML = ''; return; }
+    var hayAcuerdo = false, hayAlerta = false, ganTotal = 0, sinCosto = 0;
+    var filas = rows.map(function(r){
+      var cant = Number(r.cantidad) || 1;
+      var m = (r.margen_post_iibb_pct === null) ? null : Number(r.margen_post_iibb_pct);
+      var gan = (r.ganancia_caja_post_iibb === null) ? null : Number(r.ganancia_caja_post_iibb) * cant;
+      if (gan === null) sinCosto++; else ganTotal += gan;
+      var alertas = [];
+      if (m !== null && m <= 0) { hayAlerta = true; alertas.push('P\u00C9RDIDA'); }
+      if (r.es_acuerdo) {
+        hayAcuerdo = true;
+        var dif = (r.diferencia_vs_acordado === null) ? null : Number(r.diferencia_vs_acordado);
+        if (dif !== null && dif < -1) { hayAlerta = true; alertas.push('cobrado ' + acuFmt(Math.abs(dif)) + ' abajo del acuerdo'); }
+        else if (dif !== null && dif > 1) { alertas.push('cobrado ' + acuFmt(dif) + ' arriba del acuerdo'); }
+      }
+      var mTxt = (m === null) ? 'sin costo' : (m.toFixed(1).replace('.', ',') + '%');
+      return '<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-bottom:1px dashed #EAD9C3;font-size:12px;">' +
+        '<span style="flex:1;color:#3E2A14;">' + (r.es_acuerdo ? '\u2B50 ' : '') + cant + 'x ' + (r.producto_tck_nombre||'') + '</span>' +
+        '<span style="color:#8B6F50;">' + acuFmt(r.precio_unitario) + '</span>' +
+        '<span style="font-weight:800;min-width:58px;text-align:right;color:' + acuSemColor(m) + ';">' + mTxt + '</span>' +
+        '</div>' +
+        (alertas.length ? '<div style="font-size:11px;font-weight:800;color:#C62828;padding:1px 0 3px;">\u26A0\uFE0F ' + alertas.join(' \u00B7 ') + '</div>' : '');
+    }).join('');
+    var head = '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:900;color:#5C3A1E;margin-bottom:4px;">' +
+      (hayAcuerdo ? '\u2B50 CLIENTE CON ACUERDO \u00B7 ' : '') + 'MARGEN POST-IIBB (5%)</div>';
+    var pie = '<div style="display:flex;justify-content:space-between;font-size:12px;font-weight:800;padding-top:5px;color:#3E2A14;">' +
+      '<span>Ganancia neta del pedido' + (sinCosto ? ' (' + sinCosto + ' l\u00EDnea' + (sinCosto>1?'s':'') + ' sin costo)' : '') + '</span>' +
+      '<span style="color:' + (ganTotal <= 0 ? '#C62828' : '#1E8449') + ';">' + acuFmt(ganTotal) + '</span></div>';
+    var borde = hayAlerta ? '#C62828' : (hayAcuerdo ? '#D4A574' : '#EAD9C3');
+    var html = '<div style="margin-top:10px;background:#FFFDF9;border:1px solid ' + borde + ';border-radius:10px;padding:8px 10px;">' + head + filas + pie + '</div>';
+    _acuMargenCache[pedidoId] = html;
+    cont.innerHTML = html;
+  } catch(e) {
+    cont.innerHTML = '<div style="font-size:11px;color:#C62828;padding:4px 0;">No se pudo calcular el margen (' + e.message + ')</div>';
+  }
+}
+
 function toggleCard(id) {
   var b = document.getElementById('body-'+id);
   if (b) b.classList.toggle('on');
+  if (b && b.classList.contains('on')) acuCargarMargen(id);   // v13.31.0: margen lazy
 }
 
 // ── NOTAS ─────────────────────────────────────────────────────────
