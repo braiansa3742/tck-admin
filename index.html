@@ -1,5 +1,21 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.30.2 — 12/06/2026
+     v13.30.2: TOKEN EN LOS FETCH DIRECTOS (cierre Fase B aplicado en BD).
+       · Auditoría 12/6 tarde: 29 fetch a Supabase NO pasaban por sbFetch
+         y mandaban la anon key fija. Con el candado puesto (anon sin
+         permisos en 38 tablas), 18 de esos pegaban a tablas cerradas:
+         Canalización (clientes_activos ×5), Sin canonizar (productos y
+         ciudades), Tesorería entera (_tesFetch → mp_movimientos, cheques,
+         vw_caja*), devoluciones, vw_stock_visible y pedidos_items —
+         fallaban con 401/403 aunque el login hubiera emitido token.
+       · FIX: los 29 pasan a 'Bearer ' + (_JWT || SUPABASE_KEY) — mismo
+         fallback que sbFetch. EXCEPCIÓN (1): el fetch del bucket de
+         comprobantes (storage) queda con anon key porque la policy del
+         bucket es solo para rol anon; con JWT quedaría bloqueado.
+       · Sin cambios funcionales: con token viaja la identidad, sin token
+         viaja anon como siempre.
+     ──────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.30.1 — 12/06/2026
      v13.30.1: BUMP DE SESSION_KEY (tck_session → tck_session_v2).
        Invalida sesiones pre-JWT: el próximo ingreso pide PIN (el de
@@ -14012,7 +14028,7 @@ async function cargarCiudadesCanonicas() {
     var resp = await fetch(url, {
       headers: {
         'apikey':        SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY
+        'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY)
       }
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -14194,7 +14210,7 @@ async function cargarProductosCanonicos() {
     var resp = await fetch(SUPABASE_URL + '/rest/v1/productos_canonicos?select=nombre,emoji,categoria,activo,sin_stock,aliases&order=orden.asc', {
       headers: {
         'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY
+        'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY)
       }
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -14215,7 +14231,7 @@ function _refrescarProductosCanonicosBg() {
   setTimeout(async function() {
     try {
       var resp = await fetch(SUPABASE_URL + '/rest/v1/productos_canonicos?select=nombre,emoji,categoria,activo,sin_stock,aliases&order=orden.asc', {
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY) }
       });
       if (!resp.ok) return;
       var productos = await resp.json();
@@ -14296,7 +14312,7 @@ async function _flushGrafiasSinCanonizar() {
           method: 'POST',
           headers: {
             'apikey': SUPABASE_KEY,
-            'Authorization': 'Bearer ' + SUPABASE_KEY,
+            'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY),
             'Content-Type': 'application/json',
             'Prefer': 'return=minimal'
           },
@@ -14310,7 +14326,7 @@ async function _flushGrafiasSinCanonizar() {
             method: 'PATCH',
             headers: {
               'apikey': SUPABASE_KEY,
-              'Authorization': 'Bearer ' + SUPABASE_KEY,
+              'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY),
               'Content-Type': 'application/json',
               'Prefer': 'return=minimal'
             },
@@ -15351,14 +15367,14 @@ async function pcanonRecargar() {
   try {
     // Pendientes
     var resp1 = await fetch(SUPABASE_URL + '/rest/v1/productos_sin_canonizar?resuelto=eq.false&order=ultimo_visto.desc&select=*', {
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY) }
     });
     if (!resp1.ok) throw new Error('HTTP ' + resp1.status);
     _pcanonPendientes = await resp1.json();
 
     // Conteo de resueltas
     var resp2 = await fetch(SUPABASE_URL + '/rest/v1/productos_sin_canonizar?resuelto=eq.true&select=id', {
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Prefer': 'count=exact' }
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY), 'Prefer': 'count=exact' }
     });
     var cntHeader = resp2.headers.get('content-range');
     if (cntHeader) {
@@ -15488,7 +15504,7 @@ async function pcanonResolver(idPendiente, nombreCanonico, nombreCrudo) {
   try {
     // 1. Leer aliases actuales del canónico
     var resp = await fetch(SUPABASE_URL + '/rest/v1/productos_canonicos?nombre=eq.' + encodeURIComponent(nombreCanonico) + '&select=id,aliases', {
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY) }
     });
     var arr = await resp.json();
     if (!arr.length) { alert('Canónico no encontrado'); return; }
@@ -15502,7 +15518,7 @@ async function pcanonResolver(idPendiente, nombreCanonico, nombreCrudo) {
       method: 'PATCH',
       headers: {
         'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY),
         'Content-Type': 'application/json',
         'Prefer': 'return=minimal'
       },
@@ -15514,7 +15530,7 @@ async function pcanonResolver(idPendiente, nombreCanonico, nombreCrudo) {
       method: 'PATCH',
       headers: {
         'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY),
         'Content-Type': 'application/json',
         'Prefer': 'return=minimal'
       },
@@ -15547,7 +15563,7 @@ async function pcanonIgnorar(idPendiente) {
       method: 'PATCH',
       headers: {
         'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY),
         'Content-Type': 'application/json',
         'Prefer': 'return=minimal'
       },
@@ -15620,7 +15636,7 @@ async function ccanonRecargar() {
     // 1. Cargar ciudades de rutas (para sugerencias y selector manual)
     if (!_ccanonRutas.length) {
       var respR = await fetch(SUPABASE_URL + '/rest/v1/rutas?select=ciudad,zona,aliases&order=ciudad.asc', {
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY) }
       });
       if (!respR.ok) throw new Error('rutas HTTP ' + respR.status);
       _ccanonRutas = await respR.json();
@@ -15628,14 +15644,14 @@ async function ccanonRecargar() {
 
     // 2. Pendientes
     var resp1 = await fetch(SUPABASE_URL + '/rest/v1/ciudades_sin_canonizar?resuelto=eq.false&order=apariciones.desc,nombre_crudo.asc&select=*', {
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY) }
     });
     if (!resp1.ok) throw new Error('pendientes HTTP ' + resp1.status);
     _ccanonPendientes = await resp1.json();
 
     // 3. Conteo de resueltas
     var resp2 = await fetch(SUPABASE_URL + '/rest/v1/ciudades_sin_canonizar?resuelto=eq.true&select=id', {
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Prefer': 'count=exact' }
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY), 'Prefer': 'count=exact' }
     });
     var cntHeader = resp2.headers.get('content-range');
     if (cntHeader) {
@@ -15777,7 +15793,7 @@ async function ccanonResolver(idPendiente, nombreCiudad, nombreCrudo) {
   try {
     // 1. Leer aliases actuales de la ciudad
     var resp = await fetch(SUPABASE_URL + '/rest/v1/rutas?ciudad=eq.' + encodeURIComponent(nombreCiudad) + '&select=ciudad,aliases', {
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY) }
     });
     var arr = await resp.json();
     if (!arr.length) { alert('Ciudad no encontrada en rutas'); return; }
@@ -15794,7 +15810,7 @@ async function ccanonResolver(idPendiente, nombreCiudad, nombreCrudo) {
       method: 'PATCH',
       headers: {
         'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY),
         'Content-Type': 'application/json',
         'Prefer': 'return=minimal'
       },
@@ -15807,7 +15823,7 @@ async function ccanonResolver(idPendiente, nombreCiudad, nombreCrudo) {
       method: 'PATCH',
       headers: {
         'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY),
         'Content-Type': 'application/json',
         'Prefer': 'return=minimal'
       },
@@ -15845,7 +15861,7 @@ async function ccanonIgnorar(idPendiente) {
       method: 'PATCH',
       headers: {
         'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY),
         'Content-Type': 'application/json',
         'Prefer': 'return=minimal'
       },
@@ -19141,7 +19157,7 @@ async function canalesVendCargar(forzar) {
       var resp = await fetch(url, {
         headers: {
           'apikey':        SUPABASE_KEY,
-          'Authorization': 'Bearer ' + SUPABASE_KEY
+          'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY)
         }
       });
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -19254,7 +19270,7 @@ async function canalesVendAbrir(vendedor) {
     var resp = await fetch(url, {
       headers: {
         'apikey':        SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY
+        'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY)
       }
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -19349,7 +19365,7 @@ async function _canalesReaEjecutarBusqueda(q) {
     var resp = await fetch(url, {
       headers: {
         'apikey':        SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY
+        'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY)
       }
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -19538,7 +19554,7 @@ async function canalesReaConfirmar() {
       method: 'PATCH',
       headers: {
         'apikey':        SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY),
         'Content-Type':  'application/json',
         'Prefer':        'return=minimal'
       },
@@ -19590,7 +19606,7 @@ async function canalesReaQuitar() {
       method: 'PATCH',
       headers: {
         'apikey':        SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY),
         'Content-Type':  'application/json',
         'Prefer':        'return=minimal'
       },
@@ -23945,7 +23961,7 @@ async function cargarRutasOrden() {
   }
   try {
     const resp = await fetch(SUPABASE_URL + '/rest/v1/rutas?select=ciudad,orden,zona,aliases&activo=eq.true&order=orden.asc', {
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY) }
     });
     if (!resp.ok) throw new Error('rutas HTTP ' + resp.status);
     const data = await resp.json();
@@ -28139,6 +28155,8 @@ async function _comprobanteBlobURL(path) {
   if (!path) return null;
   if (!window._compCache) window._compCache = {};
   if (window._compCache[path]) return window._compCache[path];
+  // v13.30.2: este fetch va SIEMPRE con anon key — la policy del bucket
+  // 'comprobantes' es solo para rol anon; con JWT (authenticated) bloquearía.
   var resp = await fetch(SUPABASE_URL + '/storage/v1/object/comprobantes/' + path, {
     headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
   });
@@ -29667,7 +29685,7 @@ async function devMarcarNC() {
       method: 'PATCH',
       headers: {
         'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY),
         'Content-Type': 'application/json',
         'Prefer': 'return=representation'
       },
@@ -32876,7 +32894,7 @@ async function cargarStockVisible() {
   try {
     const url = SUPABASE_URL + '/rest/v1/vw_stock_visible?select=*';
     const resp = await fetch(url, {
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY) }
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
@@ -33152,7 +33170,7 @@ async function cargarTopVentasStock() {
     // Lee pedidos_items últimos 7 días, agrupado por producto
     const url = SUPABASE_URL + '/rest/v1/pedidos_items?select=producto_tck_nombre,cantidad,creado_at&creado_at=gte.' + new Date(Date.now() - 7*24*60*60*1000).toISOString();
     const resp = await fetch(url, {
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY) }
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const items = await resp.json();
@@ -33419,7 +33437,7 @@ function _tesFetch(path) {
   return fetch(SUPABASE_URL + '/rest/v1/' + path, {
     headers: {
       'apikey': SUPABASE_KEY,
-      'Authorization': 'Bearer ' + SUPABASE_KEY
+      'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY)
     }
   }).then(function(r) {
     if (!r.ok) throw new Error('HTTP ' + r.status);
