@@ -1,5 +1,9 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.50.0 — 13/06/2026
+     v13.50.0: Indicador "⚠️ CAE pendiente" (rojo) en el Centro para facturas
+        emitidas en Xubio sin CAE de ARCA. Cierra el lado visual de R2: el
+        backend ya detecta y avisa por mail; ahora también se ve en pantalla.
      TCK ADMIN — v13.49.0 — 13/06/2026
      v13.49.0: FIX precio unitario de lista en la factura. El campo precio de
         Xubio viene inconsistente (neto o con IVA según la fuente); ahora el
@@ -36303,6 +36307,16 @@ async function fcCargar() {
     }
     _fcCache.presupMap = map;
 
+    // v13.50.0 — CAE de las facturadas, para marcar en rojo "CAE pendiente"
+    var pidsFact = _fcCache.salidas.filter(function (s) { return s.xubio_factura_id; }).map(function (s) { return s.pedido_id; });
+    var caeMap = {};
+    for (var j = 0; j < pidsFact.length; j += 80) {
+      var chunkF = pidsFact.slice(j, j + 80);
+      var rowsF = await sbFetch('facturas_xubio?pedido_id=in.(' + chunkF.join(',') + ')&select=pedido_id,cae');
+      (rowsF || []).forEach(function (r) { caeMap[r.pedido_id] = r.cae || ''; });
+    }
+    _fcCache.caeMap = caeMap;
+
     fcRender();
     fcBadge();
   } catch (e) {
@@ -36421,7 +36435,9 @@ function fcRender() {
             (presupNro ? ' · Presup #' + _fcEsc(presupNro) : ' · sin presupuesto') + '</div></div>' +
             '<div class="fc-monto">' + _fcMoneda(s.total) + '</div>' +
             (tiene
-              ? '<span class="fc-chip verde">FC ' + _fcEsc(s.xubio_factura_nro || '') + '</span>'
+              ? ((_fcCache.caeMap && (s.pedido_id in _fcCache.caeMap) && !_fcCache.caeMap[s.pedido_id])
+                  ? '<span class="fc-chip rojo" title="El comprobante existe en Xubio pero ARCA no le dio CAE">⚠️ CAE pendiente</span>'
+                  : '<span class="fc-chip verde">FC ' + _fcEsc(s.xubio_factura_nro || '') + '</span>')
                 + '<button class="fc-fbtn" onclick="_fcVerFactura(\'' + s.pedido_id + '\')" title="Ver factura">👁</button>'
                 + '<button class="fc-fbtn" onclick="_fcImprimirFactura(\'' + s.pedido_id + '\')" title="Imprimir / descargar">🖨</button>'
               : '<span class="fc-chip rojo">SIN FACTURA</span>') +
@@ -37017,7 +37033,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.49.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.50.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
