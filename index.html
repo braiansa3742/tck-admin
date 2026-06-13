@@ -1,5 +1,16 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.39.0 — 12/06/2026
+     v13.39.0: BLOQUE "FACTURAS DEL VIAJE" EN LA PLANILLA DE CARGA.
+       · Página nueva al final del PDF: checklist cliente → FC N° → monto,
+         ordenada por localidad, con casillero ☐ para que el chofer tilde
+         papel por papel contra la carga. Resumen "Facturadas X/Y".
+       · Si la planilla salió forzada (override), los pedidos SIN FACTURA
+         aparecen marcados ⚠️ en el checklist — el chofer los ve antes
+         de arrancar.
+       · fcCandadoPlanilla ahora devuelve el mapa pedido→factura (nro,
+         monto) que el PDF consume; un solo fetch para candado + bloque.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.38.0 — 12/06/2026
      v13.38.0: FACTURACIÓN MASIVA EN UN CLICK (Etapa 4, frontend).
        · Botón "🧾 Facturar todo (N)" en el header de Salidas de hoy y
@@ -28186,6 +28197,76 @@ async function descargarPlanillaCarga(choferParam) {
       y += 2;
     });
 
+    // ═══ v13.39.0 — FACTURAS DEL VIAJE (checklist para Francisco y el chofer) ═══
+    try {
+      const _facMap = (_fcGate && _fcGate.facturas) || {};
+      if (Object.keys(_facMap).length) {
+        const filas = pedidos.map(function(p) {
+          const f = _facMap[p.pedidoId] || { nro: null, total: 0, cliente: p.cliente || p.comercio || '' };
+          return {
+            cliente: (f.cliente || p.cliente || p.comercio || p.pedidoId || '').toString(),
+            loc: _ciudadCanonizar ? _ciudadCanonizar((p.localidad || '').trim()) : (p.localidad || ''),
+            nro: f.nro,
+            total: f.total || Number(p.total || 0)
+          };
+        }).sort(function(a, b) {
+          return a.loc === b.loc ? a.cliente.localeCompare(b.cliente) : a.loc.localeCompare(b.loc);
+        });
+        const conFC = filas.filter(function(f) { return !!f.nro; }).length;
+        const totalViaje = filas.reduce(function(a, f) { return a + (f.total || 0); }, 0);
+
+        doc.addPage(); y = 14;
+        headerPagina('FACTURAS DEL VIAJE');
+
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+        doc.setTextColor(conFC === filas.length ? 27 : 198, conFC === filas.length ? 94 : 40, conFC === filas.length ? 32 : 40);
+        doc.text('Facturadas: ' + conFC + '/' + filas.length + ' · Total del viaje: $' + Math.round(totalViaje).toLocaleString('es-AR'), M, y);
+        y += 5;
+        if (conFC < filas.length) {
+          doc.setTextColor(198, 40, 40);
+          doc.text('⚠ ' + (filas.length - conFC) + ' PEDIDO(S) SIN FACTURA — planilla forzada por admin', M, y);
+          y += 5;
+        }
+        doc.setTextColor(120, 120, 120); doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5);
+        doc.text('El chofer tilda ☐ cada factura en mano antes de salir. Sin papel = no se entrega.', M, y);
+        y += 6;
+
+        const _facHeader = function() {
+          doc.setFillColor(27, 94, 32);
+          doc.rect(M, y, W - 2 * M, 6, 'F');
+          doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
+          doc.text('CLIENTE · LOCALIDAD', M + 8, y + 4);
+          doc.text('FACTURA N°', W - M - 52, y + 4);
+          doc.text('MONTO', W - M - 4, y + 4, { align: 'right' });
+          y += 8;
+        };
+        _facHeader();
+
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+        filas.forEach(function(f) {
+          if (y > H - 18) { doc.addPage(); y = 14; headerPagina('FACTURAS DEL VIAJE'); _facHeader(); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); }
+          doc.setDrawColor(120, 120, 120);
+          doc.rect(M + 1, y - 0.5, 3.5, 3.5);   // ☐ casillero
+          doc.setTextColor(40, 40, 40);
+          let txtCli = f.cliente + ' · ' + f.loc;
+          if (txtCli.length > 58) txtCli = txtCli.substring(0, 57) + '…';
+          doc.text(txtCli, M + 8, y + 2.5);
+          if (f.nro) {
+            doc.setTextColor(27, 94, 32); doc.setFont('helvetica', 'bold');
+            doc.text(String(f.nro), W - M - 52, y + 2.5);
+          } else {
+            doc.setTextColor(198, 40, 40); doc.setFont('helvetica', 'bold');
+            doc.text('⚠ SIN FACTURA', W - M - 52, y + 2.5);
+          }
+          doc.setFont('helvetica', 'normal'); doc.setTextColor(40, 40, 40);
+          doc.text('$' + Math.round(f.total || 0).toLocaleString('es-AR'), W - M - 4, y + 2.5, { align: 'right' });
+          y += 5.2;
+        });
+      }
+    } catch (eFac) {
+      console.warn('[FC] bloque facturas del viaje falló (no bloquea el PDF):', eFac);
+    }
+
     // ── FOOTER ──
     doc.setFontSize(7);
     doc.setTextColor(150, 150, 150);
@@ -36303,15 +36384,17 @@ setTimeout(fcBadgeInit, 5000);
 async function fcCandadoPlanilla(pedidos, ctx) {
   try {
     var ids = (pedidos || []).map(function (p) { return p.pedidoId; }).filter(Boolean);
-    if (!ids.length) return { ok: true };
+    if (!ids.length) return { ok: true, facturas: {} };
 
     var sin = [];
     var vistos = {};
+    var mapa = {};   // v13.39.0 — pedido_id → { nro, total, cliente } para el PDF
     for (var i = 0; i < ids.length; i += 60) {
       var chunk = ids.slice(i, i + 60).map(encodeURIComponent);
-      var rows = await sbFetch('pedidos_zona?pedido_id=in.(' + chunk.join(',') + ')&select=pedido_id,cliente,total,xubio_factura_id');
+      var rows = await sbFetch('pedidos_zona?pedido_id=in.(' + chunk.join(',') + ')&select=pedido_id,cliente,total,xubio_factura_id,xubio_factura_nro');
       (rows || []).forEach(function (r) {
         vistos[r.pedido_id] = true;
+        mapa[r.pedido_id] = { nro: r.xubio_factura_id ? (r.xubio_factura_nro || 's/n') : null, total: Number(r.total || 0), cliente: r.cliente || '' };
         if (!r.xubio_factura_id) sin.push(r);
       });
     }
@@ -36320,9 +36403,10 @@ async function fcCandadoPlanilla(pedidos, ctx) {
     (pedidos || []).forEach(function (p) {
       if (p.pedidoId && !vistos[p.pedidoId]) {
         sin.push({ pedido_id: p.pedidoId, cliente: (p.cliente || p.comercio || p.pedidoId) + ' (no está en zona)', total: p.total || 0 });
+        mapa[p.pedidoId] = { nro: null, total: Number(p.total || 0), cliente: p.cliente || p.comercio || '' };
       }
     });
-    if (!sin.length) return { ok: true };
+    if (!sin.length) return { ok: true, facturas: mapa };
 
     var lista = sin.slice(0, 12).map(function (r) {
       return '• ' + (r.cliente || r.pedido_id) + ' (' + _fcMoneda(r.total) + ')';
@@ -36361,7 +36445,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
       console.warn('[FC] log de override falló (no bloquea):', eLog);
     }
     toast('⚠️ Planilla forzada con ' + sin.length + ' pedidos sin factura (logueado)', 'err');
-    return { ok: true, override: true };
+    return { ok: true, override: true, facturas: mapa };
   } catch (e) {
     console.error('[FC] candado', e);
     // Falla de red al verificar: decisión humana, no dejamos la operación muerta.
