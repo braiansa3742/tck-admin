@@ -1,5 +1,25 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.36.0 — 12/06/2026
+     v13.36.0: CENTRO DE FACTURACIÓN (circuito anti-pedidos-sin-facturar;
+     caso Castillo / presupuesto 3879). Reaplicado sobre v13.35.0 — las
+     v13.31/13.32 entregadas más temprano en la sesión de facturación
+     quedan obsoletas (numeración pisada por la sesión de Márgenes).
+       1. TAB "Facturación" (menú Más): salidas de hoy con semáforo
+          rojo/verde por zona, bandejas Por Facturar / Solo-en-Xubio /
+          Facturas sueltas, botón Sincronizar (dispara sync v25.5x del
+          Apps Script), badge rojo en menú Más que carga al abrir la app.
+       2. CANDADO DE FACTURACIÓN en planilla de CARGA y planilla VET:
+          consulta pedidos_zona.xubio_factura_id en vivo; pedido sin
+          factura (o ausente de pedidos_zona) bloquea la planilla.
+          Override SOLO admin con motivo obligatorio, logueado en
+          pedido_acciones (accion='override_candado_planilla').
+       3. Warning de sync vieja (>2h) en el header del tab.
+     Fuente del flag facturado: pedidos_zona.xubio_factura_id (lo escribe
+     el sync del Apps Script v25.58.0). NO se toca el estado del pedido.
+     NO se tocó: tomador, Logística, Tesorería, Stock, Compras, Márgenes,
+     Acuerdos VIP, parsers.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.35.0 — 12/06/2026
      v13.35.0: CRUD DE ACUERDOS en panel VIP (para Francisco, sin SQL).
        - "+ Nuevo acuerdo": cliente + producto (selector con costo) +
@@ -13570,6 +13590,35 @@ input.canales-exp-input[type="date"] {
     #view-margenes .mg-var-sug.ok{ background:#E8F5E9; color:#1B5E20; }
     #view-margenes .mg-var-more{ display:block; width:100%; border:none; background:#FAF6EC; font-family:inherit; font-size:11.5px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; color:#8A7B63; padding:9px; cursor:pointer; border-top:1px solid #F2EDE3; }
   </style>
+  <!-- ═══ v13.36.0 — CENTRO DE FACTURACIÓN ═══ -->
+  <div class="view" id="view-facturacion">
+    <div class="fc-head">
+      <div>
+        <h2>🧾 Facturación</h2>
+        <div class="fc-sub" id="fc-sync-info">Cargando…</div>
+      </div>
+      <button class="fc-sync-btn" id="fc-sync-btn" onclick="fcSync()">🔄 Sincronizar</button>
+    </div>
+    <div class="fc-kpis" id="fc-kpis"></div>
+    <div class="fc-sec">
+      <div class="fc-sec-tit">🚚 Salidas de hoy <span class="fc-sec-sub">se factura ANTES de cargar el camión</span></div>
+      <div id="fc-salidas" class="fc-list"><div class="fc-vacio">Cargando…</div></div>
+    </div>
+    <div class="fc-sec">
+      <div class="fc-sec-tit">🔴 Por facturar <span class="fc-sec-sub">pedidos con presupuesto, sin factura</span></div>
+      <div id="fc-porfacturar" class="fc-list"></div>
+    </div>
+    <div class="fc-sec">
+      <div class="fc-sec-tit">🟠 Solo en Xubio <span class="fc-sec-sub">presupuestos sin pedido en la app — adoptar o seguir manual</span></div>
+      <div id="fc-soloxubio" class="fc-list"></div>
+    </div>
+    <details class="fc-sec fc-details">
+      <summary class="fc-sec-tit">🟡 Facturas sueltas (sin pedido) <span class="fc-sec-sub" id="fc-sueltas-n"></span></summary>
+      <div id="fc-sueltas" class="fc-list" style="margin-top:6px;"></div>
+    </details>
+    <div style="height:90px;"></div>
+  </div>
+
   <div class="view" id="view-margenes">
     <div class="mg-head">
       <h2>📊 Márgenes por producto</h2>
@@ -13700,6 +13749,12 @@ input.canales-exp-input[type="date"] {
       <button class="menu-mas-item" id="menu-mas-margenes" onclick="cambiarTab('margenes');cerrarMenuMas()">
         <div class="menu-mas-icon">📊</div>
         <div class="menu-mas-lbl">Márgenes</div>
+      </button>
+      <!-- v13.36.0 — Tab Facturación (Centro de Facturación) -->
+      <button class="menu-mas-item" id="menu-mas-facturacion" onclick="cambiarTab('facturacion');cerrarMenuMas()">
+        <div class="menu-mas-icon">🧾</div>
+        <div class="menu-mas-lbl">Facturación</div>
+        <div class="menu-mas-badge" id="menu-mas-fc-badge" style="display:none;background:#C62828;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;margin-top:3px;">0</div>
       </button>
       <!-- v12.20.0 — Tab Tesorería -->
       <button class="menu-mas-item" id="menu-mas-tesoreria" onclick="cambiarTab('tesoreria');cerrarMenuMas()">
@@ -18812,7 +18867,7 @@ function cambiarTab(tab) {
   _tabActual = tab;
 
   // Views — incluye logistica + stock (v12.15.0) + compras (v12.18.0) + tesoreria (v12.20.0)
-  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock','compras','tesoreria','margenes'].forEach(function(t) {
+  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock','compras','tesoreria','margenes','facturacion'].forEach(function(t) {
     var v = document.getElementById('view-' + t);
     var b = document.getElementById('tab-btn-' + t);
     if (v) v.classList.toggle('active', t === tab);
@@ -18821,7 +18876,13 @@ function cambiarTab(tab) {
 
   // El botón "Más" se marca activo si estás en un tab oculto
   var btnMas = document.getElementById('tab-btn-mas');
-  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes' || tab === 'rendiciones' || tab === 'acc-dup' || tab === 'prod-canon' || tab === 'ccanon' || tab === 'stock' || tab === 'compras' || tab === 'tesoreria' || tab === 'margenes');
+  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes' || tab === 'rendiciones' || tab === 'acc-dup' || tab === 'prod-canon' || tab === 'ccanon' || tab === 'stock' || tab === 'compras' || tab === 'tesoreria' || tab === 'margenes' || tab === 'facturacion');
+
+  // v13.36.0 — Facturación: cargar al abrir
+  if (tab === 'facturacion') {
+    if (typeof fcCargar === 'function') fcCargar();
+    var v = document.getElementById('view-facturacion'); if (v) v.scrollTop = 0;
+  }
 
   // v12.20.0 — Tesorería: cargar al abrir
   if (tab === 'tesoreria') {
@@ -27636,6 +27697,10 @@ async function _vetGenerarAsync(opts) {
     return;
   }
 
+  // ═══ v13.36.0 — CANDADO DE FACTURACIÓN también en la planilla VET ═══
+  const _fcGateVet = await fcCandadoPlanilla(pedidos, { chofer: chofer, viajeId: viajeId });
+  if (!_fcGateVet.ok) return;
+
   // Agrupar por ciudad → categoría
   const porCiudad = {};
   let totalUds = 0, totalKg = 0;
@@ -27786,6 +27851,11 @@ async function descargarPlanillaCarga(choferParam) {
     toast('No hay pedidos confirmados para ' + chofer, 'err');
     return;
   }
+
+  // ═══ v13.36.0 — CANDADO DE FACTURACIÓN: sin factura no hay planilla ═══
+  // Cubre también lzImprimirPlanillaCargaViaje (delega en esta función).
+  const _fcGate = await fcCandadoPlanilla(pedidos, { chofer: chofer, viajeId: viajeId });
+  if (!_fcGate.ok) return;
 
   toast('⏳ Generando PDF...', 'ok');
 
@@ -35820,6 +35890,36 @@ async function comprasDetailCargarFecha() {
 .modal-overlay .xc-success-title { font-size: 18px !important; font-weight: 800 !important; color: #1B5E20 !important; margin-bottom: 6px !important; }
 .modal-overlay .xc-success-sub { font-size: 13px !important; color: #666 !important; }
 
+/* ═══ v13.36.0 — Centro de Facturación ═══ */
+.fc-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px 6px;gap:10px;}
+.fc-head h2{font-family:'Barlow Condensed',sans-serif;font-size:24px;font-weight:900;color:var(--red);margin:0;}
+.fc-sub{font-size:11px;color:var(--text3);margin-top:2px;}
+.fc-sync-btn{background:var(--red);color:#fff;border:none;border-radius:10px;padding:9px 14px;font-weight:800;font-size:13px;cursor:pointer;flex-shrink:0;}
+.fc-sync-btn:disabled{opacity:.5;}
+.fc-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:8px 16px;}
+.fc-kpi{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 6px;text-align:center;}
+.fc-kpi .n{font-size:20px;font-weight:900;}
+.fc-kpi .l{font-size:9px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.3px;}
+.fc-sec{padding:8px 16px;}
+.fc-sec-tit{font-size:14px;font-weight:900;color:var(--text);margin-bottom:6px;}
+.fc-sec-sub{font-size:10px;color:var(--text3);font-weight:600;margin-left:6px;}
+.fc-list{display:flex;flex-direction:column;gap:6px;}
+.fc-zona-h{font-size:12px;font-weight:900;color:var(--text2);margin:8px 0 2px;display:flex;justify-content:space-between;align-items:center;}
+.fc-row{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;display:flex;align-items:center;gap:8px;font-size:12px;}
+.fc-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+.fc-dot.ok{background:#2E7D32;}
+.fc-dot.no{background:#C62828;}
+.fc-main{flex:1;min-width:0;}
+.fc-cli{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.fc-meta{font-size:10px;color:var(--text3);}
+.fc-monto{font-weight:900;white-space:nowrap;font-size:12px;}
+.fc-chip{font-size:10px;font-weight:800;border-radius:8px;padding:2px 7px;white-space:nowrap;flex-shrink:0;}
+.fc-chip.rojo{background:#FDE7E7;color:#C62828;}
+.fc-chip.verde{background:#E6F4E6;color:#2E7D32;}
+.fc-chip.gris{background:var(--cream2);color:var(--text2);}
+.fc-vacio{font-size:12px;color:var(--text3);padding:12px;text-align:center;background:var(--cream2);border-radius:10px;}
+.fc-details summary{cursor:pointer;list-style:none;}
+.fc-details summary::-webkit-details-marker{display:none;}
 </style>
 
 <!-- ═══ v12.0 BLOQUE D — MODALES DE LOGÍSTICA ZONAS ═══ -->
@@ -35855,6 +35955,308 @@ async function comprasDetailCargarFecha() {
     </div>
   </div>
 </div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+//  v13.31.0 — CENTRO DE FACTURACIÓN (fc*)
+//  Lee el espejo Xubio de Supabase (lo alimenta el Apps Script v25.57.x):
+//  vw_fact_por_facturar / vw_fact_solo_xubio / vw_fact_sueltas + pedidos_zona.
+//  Flag de facturado: pedidos_zona.xubio_factura_id.
+// ═══════════════════════════════════════════════════════════════════════════
+
+var _fcCache = { porFacturar: [], soloXubio: [], sueltas: [], salidas: [], presupMap: {}, ultimaSync: null };
+var _fcCargando = false;
+
+function _fcHoyISO() {
+  var d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function _fcMoneda(n) {
+  return '$' + Number(n || 0).toLocaleString('es-AR', { maximumFractionDigits: 0 });
+}
+
+function _fcEsc(s) {
+  return String(s == null ? '' : s).replace(/[<>&"]/g, function (c) {
+    return { '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c];
+  });
+}
+
+async function fcCargar() {
+  if (_fcCargando) return;
+  _fcCargando = true;
+  try {
+    var hoy = _fcHoyISO();
+    var res = await Promise.all([
+      sbFetch('vw_fact_por_facturar?select=*'),
+      sbFetch('vw_fact_solo_xubio?select=*'),
+      sbFetch('vw_fact_sueltas?select=*&limit=60'),
+      sbFetch('pedidos_zona?salida_planificada=eq.' + hoy +
+              '&estado=not.in.(Cancelado,%22Cancelado%20por%20admin%22)' +
+              '&select=pedido_id,cliente,vendedor,zona,localidad_canonica,total,estado,xubio_presupuesto_id,xubio_factura_id,xubio_factura_nro' +
+              '&order=zona.asc,localidad_canonica.asc'),
+      sbFetch('facturacion_sync_log?tipo=eq.ventas&order=corrido_at.desc&limit=1')
+    ]);
+    _fcCache.porFacturar = res[0] || [];
+    _fcCache.soloXubio   = res[1] || [];
+    _fcCache.sueltas     = res[2] || [];
+    _fcCache.salidas     = res[3] || [];
+    _fcCache.ultimaSync  = (res[4] && res[4][0]) || null;
+
+    // Números de presupuesto para las salidas (lookup por chunks)
+    var tids = [];
+    _fcCache.salidas.forEach(function (s) {
+      if (s.xubio_presupuesto_id && tids.indexOf(s.xubio_presupuesto_id) < 0) tids.push(s.xubio_presupuesto_id);
+    });
+    var map = {};
+    for (var i = 0; i < tids.length; i += 80) {
+      var chunk = tids.slice(i, i + 80);
+      var rows = await sbFetch('presupuestos_xubio?transaccion_id=in.(' + chunk.join(',') + ')&select=transaccion_id,numero');
+      (rows || []).forEach(function (r) { map[r.transaccion_id] = r.numero; });
+    }
+    _fcCache.presupMap = map;
+
+    fcRender();
+    fcBadge();
+  } catch (e) {
+    console.error('[FC] fcCargar', e);
+    toast('Error cargando Facturación: ' + e.message, 'err');
+  } finally {
+    _fcCargando = false;
+  }
+}
+
+function fcRender() {
+  var c = _fcCache;
+
+  // ── Info de última sync ──
+  var info = document.getElementById('fc-sync-info');
+  if (info) {
+    if (c.ultimaSync && c.ultimaSync.corrido_at) {
+      var dt = new Date(c.ultimaSync.corrido_at);
+      var horas = (Date.now() - dt.getTime()) / 3600000;
+      if (horas > 2) {
+        info.innerHTML = '<span style="color:#C62828;font-weight:800;">⚠️ Última sync hace ' + horas.toFixed(1) +
+          ' h — el semáforo puede estar viejo. Tocá Sincronizar y revisá el trigger del Apps Script.</span>';
+      } else {
+        info.textContent = 'Última sync: ' + dt.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) +
+          ' · auto cada 30 min · corte 12/06';
+      }
+    } else {
+      info.textContent = 'Sin sync registrada todavía';
+    }
+  }
+
+  // ── KPIs ──
+  var fact = c.salidas.filter(function (s) { return !!s.xubio_factura_id; }).length;
+  var montoPF = c.porFacturar.reduce(function (a, r) { return a + Number(r.total || 0); }, 0);
+  var kpis = document.getElementById('fc-kpis');
+  if (kpis) {
+    kpis.innerHTML =
+      '<div class="fc-kpi"><div class="n" style="color:' + (fact === c.salidas.length && c.salidas.length ? '#2E7D32' : '#C62828') + ';">' + fact + '/' + c.salidas.length + '</div><div class="l">Salidas hoy facturadas</div></div>' +
+      '<div class="fc-kpi"><div class="n" style="color:#C62828;">' + c.porFacturar.length + '</div><div class="l">Por facturar · ' + _fcMoneda(montoPF) + '</div></div>' +
+      '<div class="fc-kpi"><div class="n" style="color:#EF6C00;">' + c.soloXubio.length + '</div><div class="l">Solo en Xubio</div></div>';
+  }
+
+  // ── Salidas de hoy, agrupadas por zona ──
+  var contS = document.getElementById('fc-salidas');
+  if (contS) {
+    if (!c.salidas.length) {
+      contS.innerHTML = '<div class="fc-vacio">No hay pedidos con salida planificada para hoy.</div>';
+    } else {
+      var porZona = {};
+      c.salidas.forEach(function (s) {
+        var z = s.zona || 'sin_zona';
+        (porZona[z] = porZona[z] || []).push(s);
+      });
+      var html = '';
+      Object.keys(porZona).sort().forEach(function (z) {
+        var arr = porZona[z];
+        var ok = arr.filter(function (s) { return !!s.xubio_factura_id; }).length;
+        html += '<div class="fc-zona-h"><span>' + _fcEsc(z.toUpperCase().replace('_', ' / ')) + '</span>' +
+                '<span class="fc-chip ' + (ok === arr.length ? 'verde' : 'rojo') + '">' + ok + '/' + arr.length + ' facturados</span></div>';
+        arr.forEach(function (s) {
+          var tiene = !!s.xubio_factura_id;
+          var presupNro = s.xubio_presupuesto_id ? (c.presupMap[s.xubio_presupuesto_id] || '—') : null;
+          html += '<div class="fc-row">' +
+            '<div class="fc-dot ' + (tiene ? 'ok' : 'no') + '"></div>' +
+            '<div class="fc-main"><div class="fc-cli">' + _fcEsc(s.cliente) + '</div>' +
+            '<div class="fc-meta">' + _fcEsc(s.localidad_canonica || '') + ' · ' + _fcEsc(s.vendedor || '') +
+            (presupNro ? ' · Presup #' + _fcEsc(presupNro) : ' · sin presupuesto') + '</div></div>' +
+            '<div class="fc-monto">' + _fcMoneda(s.total) + '</div>' +
+            (tiene
+              ? '<span class="fc-chip verde">FC ' + _fcEsc(s.xubio_factura_nro || '') + '</span>'
+              : '<span class="fc-chip rojo">SIN FACTURA</span>') +
+            '</div>';
+        });
+      });
+      contS.innerHTML = html;
+    }
+  }
+
+  // ── Por facturar ──
+  var contP = document.getElementById('fc-porfacturar');
+  if (contP) {
+    if (!c.porFacturar.length) {
+      contP.innerHTML = '<div class="fc-vacio">✅ Nada pendiente — todos los pedidos con presupuesto tienen factura.</div>';
+    } else {
+      contP.innerHTML = c.porFacturar.map(function (r) {
+        var dias = Number(r.dias_vencido || 0);
+        return '<div class="fc-row">' +
+          '<div class="fc-dot no"></div>' +
+          '<div class="fc-main"><div class="fc-cli">' + _fcEsc(r.cliente) + '</div>' +
+          '<div class="fc-meta">' + _fcEsc(r.localidad_canonica || '') + ' · ' + _fcEsc(r.vendedor || '') +
+          ' · Presup #' + _fcEsc(r.presupuesto_nro || '—') + ' · salida ' + _fcEsc(r.salida_planificada || '—') + '</div></div>' +
+          '<div class="fc-monto">' + _fcMoneda(r.total) + '</div>' +
+          (dias > 0 ? '<span class="fc-chip rojo">' + dias + 'd vencido</span>' : '<span class="fc-chip gris">hoy</span>') +
+          '</div>';
+      }).join('');
+    }
+  }
+
+  // ── Solo en Xubio ──
+  var contX = document.getElementById('fc-soloxubio');
+  if (contX) {
+    if (!c.soloXubio.length) {
+      contX.innerHTML = '<div class="fc-vacio">Nada — todos los presupuestos de Xubio tienen pedido en la app.</div>';
+    } else {
+      contX.innerHTML = c.soloXubio.map(function (r) {
+        return '<div class="fc-row">' +
+          '<div class="fc-dot no" style="background:#EF6C00;"></div>' +
+          '<div class="fc-main"><div class="fc-cli">' + _fcEsc(r.cliente_nombre || '(sin cliente)') + '</div>' +
+          '<div class="fc-meta">Presup #' + _fcEsc(r.numero) + ' · ' + _fcEsc(r.fecha || '') + ' · ' + _fcEsc(r.estado_xubio || '') + '</div></div>' +
+          '<div class="fc-monto">' + _fcMoneda(r.importe_total) + '</div>' +
+          '</div>';
+      }).join('');
+    }
+  }
+
+  // ── Facturas sueltas ──
+  var nS = document.getElementById('fc-sueltas-n');
+  if (nS) nS.textContent = '(' + c.sueltas.length + ')';
+  var contF = document.getElementById('fc-sueltas');
+  if (contF) {
+    contF.innerHTML = c.sueltas.length
+      ? c.sueltas.map(function (r) {
+          var esNC = String(r.tipo) === '3';
+          return '<div class="fc-row">' +
+            '<div class="fc-main"><div class="fc-cli">' + _fcEsc(r.cliente_nombre || '') + '</div>' +
+            '<div class="fc-meta">' + (esNC ? 'NC ' : 'FC ') + _fcEsc(r.numero) + ' · ' + _fcEsc(r.fecha || '') + '</div></div>' +
+            '<div class="fc-monto">' + _fcMoneda(r.importe_total) + '</div>' +
+            (esNC ? '<span class="fc-chip gris">Nota Crédito</span>' : '') +
+            '</div>';
+        }).join('')
+      : '<div class="fc-vacio">Sin facturas sueltas.</div>';
+  }
+}
+
+function fcBadge() {
+  var b = document.getElementById('menu-mas-fc-badge');
+  if (!b) return;
+  var n = _fcCache.porFacturar.length;
+  b.textContent = n;
+  b.style.display = n > 0 ? 'block' : 'none';
+}
+
+async function fcSync() {
+  var btn = document.getElementById('fc-sync-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Sincronizando…'; }
+  try {
+    var resp = await fetch(APPS_SCRIPT_URL + '?accion=xubioSyncVentasManual&porQuien=' + encodeURIComponent(vendedorActual || 'ADMIN'));
+    var j = await resp.json();
+    toast('Sync: ' + (j.presupuestos || 0) + ' presup · ' + (j.facturas || 0) + ' fact · ' +
+          (j.pedidos_marcados || 0) + ' pedidos marcados', j.errores ? 'err' : 'ok');
+    await fcCargar();
+  } catch (e) {
+    console.error('[FC] fcSync', e);
+    toast('Error en el sync: ' + e.message, 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Sincronizar'; }
+  }
+}
+
+// Badge del menú Más al abrir la app (sin entrar al tab): lo rojo se ve
+// aunque nadie abra Facturación.
+async function fcBadgeInit() {
+  try {
+    var rows = await sbFetch('vw_fact_por_facturar?select=pedido_id&limit=1000');
+    _fcCache.porFacturar = rows || [];
+    fcBadge();
+  } catch (e) { console.warn('[FC] badge init falló:', e.message); }
+}
+setTimeout(fcBadgeInit, 5000);
+
+// ═══ CANDADO DE FACTURACIÓN — usado por descargarPlanillaCarga (y vet) ═══
+async function fcCandadoPlanilla(pedidos, ctx) {
+  try {
+    var ids = (pedidos || []).map(function (p) { return p.pedidoId; }).filter(Boolean);
+    if (!ids.length) return { ok: true };
+
+    var sin = [];
+    var vistos = {};
+    for (var i = 0; i < ids.length; i += 60) {
+      var chunk = ids.slice(i, i + 60).map(encodeURIComponent);
+      var rows = await sbFetch('pedidos_zona?pedido_id=in.(' + chunk.join(',') + ')&select=pedido_id,cliente,total,xubio_factura_id');
+      (rows || []).forEach(function (r) {
+        vistos[r.pedido_id] = true;
+        if (!r.xubio_factura_id) sin.push(r);
+      });
+    }
+    // FIX BYPASS: pedido que no está en pedidos_zona NO puede presumirse
+    // facturado. Se lo trata como sin factura.
+    (pedidos || []).forEach(function (p) {
+      if (p.pedidoId && !vistos[p.pedidoId]) {
+        sin.push({ pedido_id: p.pedidoId, cliente: (p.cliente || p.comercio || p.pedidoId) + ' (no está en zona)', total: p.total || 0 });
+      }
+    });
+    if (!sin.length) return { ok: true };
+
+    var lista = sin.slice(0, 12).map(function (r) {
+      return '• ' + (r.cliente || r.pedido_id) + ' (' + _fcMoneda(r.total) + ')';
+    }).join('\n');
+    var extra = sin.length > 12 ? ('\n…y ' + (sin.length - 12) + ' más') : '';
+
+    if (vendedorActual !== 'ADMIN') {
+      alert('⛔ PLANILLA BLOQUEADA\n\n' + sin.length + ' pedido(s) SIN FACTURA:\n\n' + lista + extra +
+            '\n\nHay que facturar en Xubio, tocar Sincronizar en el tab Facturación y reintentar. Solo un admin puede forzar la planilla.');
+      return { ok: false };
+    }
+
+    var seguir = confirm('⛔ CANDADO DE FACTURACIÓN\n\n' + sin.length + ' pedido(s) SIN FACTURA:\n\n' + lista + extra +
+      '\n\nLo correcto: facturar en Xubio → 🔄 Sincronizar (tab Facturación) → reintentar.\n\n¿FORZAR la planilla igual? (queda logueado con tu motivo)');
+    if (!seguir) { toast('Planilla bloqueada: faltan ' + sin.length + ' facturas', 'err'); return { ok: false }; }
+
+    var motivo = prompt('Motivo del override (obligatorio):');
+    motivo = (motivo || '').trim();
+    if (!motivo) { toast('Override cancelado: falta el motivo', 'err'); return { ok: false }; }
+
+    try {
+      await sbFetch('pedido_acciones', {
+        method: 'POST',
+        prefer: 'return=minimal',
+        body: JSON.stringify(sin.map(function (r) {
+          return {
+            pedido_id: r.pedido_id,
+            accion: 'override_candado_planilla',
+            vendedor_que_actuo: 'ADMIN',
+            fecha_hora: new Date().toISOString(),
+            metadata: { motivo: motivo, chofer: (ctx && ctx.chofer) || null, viaje_id: (ctx && ctx.viajeId) || null }
+          };
+        }))
+      });
+    } catch (eLog) {
+      console.warn('[FC] log de override falló (no bloquea):', eLog);
+    }
+    toast('⚠️ Planilla forzada con ' + sin.length + ' pedidos sin factura (logueado)', 'err');
+    return { ok: true, override: true };
+  } catch (e) {
+    console.error('[FC] candado', e);
+    // Falla de red al verificar: decisión humana, no dejamos la operación muerta.
+    return confirm('No pude verificar las facturas (error de red).\n\n¿Generar la planilla igual?') ? { ok: true } : { ok: false };
+  }
+}
+
+</script>
 
 </body>
 </html>
