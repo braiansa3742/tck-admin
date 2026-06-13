@@ -1,5 +1,18 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.37.0 — 12/06/2026
+     v13.37.0: FIX iOS PWA — botón "← Volver" inalcanzable bajo el notch.
+       · Causa: viewport-fit=cover + status-bar black-translucent meten
+         el contenido debajo del status bar del iPhone. Headers con
+         top:0 sin env(safe-area-inset-top) dejaban el primer botón
+         justo bajo la hora del sistema → el tap nunca llegaba.
+       · Fix CSS puro (4 reglas): .v-detalle-hdr (detalle de viaje),
+         .tomador-hdr (x2, tomador de pedidos) y .hdr (header app)
+         suman env(safe-area-inset-top, 0px) al padding-top.
+       · .v-detalle-back: área de tap 40px mínimo (antes ~28px).
+       · env() = 0 en desktop/Android → cero impacto fuera de iPhone.
+       · CERO cambios de JS. Aplicado sobre la v13.36.0 (Facturación).
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.36.0 — 12/06/2026
      v13.36.0: CENTRO DE FACTURACIÓN (circuito anti-pedidos-sin-facturar;
      caso Castillo / presupuesto 3879). Reaplicado sobre v13.35.0 — las
@@ -1985,7 +1998,7 @@ body {
 /* ══ HEADER PRO — Opción A · Logo gigante + dorado ══ */
 .hdr {
   background: linear-gradient(135deg, #6B0000 0%, #4D0000 100%);
-  padding: 16px 16px 14px;
+  padding: calc(16px + env(safe-area-inset-top, 0px)) 16px 14px; /* v13.37.0: safe area iOS */
   position: sticky;
   top: 0;
   z-index: 100;
@@ -4161,7 +4174,7 @@ body {
 }
 .tomador-hdr {
   background: linear-gradient(135deg, #4A0000, #8B0000);
-  padding: 14px 16px 12px;
+  padding: calc(14px + env(safe-area-inset-top, 0px)) 16px 12px; /* v13.37.0: safe area iOS */
   display: flex;
   align-items: center;
   gap: 12px;
@@ -4678,7 +4691,7 @@ body {
 }
 .tomador-hdr {
   background: linear-gradient(135deg, #4A0000, #8B0000);
-  padding: 14px 16px 12px;
+  padding: calc(14px + env(safe-area-inset-top, 0px)) 16px 12px; /* v13.37.0: safe area iOS */
   display: flex;
   align-items: center;
   gap: 12px;
@@ -8498,7 +8511,7 @@ input[type="date"] {
 }
 .v-detalle-hdr {
   background: linear-gradient(135deg, var(--red), var(--red2));
-  padding: 14px 16px;
+  padding: calc(14px + env(safe-area-inset-top, 0px)) 16px 14px; /* v13.37.0: botón Volver bajo el notch en PWA iOS */
   color: #fff;
   position: sticky;
   top: 0;
@@ -8508,9 +8521,10 @@ input[type="date"] {
   background: rgba(255,255,255,.2);
   border: none;
   color: #fff;
-  font-size: 14px;
-  padding: 6px 12px;
-  border-radius: 16px;
+  font-size: 15px;
+  padding: 10px 18px; /* v13.37.0: área de tap ≥40px (antes 6px 12px, muy chico) */
+  min-height: 40px;
+  border-radius: 20px;
   cursor: pointer;
   margin-bottom: 8px;
   font-family: 'Barlow Condensed', sans-serif;
