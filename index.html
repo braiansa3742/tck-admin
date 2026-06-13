@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.33.0 — 12/06/2026
+     TCK ADMIN — v13.34.0 — 12/06/2026
+     v13.34.0: PANEL ACUERDOS VIP en tab Margenes.
+       - Salud de cada acuerdo (margen post-IIBB vivo vs objetivo,
+         semaforo, modo AUTO/OFF, ultimo reajuste, revision vencida).
+       - Cumplimiento de volumen minimo de la ultima semana.
+       - Historial de lo que el sistema hizo solo (acuerdos_log).
+       - Boton "Reajustar ahora" (rpc fn_acuerdos_reajustar, manual).
+       Fail-soft: si las vistas no existen, el tab sigue normal.
      v13.33.0: MARGEN A SIMPLE VISTA (SOLO ADMIN).
        - Chip de margen ponderado en cada card sin abrirla (semaforo:
          rojo <5, naranja <12, verde >=12; con aviso si hay perdida).
@@ -13562,6 +13569,17 @@ input.canales-exp-input[type="date"] {
       <div class="mg-sub">Costo de reposición · margen neto · volumen 7/30 días</div>
     </div>
     <div class="mg-kpis" id="mg-kpis"></div>
+    <div id="mg-acu-wrap" style="display:none;background:#FFFDF9;border:1.5px solid #D4A574;border-radius:14px;padding:12px 14px;margin-bottom:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:16px;color:#B45309;">⭐ ACUERDOS VIP</span>
+        <button id="mg-acu-reaj" onclick="mgAcuReajustar()" style="background:#B45309;color:#fff;border:none;border-radius:10px;padding:6px 12px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:12px;cursor:pointer;">Reajustar ahora</button>
+      </div>
+      <div id="mg-acu-list"></div>
+      <div style="margin-top:10px;">
+        <button id="mg-acu-log-btn" onclick="mgAcuLogToggle()" style="background:none;border:none;color:#8B6F50;font-size:12px;font-weight:800;cursor:pointer;padding:0;">▸ Ver historial automático</button>
+        <div id="mg-acu-log" style="display:none;margin-top:6px;"></div>
+      </div>
+    </div>
     <div class="mg-var-wrap" id="mg-var-wrap" style="display:none;">
       <div class="mg-var-head"><span class="t" id="mg-var-tit">⚠️ Costos que se movieron</span><span class="s">últ. 30 días</span></div>
       <div id="mg-var-list"></div>
@@ -34266,6 +34284,114 @@ var _mgOrden  = localStorage.getItem('tck_mg_orden') || 'mar';   // gan | mar | 
 var _mgIva    = localStorage.getItem('tck_mg_iva')   || 'con';   // sin | con
 var _mgCargando = false;
 
+// ═══ v13.34.0: panel ACUERDOS VIP en tab Margenes ═══
+var _mgAcuSalud = [], _mgAcuCumpl = [], _mgAcuLog = [];
+
+function mgAcuSem(sem){
+  return sem === 'verde' ? '#1E8449' : sem === 'amarillo' ? '#E65100' :
+         (sem === 'rojo' || sem === 'NEGATIVO') ? '#C62828' : '#9E9E9E';
+}
+
+function mgAcuCumplDe(acuerdoId){
+  var filas = (_mgAcuCumpl || []).filter(function(c){ return c.acuerdo_id === acuerdoId && c.semana; });
+  if (!filas.length) return { txt: 'sin compras esta semana', ok: false, sin: true };
+  filas.sort(function(a,b){ return a.semana < b.semana ? 1 : -1; });
+  var u = filas[0];
+  var ok = Number(u.cajas_compradas) >= Number(u.volumen_min_semanal);
+  return { txt: u.cajas_compradas + '/' + u.volumen_min_semanal + ' cajas (sem. ' + u.semana + ')', ok: ok, sin: false };
+}
+
+function mgRenderAcuerdos(){
+  var wrap = document.getElementById('mg-acu-wrap');
+  var list = document.getElementById('mg-acu-list');
+  if (!wrap || !list) return;
+  if (!_mgAcuSalud.length) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  list.innerHTML = _mgAcuSalud.map(function(a){
+    var col = mgAcuSem(a.semaforo);
+    var m = (a.margen_post_iibb_pct === null) ? '\u2014' : String(a.margen_post_iibb_pct).replace('.', ',') + '%';
+    var obj = (a.margen_objetivo_pct === null) ? '\u2014' : String(Math.round(Number(a.margen_objetivo_pct)*10)/10).replace('.', ',') + '%';
+    var c = mgAcuCumplDe(a.acuerdo_id);
+    var cumplHtml = c.sin
+      ? '<span style="color:#9E9E9E;">\u23F8 ' + c.txt + '</span>'
+      : (c.ok ? '<span style="color:#1E8449;">\u2714 ' + c.txt + '</span>'
+              : '<span style="color:#C62828;font-weight:800;">\u2716 ' + c.txt + '</span>');
+    var ajuste = a.ultimo_ajuste_at
+      ? '\u00B7 \u00FAlt. reajuste ' + String(a.ultimo_ajuste_at).substring(0,10)
+      : '';
+    var modo = a.modo_ajuste === 'auto'
+      ? '<span style="background:#E8F5E9;color:#1B5E20;border-radius:8px;padding:1px 6px;font-size:10px;font-weight:900;">AUTO</span>'
+      : '<span style="background:#ECEFF1;color:#455A64;border-radius:8px;padding:1px 6px;font-size:10px;font-weight:900;">OFF</span>';
+    var rev = a.revision_vencida
+      ? '<div style="font-size:11px;font-weight:800;color:#C62828;margin-top:2px;">\u26A0\uFE0F Revisi\u00F3n vencida \u2014 ver acuerdo</div>' : '';
+    return '<div style="border-bottom:1px dashed #EAD9C3;padding:7px 0;">' +
+      '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">' +
+        '<span style="font-weight:800;color:#3E2A14;font-size:13px;">' + a.cliente + ' \u00B7 ' + a.producto + '</span>' +
+        modo +
+      '</div>' +
+      '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;margin-top:2px;">' +
+        '<span style="color:#8B6F50;">$' + Number(a.precio_acordado).toLocaleString('es-AR') + ' ' + ajuste + '</span>' +
+        '<span style="font-weight:900;color:' + col + ';">' + m + ' <span style="color:#9C7050;font-weight:400;">(obj ' + obj + ')</span></span>' +
+      '</div>' +
+      '<div style="font-size:11px;margin-top:2px;">Volumen: ' + cumplHtml + '</div>' +
+      rev +
+    '</div>';
+  }).join('');
+  mgRenderAcuLog();
+}
+
+function mgRenderAcuLog(){
+  var cont = document.getElementById('mg-acu-log');
+  if (!cont) return;
+  if (!_mgAcuLog.length) { cont.innerHTML = '<div style="font-size:11px;color:#9C7050;">Sin eventos todav\u00EDa.</div>'; return; }
+  cont.innerHTML = _mgAcuLog.map(function(l){
+    var f = String(l.creado_at || '').substring(0,16).replace('T',' ');
+    var txt;
+    if (l.evento === 'reajuste_precio') {
+      txt = '\u2191 ' + (l.producto||'') + ' (' + (l.cliente||'') + '): $' +
+        Number(l.precio_anterior).toLocaleString('es-AR') + ' \u2192 <b>$' +
+        Number(l.precio_nuevo).toLocaleString('es-AR') + '</b> \u00B7 margen ' +
+        l.margen_antes + '% \u2192 ' + l.margen_despues + '% \u00B7 ' + (l.origen||'');
+    } else {
+      txt = '\u26A0\uFE0F ' + (l.cliente||'') + ' \u00B7 ' + (l.producto||'') + ': ' + (l.detalle||l.evento);
+    }
+    return '<div style="font-size:11px;color:#5C3A1E;padding:3px 0;border-bottom:1px dotted #EAD9C3;">' + f + ' \u00B7 ' + txt + '</div>';
+  }).join('');
+}
+
+function mgAcuLogToggle(){
+  var d = document.getElementById('mg-acu-log');
+  var b = document.getElementById('mg-acu-log-btn');
+  if (!d || !b) return;
+  var abierto = d.style.display !== 'none';
+  d.style.display = abierto ? 'none' : 'block';
+  b.textContent = (abierto ? '\u25B8' : '\u25BE') + ' Ver historial autom\u00E1tico';
+}
+
+async function mgAcuReajustar(){
+  var btn = document.getElementById('mg-acu-reaj');
+  if (btn) { btn.disabled = true; btn.textContent = 'Reajustando\u2026'; }
+  try {
+    var res = await sbFetch('rpc/fn_acuerdos_reajustar', {
+      method: 'POST',
+      body: JSON.stringify({ p_canonico_id: null, p_origen: 'manual' })
+    });
+    var n = Array.isArray(res) ? res.length : 0;
+    // refrescar salud + log
+    var nuevos = await Promise.all([
+      sbFetch('vw_acuerdos_salud?select=*').catch(function(){ return []; }),
+      sbFetch('acuerdos_log?select=*&order=creado_at.desc&limit=15').catch(function(){ return []; })
+    ]);
+    _mgAcuSalud = nuevos[0]; _mgAcuLog = nuevos[1];
+    mgRenderAcuerdos();
+    if (typeof toast === 'function') toast(n ? (n + ' precio(s) reajustado(s)') : 'Todo en orden, sin cambios');
+  } catch(e) {
+    if (typeof toast === 'function') toast('Error: ' + (e.message||e), 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Reajustar ahora'; }
+  }
+}
+
 async function margenesInit() {
   if (_mgData !== null) { mgRender(); return; }   // ya estaba cargado
   if (_mgCargando) return;
@@ -34276,14 +34402,22 @@ async function margenesInit() {
     // v13.23 — variaciones en paralelo, fail-soft (si la vista no existe, el tab sigue)
     var res = await Promise.all([
       sbFetch('vw_margen_producto?select=*'),
+      // v13.34.0 — acuerdos VIP (fail-soft)
+      sbFetch('vw_acuerdos_salud?select=*').catch(function(){ return []; }),
+      sbFetch('vw_acuerdos_cumplimiento?select=*').catch(function(){ return []; }),
+      sbFetch('acuerdos_log?select=*&order=creado_at.desc&limit=15').catch(function(){ return []; }),
       sbFetch('vw_variacion_costos?select=*&var_pct=not.is.null&dias_desde_cambio=lte.30&order=fecha_cambio.desc')
         .catch(function(e){ console.warn('[margenes] vw_variacion_costos:', e.message || e); return []; })
     ]);
     _mgData = Array.isArray(res[0]) ? res[0] : [];
-    _mgVarData = Array.isArray(res[1]) ? res[1] : [];
+    _mgAcuSalud = Array.isArray(res[1]) ? res[1] : [];     // v13.34.0
+    _mgAcuCumpl = Array.isArray(res[2]) ? res[2] : [];     // v13.34.0
+    _mgAcuLog   = Array.isArray(res[3]) ? res[3] : [];     // v13.34.0
+    _mgVarData = Array.isArray(res[4]) ? res[4] : [];
     mgInitFiltro();
     _mgSyncCtrlUI();   // v13.28 — toggles según default/preferencia guardada
     mgRenderVariaciones();
+    mgRenderAcuerdos();   // v13.34.0
     mgRender();
   } catch (e) {
     if (cont) cont.innerHTML = '<div class="mg-estado" style="color:#C62828;">Error al cargar: ' + (e.message || e) + '</div>';
