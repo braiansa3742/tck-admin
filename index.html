@@ -1,5 +1,18 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.40.0 — 12/06/2026
+     v13.40.0: DOS FIXES DE ESCRITORIO (reportados por Braian en PC).
+       1. BUG CRÍTICO — clics muertos en el centro de la pantalla (login
+          PIN inutilizable): #rep-periodo-mas-sheet en ≥720px se re-estila
+          como modal CENTRADO con opacity:0, pero opacity no desactiva el
+          hit-testing → panel fantasma de 420px con z-index 9999 tragándose
+          los clics. Diagnóstico por elementFromPoint en headless. Fix:
+          pointer-events:none + visibility:hidden en estado oculto desktop.
+       2. Tab Facturación invisible en PC: el sidebar desktop (tckDesktopNav)
+          espeja el menú Más SOLO si existe un tab-btn-{tab} oculto en el
+          nav — Facturación no tenía el suyo. Se agrega tab-btn-facturacion
+          (con badge propio que fcBadge ahora también actualiza).
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.39.0 — 12/06/2026
      v13.39.0: BLOQUE "FACTURAS DEL VIAJE" EN LA PLANILLA DE CARGA.
        · Página nueva al final del PDF: checklist cliente → FC N° → monto,
@@ -5982,11 +5995,15 @@ body {
     border-radius: 14px;
     max-height: 78vh;
     opacity: 0;
+    pointer-events: none;   /* v13.40.0: opacity:0 NO desactiva clics — esto sí */
+    visibility: hidden;     /* v13.40.0: fuera del hit-testing por completo */
     transition: opacity .22s ease, transform .22s cubic-bezier(.4,0,.2,1);
   }
   .rep-periodo-mas-sheet.on {
     transform: translate(-50%, 50%) scale(1);
     opacity: 1;
+    pointer-events: auto;   /* v13.40.0 */
+    visibility: visible;    /* v13.40.0 */
   }
   .rep-periodo-mas-handle { display: none; }
 }
@@ -13746,6 +13763,12 @@ input.canales-exp-input[type="date"] {
   <button class="tab-btn" id="tab-btn-gps" onclick="cambiarTab('gps')" style="display:none !important;">
     <span class="tab-icon"><svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg></span>
     <span class="tab-label">Visitas</span>
+  </button>
+  <!-- v13.40.0 — destino del sidebar desktop para Facturación (tckDesktopNav lo muestra en PC) -->
+  <button class="tab-btn" id="tab-btn-facturacion" onclick="cambiarTab('facturacion')" style="display:none !important;">
+    <span class="tab-badge" id="tab-fc-badge"></span>
+    <span class="tab-icon">🧾</span>
+    <span class="tab-label">Facturación</span>
   </button>
   <button class="tab-btn" id="tab-btn-rendiciones" onclick="cambiarTab('rendiciones')" style="display:none !important;">
     <span class="tab-icon">💰</span>
@@ -36345,11 +36368,12 @@ async function fcFacturarZona(zona) {
 }
 
 function fcBadge() {
-  var b = document.getElementById('menu-mas-fc-badge');
-  if (!b) return;
   var n = _fcCache.porFacturar.length;
-  b.textContent = n;
-  b.style.display = n > 0 ? 'block' : 'none';
+  var b = document.getElementById('menu-mas-fc-badge');
+  if (b) { b.textContent = n; b.style.display = n > 0 ? 'block' : 'none'; }
+  // v13.40.0 — badge del sidebar desktop (mismo patrón que tab-badge-pend)
+  var t = document.getElementById('tab-fc-badge');
+  if (t) { t.textContent = n > 0 ? (n > 99 ? '99+' : n) : ''; t.classList.toggle('on', n > 0); }
 }
 
 async function fcSync() {
