@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.34.0 — 12/06/2026
+     TCK ADMIN — v13.35.0 — 12/06/2026
+     v13.35.0: CRUD DE ACUERDOS en panel VIP (para Francisco, sin SQL).
+       - "+ Nuevo acuerdo": cliente + producto (selector con costo) +
+         precio + minimo; calcula margen objetivo en vivo y lo inserta.
+       - Por acuerdo: editar precio (recalcula objetivo = re-pactar),
+         pausar/reactivar, y "Aviso cliente" (copia texto de WhatsApp
+         con el precio nuevo — los PDF prometen aviso previo).
+       - Escribe por API con JWT authenticated (policies Tanda 1/3).
      v13.34.0: PANEL ACUERDOS VIP en tab Margenes.
        - Salud de cada acuerdo (margen post-IIBB vivo vs objetivo,
          semaforo, modo AUTO/OFF, ultimo reajuste, revision vencida).
@@ -13572,7 +13579,17 @@ input.canales-exp-input[type="date"] {
     <div id="mg-acu-wrap" style="display:none;background:#FFFDF9;border:1.5px solid #D4A574;border-radius:14px;padding:12px 14px;margin-bottom:14px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
         <span style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:16px;color:#B45309;">⭐ ACUERDOS VIP</span>
-        <button id="mg-acu-reaj" onclick="mgAcuReajustar()" style="background:#B45309;color:#fff;border:none;border-radius:10px;padding:6px 12px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:12px;cursor:pointer;">Reajustar ahora</button>
+        <button onclick="mgAcuFormToggle()" style="background:#1E8449;color:#fff;border:none;border-radius:10px;padding:6px 12px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:12px;cursor:pointer;margin-right:6px;">+ Nuevo acuerdo</button><button id="mg-acu-reaj" onclick="mgAcuReajustar()" style="background:#B45309;color:#fff;border:none;border-radius:10px;padding:6px 12px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:12px;cursor:pointer;">Reajustar ahora</button>
+      </div>
+      <div id="mg-acu-form" style="display:none;background:#FFF;border:1px solid #E8D5BB;border-radius:10px;padding:10px;margin-bottom:10px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <input id="mg-acu-f-cli" placeholder="Cliente (como se carga en pedidos)" style="grid-column:1/3;padding:8px;border:1px solid #E8D5BB;border-radius:8px;font-size:13px;">
+          <select id="mg-acu-f-prod" style="grid-column:1/3;padding:8px;border:1px solid #E8D5BB;border-radius:8px;font-size:13px;"></select>
+          <input id="mg-acu-f-precio" type="number" placeholder="Precio acordado $" style="padding:8px;border:1px solid #E8D5BB;border-radius:8px;font-size:13px;">
+          <input id="mg-acu-f-min" type="number" placeholder="Mínimo cajas/semana" style="padding:8px;border:1px solid #E8D5BB;border-radius:8px;font-size:13px;">
+        </div>
+        <div id="mg-acu-f-margen" style="font-size:11px;color:#8B6F50;margin-top:6px;"></div>
+        <button onclick="mgAcuGuardar()" style="margin-top:8px;background:#B45309;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;cursor:pointer;">Guardar acuerdo</button>
       </div>
       <div id="mg-acu-list"></div>
       <div style="margin-top:10px;">
@@ -34286,6 +34303,7 @@ var _mgCargando = false;
 
 // ═══ v13.34.0: panel ACUERDOS VIP en tab Margenes ═══
 var _mgAcuSalud = [], _mgAcuCumpl = [], _mgAcuLog = [];
+var _mgAcuPausados = null;   // v13.35.0: lazy
 
 function mgAcuSem(sem){
   return sem === 'verde' ? '#1E8449' : sem === 'amarillo' ? '#E65100' :
@@ -34299,6 +34317,126 @@ function mgAcuCumplDe(acuerdoId){
   var u = filas[0];
   var ok = Number(u.cajas_compradas) >= Number(u.volumen_min_semanal);
   return { txt: u.cajas_compradas + '/' + u.volumen_min_semanal + ' cajas (sem. ' + u.semana + ')', ok: ok, sin: false };
+}
+
+// ── v13.35.0: CRUD de acuerdos (alta/edicion/pausa) + aviso al cliente ──
+function mgAcuCalcMargen(precio, canonicoId){
+  var p = (_mgData || []).find(function(x){ return x.canonico_id === canonicoId; });
+  if (!p || p.costo_neto_caja === null || p.alicuota_iva === null || !precio) return null;
+  var neto = precio / (1 + Number(p.alicuota_iva)/100);
+  return Math.round(1000 * (neto - Number(p.costo_neto_caja) - 0.05*neto) / neto) / 10;
+}
+
+function mgAcuFormToggle(){
+  var d = document.getElementById('mg-acu-form');
+  if (!d) return;
+  var abrir = d.style.display === 'none';
+  d.style.display = abrir ? 'block' : 'none';
+  if (abrir) {
+    var sel = document.getElementById('mg-acu-f-prod');
+    if (sel && !sel.options.length) {
+      var conCosto = (_mgData || []).filter(function(p){ return p.costo_neto_caja !== null; })
+        .sort(function(a,b){ return (a.producto||'').localeCompare(b.producto||''); });
+      sel.innerHTML = '<option value="">Producto…</option>' + conCosto.map(function(p){
+        return '<option value="' + p.canonico_id + '">' + p.producto + ' (lista $' +
+          Math.round(Number(p.precio_venta_civa)).toLocaleString('es-AR') + ')</option>';
+      }).join('');
+      var actualizar = function(){
+        var cid = parseInt(sel.value) || 0;
+        var pr = Number((document.getElementById('mg-acu-f-precio')||{}).value) || 0;
+        var m = cid && pr ? mgAcuCalcMargen(pr, cid) : null;
+        var out = document.getElementById('mg-acu-f-margen');
+        if (out) out.innerHTML = (m === null) ? '' :
+          'Margen post-IIBB con ese precio: <b style="color:' + mgAcuSem(m <= 0 ? 'NEGATIVO' : m < 5 ? 'rojo' : m < 12 ? 'amarillo' : 'verde') + ';">' +
+          String(m).replace('.', ',') + '%</b> (queda como objetivo del acuerdo)';
+      };
+      sel.onchange = actualizar;
+      var pi = document.getElementById('mg-acu-f-precio');
+      if (pi) pi.oninput = actualizar;
+    }
+  }
+}
+
+async function mgAcuGuardar(){
+  var cli = (document.getElementById('mg-acu-f-cli')||{}).value || '';
+  var cid = parseInt((document.getElementById('mg-acu-f-prod')||{}).value) || 0;
+  var pr  = Number((document.getElementById('mg-acu-f-precio')||{}).value) || 0;
+  var mn  = Number((document.getElementById('mg-acu-f-min')||{}).value) || 0;
+  cli = cli.trim();
+  if (!cli || !cid || !pr) { if (typeof toast==='function') toast('Faltan cliente, producto o precio', 'err'); return; }
+  var obj = mgAcuCalcMargen(pr, cid);
+  if (obj === null) { if (typeof toast==='function') toast('Producto sin costo: no se puede calcular objetivo', 'err'); return; }
+  try {
+    await sbFetch('acuerdos_precio', {
+      method: 'POST',
+      body: JSON.stringify({
+        cliente: cli, canonico_id: cid, precio_acordado: pr,
+        volumen_min_semanal: mn, margen_objetivo_pct: obj,
+        proxima_revision: new Date(Date.now() + 30*86400000).toISOString().substring(0,10),
+        notas: 'Alta desde admin ' + new Date().toLocaleDateString('es-AR')
+      })
+    });
+    if (typeof toast==='function') toast('Acuerdo creado: ' + cli);
+    document.getElementById('mg-acu-form').style.display = 'none';
+    ['mg-acu-f-cli','mg-acu-f-precio','mg-acu-f-min'].forEach(function(id){ var e=document.getElementById(id); if(e) e.value=''; });
+    await mgAcuRefrescar();
+  } catch(e) { if (typeof toast==='function') toast('Error: ' + (e.message||e), 'err'); }
+}
+
+async function mgAcuEditar(acuerdoId, precioActual, canonicoIdNombre){
+  var a = (_mgAcuSalud || []).find(function(x){ return x.acuerdo_id === acuerdoId; });
+  var nuevo = prompt('Nuevo precio acordado para ' + (a ? a.producto + ' (' + a.cliente + ')' : '') + ':', precioActual);
+  if (nuevo === null) return;
+  nuevo = Number(nuevo) || 0;
+  if (nuevo <= 0) { if (typeof toast==='function') toast('Precio inválido', 'err'); return; }
+  // buscar canonico_id por producto en _mgData (la vista salud no lo trae)
+  var prod = a ? (_mgData || []).find(function(p){ return p.producto === a.producto; }) : null;
+  var obj = prod ? mgAcuCalcMargen(nuevo, prod.canonico_id) : null;
+  var body = { precio_acordado: nuevo, ultimo_ajuste_at: new Date().toISOString() };
+  if (obj !== null) body.margen_objetivo_pct = obj;   // editar = re-pactar el objetivo
+  try {
+    var r = await sbFetch('acuerdos_precio?id=eq.' + acuerdoId, { method: 'PATCH', body: JSON.stringify(body) });
+    if (!r || !r.length) throw new Error('no se modificó (¿RLS/sesión?)');
+    if (typeof toast==='function') toast('Precio actualizado a $' + nuevo.toLocaleString('es-AR'));
+    await mgAcuRefrescar();
+  } catch(e) { if (typeof toast==='function') toast('Error: ' + (e.message||e), 'err'); }
+}
+
+async function mgAcuPausar(acuerdoId, estadoActual){
+  var nuevo = estadoActual === 'activo' ? 'pausado' : 'activo';
+  try {
+    var r = await sbFetch('acuerdos_precio?id=eq.' + acuerdoId, {
+      method: 'PATCH', body: JSON.stringify({ estado: nuevo })
+    });
+    if (!r || !r.length) throw new Error('no se modificó');
+    _mgAcuPausados = null;   // refrescar franja de pausados
+    if (typeof toast==='function') toast(nuevo === 'pausado' ? 'Acuerdo pausado' : 'Acuerdo reactivado');
+    await mgAcuRefrescar();
+  } catch(e) { if (typeof toast==='function') toast('Error: ' + (e.message||e), 'err'); }
+}
+
+function mgAcuAviso(acuerdoId){
+  var a = (_mgAcuSalud || []).find(function(x){ return x.acuerdo_id === acuerdoId; });
+  if (!a) return;
+  var txt = 'Hola! Te escribimos de TCK. Por la suba de costos de esta semana, el precio acordado de ' +
+    a.producto + ' pasa a $' + Number(a.precio_acordado).toLocaleString('es-AR') +
+    ' por caja a partir de la próxima entrega. Cualquier duda estamos a disposición. ¡Gracias por elegirnos!';
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(function(){
+      if (typeof toast==='function') toast('Aviso copiado: pegalo en WhatsApp del cliente');
+    }).catch(function(){ prompt('Copiá el aviso:', txt); });
+  } else { prompt('Copiá el aviso:', txt); }
+}
+
+async function mgAcuRefrescar(){
+  var nuevos = await Promise.all([
+    sbFetch('vw_acuerdos_salud?select=*').catch(function(){ return []; }),
+    sbFetch('vw_acuerdos_cumplimiento?select=*').catch(function(){ return []; }),
+    sbFetch('acuerdos_log?select=*&order=creado_at.desc&limit=15').catch(function(){ return []; })
+  ]);
+  _mgAcuSalud = nuevos[0]; _mgAcuCumpl = nuevos[1]; _mgAcuLog = nuevos[2];
+  _mgAcuPausados = null;
+  mgRenderAcuerdos();
 }
 
 function mgRenderAcuerdos(){
@@ -34322,6 +34460,11 @@ function mgRenderAcuerdos(){
     var modo = a.modo_ajuste === 'auto'
       ? '<span style="background:#E8F5E9;color:#1B5E20;border-radius:8px;padding:1px 6px;font-size:10px;font-weight:900;">AUTO</span>'
       : '<span style="background:#ECEFF1;color:#455A64;border-radius:8px;padding:1px 6px;font-size:10px;font-weight:900;">OFF</span>';
+    var acciones = '<div style="display:flex;gap:6px;margin-top:4px;">' +
+      '<button onclick="mgAcuEditar(' + a.acuerdo_id + ',' + a.precio_acordado + ')" style="background:#FFF3E0;color:#B45309;border:1px solid #D4A574;border-radius:8px;padding:2px 8px;font-size:10px;font-weight:800;cursor:pointer;">\u270F\uFE0F Precio</button>' +
+      '<button onclick="mgAcuPausar(' + a.acuerdo_id + ',\'activo\')" style="background:#ECEFF1;color:#455A64;border:1px solid #B0BEC5;border-radius:8px;padding:2px 8px;font-size:10px;font-weight:800;cursor:pointer;">\u23F8 Pausar</button>' +
+      '<button onclick="mgAcuAviso(' + a.acuerdo_id + ')" style="background:#E8F5E9;color:#1B5E20;border:1px solid #81C784;border-radius:8px;padding:2px 8px;font-size:10px;font-weight:800;cursor:pointer;">\uD83D\uDCCB Aviso cliente</button>' +
+      '</div>';
     var rev = a.revision_vencida
       ? '<div style="font-size:11px;font-weight:800;color:#C62828;margin-top:2px;">\u26A0\uFE0F Revisi\u00F3n vencida \u2014 ver acuerdo</div>' : '';
     return '<div style="border-bottom:1px dashed #EAD9C3;padding:7px 0;">' +
@@ -34334,10 +34477,38 @@ function mgRenderAcuerdos(){
         '<span style="font-weight:900;color:' + col + ';">' + m + ' <span style="color:#9C7050;font-weight:400;">(obj ' + obj + ')</span></span>' +
       '</div>' +
       '<div style="font-size:11px;margin-top:2px;">Volumen: ' + cumplHtml + '</div>' +
+      acciones +
       rev +
     '</div>';
   }).join('');
+  mgRenderPausados();   // v13.35.0
   mgRenderAcuLog();
+}
+
+function mgRenderPausados(){
+  var list = document.getElementById('mg-acu-list');
+  if (!list) return;
+  if (_mgAcuPausados === null) {
+    _mgAcuPausados = [];   // evita doble fetch
+    sbFetch('acuerdos_precio?estado=eq.pausado&select=id,cliente,canonico_id,precio_acordado')
+      .then(function(rows){ _mgAcuPausados = rows || []; mgRenderPausados(); })
+      .catch(function(){});
+    return;
+  }
+  var viejo = document.getElementById('mg-acu-pausados');
+  if (viejo) viejo.remove();
+  if (!_mgAcuPausados.length) return;
+  var html = _mgAcuPausados.map(function(p){
+    var prod = (_mgData || []).find(function(x){ return x.canonico_id === p.canonico_id; });
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:12px;color:#9E9E9E;">' +
+      '<span>\u23F8 ' + p.cliente + ' \u00B7 ' + (prod ? prod.producto : 'canónico ' + p.canonico_id) +
+      ' \u00B7 $' + Number(p.precio_acordado).toLocaleString('es-AR') + '</span>' +
+      '<button onclick="mgAcuPausar(' + p.id + ',\'pausado\')" style="background:#E8F5E9;color:#1B5E20;border:1px solid #81C784;border-radius:8px;padding:2px 8px;font-size:10px;font-weight:800;cursor:pointer;">\u25B6 Reactivar</button>' +
+      '</div>';
+  }).join('');
+  list.insertAdjacentHTML('afterend',
+    '<div id="mg-acu-pausados" style="margin-top:8px;border-top:1px dashed #EAD9C3;padding-top:6px;">' +
+    '<div style="font-size:11px;font-weight:800;color:#9E9E9E;margin-bottom:2px;">PAUSADOS</div>' + html + '</div>');
 }
 
 function mgRenderAcuLog(){
