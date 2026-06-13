@@ -1,5 +1,18 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.38.0 — 12/06/2026
+     v13.38.0: FACTURACIÓN MASIVA EN UN CLICK (Etapa 4, frontend).
+       · Botón "🧾 Facturar todo (N)" en el header de Salidas de hoy y
+         botón por zona "Facturar los N". Solo ADMIN.
+       · Lista previa de confirmación con clientes y total → llama
+         accion=facturarLote (Apps Script v25.59.0) en tandas de 20 con
+         progreso en vivo → resumen (facturadas / ya existentes / errores).
+       · Respeta los flags del backend: DRY-RUN avisa que es modo prueba;
+         deshabilitado explica que falta el OK de contadores.
+       · Aplicado sobre la v13.37.0 (fix iOS PWA) de producción. La
+         "tck-admin-v13.37.0.html" entregada antes en este chat queda
+         DESCARTADA (número pisado por la sesión del fix iOS).
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.37.0 — 12/06/2026
      v13.37.0: FIX iOS PWA — botón "← Volver" inalcanzable bajo el notch.
        · Causa: viewport-fit=cover + status-bar black-translucent meten
@@ -13615,7 +13628,10 @@ input.canales-exp-input[type="date"] {
     </div>
     <div class="fc-kpis" id="fc-kpis"></div>
     <div class="fc-sec">
-      <div class="fc-sec-tit">🚚 Salidas de hoy <span class="fc-sec-sub">se factura ANTES de cargar el camión</span></div>
+      <div class="fc-sec-tit" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+        <span>🚚 Salidas de hoy <span class="fc-sec-sub">se factura ANTES de cargar el camión</span></span>
+        <button class="fc-fact-btn" id="fc-fact-todo" style="display:none;" onclick="fcFacturarZona(null)">🧾 Facturar todo</button>
+      </div>
       <div id="fc-salidas" class="fc-list"><div class="fc-vacio">Cargando…</div></div>
     </div>
     <div class="fc-sec">
@@ -35934,6 +35950,9 @@ async function comprasDetailCargarFecha() {
 .fc-vacio{font-size:12px;color:var(--text3);padding:12px;text-align:center;background:var(--cream2);border-radius:10px;}
 .fc-details summary{cursor:pointer;list-style:none;}
 .fc-details summary::-webkit-details-marker{display:none;}
+.fc-fact-btn{background:#1B5E20;color:#fff;border:none;border-radius:9px;padding:6px 12px;font-weight:800;font-size:12px;cursor:pointer;flex-shrink:0;}
+.fc-fact-btn:disabled{opacity:.55;cursor:wait;}
+.fc-fact-btn.zona{padding:4px 10px;font-size:11px;}
 </style>
 
 <!-- ═══ v12.0 BLOQUE D — MODALES DE LOGÍSTICA ZONAS ═══ -->
@@ -36072,6 +36091,14 @@ function fcRender() {
       '<div class="fc-kpi"><div class="n" style="color:#EF6C00;">' + c.soloXubio.length + '</div><div class="l">Solo en Xubio</div></div>';
   }
 
+  // Botón global de facturación masiva (solo ADMIN, solo si hay pendientes)
+  var btnTodo = document.getElementById('fc-fact-todo');
+  if (btnTodo) {
+    var pendTot = c.salidas.filter(function (s) { return !s.xubio_factura_id; }).length;
+    btnTodo.style.display = (vendedorActual === 'ADMIN' && pendTot > 0) ? 'inline-block' : 'none';
+    btnTodo.textContent = '🧾 Facturar todo (' + pendTot + ')';
+  }
+
   // ── Salidas de hoy, agrupadas por zona ──
   var contS = document.getElementById('fc-salidas');
   if (contS) {
@@ -36087,8 +36114,13 @@ function fcRender() {
       Object.keys(porZona).sort().forEach(function (z) {
         var arr = porZona[z];
         var ok = arr.filter(function (s) { return !!s.xubio_factura_id; }).length;
+        var pendZ = arr.length - ok;
         html += '<div class="fc-zona-h"><span>' + _fcEsc(z.toUpperCase().replace('_', ' / ')) + '</span>' +
-                '<span class="fc-chip ' + (ok === arr.length ? 'verde' : 'rojo') + '">' + ok + '/' + arr.length + ' facturados</span></div>';
+                '<span style="display:flex;gap:6px;align-items:center;">' +
+                (pendZ > 0 && vendedorActual === 'ADMIN'
+                  ? '<button class="fc-fact-btn zona" onclick="fcFacturarZona(\'' + _fcEsc(z) + '\')">🧾 Facturar los ' + pendZ + '</button>'
+                  : '') +
+                '<span class="fc-chip ' + (ok === arr.length ? 'verde' : 'rojo') + '">' + ok + '/' + arr.length + ' facturados</span></span></div>';
         arr.forEach(function (s) {
           var tiene = !!s.xubio_factura_id;
           var presupNro = s.xubio_presupuesto_id ? (c.presupMap[s.xubio_presupuesto_id] || '—') : null;
@@ -36161,6 +36193,73 @@ function fcRender() {
             '</div>';
         }).join('')
       : '<div class="fc-vacio">Sin facturas sueltas.</div>';
+  }
+}
+
+// ═══ v13.38.0 — FACTURACIÓN MASIVA ═══
+function _fcPendientesDeZona(zona) {
+  return _fcCache.salidas.filter(function (s) {
+    return !s.xubio_factura_id && (zona == null || (s.zona || 'sin_zona') === zona);
+  });
+}
+
+async function fcFacturarZona(zona) {
+  if (vendedorActual !== 'ADMIN') { toast('Solo un admin puede facturar en lote', 'err'); return; }
+  var pend = _fcPendientesDeZona(zona);
+  if (!pend.length) { toast('No hay pendientes' + (zona ? ' en ' + zona : ''), 'ok'); return; }
+
+  var total = pend.reduce(function (a, s) { return a + Number(s.total || 0); }, 0);
+  var lista = pend.slice(0, 15).map(function (s) { return '• ' + (s.cliente || s.pedido_id) + ' (' + _fcMoneda(s.total) + ')'; }).join('\n');
+  var extra = pend.length > 15 ? '\n…y ' + (pend.length - 15) + ' más' : '';
+  if (!confirm('🧾 FACTURAR ' + pend.length + ' PEDIDOS' + (zona ? ' — ' + zona.toUpperCase() : ' (todas las zonas)') +
+      '\nTotal: ' + _fcMoneda(total) + '\n\n' + lista + extra +
+      '\n\nXubio va a emitir las facturas (CAE) una por una. ¿Confirmar?')) return;
+
+  var ids = pend.map(function (s) { return s.pedido_id; });
+  var btns = document.querySelectorAll('.fc-fact-btn');
+  btns.forEach(function (b) { b.disabled = true; });
+  var btnTodo = document.getElementById('fc-fact-todo');
+
+  var hechas = 0, yaEst = 0, errores = [], dry = false, tanda = 0;
+  try {
+    while (ids.length) {
+      tanda++;
+      var chunk = ids.splice(0, 20);
+      if (btnTodo) btnTodo.textContent = '⏳ Facturando… ' + hechas + '/' + pend.length;
+      toast('⏳ Tanda ' + tanda + ': facturando ' + chunk.length + ' pedidos…', 'ok');
+      var resp = await fetch(APPS_SCRIPT_URL + '?accion=facturarLote&ids=' + encodeURIComponent(chunk.join(',')));
+      var j = await resp.json();
+
+      if (j.status === 'deshabilitado') {
+        alert('⛔ El facturador está APAGADO.\n\n' + (j.message || '') + '\n\nFalta el OK de Gastón y Ricardo. Mientras tanto: facturar en Xubio y tocar Sincronizar.');
+        return;
+      }
+      if (j.status === 'ocupado') { alert('⏳ ' + j.message); return; }
+      if (j.status === 'dry_run') {
+        dry = true;
+        alert('🧪 MODO PRUEBA (dry-run): no se facturó nada.\nEl payload de muestra quedó en el log del Apps Script para validar antes del primer disparo real.');
+        return;
+      }
+      (j.resultados || []).forEach(function (r) {
+        if (r.status === 'facturada') hechas++;
+        else if (r.status === 'ya_facturada') yaEst++;
+        else if (r.status === 'error') errores.push((r.pedido_id || '') + ': ' + (r.error || ''));
+      });
+      if (j.restantes && j.restantes.length) ids = j.restantes.concat(ids);
+    }
+  } catch (e) {
+    console.error('[FC] facturarZona', e);
+    errores.push('red: ' + e.message);
+  } finally {
+    btns.forEach(function (b) { b.disabled = false; });
+    if (btnTodo) btnTodo.textContent = '🧾 Facturar todo';
+  }
+
+  if (!dry) {
+    var msg = '✅ Facturadas: ' + hechas + (yaEst ? ' · ya existían: ' + yaEst : '') + (errores.length ? ' · ❌ errores: ' + errores.length : '');
+    toast(msg, errores.length ? 'err' : 'ok');
+    if (errores.length) alert('Errores del lote (' + errores.length + '):\n\n' + errores.slice(0, 15).join('\n') + (errores.length > 15 ? '\n…' : '') + '\n\nEsos pedidos siguen en rojo — facturalos en Xubio a mano o reintentá.');
+    await fcCargar();
   }
 }
 
