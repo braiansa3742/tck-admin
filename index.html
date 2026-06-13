@@ -1,5 +1,17 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.41.0 — 12/06/2026
+     v13.41.0: REORDEN DEL TAB FACTURACIÓN — "lo de HOY vs lo del LUNES"
+     (feedback de Braian: 30 rojos que eran presupuestos de salidas
+     futuras se mezclaban con lo urgente y nadie entendía qué facturar).
+       · 🔴 "Por facturar — HOY y vencidos": SOLO salida hoy o pasada.
+         Es la lista de trabajo real de Francisco. Roja.
+       · 📅 "Próximas salidas" (sección nueva): presupuestos con salida
+         futura, agrupados por fecha, en gris — informativos, se facturan
+         la mañana de SU salida, no hoy.
+       · KPI del medio y badges cuentan SOLO hoy+vencidos (el trabajo
+         real); las futuras van en subtítulo.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.40.0 — 12/06/2026
      v13.40.0: DOS FIXES DE ESCRITORIO (reportados por Braian en PC).
        1. BUG CRÍTICO — clics muertos en el centro de la pantalla (login
@@ -13663,8 +13675,12 @@ input.canales-exp-input[type="date"] {
       <div id="fc-salidas" class="fc-list"><div class="fc-vacio">Cargando…</div></div>
     </div>
     <div class="fc-sec">
-      <div class="fc-sec-tit">🔴 Por facturar <span class="fc-sec-sub">pedidos con presupuesto, sin factura</span></div>
+      <div class="fc-sec-tit">🔴 Por facturar — HOY y vencidos <span class="fc-sec-sub">el trabajo real de la mañana</span></div>
       <div id="fc-porfacturar" class="fc-list"></div>
+    </div>
+    <div class="fc-sec">
+      <div class="fc-sec-tit">📅 Próximas salidas <span class="fc-sec-sub">se facturan la mañana de su salida — todavía no son trabajo</span></div>
+      <div id="fc-futuros" class="fc-list"></div>
     </div>
     <div class="fc-sec">
       <div class="fc-sec-tit">🟠 Solo en Xubio <span class="fc-sec-sub">presupuestos sin pedido en la app — adoptar o seguir manual</span></div>
@@ -36186,12 +36202,15 @@ function fcRender() {
 
   // ── KPIs ──
   var fact = c.salidas.filter(function (s) { return !!s.xubio_factura_id; }).length;
-  var montoPF = c.porFacturar.reduce(function (a, r) { return a + Number(r.total || 0); }, 0);
+  // v13.41.0 — el KPI rojo cuenta SOLO hoy+vencidos (trabajo real)
+  var urg = c.porFacturar.filter(function (r) { return Number(r.dias_vencido || 0) >= 0; });
+  var fut = c.porFacturar.length - urg.length;
+  var montoUrg = urg.reduce(function (a, r) { return a + Number(r.total || 0); }, 0);
   var kpis = document.getElementById('fc-kpis');
   if (kpis) {
     kpis.innerHTML =
       '<div class="fc-kpi"><div class="n" style="color:' + (fact === c.salidas.length && c.salidas.length ? '#2E7D32' : '#C62828') + ';">' + fact + '/' + c.salidas.length + '</div><div class="l">Salidas hoy facturadas</div></div>' +
-      '<div class="fc-kpi"><div class="n" style="color:#C62828;">' + c.porFacturar.length + '</div><div class="l">Por facturar · ' + _fcMoneda(montoPF) + '</div></div>' +
+      '<div class="fc-kpi"><div class="n" style="color:' + (urg.length ? '#C62828' : '#2E7D32') + ';">' + urg.length + '</div><div class="l">Urgentes · ' + _fcMoneda(montoUrg) + (fut ? ' · +' + fut + ' próx.' : '') + '</div></div>' +
       '<div class="fc-kpi"><div class="n" style="color:#EF6C00;">' + c.soloXubio.length + '</div><div class="l">Solo en Xubio</div></div>';
   }
 
@@ -36244,13 +36263,16 @@ function fcRender() {
     }
   }
 
-  // ── Por facturar ──
+  // ── Por facturar: HOY/vencidos en rojo · futuros aparte (v13.41.0) ──
+  var urgentes = c.porFacturar.filter(function (r) { return Number(r.dias_vencido || 0) >= 0; });
+  var futuros  = c.porFacturar.filter(function (r) { return Number(r.dias_vencido || 0) < 0; });
+
   var contP = document.getElementById('fc-porfacturar');
   if (contP) {
-    if (!c.porFacturar.length) {
-      contP.innerHTML = '<div class="fc-vacio">✅ Nada pendiente — todos los pedidos con presupuesto tienen factura.</div>';
+    if (!urgentes.length) {
+      contP.innerHTML = '<div class="fc-vacio">✅ Nada urgente — lo que sale hoy está facturado.</div>';
     } else {
-      contP.innerHTML = c.porFacturar.map(function (r) {
+      contP.innerHTML = urgentes.map(function (r) {
         var dias = Number(r.dias_vencido || 0);
         return '<div class="fc-row">' +
           '<div class="fc-dot no"></div>' +
@@ -36258,9 +36280,42 @@ function fcRender() {
           '<div class="fc-meta">' + _fcEsc(r.localidad_canonica || '') + ' · ' + _fcEsc(r.vendedor || '') +
           ' · Presup #' + _fcEsc(r.presupuesto_nro || '—') + ' · salida ' + _fcEsc(r.salida_planificada || '—') + '</div></div>' +
           '<div class="fc-monto">' + _fcMoneda(r.total) + '</div>' +
-          (dias > 0 ? '<span class="fc-chip rojo">' + dias + 'd vencido</span>' : '<span class="fc-chip gris">hoy</span>') +
+          (dias > 0 ? '<span class="fc-chip rojo">' + dias + 'd vencido</span>' : '<span class="fc-chip rojo">HOY</span>') +
           '</div>';
       }).join('');
+    }
+  }
+
+  var contFut = document.getElementById('fc-futuros');
+  if (contFut) {
+    if (!futuros.length) {
+      contFut.innerHTML = '<div class="fc-vacio">Sin presupuestos para salidas futuras.</div>';
+    } else {
+      var porFecha = {};
+      futuros.forEach(function (r) {
+        var f = r.salida_planificada || 'sin fecha';
+        (porFecha[f] = porFecha[f] || []).push(r);
+      });
+      var DIAS_ES = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+      var htmlF = '';
+      Object.keys(porFecha).sort().forEach(function (f) {
+        var arr = porFecha[f];
+        var montoF = arr.reduce(function (a, r) { return a + Number(r.total || 0); }, 0);
+        var dia = '';
+        try { dia = DIAS_ES[new Date(f + 'T12:00:00').getDay()] + ' '; } catch (eD) {}
+        htmlF += '<div class="fc-zona-h"><span>📅 ' + dia + _fcEsc(f) + '</span>' +
+          '<span class="fc-chip gris">' + arr.length + ' pedidos · ' + _fcMoneda(montoF) + '</span></div>';
+        htmlF += arr.map(function (r) {
+          return '<div class="fc-row" style="opacity:.75;">' +
+            '<div class="fc-dot" style="background:#B0A89A;"></div>' +
+            '<div class="fc-main"><div class="fc-cli">' + _fcEsc(r.cliente) + '</div>' +
+            '<div class="fc-meta">' + _fcEsc(r.localidad_canonica || '') + ' · ' + _fcEsc(r.vendedor || '') +
+            ' · Presup #' + _fcEsc(r.presupuesto_nro || '—') + '</div></div>' +
+            '<div class="fc-monto">' + _fcMoneda(r.total) + '</div>' +
+            '</div>';
+        }).join('');
+      });
+      contFut.innerHTML = htmlF;
     }
   }
 
@@ -36368,7 +36423,8 @@ async function fcFacturarZona(zona) {
 }
 
 function fcBadge() {
-  var n = _fcCache.porFacturar.length;
+  // v13.41.0 — el badge cuenta solo hoy+vencidos (no presupuestos futuros)
+  var n = _fcCache.porFacturar.filter(function (r) { return Number(r.dias_vencido || 0) >= 0; }).length;
   var b = document.getElementById('menu-mas-fc-badge');
   if (b) { b.textContent = n; b.style.display = n > 0 ? 'block' : 'none'; }
   // v13.40.0 — badge del sidebar desktop (mismo patrón que tab-badge-pend)
