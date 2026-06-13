@@ -1,5 +1,12 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.43.0 — 13/06/2026
+     v13.43.0: SELECTOR DE FECHA en el Centro de Facturación. La sección
+        "Salidas" deja de estar clavada en hoy: navegás días con ◀ ▶ +
+        calendario nativo (default hoy, botón "Hoy" para volver). Solo
+        afecta "Salidas"; las bandejas Por facturar / Próximas / Solo Xubio
+        / Sueltas siguen ancladas a hoy. Sirve para auditar facturas de
+        cualquier día (ej: reparto facturado la mañana siguiente a su salida).
      TCK ADMIN — v13.42.0 — 12/06/2026
      v13.42.0: UPDATE CHECK. Banner flotante "Actualizar" cuando hay
         version nueva (lee version.json del repo, cache-bust). Al tocar:
@@ -13672,9 +13679,17 @@ input.canales-exp-input[type="date"] {
     </div>
     <div class="fc-kpis" id="fc-kpis"></div>
     <div class="fc-sec">
-      <div class="fc-sec-tit" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
-        <span>🚚 Salidas de hoy <span class="fc-sec-sub">se factura ANTES de cargar el camión</span></span>
-        <button class="fc-fact-btn" id="fc-fact-todo" style="display:none;" onclick="fcFacturarZona(null)">🧾 Facturar todo</button>
+      <div class="fc-sec-tit" style="display:block;">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+          <span id="fc-salidas-tit">🚚 Salidas de hoy <span class="fc-sec-sub">se factura ANTES de cargar el camión</span></span>
+          <button class="fc-fact-btn" id="fc-fact-todo" style="display:none;" onclick="fcFacturarZona(null)">🧾 Facturar todo</button>
+        </div>
+        <div class="fc-fecha-nav">
+          <button type="button" class="fc-fecha-btn" onclick="_fcCambiarFecha(-1)" aria-label="Día anterior">◀</button>
+          <input type="date" id="fc-fecha-input" class="fc-fecha-input" onchange="_fcSetFecha(this.value)">
+          <button type="button" class="fc-fecha-btn" onclick="_fcCambiarFecha(1)" aria-label="Día siguiente">▶</button>
+          <button type="button" class="fc-fecha-hoy" id="fc-fecha-hoy" onclick="_fcSetFecha('')">Hoy</button>
+        </div>
       </div>
       <div id="fc-salidas" class="fc-list"><div class="fc-vacio">Cargando…</div></div>
     </div>
@@ -36077,6 +36092,13 @@ async function comprasDetailCargarFecha() {
 .fc-fact-btn{background:#1B5E20;color:#fff;border:none;border-radius:9px;padding:6px 12px;font-weight:800;font-size:12px;cursor:pointer;flex-shrink:0;}
 .fc-fact-btn:disabled{opacity:.55;cursor:wait;}
 .fc-fact-btn.zona{padding:4px 10px;font-size:11px;}
+/* v13.43.0 — selector de fecha del Centro (navegar salidas por día, como en Xubio) */
+.fc-fecha-nav{display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:nowrap;}
+.fc-fecha-btn{background:var(--cream2);color:var(--text2);border:1px solid var(--line);border-radius:8px;width:36px;height:36px;font-size:14px;font-weight:900;cursor:pointer;flex-shrink:0;line-height:1;}
+.fc-fecha-btn:active{opacity:.65;}
+.fc-fecha-input{flex:1;min-width:0;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 9px;font-family:inherit;font-size:13px;font-weight:800;color:var(--text);}
+.fc-fecha-hoy{background:var(--red);color:#fff;border:none;border-radius:8px;padding:8px 12px;font-weight:800;font-size:12px;cursor:pointer;flex-shrink:0;}
+.fc-fecha-hoy.oculto{display:none;}
 </style>
 
 <!-- ═══ v12.0 BLOQUE D — MODALES DE LOGÍSTICA ZONAS ═══ -->
@@ -36129,6 +36151,21 @@ function _fcHoyISO() {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
+// v13.43.0 — fecha activa del Centro. null = hoy. Solo afecta la sección "Salidas";
+// las bandejas "Por facturar" / "Próximas" / "Solo Xubio" / "Sueltas" no dependen del día.
+var _fcFecha = null;
+function _fcFechaActiva() { return _fcFecha || _fcHoyISO(); }
+function _fcSetFecha(iso) {
+  _fcFecha = (iso && iso !== _fcHoyISO()) ? iso : null;
+  fcCargar();
+}
+function _fcCambiarFecha(deltaDias) {
+  var base = _fcFechaActiva();
+  var d = new Date(base + 'T12:00:00');
+  d.setDate(d.getDate() + deltaDias);
+  _fcSetFecha(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'));
+}
+
 function _fcMoneda(n) {
   return '$' + Number(n || 0).toLocaleString('es-AR', { maximumFractionDigits: 0 });
 }
@@ -36143,7 +36180,7 @@ async function fcCargar() {
   if (_fcCargando) return;
   _fcCargando = true;
   try {
-    var hoy = _fcHoyISO();
+    var hoy = _fcFechaActiva(); // v13.43.0 — fecha elegida en el selector (default hoy)
     var res = await Promise.all([
       sbFetch('vw_fact_por_facturar?select=*'),
       sbFetch('vw_fact_solo_xubio?select=*'),
@@ -36186,6 +36223,27 @@ async function fcCargar() {
 function fcRender() {
   var c = _fcCache;
 
+  // v13.43.0 — sincronizar selector de fecha + título dinámico de "Salidas"
+  var _fhoy = _fcHoyISO();
+  var _factiva = _fcFechaActiva();
+  var _esHoy = (_factiva === _fhoy);
+  var _inp = document.getElementById('fc-fecha-input');
+  if (_inp) _inp.value = _factiva;
+  var _btnHoy = document.getElementById('fc-fecha-hoy');
+  if (_btnHoy) _btnHoy.classList.toggle('oculto', _esHoy);
+  var _titS = document.getElementById('fc-salidas-tit');
+  if (_titS) {
+    var _DIASL = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+    var _etq;
+    if (_esHoy) { _etq = 'de hoy'; }
+    else {
+      var _dd = new Date(_factiva + 'T12:00:00');
+      _etq = 'del ' + _DIASL[_dd.getDay()] + ' ' + String(_dd.getDate()).padStart(2, '0') + '/' + String(_dd.getMonth() + 1).padStart(2, '0');
+    }
+    _titS.innerHTML = '🚚 Salidas ' + _etq + ' <span class="fc-sec-sub">se factura ANTES de cargar el camión</span>';
+  }
+  var _fcortaKpi = _esHoy ? 'hoy' : (_factiva.slice(8, 10) + '/' + _factiva.slice(5, 7));
+
   // ── Info de última sync ──
   var info = document.getElementById('fc-sync-info');
   if (info) {
@@ -36213,7 +36271,7 @@ function fcRender() {
   var kpis = document.getElementById('fc-kpis');
   if (kpis) {
     kpis.innerHTML =
-      '<div class="fc-kpi"><div class="n" style="color:' + (fact === c.salidas.length && c.salidas.length ? '#2E7D32' : '#C62828') + ';">' + fact + '/' + c.salidas.length + '</div><div class="l">Salidas hoy facturadas</div></div>' +
+      '<div class="fc-kpi"><div class="n" style="color:' + (fact === c.salidas.length && c.salidas.length ? '#2E7D32' : '#C62828') + ';">' + fact + '/' + c.salidas.length + '</div><div class="l">Salidas ' + _fcortaKpi + ' facturadas</div></div>' +
       '<div class="fc-kpi"><div class="n" style="color:' + (urg.length ? '#C62828' : '#2E7D32') + ';">' + urg.length + '</div><div class="l">Urgentes · ' + _fcMoneda(montoUrg) + (fut ? ' · +' + fut + ' próx.' : '') + '</div></div>' +
       '<div class="fc-kpi"><div class="n" style="color:#EF6C00;">' + c.soloXubio.length + '</div><div class="l">Solo en Xubio</div></div>';
   }
@@ -36230,7 +36288,7 @@ function fcRender() {
   var contS = document.getElementById('fc-salidas');
   if (contS) {
     if (!c.salidas.length) {
-      contS.innerHTML = '<div class="fc-vacio">No hay pedidos con salida planificada para hoy.</div>';
+      contS.innerHTML = '<div class="fc-vacio">No hay pedidos con salida planificada para ' + (_esHoy ? 'hoy' : _factiva) + '.</div>';
     } else {
       var porZona = {};
       c.salidas.forEach(function (s) {
@@ -36550,7 +36608,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.42.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.43.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
