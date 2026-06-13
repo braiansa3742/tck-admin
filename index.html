@@ -1,5 +1,10 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.49.0 — 13/06/2026
+     v13.49.0: FIX precio unitario de lista en la factura. El campo precio de
+        Xubio viene inconsistente (neto o con IVA según la fuente); ahora el
+        precio de lista se deriva del importe (importe / (cant × (1-dto%))),
+        que siempre es fiable. Coincide con Xubio.
      TCK ADMIN — v13.48.0 — 13/06/2026
      v13.48.0: La factura usa los RENGLONES REALES de Xubio (facturas_xubio.items):
         precio de lista, % descuento y alícuota exactos por renglón. Muestra
@@ -36674,14 +36679,17 @@ async function _fcDatosFactura(pid) {
       var tot = Number(it.total != null ? it.total : imp + ivaL);
       var cant = Number(it.cantidad || 1) || 1;
       var alic = imp > 0 ? Math.round(ivaL / imp * 1000) / 10 : 21;
-      var pConIva = Number(it.precio != null ? it.precio : (it.precioconivaincluido || 0));
-      var precioNetoLista = pConIva / (1 + alic / 100);        // precio unitario de lista (neto)
+      var dtoP = Number(it.porcentajeDescuento || 0);
+      // El campo it.precio viene inconsistente (neto o con IVA según la fuente:
+      // comprobante vs presupuesto). Derivamos el precio de lista NETO desde el
+      // importe, que siempre es fiable: importe = precioLista × cant × (1 - dto%).
+      var precioNetoLista = (dtoP < 100) ? (imp / (cant * (1 - dtoP / 100))) : (imp / cant);        // precio unitario de lista (neto)
       ivaPorAlic[alic] = (ivaPorAlic[alic] || 0) + ivaL;
       return {
         cod: (it.producto && it.producto.codigo) || '',
         art: (it.producto && it.producto.nombre) || it.descripcion || '',
         obs: it.descripcion || '',
-        cant: cant, precioU: precioNetoLista, dto: Number(it.porcentajeDescuento || 0),
+        cant: cant, precioU: precioNetoLista, dto: dtoP,
         neto: imp, alic: alic, cIva: tot
       };
     });
@@ -37009,7 +37017,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.48.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.49.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
