@@ -1,5 +1,11 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.48.0 — 13/06/2026
+     v13.48.0: La factura usa los RENGLONES REALES de Xubio (facturas_xubio.items):
+        precio de lista, % descuento y alícuota exactos por renglón. Muestra
+        código de artículo y el descuento a la vista. Para facturas viejas sin
+        items, cae al método interino (pedido ajustado). Requiere backfill +
+        Apps Script v25.64.0.
      TCK ADMIN — v13.47.0 — 13/06/2026
      v13.47.0: FIX factura. (1) Logo ya no se estira (align-self).
         (2) provincia y forma de pago: se leen del objeto/id del raw (no
@@ -36644,7 +36650,7 @@ async function _fcMapAlicuota() {
 
 async function _fcDatosFactura(pid) {
   var fxArr = await sbFetch('facturas_xubio?pedido_id=eq.' + encodeURIComponent(pid) +
-    '&select=numero,tipo,punto_venta,cae,cliente_xubio_id,cliente_nombre,importe_total,fecha,raw&limit=1');
+    '&select=numero,tipo,punto_venta,cae,cliente_xubio_id,cliente_nombre,importe_total,fecha,raw,items&limit=1');
   if (!fxArr || !fxArr.length) throw new Error('No encontré la factura de ' + pid);
   var fx = fxArr[0];
   var raw = fx.raw || {};
@@ -36658,31 +36664,51 @@ async function _fcDatosFactura(pid) {
     cli = (cArr && cArr.length) ? cArr[0] : null;
   }
   var ivaPorAlic = {}, sumNeto = 0, sumIva = 0;
-  var reng = items.map(function (it) {
-    var mp = mapa[it.producto_tck_nombre];
-    var alic = (mp && mp.alic != null) ? mp.alic : 21;
-    var sub = Number(it.subtotal || 0);
-    var cant = Number(it.cantidad || 1) || 1;
-    var neto = sub / (1 + alic / 100);
-    var iva = sub - neto;
-    sumNeto += neto; sumIva += iva;
-    ivaPorAlic[alic] = (ivaPorAlic[alic] || 0) + iva;
-    return { art: (mp && mp.x) ? mp.x : (it.producto_tck_nombre || ''), obs: it.producto_tck_nombre || it.descripcion_libre || it.calibre || '', cant: cant, precioU: neto / cant, neto: neto, alic: alic, cIva: sub };
-  });
-  // v13.47.0 — los renglones salen del PEDIDO, pero Xubio puede facturar otro
-  // monto (descuento, lista de precios). Ajustamos cada renglón al gravado real
-  // de la factura para que el detalle cuadre con el total. INTERINO: lo
-  // definitivo es guardar los renglones reales de Xubio (facturas_xubio_items).
-  var _gravReal = Number(raw.importeGravado != null ? raw.importeGravado : sumNeto);
-  if (sumNeto > 0 && Math.abs(sumNeto - _gravReal) > 1) {
-    var _factor = _gravReal / sumNeto;
-    ivaPorAlic = {};
-    reng.forEach(function (r) {
-      r.neto = r.neto * _factor;
-      r.precioU = r.neto / r.cant;
-      r.cIva = r.neto * (1 + r.alic / 100);
-      ivaPorAlic[r.alic] = (ivaPorAlic[r.alic] || 0) + (r.cIva - r.neto);
+  var reng;
+  if (fx.items && fx.items.length) {
+    // v13.48.0 — RENGLONES REALES de Xubio: precio de lista, % descuento y
+    // alícuota exactos. Es la fuente fiel; reemplaza al cálculo desde el pedido.
+    reng = fx.items.map(function (it) {
+      var imp = Number(it.importe || 0);                       // neto con descuento
+      var ivaL = Number(it.iva || 0);
+      var tot = Number(it.total != null ? it.total : imp + ivaL);
+      var cant = Number(it.cantidad || 1) || 1;
+      var alic = imp > 0 ? Math.round(ivaL / imp * 1000) / 10 : 21;
+      var pConIva = Number(it.precio != null ? it.precio : (it.precioconivaincluido || 0));
+      var precioNetoLista = pConIva / (1 + alic / 100);        // precio unitario de lista (neto)
+      ivaPorAlic[alic] = (ivaPorAlic[alic] || 0) + ivaL;
+      return {
+        cod: (it.producto && it.producto.codigo) || '',
+        art: (it.producto && it.producto.nombre) || it.descripcion || '',
+        obs: it.descripcion || '',
+        cant: cant, precioU: precioNetoLista, dto: Number(it.porcentajeDescuento || 0),
+        neto: imp, alic: alic, cIva: tot
+      };
     });
+  } else {
+    // FALLBACK interino — desde el PEDIDO, ajustado al gravado real (facturas viejas sin items)
+    reng = items.map(function (it) {
+      var mp = mapa[it.producto_tck_nombre];
+      var alic = (mp && mp.alic != null) ? mp.alic : 21;
+      var sub = Number(it.subtotal || 0);
+      var cant = Number(it.cantidad || 1) || 1;
+      var neto = sub / (1 + alic / 100);
+      var iva = sub - neto;
+      sumNeto += neto; sumIva += iva;
+      ivaPorAlic[alic] = (ivaPorAlic[alic] || 0) + iva;
+      return { cod: '', art: (mp && mp.x) ? mp.x : (it.producto_tck_nombre || ''), obs: it.producto_tck_nombre || it.descripcion_libre || it.calibre || '', cant: cant, precioU: neto / cant, dto: 0, neto: neto, alic: alic, cIva: sub };
+    });
+    var _gravReal = Number(raw.importeGravado != null ? raw.importeGravado : sumNeto);
+    if (sumNeto > 0 && Math.abs(sumNeto - _gravReal) > 1) {
+      var _factor = _gravReal / sumNeto;
+      ivaPorAlic = {};
+      reng.forEach(function (r) {
+        r.neto = r.neto * _factor;
+        r.precioU = r.neto / r.cant;
+        r.cIva = r.neto * (1 + r.alic / 100);
+        ivaPorAlic[r.alic] = (ivaPorAlic[r.alic] || 0) + (r.cIva - r.neto);
+      });
+    }
   }
   var pedZ = (typeof _fcCache !== 'undefined' && _fcCache.salidas) ? _fcCache.salidas.find(function (s) { return s.pedido_id === pid; }) : null;
   return {
@@ -36753,9 +36779,9 @@ function _fcEstilosFactura() {
 function _fcFacturaBody(d, idx) {
   var lc = _fcLetraCod(d.numero, d.tipo);
   var filas = d.renglones.map(function (r) {
-    return '<tr><td></td><td>' + _fcEscF(r.art) + '</td><td>' + _fcEscF(r.obs) + '</td>'
+    return '<tr><td>' + _fcEscF(r.cod || '') + '</td><td>' + _fcEscF(r.art) + '</td><td>' + _fcEscF(r.obs) + '</td>'
       + '<td class="rt">' + _fcNum(r.cant) + '</td><td class="rt">' + _fcNum(r.precioU) + '</td>'
-      + '<td class="rt">0,00</td><td class="rt">' + _fcNum(r.neto) + '</td>'
+      + '<td class="rt">' + _fcNum(r.dto || 0) + '</td><td class="rt">' + _fcNum(r.neto) + '</td>'
       + '<td class="rt">' + _fcNum(r.alic) + '%</td><td class="rt">' + _fcNum(r.cIva) + '</td></tr>';
   }).join('');
   function ivaA(a) { return _fcNum(d.ivaPorAlic[a] || 0); }
@@ -36983,7 +37009,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.47.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.48.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
