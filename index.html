@@ -1,5 +1,11 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.44.0 — 13/06/2026
+     v13.44.0: FACTURAR SELECTIVO. Checkbox por cada pedido sin facturar +
+        checkbox maestro por zona; botón azul "Facturar tildadas (N)" que
+        aparece al tildar. Reusa el mismo motor de facturación (Apps Script
+        facturarLote). Convive con "Facturar todo". La selección se limpia
+        al cambiar de día o al terminar de facturar.
      TCK ADMIN — v13.43.0 — 13/06/2026
      v13.43.0: SELECTOR DE FECHA en el Centro de Facturación. La sección
         "Salidas" deja de estar clavada en hoy: navegás días con ◀ ▶ +
@@ -13683,6 +13689,7 @@ input.canales-exp-input[type="date"] {
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
           <span id="fc-salidas-tit">🚚 Salidas de hoy <span class="fc-sec-sub">se factura ANTES de cargar el camión</span></span>
           <button class="fc-fact-btn" id="fc-fact-todo" style="display:none;" onclick="fcFacturarZona(null)">🧾 Facturar todo</button>
+          <button class="fc-fact-btn" id="fc-fact-sel" style="display:none;background:#0D47A1;" onclick="fcFacturarTildadas()">🧾 Facturar tildadas (0)</button>
         </div>
         <div class="fc-fecha-nav">
           <button type="button" class="fc-fecha-btn" onclick="_fcCambiarFecha(-1)" aria-label="Día anterior">◀</button>
@@ -36099,6 +36106,9 @@ async function comprasDetailCargarFecha() {
 .fc-fecha-input{flex:1;min-width:0;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 9px;font-family:inherit;font-size:13px;font-weight:800;color:var(--text);}
 .fc-fecha-hoy{background:var(--red);color:#fff;border:none;border-radius:8px;padding:8px 12px;font-weight:800;font-size:12px;cursor:pointer;flex-shrink:0;}
 .fc-fecha-hoy.oculto{display:none;}
+/* v13.44.0 — checkboxes para facturar selectivo */
+.fc-check{width:20px;height:20px;flex-shrink:0;cursor:pointer;accent-color:#1B5E20;margin:0;}
+.fc-check-zona{width:17px;height:17px;cursor:pointer;accent-color:#1B5E20;vertical-align:middle;margin-right:5px;}
 </style>
 
 <!-- ═══ v12.0 BLOQUE D — MODALES DE LOGÍSTICA ZONAS ═══ -->
@@ -36157,6 +36167,7 @@ var _fcFecha = null;
 function _fcFechaActiva() { return _fcFecha || _fcHoyISO(); }
 function _fcSetFecha(iso) {
   _fcFecha = (iso && iso !== _fcHoyISO()) ? iso : null;
+  _fcSel = {}; // v13.44.0 — al cambiar de día se descarta la selección
   fcCargar();
 }
 function _fcCambiarFecha(deltaDias) {
@@ -36164,6 +36175,32 @@ function _fcCambiarFecha(deltaDias) {
   var d = new Date(base + 'T12:00:00');
   d.setDate(d.getDate() + deltaDias);
   _fcSetFecha(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'));
+}
+
+// v13.44.0 — SELECCIÓN PARA FACTURAR (tildar filas + "Facturar tildadas")
+var _fcSel = {}; // pedido_id -> true
+function _fcToggleSel(pid, on) {
+  if (on) _fcSel[pid] = true; else delete _fcSel[pid];
+  _fcRefrescarBtnSel();
+}
+function _fcToggleZona(zona, on) {
+  _fcCache.salidas.forEach(function (s) {
+    if (!s.xubio_factura_id && (s.zona || 'sin_zona') === zona) {
+      if (on) _fcSel[s.pedido_id] = true; else delete _fcSel[s.pedido_id];
+    }
+  });
+  fcRender(); // refleja los tildes de cada fila
+}
+function _fcSelCount() {
+  // solo cuentan los tildados que siguen visibles y sin facturar
+  return _fcCache.salidas.filter(function (s) { return !s.xubio_factura_id && _fcSel[s.pedido_id]; }).length;
+}
+function _fcRefrescarBtnSel() {
+  var b = document.getElementById('fc-fact-sel');
+  if (!b) return;
+  var n = _fcSelCount();
+  b.style.display = (vendedorActual === 'ADMIN' && n > 0) ? 'inline-block' : 'none';
+  b.textContent = '🧾 Facturar tildadas (' + n + ')';
 }
 
 function _fcMoneda(n) {
@@ -36300,7 +36337,13 @@ function fcRender() {
         var arr = porZona[z];
         var ok = arr.filter(function (s) { return !!s.xubio_factura_id; }).length;
         var pendZ = arr.length - ok;
-        html += '<div class="fc-zona-h"><span>' + _fcEsc(z.toUpperCase().replace('_', ' / ')) + '</span>' +
+        var pendZona = arr.filter(function (s) { return !s.xubio_factura_id; });
+        var todosTil = pendZona.length > 0 && pendZona.every(function (s) { return _fcSel[s.pedido_id]; });
+        html += '<div class="fc-zona-h"><span>' +
+                ((pendZona.length && vendedorActual === 'ADMIN')
+                  ? '<input type="checkbox" class="fc-check-zona" onchange="_fcToggleZona(\'' + _fcEsc(z) + '\', this.checked)"' + (todosTil ? ' checked' : '') + '>'
+                  : '') +
+                _fcEsc(z.toUpperCase().replace('_', ' / ')) + '</span>' +
                 '<span style="display:flex;gap:6px;align-items:center;">' +
                 (pendZ > 0 && vendedorActual === 'ADMIN'
                   ? '<button class="fc-fact-btn zona" onclick="fcFacturarZona(\'' + _fcEsc(z) + '\')">🧾 Facturar los ' + pendZ + '</button>'
@@ -36309,7 +36352,11 @@ function fcRender() {
         arr.forEach(function (s) {
           var tiene = !!s.xubio_factura_id;
           var presupNro = s.xubio_presupuesto_id ? (c.presupMap[s.xubio_presupuesto_id] || '—') : null;
+          var chk = (!tiene && vendedorActual === 'ADMIN')
+            ? '<input type="checkbox" class="fc-check" onchange="_fcToggleSel(\'' + s.pedido_id + '\', this.checked)"' + (_fcSel[s.pedido_id] ? ' checked' : '') + '>'
+            : '';
           html += '<div class="fc-row">' +
+            chk +
             '<div class="fc-dot ' + (tiene ? 'ok' : 'no') + '"></div>' +
             '<div class="fc-main"><div class="fc-cli">' + _fcEsc(s.cliente) + '</div>' +
             '<div class="fc-meta">' + _fcEsc(s.localidad_canonica || '') + ' · ' + _fcEsc(s.vendedor || '') +
@@ -36324,6 +36371,8 @@ function fcRender() {
       contS.innerHTML = html;
     }
   }
+
+  _fcRefrescarBtnSel(); // v13.44.0 — mostrar/ocultar botón "Facturar tildadas"
 
   // ── Por facturar: HOY/vencidos en rojo · futuros aparte (v13.41.0) ──
   var urgentes = c.porFacturar.filter(function (r) { return Number(r.dias_vencido || 0) >= 0; });
@@ -36424,15 +36473,15 @@ function _fcPendientesDeZona(zona) {
   });
 }
 
-async function fcFacturarZona(zona) {
-  if (vendedorActual !== 'ADMIN') { toast('Solo un admin puede facturar en lote', 'err'); return; }
-  var pend = _fcPendientesDeZona(zona);
-  if (!pend.length) { toast('No hay pendientes' + (zona ? ' en ' + zona : ''), 'ok'); return; }
+// v13.44.0 — motor compartido: factura una lista de pedidos (todo / por zona / tildados)
+async function _fcFacturarLista(pend, etiqueta) {
+  if (vendedorActual !== 'ADMIN') { toast('Solo un admin puede facturar', 'err'); return; }
+  if (!pend.length) { toast('No hay pedidos para facturar', 'ok'); return; }
 
   var total = pend.reduce(function (a, s) { return a + Number(s.total || 0); }, 0);
   var lista = pend.slice(0, 15).map(function (s) { return '• ' + (s.cliente || s.pedido_id) + ' (' + _fcMoneda(s.total) + ')'; }).join('\n');
   var extra = pend.length > 15 ? '\n…y ' + (pend.length - 15) + ' más' : '';
-  if (!confirm('🧾 FACTURAR ' + pend.length + ' PEDIDOS' + (zona ? ' — ' + zona.toUpperCase() : ' (todas las zonas)') +
+  if (!confirm('🧾 FACTURAR ' + pend.length + ' PEDIDO' + (pend.length > 1 ? 'S' : '') + (etiqueta ? ' — ' + etiqueta : '') +
       '\nTotal: ' + _fcMoneda(total) + '\n\n' + lista + extra +
       '\n\nXubio va a emitir las facturas (CAE) una por una. ¿Confirmar?')) return;
 
@@ -36440,6 +36489,7 @@ async function fcFacturarZona(zona) {
   var btns = document.querySelectorAll('.fc-fact-btn');
   btns.forEach(function (b) { b.disabled = true; });
   var btnTodo = document.getElementById('fc-fact-todo');
+  var btnSel = document.getElementById('fc-fact-sel');
 
   var hechas = 0, yaEst = 0, errores = [], dry = false, tanda = 0;
   try {
@@ -36447,6 +36497,7 @@ async function fcFacturarZona(zona) {
       tanda++;
       var chunk = ids.splice(0, 20);
       if (btnTodo) btnTodo.textContent = '⏳ Facturando… ' + hechas + '/' + pend.length;
+      if (btnSel) btnSel.textContent = '⏳ Facturando… ' + hechas + '/' + pend.length;
       toast('⏳ Tanda ' + tanda + ': facturando ' + chunk.length + ' pedidos…', 'ok');
       var resp = await fetch(APPS_SCRIPT_URL + '?accion=facturarLote&ids=' + encodeURIComponent(chunk.join(',')));
       var j = await resp.json();
@@ -36469,19 +36520,31 @@ async function fcFacturarZona(zona) {
       if (j.restantes && j.restantes.length) ids = j.restantes.concat(ids);
     }
   } catch (e) {
-    console.error('[FC] facturarZona', e);
+    console.error('[FC] facturarLista', e);
     errores.push('red: ' + e.message);
   } finally {
     btns.forEach(function (b) { b.disabled = false; });
     if (btnTodo) btnTodo.textContent = '🧾 Facturar todo';
+    _fcRefrescarBtnSel();
   }
 
   if (!dry) {
     var msg = '✅ Facturadas: ' + hechas + (yaEst ? ' · ya existían: ' + yaEst : '') + (errores.length ? ' · ❌ errores: ' + errores.length : '');
     toast(msg, errores.length ? 'err' : 'ok');
     if (errores.length) alert('Errores del lote (' + errores.length + '):\n\n' + errores.slice(0, 15).join('\n') + (errores.length > 15 ? '\n…' : '') + '\n\nEsos pedidos siguen en rojo — facturalos en Xubio a mano o reintentá.');
+    _fcSel = {}; // limpiar selección tras facturar
     await fcCargar();
   }
+}
+
+async function fcFacturarZona(zona) {
+  var pend = _fcPendientesDeZona(zona);
+  return _fcFacturarLista(pend, zona ? zona.toUpperCase().replace('_', ' / ') : '(todas las zonas)');
+}
+
+function fcFacturarTildadas() {
+  var pend = _fcCache.salidas.filter(function (s) { return !s.xubio_factura_id && _fcSel[s.pedido_id]; });
+  return _fcFacturarLista(pend, 'TILDADAS');
 }
 
 function fcBadge() {
@@ -36608,7 +36671,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.43.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.44.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
