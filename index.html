@@ -1,5 +1,17 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.52.0 — 14/06/2026
+     v13.52.0: PRECIOS SUGERIDOS — pantalla de aprobación en el tab Márgenes.
+        Lee precios_sugerencias (pendientes, las pobla el cron diario
+        fn_precios_sugerir). Cada sugerencia: precio actual→sugerido, margen
+        actual→resultante vs objetivo, badge TRAMOS. "Aprobar" aplica el precio
+        TIER-AWARE: si el producto tiene tramos (Suprema, Maples) sube TODOS los
+        tramos el mismo $ para mantener el recargo por comprar suelto; después
+        escribe Sheet+canónicos+lista Xubio+mail con actualizarPrecioVenta (sin
+        tocar el Apps Script). "Rechazar" solo marca el estado. El modal
+        "Cambiar precio" existente (v13.24) también pasa a ser tier-aware con el
+        mismo helper (antes sólo tocaba el Sheet → no movía catálogo/ventas en
+        los productos con tramos). Incluye la Tarea 1 (panel VIP en Clientes).
      TCK ADMIN — v13.51.0 — 14/06/2026
      v13.51.0: El panel ⭐ ACUERDOS VIP se mueve del tab Márgenes al tab
         Clientes (primera card). Márgenes queda limpio para análisis de
@@ -13793,6 +13805,15 @@ input.canales-exp-input[type="date"] {
       <div class="mg-sub">Costo de reposición · margen neto · volumen 7/30 días</div>
     </div>
     <div class="mg-kpis" id="mg-kpis"></div>
+    <!-- 📈 PRECIOS SUGERIDOS (aprobación) — v13.52.0 -->
+    <div id="mg-sug-wrap" style="display:none;background:#FFFDF9;border:1.5px solid #66BB6A;border-radius:14px;padding:12px 14px;margin:8px 12px 6px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+        <span style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:16px;color:#1B5E20;">📈 PRECIOS SUGERIDOS</span>
+        <span id="mg-sug-count" style="font-size:11px;font-weight:800;color:#1B5E20;background:#E8F5E9;border-radius:10px;padding:2px 8px;"></span>
+      </div>
+      <div style="font-size:11px;color:#5C4F3A;margin-bottom:8px;">El margen cayó bajo el objetivo. Aprobar aplica en Sheet, catálogo, ventas, Márgenes (+ tramos) y lista Xubio.</div>
+      <div id="mg-sug-list"></div>
+    </div>
     <div class="mg-var-wrap" id="mg-var-wrap" style="display:none;">
       <div class="mg-var-head"><span class="t" id="mg-var-tit">⚠️ Costos que se movieron</span><span class="s">últ. 30 días</span></div>
       <div id="mg-var-list"></div>
@@ -34587,6 +34608,8 @@ function _cprFmtHora(ts) {
 // v12.29 — TAB MÁRGENES (lee vw_margen_producto por REST directo)
 // ═══════════════════════════════════════════════════════════════
 var _mgData = null;          // cache de la vista
+var _mgSug = [];             // v13.52.0 — precios sugeridos pendientes
+var _mgTramoIds = {};        // v13.52.0 — { canonico_id: true } productos con tramos
 var _mgVarData = null;       // v13.23 — cache vw_variacion_costos (30 días)
 var _mgVarExpand = false;    // v13.23 — expansor de la lista de variaciones
 var _mgUnidad = 'caja';      // caja | kg
@@ -34743,6 +34766,108 @@ async function clientesAcuLoad(){
   } catch(e){ console.warn('[clientes/acu] panel VIP no cargó:', e && e.message || e); }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// v13.52.0 — PRECIOS SUGERIDOS (aprobación en tab Márgenes)
+// Lee precios_sugerencias (estado=pendiente, las pobla el cron fn_precios_sugerir).
+// Aprobar = aplicar precio tier-aware (tramos con gap fijo en $) + Sheet/canónicos/
+// Xubio/mail vía actualizarPrecioVenta. Rechazar = solo marca el estado.
+// ═══════════════════════════════════════════════════════════════
+function mgSugFmt(n){ return '$' + Math.round(Number(n)||0).toLocaleString('es-AR'); }
+function mgSugPct(n){ return (n===null||n===undefined) ? '\u2014' : String(Math.round(Number(n)*10)/10).replace('.',',') + '%'; }
+
+function mgSugRender(){
+  var wrap = document.getElementById('mg-sug-wrap');
+  var list = document.getElementById('mg-sug-list');
+  var cnt  = document.getElementById('mg-sug-count');
+  if (!wrap || !list) return;
+  if (!_mgSug.length){ wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  if (cnt) cnt.textContent = _mgSug.length + (_mgSug.length===1 ? ' pendiente' : ' pendientes');
+  list.innerHTML = _mgSug.map(function(s){
+    var sube = mgSugFmt(s.precio_actual) + ' \u2192 <b style="color:#1B5E20;">' + mgSugFmt(s.precio_sugerido) + '</b>';
+    var marg = 'Margen ' + mgSugPct(s.margen_actual) + ' \u2192 ' + mgSugPct(s.margen_resultante) +
+               ' <span style="color:#8A7B63;">(obj ' + mgSugPct(s.margen_objetivo) + ')</span>';
+    var badge = _mgTramoIds[s.canonico_id]
+      ? ' <span style="background:#E3F2FD;color:#1565C0;border-radius:8px;padding:1px 6px;font-size:10px;font-weight:800;">TRAMOS</span>' : '';
+    return '<div style="background:#fff;border:1px solid #DDE8D5;border-radius:10px;padding:10px 11px;margin-bottom:8px;">' +
+        '<div style="font-weight:800;font-size:14px;color:#2C2416;">' + (s.producto||'') + badge + '</div>' +
+        '<div style="font-size:13px;margin-top:3px;">' + sube + '</div>' +
+        '<div style="font-size:11.5px;color:#5C4F3A;margin-top:2px;">' + marg + '</div>' +
+        '<div style="display:flex;gap:8px;margin-top:9px;">' +
+          '<button onclick="mgSugAprobar(' + s.id + ')" style="flex:1;background:#1E8449;color:#fff;border:none;border-radius:8px;padding:9px;font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:13px;cursor:pointer;">\u2713 Aprobar</button>' +
+          '<button onclick="mgSugRechazar(' + s.id + ')" style="background:#fff;color:#C62828;border:1px solid #E0B4B4;border-radius:8px;padding:9px 14px;font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:13px;cursor:pointer;">Rechazar</button>' +
+        '</div>' +
+      '</div>';
+  }).join('');
+}
+
+// Aplica precioNuevo respetando tramos: si el producto tiene tramos, sube TODOS
+// el mismo $ (mantiene el gap por comprar suelto). Después escribe Sheet+canónicos+
+// Xubio+mail con actualizarPrecioVenta (precio de caja). Devuelve el JSON del AS.
+async function aplicarPrecioTierAware(canonicoId, producto, precioNuevo){
+  if (canonicoId != null){
+    var tramos = await sbFetch('producto_tramos?producto_id=eq.' + canonicoId +
+      '&activo=eq.true&zona=eq.todas&select=id,cantidad_min,precio');
+    if (Array.isArray(tramos) && tramos.length){
+      var caja = tramos[0];   // caja = mayor cantidad_min (lo que ancla la sugerencia)
+      for (var i=1;i<tramos.length;i++){ if (Number(tramos[i].cantidad_min) > Number(caja.cantidad_min)) caja = tramos[i]; }
+      var delta = Math.round(Number(precioNuevo) - Number(caja.precio));
+      if (delta !== 0){
+        for (var k=0;k<tramos.length;k++){
+          await sbFetch('producto_tramos?id=eq.' + tramos[k].id,
+            { method:'PATCH', body: JSON.stringify({ precio: Math.round(Number(tramos[k].precio) + delta) }) });
+        }
+      }
+    }
+  }
+  var r = await fetch(APPS_SCRIPT_URL + '?accion=actualizarPrecioVenta&producto=' +
+    encodeURIComponent(producto) + '&precioNuevo=' + Math.round(precioNuevo) +
+    '&porQuien=' + encodeURIComponent('Aprobación precios'));
+  return await r.json();
+}
+
+async function mgSugAprobar(id){
+  var s = _mgSug.find(function(x){ return x.id === id; });
+  if (!s) return;
+  var tieneTr = !!_mgTramoIds[s.canonico_id];
+  var msg = 'Aprobar ' + s.producto + ': ' + mgSugFmt(s.precio_actual) + ' \u2192 ' + mgSugFmt(s.precio_sugerido) + '?';
+  if (tieneTr) msg += '\nTiene tramos: se suben todos +' + mgSugFmt(Math.round(s.precio_sugerido - s.precio_actual)) +
+                      ' (se mantiene la diferencia por comprar suelto).';
+  msg += '\nSe aplica en Sheet, catálogo, ventas, Márgenes y lista Xubio.';
+  if (!confirm(msg)) return;
+  try {
+    var j = await aplicarPrecioTierAware(s.canonico_id, s.producto, s.precio_sugerido);
+    if (j && (j.status === 'ok' || j.status === 'sin_cambio')){
+      await sbFetch('precios_sugerencias?id=eq.' + id,
+        { method:'PATCH', body: JSON.stringify({ estado:'aprobado', resuelto_at: new Date().toISOString() }) });
+      var xl = String((j && j.xubio_lista) || '');
+      var extra = (xl.indexOf('actualizado')===0) ? ' \u00B7 Xubio \u2713'
+                : (xl.indexOf('sin_cambio')===0) ? '' : ' \u00B7 \u26A0\uFE0F Xubio a mano';
+      if (typeof toast==='function') toast('\u2705 ' + s.producto + ' \u2192 ' + mgSugFmt(s.precio_sugerido) + extra, 'ok');
+      mgRecargar();
+    } else {
+      if (typeof toast==='function') toast('\u274C ' + ((j && j.message) || 'No se pudo aplicar'), 'error');
+    }
+  } catch(e){
+    if (typeof toast==='function') toast('\u274C Error: ' + (e && e.message || e), 'error');
+  }
+}
+
+async function mgSugRechazar(id){
+  var s = _mgSug.find(function(x){ return x.id === id; });
+  if (!s) return;
+  if (!confirm('Rechazar la sugerencia de ' + s.producto + '? No cambia ningún precio.')) return;
+  try {
+    await sbFetch('precios_sugerencias?id=eq.' + id,
+      { method:'PATCH', body: JSON.stringify({ estado:'rechazado', resuelto_at: new Date().toISOString() }) });
+    _mgSug = _mgSug.filter(function(x){ return x.id !== id; });
+    mgSugRender();
+    if (typeof toast==='function') toast('Sugerencia de ' + s.producto + ' rechazada', 'ok');
+  } catch(e){
+    if (typeof toast==='function') toast('\u274C No se pudo rechazar: ' + (e && e.message || e), 'error');
+  }
+}
+
 function mgRenderAcuerdos(){
   var wrap = document.getElementById('mg-acu-wrap');
   var list = document.getElementById('mg-acu-list');
@@ -34882,16 +35007,23 @@ async function margenesInit() {
       sbFetch('vw_acuerdos_cumplimiento?select=*').catch(function(){ return []; }),
       sbFetch('acuerdos_log?select=*&order=creado_at.desc&limit=15').catch(function(){ return []; }),
       sbFetch('vw_variacion_costos?select=*&var_pct=not.is.null&dias_desde_cambio=lte.30&order=fecha_cambio.desc')
-        .catch(function(e){ console.warn('[margenes] vw_variacion_costos:', e.message || e); return []; })
+        .catch(function(e){ console.warn('[margenes] vw_variacion_costos:', e.message || e); return []; }),
+      // v13.52.0 — precios sugeridos pendientes + set de productos con tramos
+      sbFetch('precios_sugerencias?estado=eq.pendiente&order=margen_actual.asc&select=*').catch(function(){ return []; }),
+      sbFetch('producto_tramos?activo=eq.true&zona=eq.todas&select=producto_id').catch(function(){ return []; })
     ]);
     _mgData = Array.isArray(res[0]) ? res[0] : [];
     _mgAcuSalud = Array.isArray(res[1]) ? res[1] : [];     // v13.34.0
     _mgAcuCumpl = Array.isArray(res[2]) ? res[2] : [];     // v13.34.0
     _mgAcuLog   = Array.isArray(res[3]) ? res[3] : [];     // v13.34.0
     _mgVarData = Array.isArray(res[4]) ? res[4] : [];
+    _mgSug = Array.isArray(res[5]) ? res[5] : [];                                   // v13.52.0
+    _mgTramoIds = {};                                                               // v13.52.0
+    (Array.isArray(res[6]) ? res[6] : []).forEach(function(t){ if (t && t.producto_id != null) _mgTramoIds[t.producto_id] = true; });
     mgInitFiltro();
     _mgSyncCtrlUI();   // v13.28 — toggles según default/preferencia guardada
     mgRenderVariaciones();
+    mgSugRender();        // v13.52.0
     mgRenderAcuerdos();   // v13.34.0
     mgRender();
   } catch (e) {
@@ -35101,8 +35233,10 @@ async function mgPrecioConfirmar(){
   ok.disabled = true; ok.textContent = '⏳ Aplicando…';
   st.textContent = 'Escribiendo Sheet + Márgenes + Xubio (tarda unos segundos)…';
   try {
-    var r = await fetch(APPS_SCRIPT_URL + '?accion=actualizarPrecioVenta&producto=' + encodeURIComponent(_mgpProd) + '&precioNuevo=' + precio + '&porQuien=' + encodeURIComponent('admin panel'));
-    var j = await r.json();
+    // v13.52.0 — tier-aware: si el producto tiene tramos, sube todos manteniendo el gap
+    var _cid = null;
+    try { var _d = (_mgData||[]).find(function(x){ return x.producto === _mgpProd; }); if (_d) _cid = _d.canonico_id; } catch(eC){}
+    var j = await aplicarPrecioTierAware(_cid, _mgpProd, precio);
     if(j && j.status === 'ok'){
       var xl = String(j.xubio_lista || '');
       var extra = (xl.indexOf('actualizado') === 0) ? ' · Xubio ✓'
@@ -37053,7 +37187,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.51.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.52.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
