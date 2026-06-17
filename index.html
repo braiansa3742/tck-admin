@@ -1,6 +1,11 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v13.52.0 — 14/06/2026
+     v13.53.0: BANDEJA DE PROPUESTAS DE ACUERDO — en el panel ⭐ ACUERDOS
+        VIP (tab Clientes) aparece arriba la lista de propuestas que cargan los
+        vendedores desde ventas (vw_acuerdos_pendientes) con el margen post-IIBB
+        ya calculado. Aprobar = rpc fn_acuerdo_aprobar (activa + congela margen);
+        Rechazar = rpc fn_acuerdo_rechazar (con motivo). Modulo mgAcuPend*.
      v13.52.0: PRECIOS SUGERIDOS — pantalla de aprobación en el tab Márgenes.
         Lee precios_sugerencias (pendientes, las pobla el cron diario
         fn_precios_sugerir). Cada sugerencia: precio actual→sugerido, margen
@@ -12205,6 +12210,10 @@ input.canales-exp-input[type="date"] {
         </div>
         <div id="mg-acu-f-margen" style="font-size:11px;color:#8B6F50;margin-top:6px;"></div>
         <button onclick="mgAcuGuardar()" style="margin-top:8px;background:#B45309;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;cursor:pointer;">Guardar acuerdo</button>
+      </div>
+      <div id="mg-acupend-wrap" style="display:none;background:#FFF8F0;border:1.5px solid #E0A93D;border-radius:12px;padding:10px 11px;margin-bottom:10px;">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:14px;color:#B45309;margin-bottom:7px;">🤝 PROPUESTAS PENDIENTES <span id="mg-acupend-count" style="font-weight:600;font-size:12px;color:#8A7B63;"></span></div>
+        <div id="mg-acupend-list"></div>
       </div>
       <div id="mg-acu-list"></div>
       <div style="margin-top:10px;">
@@ -34745,15 +34754,86 @@ function mgAcuAviso(acuerdoId){
   } else { prompt('Copiá el aviso:', txt); }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// v13.53.0 — BANDEJA DE PROPUESTAS DE ACUERDO (pendientes de aprobacion)
+// Lee vw_acuerdos_pendientes (acuerdos que cargan los vendedores desde
+// ventas con estado=pendiente_aprobacion). Muestra margen post-IIBB ya
+// calculado en la vista. Aprobar = rpc fn_acuerdo_aprobar (activa y congela
+// el margen objetivo del dia). Rechazar = rpc fn_acuerdo_rechazar (con motivo).
+// ═══════════════════════════════════════════════════════════════
+var _mgAcuPend = [];
+
+function mgAcuPendEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function mgAcuPendFmt(n){ return '$' + Math.round(Number(n)||0).toLocaleString('es-AR'); }
+function mgAcuPendPct(n){ return (n===null||n===undefined) ? 's/costo' : String(Math.round(Number(n)*10)/10).replace('.',',') + '%'; }
+function mgAcuPendColor(n){
+  if (n===null||n===undefined) return '#8A7B63';
+  if (n < 5) return '#C62828';
+  if (n < 10) return '#E65100';
+  return '#1B5E20';
+}
+
+function mgAcuPendRender(){
+  var wrap = document.getElementById('mg-acupend-wrap');
+  var list = document.getElementById('mg-acupend-list');
+  var cnt  = document.getElementById('mg-acupend-count');
+  if (!wrap || !list) return;
+  if (!_mgAcuPend.length){ wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  if (cnt) cnt.textContent = _mgAcuPend.length + (_mgAcuPend.length===1 ? ' propuesta' : ' propuestas');
+  list.innerHTML = _mgAcuPend.map(function(p){
+    var marg  = mgAcuPendPct(p.margen_acordado_pct);
+    var col   = mgAcuPendColor(p.margen_acordado_pct);
+    var lista = (p.precio_lista_civa != null)
+      ? ('<span style="color:#8A7B63;text-decoration:line-through;">' + mgAcuPendFmt(p.precio_lista_civa) + '</span> \u2192 ') : '';
+    var sinCosto = (p.cobertura !== 'ok')
+      ? '<div style="font-size:11px;color:#E65100;margin-top:2px;">\u26A0\uFE0F Producto sin costo: se activa sin autoreajuste.</div>' : '';
+    var quien = p.propuesto_por ? ('<span style="color:#8A7B63;">propuesto por ' + mgAcuPendEsc(p.propuesto_por) + '</span>') : '';
+    var min   = (Number(p.volumen_min_semanal) > 0) ? (' \u00B7 m\u00EDn ' + p.volumen_min_semanal + '/sem') : '';
+    return '<div style="background:#fff;border:1px solid #E8D5BB;border-radius:10px;padding:10px 11px;margin-bottom:8px;">' +
+        '<div style="font-weight:800;font-size:14px;color:#2C2416;">' + mgAcuPendEsc(p.cliente) + '</div>' +
+        '<div style="font-size:13px;margin-top:2px;color:#5C4F3A;">' + mgAcuPendEsc(p.producto) + min + '</div>' +
+        '<div style="font-size:14px;margin-top:3px;">' + lista + '<b>' + mgAcuPendFmt(p.precio_acordado) + '</b> ' +
+          '<span style="color:' + col + ';font-weight:800;">\u00B7 margen ' + marg + '</span></div>' +
+        sinCosto +
+        '<div style="font-size:11px;margin-top:3px;">' + quien + '</div>' +
+        '<div style="display:flex;gap:8px;margin-top:9px;">' +
+          '<button onclick="mgAcuPendAprobar(' + p.id + ')" style="flex:1;background:#1E8449;color:#fff;border:none;border-radius:8px;padding:9px;font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:13px;cursor:pointer;">\u2713 Aprobar</button>' +
+          '<button onclick="mgAcuPendRechazar(' + p.id + ')" style="background:#fff;color:#C62828;border:1px solid #E0B4B4;border-radius:8px;padding:9px 14px;font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:13px;cursor:pointer;">Rechazar</button>' +
+        '</div>' +
+      '</div>';
+  }).join('');
+}
+
+async function mgAcuPendAprobar(id){
+  try {
+    await sbFetch('rpc/fn_acuerdo_aprobar', { method:'POST', body: JSON.stringify({ p_id: id }) });
+    if (typeof toast==='function') toast('Acuerdo aprobado y activo');
+    await mgAcuRefrescar();
+  } catch(e){ if (typeof toast==='function') toast('Error: ' + (e.message||e), 'err'); }
+}
+
+async function mgAcuPendRechazar(id){
+  var motivo = prompt('Motivo del rechazo (opcional):', '');
+  if (motivo === null) return;
+  try {
+    await sbFetch('rpc/fn_acuerdo_rechazar', { method:'POST', body: JSON.stringify({ p_id: id, p_motivo: motivo || '' }) });
+    if (typeof toast==='function') toast('Propuesta rechazada');
+    await mgAcuRefrescar();
+  } catch(e){ if (typeof toast==='function') toast('Error: ' + (e.message||e), 'err'); }
+}
+
 async function mgAcuRefrescar(){
   var nuevos = await Promise.all([
     sbFetch('vw_acuerdos_salud?select=*').catch(function(){ return []; }),
     sbFetch('vw_acuerdos_cumplimiento?select=*').catch(function(){ return []; }),
-    sbFetch('acuerdos_log?select=*&order=creado_at.desc&limit=15').catch(function(){ return []; })
+    sbFetch('acuerdos_log?select=*&order=creado_at.desc&limit=15').catch(function(){ return []; }),
+    sbFetch('vw_acuerdos_pendientes?select=*').catch(function(){ return []; })
   ]);
-  _mgAcuSalud = nuevos[0]; _mgAcuCumpl = nuevos[1]; _mgAcuLog = nuevos[2];
+  _mgAcuSalud = nuevos[0]; _mgAcuCumpl = nuevos[1]; _mgAcuLog = nuevos[2]; _mgAcuPend = nuevos[3] || [];
   _mgAcuPausados = null;
   mgRenderAcuerdos();
+  mgAcuPendRender();
 }
 
 // v13.51.0 — Carga del panel ⭐ ACUERDOS VIP cuando se abre el tab Clientes.
