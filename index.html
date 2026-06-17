@@ -13102,7 +13102,7 @@ input.canales-exp-input[type="date"] {
               <option value="">— Elegir —</option>
               <option value="Joan">🚚 Joan</option>
               <option value="Luis">🚚 Luis</option>
-              <option value="Juan Pablo">🚚 Juampi</option>
+              <option value="Juan Pablo">🚚 Ian</option>
             </select>
           </div>
           <div style="flex:1;">
@@ -26056,7 +26056,7 @@ function lzRenderDetalleViaje() {
     html += '          <option value="">— Elegir —</option>';
     html += '          <option value="Joan"' + (v.chofer === 'Joan' ? ' selected' : '') + '>🟢 Joan</option>';
     html += '          <option value="Luis"' + (v.chofer === 'Luis' ? ' selected' : '') + '>🟠 Luis</option>';
-    html += '          <option value="Juan Pablo"' + (v.chofer === 'Juan Pablo' ? ' selected' : '') + '>🔵 Juampi</option>';
+    html += '          <option value="Juan Pablo"' + (v.chofer === 'Juan Pablo' ? ' selected' : '') + '>🔵 Ian</option>';
     html += '        </select>';
   } else {
     html += '        <div class="v-detalle-static">' + lzEsc(tieneChofer ? v.chofer : '—') + '</div>';
@@ -27598,7 +27598,7 @@ function mostrarPickerChofer(btn, event) {
     '<div class="chofer-picker">' +
       '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Joan" onclick="asignarChoferBtn(this,event)">🚚 Joan</button>' +
       '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Luis" onclick="asignarChoferBtn(this,event)">🚚 Luis</button>' +
-      '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Juan Pablo" onclick="asignarChoferBtn(this,event)">🚚 Juampi</button>' +
+      '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Juan Pablo" onclick="asignarChoferBtn(this,event)">🚚 Ian</button>' +
     '</div>' +
     '<button class="chofer-picker-cancel" data-pid="' + pedidoId + '" onclick="cancelarPickerChoferBtn(this,event)">Cancelar</button>';
 }
@@ -30053,7 +30053,7 @@ async function renderLogisticaDevoluciones(el) {
       + mkChoferChip('todos', '👥 Todos', conteoPorChofer.todos, '#1A237E', '#E8EAF6')
       + mkChoferChip('Joan',  '🚚 Joan',  conteoPorChofer.Joan,  '#2E7D32', '#E8F5E9')
       + mkChoferChip('Luis',  '🚚 Luis',  conteoPorChofer.Luis,  '#E65100', '#FFF3E0')
-      + mkChoferChip('Juan Pablo', '🚚 Juampi', conteoPorChofer['Juan Pablo'], '#1565C0', '#E3F2FD')
+      + mkChoferChip('Juan Pablo', '🚚 Ian', conteoPorChofer['Juan Pablo'], '#1565C0', '#E3F2FD')
       + '</div>';
 
     // Chip toggle "Solo pendientes"
