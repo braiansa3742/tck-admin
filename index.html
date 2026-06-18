@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.52.0 — 14/06/2026
+     TCK ADMIN — v13.54.0 — 18/06/2026
+     v13.54.0: FIX panel "Costos que se movieron" (tab Márgenes) — separa lo que
+        REQUIERE acción (suba de costo NO ajustada, con sugerido > precio actual)
+        de lo que ya está al día (precios ya ajustados + bajas de costo). Antes
+        mostraba TODO arriba y contaba como pendiente lo ya resuelto, dando
+        sensación de trabajo que no había. Los "ya al día" pasan a un grupo que
+        solo se ve al expandir. Solo render (mgRenderVariaciones); sin cambios SQL.
      v13.53.0: BANDEJA DE PROPUESTAS DE ACUERDO — en el panel ⭐ ACUERDOS
         VIP (tab Clientes) aparece arriba la lista de propuestas que cargan los
         vendedores desde ventas (vw_acuerdos_pendientes) con el margen post-IIBB
@@ -35214,28 +35220,60 @@ function mgRenderVariaciones(){
   });
   if(!rows.length){ wrap.style.display = 'none'; return; }
 
-  // Subas primero (duelen), bajas después; dentro de cada grupo, reciente arriba
-  rows.sort(function(a,b){
+  // v13.54 — separar lo que REQUIERE ACCIÓN de lo que ya está al día.
+  // Pendiente = suba de costo, todavía NO ajustada, con sugerido por encima del
+  // precio actual. Los ya ajustados y las bajas no son trabajo pendiente: van al
+  // grupo "al día", oculto salvo que se expanda. Antes mostraba TODO arriba
+  // (incluido lo ya ajustado), dando sensación de cosas para hacer que no había.
+  function _mgEsPend(d){
+    var v = mgN(d.var_pct) || 0;
+    var sug = mgN(d.precio_sugerido_civa), pAct = mgN(d.precio_venta_civa);
+    return d.precio_ya_ajustado !== true && v > 0 && sug !== null && pAct !== null && sug > pAct;
+  }
+  var pend = [], resto = [];
+  rows.forEach(function(d){ (_mgEsPend(d) ? pend : resto).push(d); });
+
+  var _mgPorFecha = function(a,b){ return String(b.fecha_cambio||'').localeCompare(String(a.fecha_cambio||'')); };
+  pend.sort(_mgPorFecha);
+  resto.sort(function(a,b){
     var sa = (mgN(a.var_pct)||0) > 0 ? 0 : 1;
     var sb = (mgN(b.var_pct)||0) > 0 ? 0 : 1;
     if(sa !== sb) return sa - sb;
-    return String(b.fecha_cambio||'').localeCompare(String(a.fecha_cambio||''));
+    return _mgPorFecha(a,b);
   });
 
-  var subas = rows.filter(function(d){ return (mgN(d.var_pct)||0) > 0; }).length;
   var tit = document.getElementById('mg-var-tit');
-  if(tit) tit.textContent = (subas>0 ? '⚠️' : '✅') + ' Costos que se movieron (' + rows.length + ')';
+  if(tit) tit.textContent = (pend.length > 0)
+    ? '⚠️ Costos que se movieron (' + pend.length + ' para revisar)'
+    : '✅ Costos al día';
 
   var VISIBLES = 4;
-  var mostrar = _mgVarExpand ? rows : rows.slice(0, VISIBLES);
   var html = '';
-  mostrar.forEach(function(d){ html += mgVarFila(d); });
+  if(pend.length){
+    (_mgVarExpand ? pend : pend.slice(0, VISIBLES)).forEach(function(d){ html += mgVarFila(d); });
+  } else {
+    html += '<div style="padding:14px;text-align:center;color:#1B5E20;background:#E8F5E9;border-radius:10px;font-weight:700;font-size:13px;">✅ Todo al día'
+      + (resto.length ? ' · ' + resto.length + ' con costo movido, ya ajustados' : '') + '</div>';
+  }
+  if(_mgVarExpand && resto.length){
+    html += '<div style="margin:10px 2px 4px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;color:#8A7B63;">✓ Ya al día (' + resto.length + ')</div>';
+    resto.forEach(function(d){ html += mgVarFila(d); });
+  }
   list.innerHTML = html;
 
   if(more){
-    if(rows.length > VISIBLES){
+    var pendOcultos = (pend.length > VISIBLES) ? (pend.length - VISIBLES) : 0;
+    if(pendOcultos > 0 || resto.length > 0){
       more.style.display = 'block';
-      more.textContent = _mgVarExpand ? '▲ Ver menos' : '▼ Ver los ' + (rows.length - VISIBLES) + ' restantes';
+      if(_mgVarExpand){
+        more.textContent = '▲ Ver menos';
+      } else if(pendOcultos > 0 && resto.length > 0){
+        more.textContent = '▼ Ver ' + pendOcultos + ' más y los ya ajustados (' + resto.length + ')';
+      } else if(pendOcultos > 0){
+        more.textContent = '▼ Ver los ' + pendOcultos + ' restantes';
+      } else {
+        more.textContent = '▼ Ver los ya ajustados (' + resto.length + ')';
+      }
     } else {
       more.style.display = 'none';
     }
