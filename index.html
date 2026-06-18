@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.54.0 — 18/06/2026
+     TCK ADMIN — v13.55.0 — 18/06/2026
+     v13.55.0: CUENTAS CORRIENTES — nueva seccion en el tab Tesoreria con el
+        saldo real por cliente (vista vw_cuenta_corriente_saldo): ancla del
+        export Xubio menos cobros del dia, badge de clase (activa/congelada/
+        parada) y desglose apertura/movimiento. Solo lectura. Modulo cc*.
      v13.54.0: FIX panel "Costos que se movieron" (tab Márgenes) — separa lo que
         REQUIERE acción (suba de costo NO ajustada, con sugerido > precio actual)
         de lo que ya está al día (precios ya ajustados + bajas de costo). Antes
@@ -13549,6 +13553,51 @@ input.canales-exp-input[type="date"] {
 
       <div class="tes-wrap">
 
+        <!-- ═══ CUENTAS CORRIENTES (v13.55.0) ═══ -->
+        <style>
+        .cc-sec{margin-bottom:18px}
+        .cc-hdr-tit{font-size:16px;font-weight:800;color:#8E1B1B;margin-bottom:9px;letter-spacing:.3px}
+        .cc-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+        .cc-stat{background:#fff;border-radius:11px;padding:10px;border:1px solid #eee;border-top:3px solid var(--c)}
+        .cc-stat .l{font-size:11px;font-weight:700;color:#7a7167;text-transform:uppercase;letter-spacing:.3px}
+        .cc-stat .v{font-size:19px;font-weight:900;color:#1A0800}
+        .cc-stat .d{font-size:11px;color:#7a7167;font-weight:600}
+        .cc-search{width:100%;padding:11px 13px;font-family:'Barlow Condensed',sans-serif;font-size:15px;border:2px solid #e3ddd2;border-radius:10px;background:#fff;margin-bottom:10px;font-weight:600}
+        .cc-search:focus{outline:none;border-color:#E0A93D}
+        .cc-row{background:#fff;border-radius:10px;padding:11px 13px;border:1px solid #eee;margin-bottom:7px;cursor:pointer;display:flex;align-items:center;gap:10px}
+        .cc-row:active{background:#faf6ef}
+        .cc-row .mn{flex:1;min-width:0}
+        .cc-row .nm{font-size:16px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#1A0800}
+        .cc-row .mt{font-size:12px;color:#7a7167;font-weight:600;margin-top:1px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+        .cc-bdg{font-size:10px;font-weight:800;padding:2px 7px;border-radius:18px;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap}
+        .cc-b-activa{background:#E8F5E9;color:#1E8449}
+        .cc-b-congelada{background:#FDECEA;color:#C62828}
+        .cc-b-parada{background:#FBF0E2;color:#D9822B}
+        .cc-warn{color:#C62828;font-weight:700}
+        .cc-sal{text-align:right;flex-shrink:0}
+        .cc-sal .m{font-size:17px;font-weight:900;color:#1A0800}
+        .cc-sal .s{font-size:10px;color:#7a7167;font-weight:600}
+        .cc-det{background:#fff;border:2px solid #E0A93D;border-radius:11px;padding:12px 14px;margin:7px 0 11px;display:none}
+        .cc-det.open{display:block}
+        .cc-det h4{font-size:17px;font-weight:900;margin:0 0 7px}
+        .cc-dl{display:flex;justify-content:space-between;font-size:14px;padding:4px 0;border-bottom:1px dashed #eee;font-weight:600;color:#1A0800}
+        .cc-dl .v{font-weight:800}
+        .cc-dl.t{border-bottom:none;border-top:2px solid #333;margin-top:3px;padding-top:7px;font-size:16px}
+        .cc-note{font-size:12px;color:#7a7167;font-weight:600;margin-top:8px;line-height:1.4}
+        .cc-loading{text-align:center;padding:24px;color:#9C7050;font-style:italic;font-size:13px}
+        </style>
+        <div class="cc-sec" id="cc-sec">
+          <div class="cc-hdr-tit">📒 Cuentas corrientes</div>
+          <div id="cc-loading" class="cc-loading">Cargando cuentas corrientes…</div>
+          <div id="cc-cont" style="display:none;">
+            <div class="cc-stats" id="cc-stats"></div>
+            <input class="cc-search" id="cc-q" placeholder="🔎 Buscar cliente…" oninput="ccFiltrar()">
+            <div id="cc-lista"></div>
+            <div class="cc-note">El saldo es el de Xubio neto de cobros del día (corte <span id="cc-corte">—</span>). Los 🔴 y 🟡 arrastran apertura sin validar; se corrige cuando administración confirma la deuda real.</div>
+          </div>
+          <div id="cc-err" class="cc-loading" style="display:none;color:#B71C1C;">No se pudieron cargar las cuentas corrientes.</div>
+        </div>
+
         <!-- Loading -->
         <div id="tes-loading" style="text-align:center;padding:60px 20px;color:#9C7050;font-style:italic;">
           Cargando proyección…
@@ -19076,6 +19125,7 @@ function cambiarTab(tab) {
   // v12.20.0 — Tesorería: cargar al abrir
   if (tab === 'tesoreria') {
     if (typeof tesCargar === 'function') tesCargar();
+    if (typeof ccCargar === 'function') ccCargar();
     var v = document.getElementById('view-tesoreria'); if (v) v.scrollTop = 0;
   }
 
@@ -34114,6 +34164,81 @@ function _tesFetch(path) {
   });
 }
 
+/* ═══ CUENTAS CORRIENTES (v13.55.0) — lee vw_cuenta_corriente_saldo ═══ */
+var _ccData = [];
+function _ccFmt(n){ return '$' + Math.round(Number(n)||0).toLocaleString('es-AR'); }
+function _ccLbl(c){ return c==='activa'?'Activa':(c==='congelada'?'Congelada':(c==='parada'?'Parada':'—')); }
+function _ccEsc(s){ return String(s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function _ccFechaCorta(f){ if(!f) return ''; var p=String(f).slice(0,10).split('-'); return p.length===3?(p[2]+'/'+p[1]):f; }
+function _ccMeta(c){
+  var t;
+  if (c.ultimo_cobro){
+    var d = c.dias_sin_cobranza;
+    t = (d===0 || d===null) ? ('cobró '+_ccFechaCorta(c.ultimo_cobro)) : ('últ. cobro hace '+d+'d');
+  } else { t = 'sin pagos 2026'; }
+  if (c.clase_deuda==='congelada' || c.clase_deuda==='parada') t += ' · <span class="cc-warn">⚠ apertura sin validar</span>';
+  return t;
+}
+async function ccCargar(){
+  var ld=document.getElementById('cc-loading'), ct=document.getElementById('cc-cont'), er=document.getElementById('cc-err');
+  if(!ld) return;
+  ld.style.display='block'; if(ct)ct.style.display='none'; if(er)er.style.display='none';
+  try{
+    var path='vw_cuenta_corriente_saldo?select=cliente_xubio_id,cliente_nombre,clase_deuda,saldo_ancla,saldo_corregido,saldo_estimado,saldo_apertura,cobrado_post_corte,dias_sin_cobranza,ultimo_cobro,apertura_estado,fecha_corte&es_cuenta_corriente=is.true&saldo_estimado=gt.0&order=saldo_estimado.desc';
+    var rows = await _tesFetch(path);
+    _ccData = rows || [];
+    _ccRenderStats(_ccData);
+    _ccRenderLista(_ccData);
+    var ce=document.getElementById('cc-corte');
+    if(ce && _ccData[0] && _ccData[0].fecha_corte){ ce.textContent=_ccFechaCorta(_ccData[0].fecha_corte); }
+    ld.style.display='none'; if(ct)ct.style.display='block';
+  }catch(e){
+    console.error('[CC] error', e);
+    ld.style.display='none'; if(er)er.style.display='block';
+  }
+}
+function _ccStatCard(lbl,col,o){
+  return '<div class="cc-stat" style="--c:'+col+'"><div class="l">'+lbl+'</div><div class="v">'+_ccFmt(o.m)+'</div><div class="d">'+o.n+' clientes</div></div>';
+}
+function _ccRenderStats(data){
+  var g={activa:{n:0,m:0},congelada:{n:0,m:0},parada:{n:0,m:0}};
+  data.forEach(function(c){ var k=c.clase_deuda; if(g[k]){ g[k].n++; g[k].m+=Number(c.saldo_estimado)||0; } });
+  var st=document.getElementById('cc-stats'); if(!st) return;
+  st.innerHTML = _ccStatCard('🟢 Sana','#1E8449',g.activa) + _ccStatCard('🔴 Congelada','#C62828',g.congelada) + _ccStatCard('🟡 Parada','#D9822B',g.parada);
+}
+function _ccRenderLista(data){
+  var el=document.getElementById('cc-lista'); if(!el) return;
+  if(!data.length){ el.innerHTML='<div class="cc-loading">Sin deudores.</div>'; return; }
+  el.innerHTML = data.map(function(c,i){
+    var mov = (Number(c.saldo_ancla)||0) - (Number(c.saldo_apertura)||0);
+    var alerta = (c.clase_deuda==='congelada'||c.clase_deuda==='parada');
+    var notaDet = alerta && !c.apertura_estado
+      ? '<div class="cc-note"><span class="cc-warn">⚠ Apertura sin validar.</span> Cargá la deuda real desde la planilla de verificación.</div>'
+      : (c.apertura_estado ? '<div class="cc-note">✓ Apertura validada: '+_ccEsc(c.apertura_estado)+'</div>' : '');
+    return '<div class="cc-row" onclick="ccAbrir('+i+')">'+
+      '<div class="mn"><div class="nm">'+_ccEsc(c.cliente_nombre)+'</div>'+
+      '<div class="mt"><span class="cc-bdg cc-b-'+c.clase_deuda+'">'+_ccLbl(c.clase_deuda)+'</span> '+_ccMeta(c)+'</div></div>'+
+      '<div class="cc-sal"><div class="m">'+_ccFmt(c.saldo_estimado)+'</div><div class="s">'+(c.ultimo_cobro?'últ. '+_ccFechaCorta(c.ultimo_cobro):'—')+'</div></div>'+
+      '</div>'+
+      '<div class="cc-det" id="cc-d'+i+'"><h4>'+_ccEsc(c.cliente_nombre)+'</h4>'+
+        '<div class="cc-dl">Arrastre histórico (apertura) <span class="v">'+_ccFmt(c.saldo_apertura)+'</span></div>'+
+        '<div class="cc-dl">Movimiento del año <span class="v">'+_ccFmt(mov)+'</span></div>'+
+        '<div class="cc-dl">Cobros desde el corte <span class="v">'+_ccFmt(c.cobrado_post_corte)+'</span></div>'+
+        '<div class="cc-dl t">Saldo actual <span class="v">'+_ccFmt(c.saldo_estimado)+'</span></div>'+
+        notaDet +
+      '</div>';
+  }).join('');
+}
+function ccAbrir(i){
+  var p=document.getElementById('cc-d'+i); if(!p) return;
+  document.querySelectorAll('.cc-det').forEach(function(e){ if(e!==p) e.classList.remove('open'); });
+  p.classList.toggle('open');
+}
+function ccFiltrar(){
+  var q=(document.getElementById('cc-q').value||'').toLowerCase();
+  _ccRenderLista(_ccData.filter(function(c){ return String(c.cliente_nombre||'').toLowerCase().indexOf(q)>=0; }));
+}
+
 // CARGAR data principal
 async function tesCargar() {
   var loading = document.getElementById('tes-loading');
@@ -37305,7 +37430,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.52.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.55.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
