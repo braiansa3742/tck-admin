@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.55.0 — 18/06/2026
+     TCK ADMIN — v13.57.0 — 20/06/2026
+     v13.57.0: PERFILES POR ROL — login de 4 botones (Braian/Francisco/Roman/
+        Valentina). Roles: dueno + operaciones = acceso total; cobranzas =
+        tabs acotados (pedidos, logistica, clientes, facturacion, tesoreria,
+        rendiciones, duplicados) + tabs_extra por usuario (Roman = stock).
+        Cobranzas NO ve costos/margenes (cards de pedidos + panel Acuerdos VIP
+        en Clientes quedan tapados). Identidad real en el header; sesion guarda
+        rol+tabs_extra (bump SESSION_KEY v3 → fuerza re-login). Los roles de
+        oficina operan como 'ADMIN' internamente para conservar el resto.
      v13.55.0: CUENTAS CORRIENTES — nueva seccion en el tab Tesoreria con el
         saldo real por cliente (vista vw_cuenta_corriente_saldo): ancla del
         export Xubio menos cobros del dia, badge de clase (activa/congelada/
@@ -12066,9 +12074,21 @@ input.canales-exp-input[type="date"] {
     <div class="login-titulo">Ingresá</div>
     <div class="login-sub" id="login-sub">Acceso de administración</div>
     <div id="paso1">
-      <button class="login-btn" id="login-btn-admin" onclick="seleccionarVendedor('ADMIN','A','#B8860B')" style="border-color:var(--gold);background:var(--cream2);">
+      <button class="login-btn" id="login-btn-braian" onclick="seleccionarVendedor('Braian','B','#B8860B')" style="border-color:var(--gold);background:var(--cream2);">
         <div class="login-av" style="background:var(--gold);color:var(--text);">👑</div>
-        <div class="login-btn-name">Administración<div class="login-btn-role">Ver todos los pedidos</div></div>
+        <div class="login-btn-name">Braian<div class="login-btn-role">Dueño — todo</div></div>
+      </button>
+      <button class="login-btn" id="login-btn-francisco" onclick="seleccionarVendedor('Francisco','F','#B45309')">
+        <div class="login-av" style="background:#B45309;color:#fff;">F</div>
+        <div class="login-btn-name">Francisco<div class="login-btn-role">Operaciones</div></div>
+      </button>
+      <button class="login-btn" id="login-btn-roman" onclick="seleccionarVendedor('Roman','R','#1E8449')">
+        <div class="login-av" style="background:#1E8449;color:#fff;">R</div>
+        <div class="login-btn-name">Roman<div class="login-btn-role">Cobranzas</div></div>
+      </button>
+      <button class="login-btn" id="login-btn-valentina" onclick="seleccionarVendedor('Valentina','V','#1E8449')">
+        <div class="login-av" style="background:#1E8449;color:#fff;">V</div>
+        <div class="login-btn-name">Valentina<div class="login-btn-role">Cobranzas</div></div>
       </button>
     </div>
     <div id="paso2" style="display:none;">
@@ -14009,7 +14029,7 @@ input.canales-exp-input[type="date"] {
         <div class="menu-mas-icon">💰</div>
         <div class="menu-mas-lbl">Tesorería</div>
       </button>
-      <button class="menu-mas-item" onclick="cambiarTab('clientes');cerrarMenuMas()">
+      <button class="menu-mas-item" id="menu-mas-clientes" onclick="cambiarTab('clientes');cerrarMenuMas()">
         <div class="menu-mas-icon">⭐</div>
         <div class="menu-mas-lbl">Clientes</div>
       </button>
@@ -14222,14 +14242,16 @@ const SHEET_CSV_RECIENTES = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQD
 const NUM_ADMIN = '5492314475357';
 // v13.30: PINs ELIMINADOS del HTML (estaban legibles en el código fuente).
 // La validación es server-side (rpc/login_vendedor → app_usuarios + bcrypt).
-const USUARIOS_ADMIN = ['Miguel', 'Juan', 'Lisandro', 'ADMIN'];
-const SESSION_KEY   = 'tck_session_v2'; // v13.30.1: bump — invalida sesiones pre-JWT y fuerza re-login (emisión de token)
+const USUARIOS_ADMIN = ['Miguel', 'Juan', 'Lisandro', 'ADMIN', 'Braian', 'Francisco', 'Roman', 'Valentina'];
+const SESSION_KEY   = 'tck_session_v3'; // v13.57.0: bump — invalida sesiones pre-perfiles y fuerza re-login con rol
 const SESSION_HORAS = 720; // 30 días — cada vendedor tiene su propio celular
 
-function guardarSesion(nombre) {
+function guardarSesion(nombre, rol, tabsExtra) {
   try {
     localStorage.setItem(SESSION_KEY, JSON.stringify({
       vendedor: nombre,
+      rol: rol || null,
+      tabs_extra: Array.isArray(tabsExtra) ? tabsExtra : [],
       expira: Date.now() + SESSION_HORAS * 3600 * 1000
     }));
   } catch(e) {}
@@ -14241,7 +14263,7 @@ function recuperarSesion() {
     if (!raw) return null;
     var data = JSON.parse(raw);
     if (Date.now() > data.expira) { localStorage.removeItem(SESSION_KEY); return null; }
-    return data.vendedor;
+    return data; // { vendedor, rol, tabs_extra, expira }
   } catch(e) { return null; }
 }
 
@@ -16270,6 +16292,39 @@ let pinVendedorTemp = null;
 let pinActual = '';
 const duplicadosNotificados = new Set();
 
+// ── v13.57.0 — PERFILES POR ROL ──────────────────────────────────
+// usuarioActual = nombre real del usuario (Braian/Francisco/Roman/Valentina/…).
+// vendedorActual sigue siendo 'ADMIN' para los roles de oficina, para conservar
+// el comportamiento de las verificaciones existentes (=== 'ADMIN').
+let usuarioActual   = null;
+let rolActual       = null;   // dueno | operaciones | cobranzas | admin | vendedor | chofer…
+let tabsExtraActual = [];     // tabs extra por usuario (ej: Roman = ['stock'])
+
+// Qué tabs ve cada rol de oficina. 'ALL' = todo. Cobranzas = lista acotada (+ tabs_extra).
+const ROL_TABS = {
+  dueno:       'ALL',
+  operaciones: 'ALL',
+  admin:       'ALL',
+  cobranzas:   ['pedidos','logistica','clientes','facturacion','tesoreria','rendiciones','acc-dup']
+};
+
+function puedeVer(tab) {
+  var permit = ROL_TABS[rolActual];
+  if (permit === undefined) return true;            // vendedor/chofer/etc → sin gating de oficina
+  if (permit === 'ALL') return true;
+  if (Array.isArray(permit) && permit.indexOf(tab) !== -1) return true;
+  if (tabsExtraActual && tabsExtraActual.indexOf(tab) !== -1) return true;
+  return false;
+}
+
+// Cobranzas no ve costos ni márgenes (cards de pedidos, panel Acuerdos VIP)
+function esCobranzas() { return rolActual === 'cobranzas'; }
+
+function _tckSetDisp(id, vis) {
+  var el = document.getElementById(id);
+  if (el) el.style.display = vis ? '' : 'none';
+}
+
 // ── FECHA HEADER ─────────────────────────────────────────────────
 function actualizarFecha() {
   const d = new Date();
@@ -16296,8 +16351,8 @@ var _modoCampo = new URLSearchParams(window.location.search).get('modo') === 'ca
 // Recuperar sesión si existe
 (function() {
   var sesion = recuperarSesion();
-  if (sesion && USUARIOS_ADMIN.indexOf(sesion) !== -1) {
-    login(sesion);
+  if (sesion && sesion.vendedor && USUARIOS_ADMIN.indexOf(sesion.vendedor) !== -1) {
+    login(sesion.vendedor, sesion.rol, sesion.tabs_extra);
     // Si viene con ?modo=campo, ir directo al tab Visitas
     if (_modoCampo) {
       setTimeout(function() { cambiarTab('gps'); }, 300);
@@ -16432,7 +16487,7 @@ async function verificarPin() {
     if (data && data.ok) {
       if (data.token) jwtGuardar(data.token); // v13.30: identidad JWT
       errEl.textContent = '';
-      login(nombre);
+      login(nombre, data.rol, data.tabs_extra);
     } else {
       errEl.textContent = 'PIN incorrecto. Intentá de nuevo.';
       pinActual = '';
@@ -16446,7 +16501,16 @@ async function verificarPin() {
   }
 }
 
-function login(nombre) {
+function login(nombre, rol, tabsExtra) {
+  // v13.57.0 — perfiles por rol. Los roles de oficina (dueno/operaciones/cobranzas/admin)
+  // operan internamente como 'ADMIN' (vendedorActual) para conservar todo el
+  // comportamiento existente; el gating de tabs y de costos se hace por rol.
+  rolActual       = rol || 'admin';
+  tabsExtraActual = Array.isArray(tabsExtra) ? tabsExtra : [];
+  usuarioActual   = nombre;
+  var ROLES_OFICINA = ['dueno','operaciones','cobranzas','admin'];
+  var esOficina = ROLES_OFICINA.indexOf(rolActual) !== -1;
+
   // Limpiar estado GPS anterior antes de iniciar nueva sesión
   _gpsCheckinActivo = null;
   _gpsVendedorId    = null;
@@ -16457,10 +16521,10 @@ function login(nombre) {
   _cliPeriodo    = 'semana';
   filtroFecha    = 'hoy';
   filtroVendedor = 'todos';
-  guardarSesion(nombre);
-  vendedorActual = nombre;
+  guardarSesion(nombre, rolActual, tabsExtraActual);
+  // Roles de oficina → vendedorActual = 'ADMIN' (compat. con verificaciones === 'ADMIN')
+  vendedorActual = esOficina ? 'ADMIN' : nombre;
   // v11 admin: cargar info de última sync de clientes Xubio + iniciar refresh visual
-  // (solo necesario si admin va a usar el panel, pero es barato y no molesta)
   if (typeof xubioCargarUltimaSync === 'function') {
     xubioCargarUltimaSync().catch(function(e){ console.error('[xubio sync] cargar:', e); });
     if (typeof _xubioIniciarRefreshSync === 'function') _xubioIniciarRefreshSync();
@@ -16469,19 +16533,20 @@ function login(nombre) {
   document.getElementById('panel').classList.add('on');
   document.getElementById('paso1').style.display = 'block';
   document.getElementById('paso2').style.display = 'none';
-  var esAdmin = nombre === 'ADMIN';
-  // Actualizar header con rol
+  var esAdmin = vendedorActual === 'ADMIN';
+  // Header con el nombre real del usuario + su rol
+  var ROL_LABEL = { dueno:'Dueño', operaciones:'Operaciones', cobranzas:'Cobranzas', admin:'Administración' };
   var rolLbl = document.getElementById('hdr-rol-label');
   var rolSub = document.getElementById('hdr-rol-sub');
-  if (rolLbl) rolLbl.textContent = esAdmin ? 'Francisco' : nombre;
-  if (rolSub) rolSub.textContent = esAdmin ? 'Administración' : 'Tus pedidos del día';
+  if (rolLbl) rolLbl.textContent = esOficina ? usuarioActual : nombre;
+  if (rolSub) rolSub.textContent = esOficina ? (ROL_LABEL[rolActual] || 'Administración') : 'Tus pedidos del día';
   // Mostrar botón salir en el header
   var btnSal = document.getElementById('hdr-btn-salir');
   if (btnSal) btnSal.style.display = 'flex';
   // Mantener compatibilidad con bienvenida vieja (oculta por CSS, pero IDs viven)
   var bn = document.getElementById('bienvenida-nombre');
   var bs = document.getElementById('bienvenida-sub');
-  if (bn) bn.textContent = esAdmin ? '👑 Administración' : '👤 ' + nombre;
+  if (bn) bn.textContent = '👤 ' + (esOficina ? usuarioActual : nombre);
   if (bs) bs.textContent = esAdmin
     ? 'Viendo todos los pedidos del día'
     : 'Tus pedidos de hoy — ' + new Date().toLocaleDateString('es-AR');
@@ -16498,10 +16563,8 @@ function login(nombre) {
   }
   // v12.14.0: cargar ciudades canónicas en background (mismo patrón)
   cargarCiudadesCanonicas();
-  // v12.5.0: removido checkPrimeraVez() — el manual ya no se abre solo al inicio.
-  // Sigue accesible vía botón 📖 en el header. Razón: nadie lo miraba y molestaba.
-  // Iniciar tracking GPS continuo (solo vendedores, no Admin)
-  if (nombre !== 'ADMIN') trackingIniciar();
+  // Iniciar tracking GPS continuo: sólo vendedores reales, no roles de oficina
+  if (!esOficina) trackingIniciar();
   // Cargar objetivos
   objetivosCargar();
   // Si viene en modo campo, ir directo a Visitas
@@ -16528,6 +16591,7 @@ function salir() {
   limpiarSesion();
   document.title = 'TCK Admin';
   vendedorActual = null; pinActual = ''; pinVendedorTemp = null; todosLosPedidos = [];
+  usuarioActual = null; rolActual = null; tabsExtraActual = [];
   document.getElementById('login-wrap').style.display = 'flex';
   document.getElementById('panel').classList.remove('on');
   document.getElementById('lista-pedidos').innerHTML = '';
@@ -18415,12 +18479,12 @@ async function acuCargarCostos(){
 }
 
 function acuBadgeHtml(p){
-  if (vendedorActual !== 'ADMIN' || !acuEsClienteAcuerdo(p)) return '';
+  if (vendedorActual !== 'ADMIN' || esCobranzas() || !acuEsClienteAcuerdo(p)) return '';
   return ' <span style="display:inline-block;background:#FFF3E0;color:#B45309;border:1px solid #D4A574;border-radius:20px;padding:1px 8px;font-family:\'Barlow Condensed\',sans-serif;font-size:11px;font-weight:800;vertical-align:middle;">\u2B50 ACUERDO</span>';
 }
 
 function acuMargenContainerHtml(p, id){
-  if (vendedorActual !== 'ADMIN') return '';
+  if (vendedorActual !== 'ADMIN' || esCobranzas()) return '';
   return '<div id="acu-margen-' + id + '" data-pedido="' + (p.pedidoId||'') + '"></div>';
 }
 
@@ -18468,7 +18532,7 @@ function acuRenderBloque(lineas, hayAcuerdo, hayAlerta, ganTotal, sinCosto, nota
 
 async function acuCargarMargen(id){
   var cont = document.getElementById('acu-margen-' + id);
-  if (!cont || vendedorActual !== 'ADMIN') return;
+  if (!cont || vendedorActual !== 'ADMIN' || esCobranzas()) return;
   var pedidoId = cont.getAttribute('data-pedido');
   if (!pedidoId) return;
   if (_acuMargenCache[pedidoId] !== undefined) { cont.innerHTML = _acuMargenCache[pedidoId]; return; }
@@ -18600,7 +18664,7 @@ function acuMargenPedido(p){
 }
 
 function acuChipHtml(p){
-  if (vendedorActual !== 'ADMIN') return '';
+  if (vendedorActual !== 'ADMIN' || esCobranzas()) return '';
   if (p.estado === 'Cancelado') return '';
   var r = acuMargenPedido(p);
   if (!r || r.m === null) return '';
@@ -18611,7 +18675,7 @@ function acuChipHtml(p){
 }
 
 function acuResumenBannerHtml(lista){
-  if (vendedorActual !== 'ADMIN' || !_acuCostos || !lista || !lista.length) return '';
+  if (vendedorActual !== 'ADMIN' || esCobranzas() || !_acuCostos || !lista || !lista.length) return '';
   var bajos = 0, perdidas = 0;
   lista.forEach(function(p){
     if (p.estado === 'Cancelado') return;
@@ -19111,6 +19175,8 @@ function cerrarMenuMasFondo(e) {
 }
 
 function cambiarTab(tab) {
+  // v13.57.0 — Cobranzas no puede abrir tabs fuera de su perfil ni por código
+  if (rolActual === 'cobranzas' && typeof puedeVer === 'function' && !puedeVer(tab)) tab = 'pedidos';
   if (_tabActual === tab) return;
   _tabActual = tab;
 
@@ -19218,37 +19284,49 @@ function cambiarTab(tab) {
 function mostrarTabs() {
   var nav = document.getElementById('tab-nav');
   if (nav) nav.classList.add('visible');
-  var esAdmin = vendedorActual === 'ADMIN';
-  var esCampo = vendedorActual === 'Juan' || vendedorActual === 'Lisandro';
+  var esAdmin = vendedorActual === 'ADMIN';                 // true para roles de oficina
+  var esCampo = usuarioActual === 'Juan' || usuarioActual === 'Lisandro';
 
-  // Tab Visitas — ya NO se muestra en el nav, está dentro del menú "Más"
+  // Tab Visitas — nunca en el nav, vive en el menú "Más"
   var tabGps = document.getElementById('tab-btn-gps');
-  if (tabGps) {
-    tabGps.style.display = 'none';
+  if (tabGps) tabGps.style.display = 'none';
+
+  if (!esAdmin) {
+    // ── Flujo vendedor / campo (comportamiento original) ──
+    var tabMapa = document.getElementById('tab-btn-mapa');
+    if (tabMapa) tabMapa.style.display = 'none';
+    _tckSetDisp('menu-mas-prod-canon', false);
+    _tckSetDisp('menu-mas-ccanon', false);
+    _tckSetDisp('menu-mas-margenes', false);
+    if (_tabActual === 'gps' && !esCampo) cambiarTab('pedidos');
+    if (_tabActual === 'mapa') cambiarTab('pedidos');
+    if (_tabActual === 'prod-canon') cambiarTab('pedidos');
+    if (_tabActual === 'ccanon') cambiarTab('pedidos');
+    if (_tabActual === 'margenes') cambiarTab('pedidos');
+    tckDesktopNav();
+    return;
   }
 
-  // Tab Mapa — solo Admin
-  var tabMapa = document.getElementById('tab-btn-mapa');
-  if (tabMapa) tabMapa.style.display = esAdmin ? '' : 'none';
+  // ── Flujo oficina: gating por rol (dueno/operaciones=ALL, cobranzas=acotado) ──
+  // Botones base del nav inferior
+  _tckSetDisp('tab-btn-logistica', puedeVer('logistica'));
+  _tckSetDisp('tab-btn-reportes',  puedeVer('reportes'));
+  _tckSetDisp('tab-btn-mapa',      puedeVer('mapa'));
+  // Items del menú "Más" (tckDesktopNav los promueve a nav en PC si están visibles)
+  _tckSetDisp('menu-mas-stock',       puedeVer('stock'));
+  _tckSetDisp('menu-mas-compras',     puedeVer('compras'));
+  _tckSetDisp('menu-mas-margenes',    puedeVer('margenes'));
+  _tckSetDisp('menu-mas-facturacion', puedeVer('facturacion'));
+  _tckSetDisp('menu-mas-tesoreria',   puedeVer('tesoreria'));
+  _tckSetDisp('menu-mas-clientes',    puedeVer('clientes'));
+  _tckSetDisp('menu-mas-visitas',     puedeVer('gps'));
+  _tckSetDisp('menu-mas-rendiciones', puedeVer('rendiciones'));
+  _tckSetDisp('menu-mas-acc-dup',     puedeVer('acc-dup'));
+  _tckSetDisp('menu-mas-prod-canon',  puedeVer('prod-canon'));
+  _tckSetDisp('menu-mas-ccanon',      puedeVer('ccanon'));
 
-  // v12.7.0 N40b: Item "Sin canonizar" del menú Más — solo Admin
-  var menuPC = document.getElementById('menu-mas-prod-canon');
-  if (menuPC) menuPC.style.display = esAdmin ? '' : 'none';
-
-  // v12.8.0 N41: Item "Ciudades sin canonizar" del menú Más — solo Admin
-  var menuCC = document.getElementById('menu-mas-ccanon');
-  if (menuCC) menuCC.style.display = esAdmin ? '' : 'none';
-
-  // v12.29: Item "Márgenes" del menú Más — solo Admin (info sensible: costos y ganancias)
-  var menuMrg = document.getElementById('menu-mas-margenes');
-  if (menuMrg) menuMrg.style.display = esAdmin ? '' : 'none';
-
-  // Si el tab activo quedó oculto, ir a Pedidos
-  if (_tabActual === 'gps' && !esCampo && !esAdmin) cambiarTab('pedidos');
-  if (_tabActual === 'mapa' && !esAdmin) cambiarTab('pedidos');
-  if (_tabActual === 'prod-canon' && !esAdmin) cambiarTab('pedidos');
-  if (_tabActual === 'ccanon' && !esAdmin) cambiarTab('pedidos');
-  if (_tabActual === 'margenes' && !esAdmin) cambiarTab('pedidos');
+  // Si el tab activo dejó de estar permitido para este rol, ir a Pedidos
+  if (_tabActual && _tabActual !== 'pedidos' && !puedeVer(_tabActual)) cambiarTab('pedidos');
 
   tckDesktopNav();   // v14.x — en PC: ocultar "Más" y mostrar sus destinos en el sidebar
 }
@@ -34991,6 +35069,7 @@ async function mgAcuRefrescar(){
 // El form "+ Nuevo acuerdo" depende de _mgData (datos de Márgenes): si nunca se
 // abrió Márgenes, margenesInit lo carga + pinta el panel; si ya estaba, refresca acuerdos.
 async function clientesAcuLoad(){
+  if (esCobranzas()) { var _w = document.getElementById('mg-acu-wrap'); if (_w) _w.style.display = 'none'; return; }
   try {
     if (_mgData === null) { await margenesInit(); }
     else { await mgAcuRefrescar(); }
@@ -37450,7 +37529,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.56.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.57.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
