@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.57.0 — 20/06/2026
+     TCK ADMIN — v13.58.0 — 20/06/2026
+     v13.58.0: CUENTAS CORRIENTES — deuda real. Nueva tabla cc_cliente_estado
+        (en_gestion/incobrable) + vw_cuenta_corriente_saldo con es_incobrable.
+        Panel: total de CARTERA REAL arriba (excluye incobrables), 4 tarjetas
+        (Sana/Congelada/Parada/Incobrable) clickeables que filtran la lista,
+        y boton "marcar incobrable" (con motivo) + deshacer por cliente.
+        Los incobrables quedan apartados, fuera del total, reversibles.
      v13.57.0: PERFILES POR ROL — login de 4 botones (Braian/Francisco/Roman/
         Valentina). Roles: dueno + operaciones = acceso total; cobranzas =
         tabs acotados (pedidos, logistica, clientes, facturacion, tesoreria,
@@ -13587,8 +13593,18 @@ input.canales-exp-input[type="date"] {
         <style>
         .cc-sec{margin-bottom:18px}
         .cc-hdr-tit{font-size:16px;font-weight:800;color:#8E1B1B;margin-bottom:9px;letter-spacing:.3px}
-        .cc-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
-        .cc-stat{background:#fff;border-radius:11px;padding:10px;border:1px solid #eee;border-top:3px solid var(--c)}
+        .cc-stats{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px}
+        .cc-stat{background:#fff;border-radius:11px;padding:10px;border:1px solid #eee;border-top:3px solid var(--c);cursor:pointer;transition:.12s}
+        .cc-stat.sel{box-shadow:0 0 0 2px var(--c) inset;background:#fffdf8}
+        .cc-total{background:#1A0800;color:#FAF4EC;border-radius:12px;padding:12px 14px;margin-bottom:12px;text-align:center}
+        .cc-total-l{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#D4A574}
+        .cc-total-v{font-size:26px;font-weight:900;line-height:1.1;margin-top:2px}
+        .cc-total-d{font-size:11px;color:#C9B79E;font-weight:600;margin-top:2px}
+        .cc-b-incobrable{background:#ECEFF1;color:#37474F}
+        .cc-row.incob{opacity:.62}
+        .cc-det-acc{margin-top:10px}
+        .cc-btn-incob{width:100%;background:#455A64;color:#fff;border:none;border-radius:9px;padding:9px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;cursor:pointer}
+        .cc-btn-undo{width:100%;background:#fff;color:#1E8449;border:1.5px solid #1E8449;border-radius:9px;padding:9px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;cursor:pointer}
         .cc-stat .l{font-size:11px;font-weight:700;color:#7a7167;text-transform:uppercase;letter-spacing:.3px}
         .cc-stat .v{font-size:19px;font-weight:900;color:#1A0800}
         .cc-stat .d{font-size:11px;color:#7a7167;font-weight:600}
@@ -13620,6 +13636,7 @@ input.canales-exp-input[type="date"] {
           <div class="cc-hdr-tit">📒 Cuentas corrientes</div>
           <div id="cc-loading" class="cc-loading">Cargando cuentas corrientes…</div>
           <div id="cc-cont" style="display:none;">
+            <div class="cc-total" id="cc-total"></div>
             <div class="cc-stats" id="cc-stats"></div>
             <input class="cc-search" id="cc-q" placeholder="🔎 Buscar cliente…" oninput="ccFiltrar()">
             <div id="cc-lista"></div>
@@ -34262,10 +34279,11 @@ function _tesFetch(path) {
   });
 }
 
-/* ═══ CUENTAS CORRIENTES (v13.55.0) — lee vw_cuenta_corriente_saldo ═══ */
+/* ═══ CUENTAS CORRIENTES (v13.58.0) — lee vw_cuenta_corriente_saldo ═══ */
 var _ccData = [];
+var _ccFiltro = 'real';   // 'real' | 'activa' | 'congelada' | 'parada' | 'incobrable'
 function _ccFmt(n){ return '$' + Math.round(Number(n)||0).toLocaleString('es-AR'); }
-function _ccLbl(c){ return c==='activa'?'Activa':(c==='congelada'?'Congelada':(c==='parada'?'Parada':'—')); }
+function _ccLbl(c){ return c==='activa'?'Activa':(c==='congelada'?'Congelada':(c==='parada'?'Parada':(c==='incobrable'?'Incobrable':'—'))); }
 function _ccEsc(s){ return String(s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function _ccFechaCorta(f){ if(!f) return ''; var p=String(f).slice(0,10).split('-'); return p.length===3?(p[2]+'/'+p[1]):f; }
 function _ccMeta(c){
@@ -34274,7 +34292,7 @@ function _ccMeta(c){
     var d = c.dias_sin_cobranza;
     t = (d===0 || d===null) ? ('cobró '+_ccFechaCorta(c.ultimo_cobro)) : ('últ. cobro hace '+d+'d');
   } else { t = 'sin pagos 2026'; }
-  if (c.clase_deuda==='congelada' || c.clase_deuda==='parada') t += ' · <span class="cc-warn">⚠ apertura sin validar</span>';
+  if (!c.es_incobrable && (c.clase_deuda==='congelada' || c.clase_deuda==='parada')) t += ' · <span class="cc-warn">⚠ apertura sin validar</span>';
   return t;
 }
 async function ccCargar(){
@@ -34282,11 +34300,11 @@ async function ccCargar(){
   if(!ld) return;
   ld.style.display='block'; if(ct)ct.style.display='none'; if(er)er.style.display='none';
   try{
-    var path='vw_cuenta_corriente_saldo?select=cliente_xubio_id,cliente_nombre,clase_deuda,saldo_ancla,saldo_corregido,saldo_estimado,saldo_apertura,cobrado_post_corte,dias_sin_cobranza,ultimo_cobro,apertura_estado,fecha_corte&es_cuenta_corriente=is.true&saldo_estimado=gt.0&order=saldo_estimado.desc';
+    var path='vw_cuenta_corriente_saldo?select=cliente_xubio_id,cliente_nombre,clase_deuda,saldo_ancla,saldo_corregido,saldo_estimado,saldo_apertura,cobrado_post_corte,dias_sin_cobranza,ultimo_cobro,apertura_estado,fecha_corte,estado_gestion,es_incobrable&es_cuenta_corriente=is.true&saldo_estimado=gt.0&order=saldo_estimado.desc';
     var rows = await _tesFetch(path);
     _ccData = rows || [];
     _ccRenderStats(_ccData);
-    _ccRenderLista(_ccData);
+    _ccRender();
     var ce=document.getElementById('cc-corte');
     if(ce && _ccData[0] && _ccData[0].fecha_corte){ ce.textContent=_ccFechaCorta(_ccData[0].fecha_corte); }
     ld.style.display='none'; if(ct)ct.style.display='block';
@@ -34295,27 +34313,64 @@ async function ccCargar(){
     ld.style.display='none'; if(er)er.style.display='block';
   }
 }
-function _ccStatCard(lbl,col,o){
-  return '<div class="cc-stat" style="--c:'+col+'"><div class="l">'+lbl+'</div><div class="v">'+_ccFmt(o.m)+'</div><div class="d">'+o.n+' clientes</div></div>';
+function _ccStatCard(key,lbl,col,o){
+  var sel = _ccFiltro===key ? ' sel' : '';
+  return '<div class="cc-stat'+sel+'" style="--c:'+col+'" onclick="ccSetFiltro(\''+key+'\')"><div class="l">'+lbl+'</div><div class="v">'+_ccFmt(o.m)+'</div><div class="d">'+o.n+' clientes</div></div>';
 }
 function _ccRenderStats(data){
-  var g={activa:{n:0,m:0},congelada:{n:0,m:0},parada:{n:0,m:0}};
-  data.forEach(function(c){ var k=c.clase_deuda; if(g[k]){ g[k].n++; g[k].m+=Number(c.saldo_estimado)||0; } });
+  var g={activa:{n:0,m:0},congelada:{n:0,m:0},parada:{n:0,m:0},incobrable:{n:0,m:0}};
+  var realM=0, realN=0;
+  data.forEach(function(c){
+    var s=Number(c.saldo_estimado)||0;
+    if (c.es_incobrable){ g.incobrable.n++; g.incobrable.m+=s; return; }
+    realM+=s; realN++;
+    var k=c.clase_deuda; if(g[k]){ g[k].n++; g[k].m+=s; }
+  });
+  var tot=document.getElementById('cc-total');
+  if(tot) tot.innerHTML='<div class="cc-total-l">Cartera real (sin incobrables)</div>'+
+    '<div class="cc-total-v">'+_ccFmt(realM)+'</div>'+
+    '<div class="cc-total-d">'+realN+' clientes · tocá una tarjeta para filtrar</div>';
   var st=document.getElementById('cc-stats'); if(!st) return;
-  st.innerHTML = _ccStatCard('🟢 Sana','#1E8449',g.activa) + _ccStatCard('🔴 Congelada','#C62828',g.congelada) + _ccStatCard('🟡 Parada','#D9822B',g.parada);
+  st.innerHTML = _ccStatCard('activa','🟢 Sana','#1E8449',g.activa)
+    + _ccStatCard('congelada','🔴 Congelada','#C62828',g.congelada)
+    + _ccStatCard('parada','🟡 Parada','#D9822B',g.parada)
+    + _ccStatCard('incobrable','⚫ Incobrable','#455A64',g.incobrable);
 }
-function _ccRenderLista(data){
+function ccSetFiltro(k){
+  _ccFiltro = (_ccFiltro===k) ? 'real' : k;
+  _ccRenderStats(_ccData);
+  _ccRender();
+}
+function _ccVisibles(){
+  var qel=document.getElementById('cc-q');
+  var q=(qel && qel.value || '').toLowerCase();
+  return _ccData.filter(function(c){
+    if (_ccFiltro==='incobrable'){ if(!c.es_incobrable) return false; }
+    else if (_ccFiltro==='real'){ if(c.es_incobrable) return false; }
+    else { if(c.es_incobrable || c.clase_deuda!==_ccFiltro) return false; }
+    if (q && String(c.cliente_nombre||'').toLowerCase().indexOf(q)<0) return false;
+    return true;
+  });
+}
+function _ccRender(){
   var el=document.getElementById('cc-lista'); if(!el) return;
-  if(!data.length){ el.innerHTML='<div class="cc-loading">Sin deudores.</div>'; return; }
+  var data=_ccVisibles();
+  if(!data.length){ el.innerHTML='<div class="cc-loading">Sin clientes en esta vista.</div>'; return; }
   el.innerHTML = data.map(function(c,i){
     var mov = (Number(c.saldo_ancla)||0) - (Number(c.saldo_apertura)||0);
-    var alerta = (c.clase_deuda==='congelada'||c.clase_deuda==='parada');
-    var notaDet = alerta && !c.apertura_estado
-      ? '<div class="cc-note"><span class="cc-warn">⚠ Apertura sin validar.</span> Cargá la deuda real desde la planilla de verificación.</div>'
-      : (c.apertura_estado ? '<div class="cc-note">✓ Apertura validada: '+_ccEsc(c.apertura_estado)+'</div>' : '');
-    return '<div class="cc-row" onclick="ccAbrir('+i+')">'+
+    var clase = c.es_incobrable ? 'incobrable' : c.clase_deuda;
+    var rowCls = c.es_incobrable ? 'cc-row incob' : 'cc-row';
+    var accion = c.es_incobrable
+      ? '<button class="cc-btn-undo" onclick="event.stopPropagation();ccDesmarcar('+c.cliente_xubio_id+')">↩ Volver a gestión</button>'
+      : '<button class="cc-btn-incob" onclick="event.stopPropagation();ccMarcarIncobrable('+c.cliente_xubio_id+')">⚫ Marcar incobrable</button>';
+    var notaDet = c.es_incobrable
+      ? '<div class="cc-note">⚫ Marcado incobrable — fuera de la cartera real.</div>'
+      : (((c.clase_deuda==='congelada'||c.clase_deuda==='parada') && !c.apertura_estado)
+          ? '<div class="cc-note"><span class="cc-warn">⚠ Apertura sin validar.</span></div>'
+          : (c.apertura_estado ? '<div class="cc-note">✓ Apertura validada: '+_ccEsc(c.apertura_estado)+'</div>' : ''));
+    return '<div class="'+rowCls+'" onclick="ccAbrir('+i+')">'+
       '<div class="mn"><div class="nm">'+_ccEsc(c.cliente_nombre)+'</div>'+
-      '<div class="mt"><span class="cc-bdg cc-b-'+c.clase_deuda+'">'+_ccLbl(c.clase_deuda)+'</span> '+_ccMeta(c)+'</div></div>'+
+      '<div class="mt"><span class="cc-bdg cc-b-'+clase+'">'+_ccLbl(clase)+'</span> '+_ccMeta(c)+'</div></div>'+
       '<div class="cc-sal"><div class="m">'+_ccFmt(c.saldo_estimado)+'</div><div class="s">'+(c.ultimo_cobro?'últ. '+_ccFechaCorta(c.ultimo_cobro):'—')+'</div></div>'+
       '</div>'+
       '<div class="cc-det" id="cc-d'+i+'"><h4>'+_ccEsc(c.cliente_nombre)+'</h4>'+
@@ -34324,6 +34379,7 @@ function _ccRenderLista(data){
         '<div class="cc-dl">Cobros desde el corte <span class="v">'+_ccFmt(c.cobrado_post_corte)+'</span></div>'+
         '<div class="cc-dl t">Saldo actual <span class="v">'+_ccFmt(c.saldo_estimado)+'</span></div>'+
         notaDet +
+        '<div class="cc-det-acc">'+accion+'</div>'+
       '</div>';
   }).join('');
 }
@@ -34332,11 +34388,37 @@ function ccAbrir(i){
   document.querySelectorAll('.cc-det').forEach(function(e){ if(e!==p) e.classList.remove('open'); });
   p.classList.toggle('open');
 }
-function ccFiltrar(){
-  var q=(document.getElementById('cc-q').value||'').toLowerCase();
-  _ccRenderLista(_ccData.filter(function(c){ return String(c.cliente_nombre||'').toLowerCase().indexOf(q)>=0; }));
-}
+function ccFiltrar(){ _ccRender(); }
 
+async function ccMarcarIncobrable(id){
+  var c=_ccData.find(function(x){ return String(x.cliente_xubio_id)===String(id); });
+  var nombre = c ? c.cliente_nombre : '';
+  var motivo = prompt('Marcar "'+nombre+'" como INCOBRABLE.\nSale de la cartera real (es reversible).\nMotivo (opcional):', '');
+  if (motivo === null) return;
+  try{
+    await sbFetch('cc_cliente_estado?on_conflict=cliente_xubio_id', {
+      method:'POST',
+      body: JSON.stringify([{ cliente_xubio_id: id, estado:'incobrable', motivo: motivo||null, marcado_por: usuarioActual||null, marcado_at: new Date().toISOString() }]),
+      prefer: 'resolution=merge-duplicates,return=minimal'
+    });
+    if(c){ c.es_incobrable=true; c.estado_gestion='incobrable'; }
+    _ccRenderStats(_ccData); _ccRender();
+    if(typeof toast==='function') toast('⚫ Marcado incobrable','ok');
+  }catch(e){ console.error('[CC] marcar',e); if(typeof toast==='function') toast('Error al marcar','err'); else alert('Error al marcar'); }
+}
+async function ccDesmarcar(id){
+  var c=_ccData.find(function(x){ return String(x.cliente_xubio_id)===String(id); });
+  try{
+    await sbFetch('cc_cliente_estado?on_conflict=cliente_xubio_id', {
+      method:'POST',
+      body: JSON.stringify([{ cliente_xubio_id: id, estado:'en_gestion', motivo:null, marcado_por: usuarioActual||null, marcado_at: new Date().toISOString() }]),
+      prefer: 'resolution=merge-duplicates,return=minimal'
+    });
+    if(c){ c.es_incobrable=false; c.estado_gestion='en_gestion'; }
+    _ccRenderStats(_ccData); _ccRender();
+    if(typeof toast==='function') toast('↩ Volvió a gestión','ok');
+  }catch(e){ console.error('[CC] desmarcar',e); if(typeof toast==='function') toast('Error','err'); else alert('Error'); }
+}
 // CARGAR data principal
 async function tesCargar() {
   var loading = document.getElementById('tes-loading');
@@ -37529,7 +37611,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.57.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.58.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
