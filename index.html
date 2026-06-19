@@ -14019,6 +14019,11 @@ input.canales-exp-input[type="date"] {
     <div class="menu-mas-pill"></div>
     <div class="menu-mas-titulo">Más opciones</div>
     <div class="menu-mas-grid">
+      <!-- v13.59.0 — Fotos de entrega (respaldo ante reclamos de faltante) -->
+      <button class="menu-mas-item" id="menu-mas-fotosentrega" onclick="cerrarMenuMas();fotosEntregaBuscarAbrir()">
+        <div class="menu-mas-icon">📸</div>
+        <div class="menu-mas-lbl">Fotos entrega</div>
+      </button>
       <button class="menu-mas-item" id="menu-mas-stock" onclick="cambiarTab('stock');cerrarMenuMas()">
         <div class="menu-mas-icon">📦</div>
         <div class="menu-mas-lbl">Stock</div>
@@ -29034,6 +29039,116 @@ async function _verComprobanteAdmin(path, btn) {
   }
 }
 
+// ══════════════════════════════════════════════════════════
+// v13.59.0 — FOTOS DE ENTREGA (respaldo ante reclamos)
+// ══════════════════════════════════════════════════════════
+// Busca entregas por cliente y muestra las fotos que subió el chofer
+// (entregas.foto_urls, bucket PÚBLICO 'entregas-fotos'). Para todos los
+// usuarios, desde el menú Más. Reusa el lightbox _verImgAdminLightbox.
+
+function _fEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function fotosEntregaBuscarAbrir() {
+  var prev = document.getElementById('fotosent-modal');
+  if (prev) prev.remove();
+  var ov = document.createElement('div');
+  ov.id = 'fotosent-modal';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:4800;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center;';
+  ov.onclick = function(e) { if (e.target === ov) ov.remove(); };
+  ov.innerHTML =
+    '<div style="background:#fff;width:100%;max-width:620px;max-height:88vh;border-radius:18px 18px 0 0;display:flex;flex-direction:column;overflow:hidden;">' +
+      '<div style="padding:16px 18px 10px;border-bottom:1px solid #EEE3D2;display:flex;align-items:center;gap:10px;">' +
+        '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:19px;font-weight:900;color:#1A0800;flex:1;">📸 Fotos de entrega</div>' +
+        '<button onclick="fotosEntregaCerrar()" style="background:#F4ECDD;border:none;border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;">✕</button>' +
+      '</div>' +
+      '<div style="padding:12px 18px;border-bottom:1px solid #F1E8D8;">' +
+        '<div style="font-size:12px;color:#7A6A55;margin-bottom:8px;line-height:1.35;">Buscá por <b>nombre del cliente</b> para ver lo que se le entregó (respaldo ante un reclamo de faltante).</div>' +
+        '<div style="display:flex;gap:8px;">' +
+          '<input id="fotosent-input" type="text" placeholder="Ej: Arizdale" autocomplete="off" onkeydown="if(event.key===\'Enter\')fotosEntregaBuscar()" style="flex:1;padding:11px 12px;border:1.5px solid #E8D5BB;border-radius:10px;font-size:15px;outline:none;">' +
+          '<button onclick="fotosEntregaBuscar()" style="background:#B45309;color:#fff;border:none;border-radius:10px;padding:0 18px;font-family:\'Barlow Condensed\',sans-serif;font-size:15px;font-weight:800;cursor:pointer;">Buscar</button>' +
+        '</div>' +
+      '</div>' +
+      '<div id="fotosent-resultados" style="flex:1;overflow-y:auto;padding:12px 18px 22px;">' +
+        '<div style="text-align:center;color:#9B8A72;font-size:13px;padding:24px 0;">Escribí un cliente y tocá Buscar.</div>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(ov);
+  setTimeout(function() { var i = document.getElementById('fotosent-input'); if (i) i.focus(); }, 80);
+}
+
+function fotosEntregaCerrar() {
+  var m = document.getElementById('fotosent-modal');
+  if (m) m.remove();
+}
+
+async function fotosEntregaBuscar() {
+  var inp = document.getElementById('fotosent-input');
+  var cont = document.getElementById('fotosent-resultados');
+  if (!inp || !cont) return;
+  var term = (inp.value || '').trim();
+  if (term.length < 2) {
+    cont.innerHTML = '<div style="text-align:center;color:#C62828;font-size:13px;padding:18px 0;">Escribí al menos 2 letras.</div>';
+    return;
+  }
+  cont.innerHTML = '<div style="text-align:center;color:#9B8A72;font-size:13px;padding:24px 0;">Buscando…</div>';
+  try {
+    var q = 'entregas?cliente=ilike.*' + encodeURIComponent(term) + '*' +
+            '&estado=eq.entregado' +
+            '&select=pedido_id,cliente,comercio,ciudad,chofer,fecha_entrega,foto_urls' +
+            '&order=fecha_entrega.desc.nullslast&limit=40';
+    var rows = await sbFetch(q);
+    _fotosEntregaRender(rows || []);
+  } catch(e) {
+    console.error('fotosEntregaBuscar:', e);
+    cont.innerHTML = '<div style="text-align:center;color:#C62828;font-size:13px;padding:18px 0;">❌ Error al buscar. Probá de nuevo.</div>';
+  }
+}
+
+function _fotosEntregaRender(rows) {
+  var cont = document.getElementById('fotosent-resultados');
+  if (!cont) return;
+  if (!rows.length) {
+    cont.innerHTML = '<div style="text-align:center;color:#9B8A72;font-size:13px;padding:24px 0;">Sin entregas para ese cliente.</div>';
+    return;
+  }
+  var html = '';
+  rows.forEach(function(e) {
+    var fotos = Array.isArray(e.foto_urls) ? e.foto_urls : [];
+    var fecha = '';
+    if (e.fecha_entrega) {
+      try {
+        var d = new Date(e.fecha_entrega);
+        fecha = d.toLocaleDateString('es-AR', { day: '2-digit', month: 'short' }) + ' ' +
+                d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+      } catch(_) {}
+    }
+    html += '<div style="border:1px solid #EEE3D2;border-radius:12px;padding:11px 12px;margin-bottom:10px;background:#FCF8F1;">';
+    html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:16px;font-weight:900;color:#1A0800;">' +
+            _fEsc(e.cliente || '—') +
+            (e.comercio ? ' <span style="font-weight:600;color:#7A6A55;font-size:13px;">· ' + _fEsc(e.comercio) + '</span>' : '') +
+            '</div>';
+    html += '<div style="font-size:11.5px;color:#7A6A55;margin:2px 0 9px;">📍 ' + _fEsc(e.ciudad || '?') +
+            ' · 🚚 ' + _fEsc(e.chofer || '?') + (fecha ? ' · ' + fecha : '') + '</div>';
+    if (fotos.length) {
+      html += '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
+      fotos.forEach(function(p) {
+        var url = SUPABASE_URL + '/storage/v1/object/public/entregas-fotos/' + p;
+        var urlJs = url.replace(/'/g, '%27');
+        html += '<img src="' + url + '" loading="lazy" onclick="_verImgAdminLightbox(\'' + urlJs + '\')" style="width:78px;height:78px;object-fit:cover;border-radius:9px;border:1.5px solid #D4A574;cursor:pointer;" alt="foto entrega">';
+      });
+      html += '</div>';
+    } else {
+      html += '<div style="font-size:12px;color:#B08968;background:#FBEFE0;border-radius:8px;padding:6px 9px;">📷 Sin fotos (entrega anterior al sistema de fotos)</div>';
+    }
+    html += '</div>';
+  });
+  cont.innerHTML = html;
+}
+
 // Marca / desmarca una transferencia como conciliada.
 async function transferConciliar(id, conciliar) {
   try {
@@ -37611,7 +37726,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.58.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.59.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
