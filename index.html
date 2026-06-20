@@ -1,5 +1,13 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.60.0 — 20/06/2026
+     v13.60.0: CUENTAS CORRIENTES Fase B+C — antiguedad (FIFO sobre el mayor
+        Xubio): barra de aging global (0-30/30-60/60-90/+90) clickeable,
+        orden por mayor saldo / mas viejo, mini-buckets y DESGLOSE de
+        comprobantes impagos por cliente (lazy desde vw_cc_aging). Acciones:
+        boton WhatsApp (con saldo) + Gestionar (nota), con historial de
+        gestion (cc_gestion) y badge "gestionado hace Xd". Lee telefono y
+        buckets ya provistos por vw_cuenta_corriente_saldo.
      TCK ADMIN — v13.58.0 — 20/06/2026
      v13.58.0: CUENTAS CORRIENTES — deuda real. Nueva tabla cc_cliente_estado
         (en_gestion/incobrable) + vw_cuenta_corriente_saldo con es_incobrable.
@@ -13603,6 +13611,41 @@ input.canales-exp-input[type="date"] {
         .cc-b-incobrable{background:#ECEFF1;color:#37474F}
         .cc-row.incob{opacity:.62}
         .cc-det-acc{margin-top:10px}
+        .cc-aging{background:#fff;border:1px solid #eee;border-radius:11px;padding:10px 12px;margin-bottom:10px}
+        .cc-aging-t{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;color:#7a7167;margin-bottom:7px}
+        .cc-aging-bar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:#f0ece3}
+        .cc-aging-seg{height:100%;cursor:pointer;transition:.12s}
+        .cc-aging-seg:hover{filter:brightness(1.08)}
+        .cc-aging-legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+        .cc-aging-leg{display:flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:#5a5249;cursor:pointer;border-radius:6px;padding:2px 5px}
+        .cc-aging-leg.sel{background:#1A0800;color:#fff}
+        .cc-aging-leg .dot{width:9px;height:9px;border-radius:2px;flex-shrink:0}
+        .cc-aging-leg .amt{color:#1A0800;font-weight:900}
+        .cc-aging-leg.sel .amt{color:#fff}
+        .cc-sort{display:flex;gap:6px;margin-bottom:10px}
+        .cc-sortbtn{flex:1;background:#fff;border:1.5px solid #e3ddd2;border-radius:9px;padding:8px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;color:#7a7167;cursor:pointer}
+        .cc-sortbtn.sel{background:#1A0800;color:#fff;border-color:#1A0800}
+        .cc-mini{display:flex;gap:5px;margin:8px 0}
+        .cc-mini-b{flex:1;text-align:center;border-radius:7px;padding:5px 2px;background:#f7f3ec}
+        .cc-mini-b .l{font-size:9px;font-weight:800;color:#9a8a78;text-transform:uppercase}
+        .cc-mini-b .v{font-size:12px;font-weight:900;color:#1A0800;margin-top:1px}
+        .cc-mini-b.hot{background:#FDECEA}
+        .cc-mini-b.hot .v{color:#C62828}
+        .cc-desg{margin:9px 0 4px}
+        .cc-desg-t{font-size:11px;font-weight:800;text-transform:uppercase;color:#7a7167;margin-bottom:4px}
+        .cc-desg-row{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;padding:5px 0;border-bottom:1px dashed #eee}
+        .cc-desg-row .doc{font-weight:700;color:#1A0800}
+        .cc-desg-row .dt{font-size:10px;color:#9a8a78;font-weight:600}
+        .cc-desg-row .ab{font-weight:900;color:#1A0800;text-align:right;white-space:nowrap}
+        .cc-desg-row .ed{font-size:10px;font-weight:800}
+        .cc-ed-old{color:#C62828}.cc-ed-mid{color:#D9822B}.cc-ed-new{color:#1E8449}
+        .cc-acc2{display:flex;gap:6px;margin-top:10px}
+        .cc-btn-wa{flex:1;background:#25D366;color:#fff;border:none;border-radius:9px;padding:9px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;cursor:pointer}
+        .cc-btn-wa[disabled]{background:#cfd8d3;cursor:not-allowed}
+        .cc-btn-gest{flex:1;background:#fff;color:#B45309;border:1.5px solid #B45309;border-radius:9px;padding:9px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;cursor:pointer}
+        .cc-gest-log{margin-top:9px;font-size:11px;color:#7a7167}
+        .cc-gest-log .g{padding:3px 0;border-top:1px dashed #eee}
+        .cc-gest-badge{font-size:10px;font-weight:800;color:#1E8449;background:#E8F5E9;border-radius:18px;padding:2px 7px;white-space:nowrap}
         .cc-btn-incob{width:100%;background:#455A64;color:#fff;border:none;border-radius:9px;padding:9px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;cursor:pointer}
         .cc-btn-undo{width:100%;background:#fff;color:#1E8449;border:1.5px solid #1E8449;border-radius:9px;padding:9px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;cursor:pointer}
         .cc-stat .l{font-size:11px;font-weight:700;color:#7a7167;text-transform:uppercase;letter-spacing:.3px}
@@ -13638,6 +13681,11 @@ input.canales-exp-input[type="date"] {
           <div id="cc-cont" style="display:none;">
             <div class="cc-total" id="cc-total"></div>
             <div class="cc-stats" id="cc-stats"></div>
+            <div class="cc-aging" id="cc-aging" style="display:none;"></div>
+            <div class="cc-sort" id="cc-sort">
+              <button class="cc-sortbtn sel" id="cc-sort-saldo" onclick="ccSort('saldo')">Mayor saldo</button>
+              <button class="cc-sortbtn" id="cc-sort-viejo" onclick="ccSort('viejo')">Más viejo</button>
+            </div>
             <input class="cc-search" id="cc-q" placeholder="🔎 Buscar cliente…" oninput="ccFiltrar()">
             <div id="cc-lista"></div>
             <div class="cc-note">El saldo es el de Xubio neto de cobros del día (corte <span id="cc-corte">—</span>). Los 🔴 y 🟡 arrastran apertura sin validar; se corrige cuando administración confirma la deuda real.</div>
@@ -34394,19 +34442,26 @@ function _tesFetch(path) {
   });
 }
 
-/* ═══ CUENTAS CORRIENTES (v13.58.0) — lee vw_cuenta_corriente_saldo ═══ */
+/* ═══ CUENTAS CORRIENTES (v13.60.0) — saldo + aging FIFO + gestión ═══ */
 var _ccData = [];
-var _ccFiltro = 'real';   // 'real' | 'activa' | 'congelada' | 'parada' | 'incobrable'
+var _ccGestion = {};       // cliente_xubio_id -> [gestiones] (desc)
+var _ccDesgCache = {};     // cliente_xubio_id -> [facturas abiertas]
+var _ccFiltro = 'real';    // 'real' | 'activa' | 'congelada' | 'parada' | 'incobrable'
+var _ccAging = null;       // null | 'b_0_30' | 'b_30_60' | 'b_60_90' | 'b_90_plus'
+var _ccSort = 'saldo';     // 'saldo' | 'viejo'
 function _ccFmt(n){ return '$' + Math.round(Number(n)||0).toLocaleString('es-AR'); }
+function _ccNum(n){ return Number(n)||0; }
 function _ccLbl(c){ return c==='activa'?'Activa':(c==='congelada'?'Congelada':(c==='parada'?'Parada':(c==='incobrable'?'Incobrable':'—'))); }
 function _ccEsc(s){ return String(s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function _ccFechaCorta(f){ if(!f) return ''; var p=String(f).slice(0,10).split('-'); return p.length===3?(p[2]+'/'+p[1]):f; }
+function _ccDiasDesde(iso){ if(!iso) return null; var d=Math.floor((Date.now()-new Date(iso).getTime())/86400000); return d<0?0:d; }
 function _ccMeta(c){
   var t;
   if (c.ultimo_cobro){
     var d = c.dias_sin_cobranza;
     t = (d===0 || d===null) ? ('cobró '+_ccFechaCorta(c.ultimo_cobro)) : ('últ. cobro hace '+d+'d');
   } else { t = 'sin pagos 2026'; }
+  if (c.dias_mas_viejo != null) t += ' · <b>+viejo '+c.dias_mas_viejo+'d</b>';
   if (!c.es_incobrable && (c.clase_deuda==='congelada' || c.clase_deuda==='parada')) t += ' · <span class="cc-warn">⚠ apertura sin validar</span>';
   return t;
 }
@@ -34415,9 +34470,15 @@ async function ccCargar(){
   if(!ld) return;
   ld.style.display='block'; if(ct)ct.style.display='none'; if(er)er.style.display='none';
   try{
-    var path='vw_cuenta_corriente_saldo?select=cliente_xubio_id,cliente_nombre,clase_deuda,saldo_ancla,saldo_corregido,saldo_estimado,saldo_apertura,cobrado_post_corte,dias_sin_cobranza,ultimo_cobro,apertura_estado,fecha_corte,estado_gestion,es_incobrable&es_cuenta_corriente=is.true&saldo_estimado=gt.0&order=saldo_estimado.desc';
+    var path='vw_cuenta_corriente_saldo?select=cliente_xubio_id,cliente_nombre,clase_deuda,saldo_ancla,saldo_corregido,saldo_estimado,saldo_apertura,cobrado_post_corte,dias_sin_cobranza,ultimo_cobro,apertura_estado,fecha_corte,estado_gestion,es_incobrable,telefono,total_abierto,b_0_30,b_30_60,b_60_90,b_90_plus,dias_mas_viejo,n_abiertos&es_cuenta_corriente=is.true&saldo_estimado=gt.0&order=saldo_estimado.desc';
     var rows = await _tesFetch(path);
     _ccData = rows || [];
+    // Cargar historial de gestión (chico) en paralelo, no bloquea si falla
+    _ccGestion = {};
+    try{
+      var g = await _tesFetch('cc_gestion?select=cliente_xubio_id,accion,nota,gestionado_por,creado_at&order=creado_at.desc&limit=3000');
+      (g||[]).forEach(function(r){ var k=String(r.cliente_xubio_id); (_ccGestion[k]=_ccGestion[k]||[]).push(r); });
+    }catch(eg){ console.warn('[CC] gestion', eg); }
     _ccRenderStats(_ccData);
     _ccRender();
     var ce=document.getElementById('cc-corte');
@@ -34436,7 +34497,7 @@ function _ccRenderStats(data){
   var g={activa:{n:0,m:0},congelada:{n:0,m:0},parada:{n:0,m:0},incobrable:{n:0,m:0}};
   var realM=0, realN=0;
   data.forEach(function(c){
-    var s=Number(c.saldo_estimado)||0;
+    var s=_ccNum(c.saldo_estimado);
     if (c.es_incobrable){ g.incobrable.n++; g.incobrable.m+=s; return; }
     realM+=s; realN++;
     var k=c.clase_deuda; if(g[k]){ g[k].n++; g[k].m+=s; }
@@ -34445,65 +34506,176 @@ function _ccRenderStats(data){
   if(tot) tot.innerHTML='<div class="cc-total-l">Cartera real (sin incobrables)</div>'+
     '<div class="cc-total-v">'+_ccFmt(realM)+'</div>'+
     '<div class="cc-total-d">'+realN+' clientes · tocá una tarjeta para filtrar</div>';
-  var st=document.getElementById('cc-stats'); if(!st) return;
-  st.innerHTML = _ccStatCard('activa','🟢 Sana','#1E8449',g.activa)
+  var st=document.getElementById('cc-stats');
+  if(st) st.innerHTML = _ccStatCard('activa','🟢 Sana','#1E8449',g.activa)
     + _ccStatCard('congelada','🔴 Congelada','#C62828',g.congelada)
     + _ccStatCard('parada','🟡 Parada','#D9822B',g.parada)
     + _ccStatCard('incobrable','⚫ Incobrable','#455A64',g.incobrable);
+  _ccRenderAging(data);
 }
-function ccSetFiltro(k){
-  _ccFiltro = (_ccFiltro===k) ? 'real' : k;
-  _ccRenderStats(_ccData);
+function _ccRenderAging(data){
+  var el=document.getElementById('cc-aging'); if(!el) return;
+  // buckets sólo sobre la cartera real (no incobrables)
+  var b={b_0_30:0,b_30_60:0,b_60_90:0,b_90_plus:0};
+  data.forEach(function(c){ if(c.es_incobrable) return;
+    b.b_0_30+=_ccNum(c.b_0_30); b.b_30_60+=_ccNum(c.b_30_60); b.b_60_90+=_ccNum(c.b_60_90); b.b_90_plus+=_ccNum(c.b_90_plus); });
+  var tot=b.b_0_30+b.b_30_60+b.b_60_90+b.b_90_plus;
+  if(tot<=0){ el.style.display='none'; return; }
+  el.style.display='block';
+  var defs=[['b_0_30','0-30d','#1E8449'],['b_30_60','30-60d','#D4A574'],['b_60_90','60-90d','#D9822B'],['b_90_plus','+90d','#C62828']];
+  var segs=defs.map(function(d){ var pct=(b[d[0]]/tot*100); if(pct<=0) return '';
+    var s=_ccAging===d[0]?'box-shadow:0 0 0 2px #1A0800 inset;':'';
+    return '<div class="cc-aging-seg" style="width:'+pct.toFixed(2)+'%;background:'+d[2]+';'+s+'" onclick="ccSetAging(\''+d[0]+'\')" title="'+d[1]+': '+_ccFmt(b[d[0]])+'"></div>'; }).join('');
+  var leg=defs.map(function(d){ var sel=_ccAging===d[0]?' sel':'';
+    return '<div class="cc-aging-leg'+sel+'" onclick="ccSetAging(\''+d[0]+'\')"><span class="dot" style="background:'+d[2]+'"></span>'+d[1]+' <span class="amt">'+_ccFmt(b[d[0]])+'</span></div>'; }).join('');
+  el.innerHTML='<div class="cc-aging-t">Antigüedad de la deuda (mayor de Xubio al corte)</div>'+
+    '<div class="cc-aging-bar">'+segs+'</div><div class="cc-aging-legend">'+leg+'</div>';
+}
+function ccSetFiltro(k){ _ccFiltro=(_ccFiltro===k)?'real':k; _ccRenderStats(_ccData); _ccRender(); }
+function ccSetAging(b){ _ccAging=(_ccAging===b)?null:b; _ccRenderStats(_ccData); _ccRender(); }
+function ccSort(mode){
+  _ccSort=mode;
+  var bs=document.getElementById('cc-sort-saldo'), bv=document.getElementById('cc-sort-viejo');
+  if(bs) bs.classList.toggle('sel', mode==='saldo');
+  if(bv) bv.classList.toggle('sel', mode==='viejo');
   _ccRender();
 }
 function _ccVisibles(){
-  var qel=document.getElementById('cc-q');
-  var q=(qel && qel.value || '').toLowerCase();
-  return _ccData.filter(function(c){
+  var qel=document.getElementById('cc-q'); var q=(qel && qel.value || '').toLowerCase();
+  var out=_ccData.filter(function(c){
     if (_ccFiltro==='incobrable'){ if(!c.es_incobrable) return false; }
     else if (_ccFiltro==='real'){ if(c.es_incobrable) return false; }
     else { if(c.es_incobrable || c.clase_deuda!==_ccFiltro) return false; }
+    if (_ccAging && _ccNum(c[_ccAging])<=0) return false;
     if (q && String(c.cliente_nombre||'').toLowerCase().indexOf(q)<0) return false;
     return true;
   });
+  if(_ccSort==='viejo') out.sort(function(a,b){ return (_ccNum(b.dias_mas_viejo))-(_ccNum(a.dias_mas_viejo)); });
+  else out.sort(function(a,b){ return _ccNum(b.saldo_estimado)-_ccNum(a.saldo_estimado); });
+  return out;
+}
+function _ccMini(c){
+  var d=[['0-30',c.b_0_30,false],['30-60',c.b_30_60,false],['60-90',c.b_60_90,false],['+90',c.b_90_plus,true]];
+  return '<div class="cc-mini">'+d.map(function(x){ var hot=x[2]&&_ccNum(x[1])>0?' hot':'';
+    return '<div class="cc-mini-b'+hot+'"><div class="l">'+x[0]+'</div><div class="v">'+_ccFmt(x[1])+'</div></div>'; }).join('')+'</div>';
+}
+function _ccGestBadge(c){
+  var arr=_ccGestion[String(c.cliente_xubio_id)]; if(!arr||!arr.length) return '';
+  var d=_ccDiasDesde(arr[0].creado_at);
+  return ' <span class="cc-gest-badge">✓ gest. '+(d===0?'hoy':'hace '+d+'d')+'</span>';
+}
+function _ccGestLog(c){
+  var arr=_ccGestion[String(c.cliente_xubio_id)]; if(!arr||!arr.length) return '';
+  var ic={whatsapp:'🟢 WhatsApp',gestionado:'📌 Gestión',nota:'📝 Nota'};
+  return '<div class="cc-gest-log">'+arr.slice(0,5).map(function(r){
+    var d=_ccDiasDesde(r.creado_at);
+    return '<div class="g">'+(ic[r.accion]||r.accion)+' · '+(d===0?'hoy':'hace '+d+'d')+(r.gestionado_por?' · '+_ccEsc(r.gestionado_por):'')+(r.nota?' — '+_ccEsc(r.nota):'')+'</div>';
+  }).join('')+'</div>';
 }
 function _ccRender(){
   var el=document.getElementById('cc-lista'); if(!el) return;
   var data=_ccVisibles();
   if(!data.length){ el.innerHTML='<div class="cc-loading">Sin clientes en esta vista.</div>'; return; }
   el.innerHTML = data.map(function(c,i){
-    var mov = (Number(c.saldo_ancla)||0) - (Number(c.saldo_apertura)||0);
+    var mov = _ccNum(c.saldo_ancla) - _ccNum(c.saldo_apertura);
     var clase = c.es_incobrable ? 'incobrable' : c.clase_deuda;
     var rowCls = c.es_incobrable ? 'cc-row incob' : 'cc-row';
-    var accion = c.es_incobrable
-      ? '<button class="cc-btn-undo" onclick="event.stopPropagation();ccDesmarcar('+c.cliente_xubio_id+')">↩ Volver a gestión</button>'
-      : '<button class="cc-btn-incob" onclick="event.stopPropagation();ccMarcarIncobrable('+c.cliente_xubio_id+')">⚫ Marcar incobrable</button>';
+    var cid = c.cliente_xubio_id;
+    var waNum = _ccWaNum(c.telefono);
+    var btnWa = waNum ? '<button class="cc-btn-wa" onclick="event.stopPropagation();ccWhatsApp('+cid+')">🟢 WhatsApp</button>'
+                      : '<button class="cc-btn-wa" disabled>Sin teléfono</button>';
+    var btnGest = '<button class="cc-btn-gest" onclick="event.stopPropagation();ccGestionar('+cid+')">📌 Gestionar</button>';
+    var accIncob = c.es_incobrable
+      ? '<button class="cc-btn-undo" onclick="event.stopPropagation();ccDesmarcar('+cid+')">↩ Volver a gestión</button>'
+      : '<button class="cc-btn-incob" onclick="event.stopPropagation();ccMarcarIncobrable('+cid+')">⚫ Marcar incobrable</button>';
     var notaDet = c.es_incobrable
       ? '<div class="cc-note">⚫ Marcado incobrable — fuera de la cartera real.</div>'
       : (((c.clase_deuda==='congelada'||c.clase_deuda==='parada') && !c.apertura_estado)
           ? '<div class="cc-note"><span class="cc-warn">⚠ Apertura sin validar.</span></div>'
           : (c.apertura_estado ? '<div class="cc-note">✓ Apertura validada: '+_ccEsc(c.apertura_estado)+'</div>' : ''));
-    return '<div class="'+rowCls+'" onclick="ccAbrir('+i+')">'+
+    return '<div class="'+rowCls+'" onclick="ccAbrir('+i+','+cid+')">'+
       '<div class="mn"><div class="nm">'+_ccEsc(c.cliente_nombre)+'</div>'+
-      '<div class="mt"><span class="cc-bdg cc-b-'+clase+'">'+_ccLbl(clase)+'</span> '+_ccMeta(c)+'</div></div>'+
+      '<div class="mt"><span class="cc-bdg cc-b-'+clase+'">'+_ccLbl(clase)+'</span> '+_ccMeta(c)+_ccGestBadge(c)+'</div></div>'+
       '<div class="cc-sal"><div class="m">'+_ccFmt(c.saldo_estimado)+'</div><div class="s">'+(c.ultimo_cobro?'últ. '+_ccFechaCorta(c.ultimo_cobro):'—')+'</div></div>'+
       '</div>'+
       '<div class="cc-det" id="cc-d'+i+'"><h4>'+_ccEsc(c.cliente_nombre)+'</h4>'+
+        (c.total_abierto!=null?_ccMini(c):'')+
         '<div class="cc-dl">Arrastre histórico (apertura) <span class="v">'+_ccFmt(c.saldo_apertura)+'</span></div>'+
         '<div class="cc-dl">Movimiento del año <span class="v">'+_ccFmt(mov)+'</span></div>'+
         '<div class="cc-dl">Cobros desde el corte <span class="v">'+_ccFmt(c.cobrado_post_corte)+'</span></div>'+
         '<div class="cc-dl t">Saldo actual <span class="v">'+_ccFmt(c.saldo_estimado)+'</span></div>'+
+        '<div class="cc-desg" id="cc-desg'+i+'"></div>'+
         notaDet +
-        '<div class="cc-det-acc">'+accion+'</div>'+
+        '<div class="cc-acc2">'+btnWa+btnGest+'</div>'+
+        _ccGestLog(c)+
+        '<div class="cc-det-acc">'+accIncob+'</div>'+
       '</div>';
   }).join('');
 }
-function ccAbrir(i){
+function ccAbrir(i, cid){
   var p=document.getElementById('cc-d'+i); if(!p) return;
   document.querySelectorAll('.cc-det').forEach(function(e){ if(e!==p) e.classList.remove('open'); });
   p.classList.toggle('open');
+  if(p.classList.contains('open')) ccDesgloseCargar(cid, 'cc-desg'+i);
 }
 function ccFiltrar(){ _ccRender(); }
+
+async function ccDesgloseCargar(cid, contId){
+  var cont=document.getElementById(contId); if(!cont) return;
+  function pintar(rows){
+    if(!rows || !rows.length){ cont.innerHTML=''; return; }
+    cont.innerHTML='<div class="cc-desg-t">Comprobantes impagos ('+rows.length+')</div>'+rows.map(function(r){
+      var dias=_ccNum(r.dias);
+      var ed = dias>90?'cc-ed-old':(dias>30?'cc-ed-mid':'cc-ed-new');
+      var doc=(r.numero||r.tipo_doc||'—');
+      return '<div class="cc-desg-row"><div><div class="doc">'+_ccEsc(doc)+'</div><div class="dt">'+_ccFechaCorta(r.fecha)+' · <span class="ed '+ed+'">'+dias+'d</span></div></div>'+
+        '<div class="ab">'+_ccFmt(r.abierto)+'</div></div>';
+    }).join('');
+  }
+  if(_ccDesgCache[cid]){ pintar(_ccDesgCache[cid]); return; }
+  cont.innerHTML='<div class="cc-desg-t">Comprobantes impagos</div><div class="dt">cargando…</div>';
+  try{
+    var rows=await _tesFetch('vw_cc_aging?select=fecha,tipo_doc,numero,abierto,dias&cliente_xubio_id=eq.'+cid+'&order=dias.desc');
+    _ccDesgCache[cid]=rows||[]; pintar(_ccDesgCache[cid]);
+  }catch(e){ console.error('[CC] desglose',e); cont.innerHTML='<div class="dt">No se pudo cargar el desglose.</div>'; }
+}
+
+function _ccWaNum(tel){
+  var d=String(tel||'').replace(/\D/g,'');
+  if(!d) return '';
+  if(d.indexOf('549')===0) return d;
+  if(d.indexOf('54')===0) return '549'+d.slice(2);
+  if(d.indexOf('0')===0) d=d.slice(1);
+  if(d.length===10) return '549'+d;
+  if(d.length>=8) return '549'+d;
+  return '';
+}
+function ccWhatsApp(id){
+  var c=_ccData.find(function(x){ return String(x.cliente_xubio_id)===String(id); });
+  if(!c) return;
+  var num=_ccWaNum(c.telefono); if(!num){ alert('Cliente sin teléfono válido.'); return; }
+  var msg='Hola '+(c.cliente_nombre||'')+', te escribimos de THE CHICKENS KING. Figura un saldo pendiente de '+_ccFmt(c.saldo_estimado)+'. ¿Lo coordinamos? ¡Gracias!';
+  window.open('https://wa.me/'+num+'?text='+encodeURIComponent(msg), '_blank');
+  _ccGestRegistrar(id, 'whatsapp', null);
+}
+async function ccGestionar(id){
+  var nota=prompt('Registrar gestión de cobranza.\nNota (opcional): ej. "quedó en pagar el viernes"', '');
+  if(nota===null) return;
+  await _ccGestRegistrar(id, 'gestionado', nota||null);
+}
+async function _ccGestRegistrar(id, accion, nota){
+  try{
+    await sbFetch('cc_gestion', {
+      method:'POST',
+      body: JSON.stringify([{ cliente_xubio_id:id, accion:accion, nota:nota, gestionado_por: usuarioActual||null }]),
+      prefer:'return=minimal'
+    });
+    var k=String(id);
+    (_ccGestion[k]=_ccGestion[k]||[]).unshift({ cliente_xubio_id:id, accion:accion, nota:nota, gestionado_por:usuarioActual||null, creado_at:new Date().toISOString() });
+    _ccRender();
+    if(typeof toast==='function') toast('📌 Gestión registrada','ok');
+  }catch(e){ console.error('[CC] gestion reg',e); if(typeof toast==='function') toast('Error al registrar','err'); else alert('Error al registrar gestión'); }
+}
 
 async function ccMarcarIncobrable(id){
   var c=_ccData.find(function(x){ return String(x.cliente_xubio_id)===String(id); });
@@ -37726,7 +37898,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.59.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.60.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
