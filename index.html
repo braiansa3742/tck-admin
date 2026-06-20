@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.63.0 — 20/06/2026
+     TCK ADMIN — v13.64.0 — 20/06/2026
+     v13.64.0: B1 REHECHO — rendición por instrumento real. La caja suma
+        efectivo/transfer/cheque desde detalle_cobro (no forma_cobro, que era
+        engañoso). NO toca transfer_conciliada (la verifica MP). Soporta pago
+        parcial y de más por factura (✎ ajusta efe/tra/che/fiado). Al cerrar
+        escribe detalle_cobro ajustado + rendicion_estado='confirmada'; el
+        posteo por instrumento a Xubio lo hacen las vistas+cron (backend, ver
+        DDL aparte). No setea monto_cobrado_real (crons viejos quedan dormidos).
      v13.63.0: SEPARACIÓN CTAS CTES / TESORERÍA — Cuentas Corrientes pasa a
         ser su propio tab (📒 Ctas Ctes), antes vivía apilado dentro de
         Tesorería y se hacía un choclo vertical ilegible en cel y PC. Nuevo
@@ -13760,6 +13767,20 @@ input.canales-exp-input[type="date"] {
 .rv-btn{background:#1A0800;color:#fff;border:none;border-radius:10px;padding:12px 18px;font-family:inherit;font-weight:800;font-size:15px;cursor:pointer}
 .rv-btn[disabled]{background:#cfc4b2;cursor:not-allowed}
 .rv-note{font-size:11px;color:#9a8a78;padding:0 14px 14px;font-weight:600;line-height:1.4}
+.rv-fiado-tot{margin:0 14px 8px;font-size:12px;color:#C62828;font-weight:700;text-align:center}
+.rv-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.rv-chip{font-size:10px;font-weight:800;padding:2px 7px;border-radius:18px;background:#f0ece3;color:#5a5249}
+.rv-chip.efe{background:#EDE7DD;color:#1A0800}.rv-chip.tra{background:#E8F5E9;color:#1E8449}
+.rv-chip.che{background:#FBF0E2;color:#B45309}.rv-chip.ccte{background:#FDECEA;color:#C62828}
+.rv-fac.off{opacity:.45}
+.rv-editbox{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:7px}
+.rv-il{display:flex;flex-direction:column;gap:2px}
+.rv-il span{font-size:9px;font-weight:800;text-transform:uppercase;color:#9a8a78}
+.rv-il input{border:1.5px solid #e3ddd2;border-radius:7px;padding:4px 7px;font-size:14px;font-weight:800;color:#1A0800;font-family:inherit}
+.rv-il input:focus{outline:none;border-color:#D4A574}
+.rv-difF{font-size:10px;font-weight:900;margin-top:1px}
+.rv-difF.up{color:#1E8449}.rv-difF.down{color:#C62828}
+.rv-ed{background:#fff;border:1.5px solid #e3ddd2;border-radius:7px;padding:3px 9px;font-size:13px;font-weight:900;color:#B45309;cursor:pointer;margin-top:4px;font-family:inherit}
         .cc-btn-incob{width:100%;background:#455A64;color:#fff;border:none;border-radius:9px;padding:9px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;cursor:pointer}
         .cc-btn-undo{width:100%;background:#fff;color:#1E8449;border:1.5px solid #1E8449;border-radius:9px;padding:9px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;cursor:pointer}
         .cc-stat .l{font-size:11px;font-weight:700;color:#7a7167;text-transform:uppercase;letter-spacing:.3px}
@@ -15713,23 +15734,40 @@ async function admRendChequearCierre() {
 // Fin v8.3 admin — TAB RENDICIONES
 
 // ═══════════════════════════════════════════════════════════
-// v13.62 — RENDIR VIAJE (admin-driven). Reusa el motor de cobros:
-// confirmar entrega -> rendicion_estado='confirmada' + monto_cobrado_real
-// (+ transfer_conciliada=true en transferencias) -> cron postea a Xubio.
+// v13.64 — RENDIR VIAJE (admin-driven, por instrumento real).
+// Caja desde detalle_cobro (NO forma_cobro). NO toca transfer_conciliada
+// (eso lo maneja MP/OCR). Soporta parcial y pago de más por factura.
+// Al cerrar escribe detalle_cobro (ajustado) + rendicion_estado='confirmada'.
+// El posteo a Xubio por instrumento lo resuelven las vistas + cron (backend).
 // ═══════════════════════════════════════════════════════════
-var _rvViajes = [];        // viajes cerrados con entregas pendientes
-var _rvSel = null;         // viaje elegido
-var _rvEnt = [];           // entregas del viaje elegido
-var _rvCobrada = {};       // entrega.id -> true (admin tildó que entró)
-var _rvEfeContado = null;  // efectivo que contó admin
-var _rvCerrando = false;
+var _rvViajes = [], _rvSel = null, _rvEnt = [];
+var _rvCobro = {};      // entrega.id -> {efectivo,transferencia,cheque,cuenta_corriente}
+var _rvIncluir = {};    // entrega.id -> bool (entra en la rendición)
+var _rvEdit = {};       // entrega.id -> bool (fila expandida para ajustar)
+var _rvEfeContado = null, _rvCerrando = false;
+var _RV_INSTR = ['efectivo','transferencia','cheque','cuenta_corriente'];
 
 function _rvFmt(n){ return '$' + Math.round(Number(n)||0).toLocaleString('es-AR'); }
-function _rvNum(n){ return Number(n)||0; }
+function _rvN(n){ return Number(n)||0; }
 function _rvEsc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function _rvFecha(f){ if(!f) return ''; var p=String(f).slice(0,10).split('-'); return p.length===3?(p[2]+'/'+p[1]):f; }
-function _rvFormaLbl(f){ return ({efectivo:'EFECTIVO',transferencia:'TRANSFER.',cheque:'CHEQUE',cuenta_corriente:'FIADO'})[f]||(f||'—').toUpperCase(); }
-function _rvFormaCls(f){ return ({efectivo:'rv-f-efe',transferencia:'rv-f-tra',cheque:'rv-f-che',cuenta_corriente:'rv-f-ccte'})[f]||''; }
+
+function _rvParseDet(e){
+  var d={efectivo:0,transferencia:0,cheque:0,cuenta_corriente:0};
+  var raw=e.detalle_cobro;
+  if(raw){ try{ var o=(typeof raw==='string')?JSON.parse(raw):raw;
+    _RV_INSTR.forEach(function(k){ if(o[k]!=null) d[k]=_rvN(o[k]); });
+  }catch(_e){} }
+  if(d.efectivo+d.transferencia+d.cheque+d.cuenta_corriente===0){
+    var k=e.forma_cobro; if(_RV_INSTR.indexOf(k)===-1) k='efectivo'; d[k]=_rvN(e.monto);
+  }
+  return d;
+}
+function _rvCobrado(c){ return _rvN(c.efectivo)+_rvN(c.transferencia)+_rvN(c.cheque); } // plata real (sin fiado)
+function _rvTotal(c){ return _rvCobrado(c)+_rvN(c.cuenta_corriente); }
+function _rvSumInc(instr){
+  return _rvEnt.reduce(function(a,e){ return a+(_rvIncluir[e.id]?_rvN(_rvCobro[e.id][instr]):0); },0);
+}
 
 async function rvCargar(){
   var lista=document.getElementById('rv-lista');
@@ -15739,25 +15777,19 @@ async function rvCargar(){
     viajes = viajes || [];
     if(!viajes.length){ _rvViajes=[]; rvRenderLista(); return; }
     var ids = viajes.map(function(v){ return '"'+v.id+'"'; }).join(',');
-    var ents = await _tesFetch("entregas?viaje_id=in.("+ids+")&estado=eq.entregado&select=id,viaje_id,cliente,ciudad,pedido_id,monto,forma_cobro,rendicion_estado,monto_cobrado_real&limit=3000");
+    var ents = await _tesFetch("entregas?viaje_id=in.("+ids+")&estado=eq.entregado&select=id,viaje_id,cliente,ciudad,pedido_id,monto,forma_cobro,detalle_cobro,transfer_conciliada,rendicion_estado&limit=3000");
     ents = ents || [];
-    // agrupar por viaje, contar pendientes (no confirmadas)
     var porViaje={};
-    ents.forEach(function(e){
-      var k=e.viaje_id; (porViaje[k]=porViaje[k]||[]).push(e);
-    });
+    ents.forEach(function(e){ (porViaje[e.viaje_id]=porViaje[e.viaje_id]||[]).push(e); });
     _rvViajes = viajes.map(function(v){
-      var es = porViaje[v.id] || [];
-      var pend = es.filter(function(e){ return e.rendicion_estado!=='confirmada'; });
-      v._ent = es; v._pend = pend.length;
-      v._aCobrarEfe = pend.filter(function(e){return e.forma_cobro==='efectivo';}).reduce(function(a,e){return a+_rvNum(e.monto);},0);
+      var es=porViaje[v.id]||[];
+      var pend=es.filter(function(e){ return e.rendicion_estado!=='confirmada'; });
+      v._ent=es; v._pend=pend.length;
+      v._efe=pend.reduce(function(a,e){ return a+_rvN(_rvParseDet(e).efectivo); },0);
       return v;
-    }).filter(function(v){ return v._pend > 0; });
+    }).filter(function(v){ return v._pend>0; });
     rvRenderLista();
-  }catch(e){
-    console.error('[rv] cargar', e);
-    if(lista) lista.innerHTML='<div class="rv-empty">Error al cargar. 🔄</div>';
-  }
+  }catch(e){ console.error('[rv] cargar',e); if(lista) lista.innerHTML='<div class="rv-empty">Error al cargar. 🔄</div>'; }
 }
 
 function rvRenderLista(){
@@ -15765,120 +15797,119 @@ function rvRenderLista(){
   var cnt=document.getElementById('rv-cnt'); if(cnt) cnt.textContent=_rvViajes.length;
   if(!_rvViajes.length){ el.innerHTML='<div class="rv-empty">✓ No hay viajes pendientes de rendir.</div>'; return; }
   el.innerHTML=_rvViajes.map(function(v){
-    var sel=(_rvSel && _rvSel.id===v.id)?' sel':'';
+    var sel=(_rvSel&&_rvSel.id===v.id)?' sel':'';
     return '<div class="rv-viaje'+sel+'" onclick="rvAbrir(\''+v.id+'\')">'+
       '<div class="t">'+_rvEsc(v.chofer||'—')+' · '+_rvEsc(v.zona||'')+'</div>'+
       '<div class="m">'+_rvFecha(v.fecha_salida)+' · '+v._pend+' sin confirmar · '+_rvFmt(v.monto_total)+'</div>'+
-      (v._aCobrarEfe>0?'<div class="tag">efectivo a contar: '+_rvFmt(v._aCobrarEfe)+'</div>':'')+
+      (v._efe>0?'<div class="tag">efectivo a contar: '+_rvFmt(v._efe)+'</div>':'')+
     '</div>';
   }).join('');
 }
 
 function rvAbrir(id){
-  _rvSel=_rvViajes.find(function(v){return v.id===id;});
-  if(!_rvSel) return;
-  // solo entregas pendientes (no confirmadas)
+  _rvSel=_rvViajes.find(function(v){return v.id===id;}); if(!_rvSel) return;
   _rvEnt=(_rvSel._ent||[]).filter(function(e){ return e.rendicion_estado!=='confirmada'; });
-  _rvCobrada={}; _rvEfeContado=null;
-  // por defecto: todo lo no-fiado viene tildado (sin fiado: si se entregó, se cobró)
-  _rvEnt.forEach(function(e){ if(e.forma_cobro!=='cuenta_corriente') _rvCobrada[e.id]=true; });
+  _rvCobro={}; _rvIncluir={}; _rvEdit={}; _rvEfeContado=null;
+  _rvEnt.forEach(function(e){ _rvCobro[e.id]=_rvParseDet(e); _rvIncluir[e.id]=true; });
   var tit=document.getElementById('rv-vtit'); if(tit) tit.textContent=(_rvSel.chofer||'')+' · '+_rvFecha(_rvSel.fecha_salida);
   rvRenderPanel(); rvRenderLista();
 }
 
-function rvTildar(id){
-  var e=_rvEnt.find(function(x){return String(x.id)===String(id);});
-  if(e && e.forma_cobro==='cuenta_corriente') return; // fiado no se tilda
-  _rvCobrada[id]=!_rvCobrada[id]; rvRenderPanel();
-}
-function rvSetContado(v){ _rvEfeContado=Number(String(v).replace(/[^\d-]/g,''))||0; rvRenderPanel(); }
-
-function _rvSum(forma, soloCobrada){
-  return _rvEnt.filter(function(e){
-    return e.forma_cobro===forma && (!soloCobrada || _rvCobrada[e.id]);
-  }).reduce(function(a,e){return a+_rvNum(e.monto);},0);
-}
+function rvToggleInc(id){ _rvIncluir[id]=!_rvIncluir[id]; rvRenderPanel(); }
+function rvToggleEdit(id){ _rvEdit[id]=!_rvEdit[id]; rvRenderPanel(); }
+function rvSetCobro(id,instr,val){ _rvCobro[id][instr]=_rvN(String(val).replace(/[^\d.-]/g,'')); rvRenderPanel(); }
+function rvSetContado(v){ _rvEfeContado=_rvN(String(v).replace(/[^\d.-]/g,'')); rvRenderPanel(); }
 
 function rvRenderPanel(){
   var el=document.getElementById('rv-panel'); if(!el) return;
   if(!_rvSel){ el.innerHTML='<div class="rv-empty">Tocá un viaje para rendirlo.</div>'; return; }
   if(!_rvEnt.length){ el.innerHTML='<div class="rv-empty">Este viaje no tiene entregas pendientes.</div>'; return; }
 
-  var efeEsp=_rvSum('efectivo', true);
-  var tra=_rvSum('transferencia', true);
-  var che=_rvSum('cheque', true);
+  var efeEsp=_rvSumInc('efectivo'), tra=_rvSumInc('transferencia'), che=_rvSumInc('cheque'), fia=_rvSumInc('cuenta_corriente');
   var contado=(_rvEfeContado===null)?efeEsp:_rvEfeContado;
   var dif=contado-efeEsp;
+  // transfers verificadas por MP
+  var transObj=_rvEnt.filter(function(e){ return _rvIncluir[e.id] && _rvN(_rvCobro[e.id].transferencia)>0; });
+  var transOk=transObj.filter(function(e){ return e.transfer_conciliada; }).length;
 
   var html='<div class="rv-caja">'+
     '<div class="rv-box efe"><div class="l">Efectivo esperado</div><div class="v">'+_rvFmt(efeEsp)+'</div></div>'+
     '<div class="rv-box efe"><div class="l">Efectivo contado</div>'+
       '<input value="'+Math.round(contado).toLocaleString("es-AR")+'" inputmode="decimal" oninput="rvSetContado(this.value)"></div>'+
-    '<div class="rv-box tra"><div class="l">Transferencias</div><div class="v">'+_rvFmt(tra)+'</div></div>'+
+    '<div class="rv-box tra"><div class="l">Transferencias '+(transObj.length?('· '+transOk+'/'+transObj.length+' ✓MP'):'')+'</div><div class="v">'+_rvFmt(tra)+'</div></div>'+
     '<div class="rv-box che"><div class="l">Cheques</div><div class="v">'+_rvFmt(che)+'</div></div>'+
   '</div>';
+  if(fia>0) html+='<div class="rv-fiado-tot">Queda en cuenta corriente (fiado): <b>'+_rvFmt(fia)+'</b></div>';
   html+='<div class="rv-dif '+(dif===0?'ok':'bad')+'">'+
-    (dif===0?'✓ La caja de efectivo cierra':(dif>0?'Sobran ':'Faltan ')+_rvFmt(Math.abs(dif))+' en efectivo')+'</div>';
+    (dif===0?'✓ El efectivo cierra':(dif>0?'Sobran ':'Faltan ')+_rvFmt(Math.abs(dif))+' en efectivo — ajustá las facturas o el contado')+'</div>';
 
-  html+='<div class="rv-sub">Factura por factura — destildá lo que NO entró</div>';
+  html+='<div class="rv-sub">Factura por factura — ✎ para ajustar si pagó distinto</div>';
   _rvEnt.forEach(function(e){
-    var fiado=e.forma_cobro==='cuenta_corriente';
-    var on=!!_rvCobrada[e.id];
-    html+='<div class="rv-fac'+(on?' done':'')+(fiado?' fiado':'')+'">'+
-      (fiado
-        ? '<div class="rv-chk fiado" title="Fiado autorizado">$</div>'
-        : '<div class="rv-chk'+(on?' on':'')+'" onclick="rvTildar(\''+e.id+'\')">✓</div>')+
+    var c=_rvCobro[e.id], inc=!!_rvIncluir[e.id], cobr=_rvCobrado(c), tot=_rvN(e.monto), edit=!!_rvEdit[e.id];
+    var difF=cobr+_rvN(c.cuenta_corriente)-tot;
+    var chips=[];
+    if(c.efectivo>0) chips.push('<span class="rv-chip efe">efe '+_rvFmt(c.efectivo)+'</span>');
+    if(c.transferencia>0) chips.push('<span class="rv-chip tra">transf '+_rvFmt(c.transferencia)+(e.transfer_conciliada?' ✓':' ⏳')+'</span>');
+    if(c.cheque>0) chips.push('<span class="rv-chip che">cheque '+_rvFmt(c.cheque)+'</span>');
+    if(c.cuenta_corriente>0) chips.push('<span class="rv-chip ccte">fiado '+_rvFmt(c.cuenta_corriente)+'</span>');
+    html+='<div class="rv-fac'+(inc?'':' off')+'">'+
+      '<div class="rv-chk'+(inc?' on':'')+'" onclick="rvToggleInc(\''+e.id+'\')">'+(inc?'✓':'')+'</div>'+
       '<div class="info"><div class="cli">'+_rvEsc(e.cliente||'—')+'</div>'+
-        '<div class="meta">'+_rvEsc(e.ciudad||'')+(e.pedido_id?' · '+_rvEsc(e.pedido_id):'')+'</div></div>'+
-      '<div class="mon"><div class="n">'+_rvFmt(e.monto)+'</div>'+
-        '<div class="f '+_rvFormaCls(e.forma_cobro)+'">'+_rvFormaLbl(e.forma_cobro)+'</div></div>'+
+        '<div class="meta">'+_rvEsc(e.ciudad||'')+(e.pedido_id?' · '+_rvEsc(e.pedido_id):'')+'</div>'+
+        '<div class="rv-chips">'+chips.join('')+'</div>'+
+        (edit?(
+          '<div class="rv-editbox">'+_RV_INSTR.map(function(k){
+            var lbl={efectivo:'Efectivo',transferencia:'Transfer.',cheque:'Cheque',cuenta_corriente:'Fiado'}[k];
+            return '<label class="rv-il"><span>'+lbl+'</span><input inputmode="decimal" value="'+Math.round(_rvN(c[k])).toLocaleString("es-AR")+'" oninput="rvSetCobro(\''+e.id+'\',\''+k+'\',this.value)"></label>';
+          }).join('')+'</div>'
+        ):'')+
+      '</div>'+
+      '<div class="mon"><div class="n">'+_rvFmt(tot)+'</div>'+
+        (difF!==0?'<div class="rv-difF '+(difF>0?'up':'down')+'">'+(difF>0?'+':'')+_rvFmt(difF)+'</div>':'')+
+        '<button class="rv-ed" onclick="rvToggleEdit(\''+e.id+'\')">'+(edit?'✓':'✎')+'</button>'+
+      '</div>'+
     '</div>';
   });
 
-  var nCob=_rvEnt.filter(function(e){return _rvCobrada[e.id];}).length;
-  var nFiado=_rvEnt.filter(function(e){return e.forma_cobro==='cuenta_corriente';}).length;
-  var listo = (dif===0) && !_rvCerrando;
+  var nInc=_rvEnt.filter(function(e){return _rvIncluir[e.id];}).length;
+  var listo=(dif===0)&&nInc>0&&!_rvCerrando;
   html+='<div class="rv-footer">'+
-    '<div class="rv-prog">'+nCob+' cobradas'+(nFiado?' · '+nFiado+' fiado':'')+'</div>'+
+    '<div class="rv-prog">'+nInc+'/'+_rvEnt.length+' incluidas</div>'+
     '<button class="rv-btn" '+(listo?'':'disabled')+' onclick="rvCerrar()">'+(_rvCerrando?'Cerrando…':'Cerrar rendición → Xubio')+'</button>'+
   '</div>'+
-  '<div class="rv-note">Al cerrar: las cobradas quedan confirmadas y se postean solas a Xubio (efectivo y transferencias). Cheques quedan registrados. Lo que destildaste queda pendiente.</div>';
-
+  '<div class="rv-note">Se confirman las incluidas con lo realmente cobrado por instrumento. Lo que falte de una factura queda como deuda; si pagó de más, el excedente salda lo viejo. Las transferencias las verifica MP por separado.</div>';
   el.innerHTML=html;
 }
 
 async function rvCerrar(){
-  if(_rvCerrando || !_rvSel) return;
-  var efeEsp=_rvSum('efectivo', true);
-  var contado=(_rvEfeContado===null)?efeEsp:_rvEfeContado;
-  if(contado-efeEsp!==0){ alert('La caja de efectivo no cierra. Ajustá el contado o destildá lo que no entró.'); return; }
-  var aConfirmar=_rvEnt.filter(function(e){ return _rvCobrada[e.id] || e.forma_cobro==='cuenta_corriente'; });
-  if(!aConfirmar.length){ alert('No hay nada para confirmar.'); return; }
-  if(!confirm('Confirmás la rendición de '+aConfirmar.length+' entregas de '+(_rvSel.chofer||'')+'?')) return;
+  if(_rvCerrando||!_rvSel) return;
+  var efeEsp=_rvSumInc('efectivo'), contado=(_rvEfeContado===null)?efeEsp:_rvEfeContado;
+  if(contado-efeEsp!==0){ alert('El efectivo no cierra. Ajustá las facturas (✎) o el contado.'); return; }
+  var inc=_rvEnt.filter(function(e){ return _rvIncluir[e.id]; });
+  if(!inc.length){ alert('No hay facturas incluidas.'); return; }
+  if(!confirm('Confirmás la rendición de '+inc.length+' entregas de '+(_rvSel.chofer||'')+'?')) return;
 
   _rvCerrando=true; rvRenderPanel();
-  var ok=0, err=0, ahora=new Date().toISOString(), quien=(typeof usuarioActual!=='undefined'&&usuarioActual)?usuarioActual:'admin';
-  for(var i=0;i<aConfirmar.length;i++){
-    var e=aConfirmar[i];
-    var fiado=e.forma_cobro==='cuenta_corriente';
-    var monto=_rvNum(e.monto);
+  var ok=0,err=0,ahora=new Date().toISOString(),quien=(typeof usuarioActual!=='undefined'&&usuarioActual)?usuarioActual:'admin';
+  for(var i=0;i<inc.length;i++){
+    var e=inc[i], c=_rvCobro[e.id];
+    var det={}; _RV_INSTR.forEach(function(k){ if(_rvN(c[k])>0) det[k]=Math.round(_rvN(c[k])); });
+    var cobr=_rvCobrado(c), tot=_rvN(e.monto);
     var payload={
+      detalle_cobro: JSON.stringify(det),
       rendicion_estado:'confirmada',
       rendicion_confirmada_en:ahora,
       rendicion_confirmada_por:quien,
-      monto_cobrado_real: fiado?0:monto,
-      rendicion_monto_recibido: fiado?0:monto,
-      rendicion_diferencia:0
+      rendicion_monto_recibido:Math.round(cobr),
+      rendicion_diferencia:Math.round(cobr+_rvN(c.cuenta_corriente)-tot)
     };
-    if(e.forma_cobro==='transferencia') payload.transfer_conciliada=true;
-    try{
-      await sbFetch('entregas?id=eq.'+encodeURIComponent(e.id),{method:'PATCH',body:JSON.stringify(payload),prefer:'return=minimal'});
-      ok++;
-    }catch(ex){ console.error('[rv] confirmar',e.id,ex); err++; }
+    // NO tocar transfer_conciliada (MP) ni monto_cobrado_real (lo postean las vistas por instrumento)
+    try{ await sbFetch('entregas?id=eq.'+encodeURIComponent(e.id),{method:'PATCH',body:JSON.stringify(payload),prefer:'return=minimal'}); ok++; }
+    catch(ex){ console.error('[rv] confirmar',e.id,ex); err++; }
   }
   _rvCerrando=false;
-  if(typeof toast==='function') toast(err?('Cerrado con '+err+' errores ('+ok+' ok)'):('✓ Rendición cerrada — '+ok+' entregas'), err?'err':'ok');
-  else alert(err?('Cerrado con '+err+' errores ('+ok+' confirmadas)'):('Rendición cerrada: '+ok+' entregas confirmadas. Se postearán a Xubio en la próxima corrida.'));
+  var msg=err?('Cerrado con '+err+' errores ('+ok+' ok)'):('✓ Rendición cerrada — '+ok+' entregas');
+  if(typeof toast==='function') toast(msg,err?'err':'ok'); else alert(msg);
   _rvSel=null; _rvEnt=[];
   await rvCargar();
   var p=document.getElementById('rv-panel'); if(p) p.innerHTML='<div class="rv-empty">✓ Listo. Elegí otro viaje para seguir.</div>';
@@ -38214,7 +38245,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.63.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.64.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
