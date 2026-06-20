@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.64.0 — 20/06/2026
+     TCK ADMIN — v13.65.0 — 20/06/2026
+     v13.65.0: FACTURADOR — el resumen del lote ahora muestra el caso "sin CAE"
+        (factura creada en Xubio pero sin autorizar en ARCA). Antes se ignoraba
+        en silencio: ni sumaba a facturadas ni a errores. Ahora se cuenta aparte
+        y avisa con instrucciones para sacar el CAE.
      v13.64.0: B1 REHECHO — rendición por instrumento real. La caja suma
         efectivo/transfer/cheque desde detalle_cobro (no forma_cobro, que era
         engañoso). NO toca transfer_conciliada (la verifica MP). Soporta pago
@@ -37780,7 +37784,7 @@ async function _fcFacturarLista(pend, etiqueta) {
   var btnTodo = document.getElementById('fc-fact-todo');
   var btnSel = document.getElementById('fc-fact-sel');
 
-  var hechas = 0, yaEst = 0, errores = [], dry = false, tanda = 0;
+  var hechas = 0, yaEst = 0, sinCae = [], errores = [], dry = false, tanda = 0;
   try {
     while (ids.length) {
       tanda++;
@@ -37804,6 +37808,7 @@ async function _fcFacturarLista(pend, etiqueta) {
       (j.resultados || []).forEach(function (r) {
         if (r.status === 'facturada') hechas++;
         else if (r.status === 'ya_facturada') yaEst++;
+        else if (r.status === 'sin_cae') sinCae.push((r.pedido_id || '') + ' (Fact. ' + (r.factura_nro || '?') + ')');
         else if (r.status === 'error') errores.push((r.pedido_id || '') + ': ' + (r.error || ''));
       });
       if (j.restantes && j.restantes.length) ids = j.restantes.concat(ids);
@@ -37818,9 +37823,10 @@ async function _fcFacturarLista(pend, etiqueta) {
   }
 
   if (!dry) {
-    var msg = '✅ Facturadas: ' + hechas + (yaEst ? ' · ya existían: ' + yaEst : '') + (errores.length ? ' · ❌ errores: ' + errores.length : '');
-    toast(msg, errores.length ? 'err' : 'ok');
+    var msg = '✅ Facturadas: ' + hechas + (yaEst ? ' · ya existían: ' + yaEst : '') + (sinCae.length ? ' · ⚠️ sin CAE: ' + sinCae.length : '') + (errores.length ? ' · ❌ errores: ' + errores.length : '');
+    toast(msg, (errores.length || sinCae.length) ? 'err' : 'ok');
     if (errores.length) alert('Errores del lote (' + errores.length + '):\n\n' + errores.slice(0, 15).join('\n') + (errores.length > 15 ? '\n…' : '') + '\n\nEsos pedidos siguen en rojo — facturalos en Xubio a mano o reintentá.');
+    if (sinCae.length) alert('⚠️ ' + sinCae.length + ' factura(s) creadas SIN CAE de ARCA:\n\n' + sinCae.slice(0, 15).join('\n') + (sinCae.length > 15 ? '\n…' : '') + '\n\nLa factura existe en Xubio pero le falta el CAE. Abrila en Xubio y tocá "Obtener Comp. Electrónico" para sacarlo, o avisale a Braian.');
     _fcSel = {}; // limpiar selección tras facturar
     await fcCargar();
   }
