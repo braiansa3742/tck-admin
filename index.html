@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.62.0 — 20/06/2026
+     TCK ADMIN — v13.63.0 — 20/06/2026
+     v13.63.0: SEPARACIÓN CTAS CTES / TESORERÍA — Cuentas Corrientes pasa a
+        ser su propio tab (📒 Ctas Ctes), antes vivía apilado dentro de
+        Tesorería y se hacía un choclo vertical ilegible en cel y PC. Nuevo
+        view-cc + tab-btn-cc + item en menú Más; ccCargar se dispara al abrir
+        su tab (sale del switch de tesorería). Visible para dueño/admin/
+        operaciones/cobranzas. Tesorería queda limpio con su proyección.
      v13.62.0: RENDIR VIAJE (admin-driven) — nueva sección arriba del tab
         Rendir: "Viajes sin rendir" (cerrados con entregas no confirmadas) +
         panel de rendición por viaje (caja efectivo esperado/contado, transfer,
@@ -13609,6 +13615,37 @@ input.canales-exp-input[type="date"] {
   <!-- ═══════════════════════════════════════════════════════════════════
        v12.20.0 — TAB TESORERÍA
        ═══════════════════════════════════════════════════════════════════ -->
+  <!-- ═══ TAB CUENTAS CORRIENTES (separado de Tesorería — v13.63.0) ═══ -->
+  <div class="view" id="view-cc">
+    <div style="padding:14px 14px 90px;">
+      <div class="tes-hdr">
+        <div>
+          <div class="tes-hdr-tit">📒 Cuentas corrientes</div>
+          <div class="tes-hdr-sub">Saldos por cliente · aging · extracto</div>
+        </div>
+        <button class="tes-hdr-btn-actualizar" onclick="ccCargar()">⟳ Actualizar</button>
+      </div>
+        <div class="cc-sec" id="cc-sec">
+          <div id="cc-loading" class="cc-loading">Cargando cuentas corrientes…</div>
+          <div id="cc-cont" style="display:none;">
+            <div class="cc-total" id="cc-total"></div>
+            <div class="cc-stats" id="cc-stats"></div>
+            <div class="cc-aging" id="cc-aging" style="display:none;"></div>
+            <div class="cc-sort" id="cc-sort">
+              <button class="cc-sortbtn sel" id="cc-sort-saldo" onclick="ccSort('saldo')">Mayor saldo</button>
+              <button class="cc-sortbtn" id="cc-sort-viejo" onclick="ccSort('viejo')">Más viejo</button>
+            </div>
+            <input class="cc-search" id="cc-q" placeholder="🔎 Buscar cliente…" oninput="ccFiltrar()">
+            <div style="font-size:11px;color:#9a8a78;font-weight:600;margin:-3px 0 9px;">Tocá un cliente para ver sus buckets, facturas impagas y el <b>extracto completo</b> (facturas + pagos) para validar el saldo.</div>
+            <div id="cc-lista"></div>
+            <div class="cc-note">El saldo es el de Xubio neto de cobros del día (corte <span id="cc-corte">—</span>). Los 🔴 y 🟡 arrastran apertura sin validar; se corrige cuando administración confirma la deuda real.</div>
+          </div>
+          <div id="cc-err" class="cc-loading" style="display:none;color:#B71C1C;">No se pudieron cargar las cuentas corrientes.</div>
+        </div>
+
+    </div>
+  </div>
+
   <div class="view" id="view-tesoreria">
     <div style="padding-bottom:80px;">
 
@@ -13752,25 +13789,6 @@ input.canales-exp-input[type="date"] {
         .cc-note{font-size:12px;color:#7a7167;font-weight:600;margin-top:8px;line-height:1.4}
         .cc-loading{text-align:center;padding:24px;color:#9C7050;font-style:italic;font-size:13px}
         </style>
-        <div class="cc-sec" id="cc-sec">
-          <div class="cc-hdr-tit">📒 Cuentas corrientes</div>
-          <div id="cc-loading" class="cc-loading">Cargando cuentas corrientes…</div>
-          <div id="cc-cont" style="display:none;">
-            <div class="cc-total" id="cc-total"></div>
-            <div class="cc-stats" id="cc-stats"></div>
-            <div class="cc-aging" id="cc-aging" style="display:none;"></div>
-            <div class="cc-sort" id="cc-sort">
-              <button class="cc-sortbtn sel" id="cc-sort-saldo" onclick="ccSort('saldo')">Mayor saldo</button>
-              <button class="cc-sortbtn" id="cc-sort-viejo" onclick="ccSort('viejo')">Más viejo</button>
-            </div>
-            <input class="cc-search" id="cc-q" placeholder="🔎 Buscar cliente…" oninput="ccFiltrar()">
-            <div style="font-size:11px;color:#9a8a78;font-weight:600;margin:-3px 0 9px;">Tocá un cliente para ver sus buckets, facturas impagas y el <b>extracto completo</b> (facturas + pagos) para validar el saldo.</div>
-            <div id="cc-lista"></div>
-            <div class="cc-note">El saldo es el de Xubio neto de cobros del día (corte <span id="cc-corte">—</span>). Los 🔴 y 🟡 arrastran apertura sin validar; se corrige cuando administración confirma la deuda real.</div>
-          </div>
-          <div id="cc-err" class="cc-loading" style="display:none;color:#B71C1C;">No se pudieron cargar las cuentas corrientes.</div>
-        </div>
-
         <!-- Loading -->
         <div id="tes-loading" style="text-align:center;padding:60px 20px;color:#9C7050;font-style:italic;">
           Cargando proyección…
@@ -14126,6 +14144,10 @@ input.canales-exp-input[type="date"] {
     <span class="tab-label">Duplicados</span>
   </button>
   <!-- v13.61.0 — destinos del sidebar desktop que faltaban (tckDesktopNav los muestra en PC) -->
+  <button class="tab-btn" id="tab-btn-cc" onclick="cambiarTab('cc')" style="display:none !important;">
+    <span class="tab-icon">📒</span>
+    <span class="tab-label">Ctas Ctes</span>
+  </button>
   <button class="tab-btn" id="tab-btn-tesoreria" onclick="cambiarTab('tesoreria')" style="display:none !important;">
     <span class="tab-icon">🏦</span>
     <span class="tab-label">Tesorería</span>
@@ -14184,6 +14206,11 @@ input.canales-exp-input[type="date"] {
         <div class="menu-mas-icon">🧾</div>
         <div class="menu-mas-lbl">Facturación</div>
         <div class="menu-mas-badge" id="menu-mas-fc-badge" style="display:none;background:#C62828;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;margin-top:3px;">0</div>
+      </button>
+      <!-- v13.63.0 — Tab Cuentas Corrientes (separado de Tesorería) -->
+      <button class="menu-mas-item" id="menu-mas-cc" onclick="cambiarTab('cc');cerrarMenuMas()">
+        <div class="menu-mas-icon">📒</div>
+        <div class="menu-mas-lbl">Ctas Ctes</div>
       </button>
       <!-- v12.20.0 — Tab Tesorería -->
       <button class="menu-mas-item" id="menu-mas-tesoreria" onclick="cambiarTab('tesoreria');cerrarMenuMas()">
@@ -16639,7 +16666,7 @@ const ROL_TABS = {
   dueno:       'ALL',
   operaciones: 'ALL',
   admin:       'ALL',
-  cobranzas:   ['pedidos','logistica','clientes','facturacion','tesoreria','rendiciones','acc-dup']
+  cobranzas:   ['pedidos','logistica','clientes','facturacion','cc','tesoreria','rendiciones','acc-dup']
 };
 
 function puedeVer(tab) {
@@ -19515,7 +19542,7 @@ function cambiarTab(tab) {
   _tabActual = tab;
 
   // Views — incluye logistica + stock (v12.15.0) + compras (v12.18.0) + tesoreria (v12.20.0)
-  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock','compras','tesoreria','margenes','facturacion'].forEach(function(t) {
+  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock','compras','cc','tesoreria','margenes','facturacion'].forEach(function(t) {
     var v = document.getElementById('view-' + t);
     var b = document.getElementById('tab-btn-' + t);
     if (v) v.classList.toggle('active', t === tab);
@@ -19524,7 +19551,7 @@ function cambiarTab(tab) {
 
   // El botón "Más" se marca activo si estás en un tab oculto
   var btnMas = document.getElementById('tab-btn-mas');
-  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes' || tab === 'rendiciones' || tab === 'acc-dup' || tab === 'prod-canon' || tab === 'ccanon' || tab === 'stock' || tab === 'compras' || tab === 'tesoreria' || tab === 'margenes' || tab === 'facturacion');
+  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes' || tab === 'rendiciones' || tab === 'acc-dup' || tab === 'prod-canon' || tab === 'ccanon' || tab === 'stock' || tab === 'compras' || tab === 'cc' || tab === 'tesoreria' || tab === 'margenes' || tab === 'facturacion');
 
   // v13.36.0 — Facturación: cargar al abrir
   if (tab === 'facturacion') {
@@ -19532,10 +19559,15 @@ function cambiarTab(tab) {
     var v = document.getElementById('view-facturacion'); if (v) v.scrollTop = 0;
   }
 
+  // v13.63.0 — Cuentas Corrientes: tab propio
+  if (tab === 'cc') {
+    if (typeof ccCargar === 'function') ccCargar();
+    var vcc = document.getElementById('view-cc'); if (vcc) vcc.scrollTop = 0;
+  }
+
   // v12.20.0 — Tesorería: cargar al abrir
   if (tab === 'tesoreria') {
     if (typeof tesCargar === 'function') tesCargar();
-    if (typeof ccCargar === 'function') ccCargar();
     var v = document.getElementById('view-tesoreria'); if (v) v.scrollTop = 0;
   }
 
@@ -19652,6 +19684,7 @@ function mostrarTabs() {
   _tckSetDisp('menu-mas-compras',     puedeVer('compras'));
   _tckSetDisp('menu-mas-margenes',    puedeVer('margenes'));
   _tckSetDisp('menu-mas-facturacion', puedeVer('facturacion'));
+  _tckSetDisp('menu-mas-cc',          puedeVer('cc'));
   _tckSetDisp('menu-mas-tesoreria',   puedeVer('tesoreria'));
   _tckSetDisp('menu-mas-clientes',    puedeVer('clientes'));
   _tckSetDisp('menu-mas-visitas',     puedeVer('gps'));
@@ -38181,7 +38214,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.62.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.63.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
