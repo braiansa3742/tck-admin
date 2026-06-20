@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.61.0 — 20/06/2026
+     TCK ADMIN — v13.62.0 — 20/06/2026
+     v13.62.0: RENDIR VIAJE (admin-driven) — nueva sección arriba del tab
+        Rendir: "Viajes sin rendir" (cerrados con entregas no confirmadas) +
+        panel de rendición por viaje (caja efectivo esperado/contado, transfer,
+        cheques, diferencia; factura por factura tildable). Al cerrar confirma
+        las entregas (rendicion_estado='confirmada' + monto_cobrado_real;
+        transfer_conciliada=true en transferencias) -> los crons postean solos
+        a Xubio. Reemplaza la carga manual de cobranzas. El flujo viejo
+        (chofer envía) queda debajo. Prefijo rv*, no toca admRend*.
      v13.61.0: CTAS CTES — (1) EXTRACTO: toggle Impagos/Movimientos en el
         detalle; Movimientos trae el mayor completo del cliente (facturas +
         cobranzas + saldo corrido, vw_cc_extracto) para validar el saldo.
@@ -13209,7 +13217,19 @@ input.canales-exp-input[type="date"] {
         <button onclick="admRendCargar()" style="background:rgba(255,255,255,.2);border:none;border-radius:50%;width:34px;height:34px;color:#fff;cursor:pointer;font-size:16px;">🔄</button>
       </div>
 
-      <!-- Sección 1: Pendientes de confirmar -->
+      <!-- v13.62 — Rendir viaje (admin-driven) -->
+      <div class="rv-wrap">
+        <div class="rv-col rv-lista-col">
+          <div class="rv-col-hd">🚚 Viajes sin rendir <span class="rv-badge" id="rv-cnt">0</span></div>
+          <div id="rv-lista"><div class="rv-empty">Cargando…</div></div>
+        </div>
+        <div class="rv-col rv-panel-col">
+          <div class="rv-col-hd">💵 Rendición del viaje <span class="rv-pill" id="rv-vtit">elegí un viaje</span></div>
+          <div id="rv-panel"><div class="rv-empty">Tocá un viaje de la izquierda para rendirlo.</div></div>
+        </div>
+      </div>
+
+      <!-- Sección 1: Pendientes de confirmar (chofer envía) -->
       <div class="adm-rend-section pendientes" id="adm-rend-sec-pend">
         <div class="adm-rend-section-hdr">
           <div class="adm-rend-section-tit">⏳ Esperando confirmación</div>
@@ -13661,6 +13681,48 @@ input.canales-exp-input[type="date"] {
         .cc-gest-log{margin-top:9px;font-size:11px;color:#7a7167}
         .cc-gest-log .g{padding:3px 0;border-top:1px dashed #eee}
         .cc-gest-badge{font-size:10px;font-weight:800;color:#1E8449;background:#E8F5E9;border-radius:18px;padding:2px 7px;white-space:nowrap}
+/* v13.62 — Rendir viaje (admin-driven) */
+.rv-wrap{display:grid;grid-template-columns:300px 1fr;gap:14px;margin-bottom:18px}
+@media(max-width:760px){.rv-wrap{grid-template-columns:1fr}}
+.rv-col{background:#FAF4EC;border:1px solid #e3ddd2;border-radius:14px;overflow:hidden;align-self:start}
+.rv-col-hd{background:#1A0800;color:#fff;padding:11px 14px;font-weight:800;letter-spacing:.3px;display:flex;align-items:center;gap:8px;font-size:15px}
+.rv-badge{background:#B45309;border-radius:18px;font-size:12px;padding:2px 9px;color:#fff}
+.rv-pill{background:#D4A574;color:#1A0800;font-size:11px;font-weight:900;padding:2px 9px;border-radius:18px;text-transform:uppercase}
+.rv-empty{padding:34px 16px;text-align:center;color:#9a8a78;font-weight:700;font-size:14px}
+.rv-sub{font-size:11px;color:#9a8a78;padding:10px 14px 4px;text-transform:uppercase;font-weight:800;letter-spacing:.3px}
+.rv-viaje{padding:11px 14px;border-bottom:1px solid #e3ddd2;cursor:pointer}
+.rv-viaje:hover{background:#fff}
+.rv-viaje.sel{background:#fff;border-left:4px solid #B45309}
+.rv-viaje .t{font-weight:800;font-size:15px;color:#1A0800}
+.rv-viaje .m{font-size:12px;color:#9a8a78;font-weight:600;margin-top:1px}
+.rv-viaje .tag{font-size:11px;font-weight:800;color:#B45309;margin-top:2px}
+.rv-caja{padding:14px;display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.rv-box{background:#fff;border:1px solid #e3ddd2;border-radius:10px;padding:9px 11px}
+.rv-box .l{font-size:10px;font-weight:800;text-transform:uppercase;color:#9a8a78;letter-spacing:.3px}
+.rv-box .v{font-size:19px;font-weight:900;margin-top:2px;color:#1A0800}
+.rv-box.tra .v{color:#1E8449}.rv-box.che .v{color:#B45309}
+.rv-box input{width:100%;border:1.5px solid #D4A574;border-radius:7px;padding:4px 7px;font-size:18px;font-weight:900;color:#1A0800;margin-top:2px;font-family:inherit}
+.rv-dif{margin:0 14px 12px;padding:9px 12px;border-radius:10px;font-weight:800;text-align:center;font-size:14px}
+.rv-dif.ok{background:#E8F5E9;color:#1E8449}.rv-dif.bad{background:#FDECEA;color:#C62828}
+.rv-fac{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px dashed #e3ddd2}
+.rv-fac .info{flex:1;min-width:0}
+.rv-fac .cli{font-weight:800;font-size:15px;color:#1A0800}
+.rv-fac .meta{font-size:11px;color:#9a8a78;font-weight:600}
+.rv-fac .mon{text-align:right;white-space:nowrap}
+.rv-fac .mon .n{font-weight:900;font-size:15px;color:#1A0800}
+.rv-fac .mon .f{font-size:10px;font-weight:800;text-transform:uppercase}
+.rv-f-efe{color:#1A0800}.rv-f-tra{color:#1E8449}.rv-f-che{color:#B45309}.rv-f-ccte{color:#C62828}
+.rv-chk{width:30px;height:30px;border-radius:8px;border:2px solid #e3ddd2;display:flex;align-items:center;justify-content:center;font-weight:900;cursor:pointer;flex-shrink:0;color:transparent}
+.rv-chk.on{background:#1E8449;border-color:#1E8449;color:#fff}
+.rv-chk.fiado{border-color:#C62828;color:#C62828;cursor:default}
+.rv-fac.done{opacity:.62}
+.rv-fac.done .cli{text-decoration:line-through}
+.rv-fac.fiado .cli{color:#C62828}
+.rv-footer{padding:14px;display:flex;gap:9px;align-items:center;border-top:1px solid #e3ddd2}
+.rv-prog{flex:1;font-weight:800;font-size:13px;color:#9a8a78}
+.rv-btn{background:#1A0800;color:#fff;border:none;border-radius:10px;padding:12px 18px;font-family:inherit;font-weight:800;font-size:15px;cursor:pointer}
+.rv-btn[disabled]{background:#cfc4b2;cursor:not-allowed}
+.rv-note{font-size:11px;color:#9a8a78;padding:0 14px 14px;font-weight:600;line-height:1.4}
         .cc-btn-incob{width:100%;background:#455A64;color:#fff;border:none;border-radius:9px;padding:9px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;cursor:pointer}
         .cc-btn-undo{width:100%;background:#fff;color:#1E8449;border:1.5px solid #1E8449;border-radius:9px;padding:9px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;cursor:pointer}
         .cc-stat .l{font-size:11px;font-weight:700;color:#7a7167;text-transform:uppercase;letter-spacing:.3px}
@@ -15622,6 +15684,179 @@ async function admRendChequearCierre() {
 }
 // ═══════════════════════════════════════════════════════════════
 // Fin v8.3 admin — TAB RENDICIONES
+
+// ═══════════════════════════════════════════════════════════
+// v13.62 — RENDIR VIAJE (admin-driven). Reusa el motor de cobros:
+// confirmar entrega -> rendicion_estado='confirmada' + monto_cobrado_real
+// (+ transfer_conciliada=true en transferencias) -> cron postea a Xubio.
+// ═══════════════════════════════════════════════════════════
+var _rvViajes = [];        // viajes cerrados con entregas pendientes
+var _rvSel = null;         // viaje elegido
+var _rvEnt = [];           // entregas del viaje elegido
+var _rvCobrada = {};       // entrega.id -> true (admin tildó que entró)
+var _rvEfeContado = null;  // efectivo que contó admin
+var _rvCerrando = false;
+
+function _rvFmt(n){ return '$' + Math.round(Number(n)||0).toLocaleString('es-AR'); }
+function _rvNum(n){ return Number(n)||0; }
+function _rvEsc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function _rvFecha(f){ if(!f) return ''; var p=String(f).slice(0,10).split('-'); return p.length===3?(p[2]+'/'+p[1]):f; }
+function _rvFormaLbl(f){ return ({efectivo:'EFECTIVO',transferencia:'TRANSFER.',cheque:'CHEQUE',cuenta_corriente:'FIADO'})[f]||(f||'—').toUpperCase(); }
+function _rvFormaCls(f){ return ({efectivo:'rv-f-efe',transferencia:'rv-f-tra',cheque:'rv-f-che',cuenta_corriente:'rv-f-ccte'})[f]||''; }
+
+async function rvCargar(){
+  var lista=document.getElementById('rv-lista');
+  if(lista) lista.innerHTML='<div class="rv-empty">Cargando…</div>';
+  try{
+    var viajes = await _tesFetch("viajes?estado=eq.cerrado&order=fecha_salida.desc&limit=40&select=id,chofer,zona,fecha_salida,total_pedidos,monto_total");
+    viajes = viajes || [];
+    if(!viajes.length){ _rvViajes=[]; rvRenderLista(); return; }
+    var ids = viajes.map(function(v){ return '"'+v.id+'"'; }).join(',');
+    var ents = await _tesFetch("entregas?viaje_id=in.("+ids+")&estado=eq.entregado&select=id,viaje_id,cliente,ciudad,pedido_id,monto,forma_cobro,rendicion_estado,monto_cobrado_real&limit=3000");
+    ents = ents || [];
+    // agrupar por viaje, contar pendientes (no confirmadas)
+    var porViaje={};
+    ents.forEach(function(e){
+      var k=e.viaje_id; (porViaje[k]=porViaje[k]||[]).push(e);
+    });
+    _rvViajes = viajes.map(function(v){
+      var es = porViaje[v.id] || [];
+      var pend = es.filter(function(e){ return e.rendicion_estado!=='confirmada'; });
+      v._ent = es; v._pend = pend.length;
+      v._aCobrarEfe = pend.filter(function(e){return e.forma_cobro==='efectivo';}).reduce(function(a,e){return a+_rvNum(e.monto);},0);
+      return v;
+    }).filter(function(v){ return v._pend > 0; });
+    rvRenderLista();
+  }catch(e){
+    console.error('[rv] cargar', e);
+    if(lista) lista.innerHTML='<div class="rv-empty">Error al cargar. 🔄</div>';
+  }
+}
+
+function rvRenderLista(){
+  var el=document.getElementById('rv-lista'); if(!el) return;
+  var cnt=document.getElementById('rv-cnt'); if(cnt) cnt.textContent=_rvViajes.length;
+  if(!_rvViajes.length){ el.innerHTML='<div class="rv-empty">✓ No hay viajes pendientes de rendir.</div>'; return; }
+  el.innerHTML=_rvViajes.map(function(v){
+    var sel=(_rvSel && _rvSel.id===v.id)?' sel':'';
+    return '<div class="rv-viaje'+sel+'" onclick="rvAbrir(\''+v.id+'\')">'+
+      '<div class="t">'+_rvEsc(v.chofer||'—')+' · '+_rvEsc(v.zona||'')+'</div>'+
+      '<div class="m">'+_rvFecha(v.fecha_salida)+' · '+v._pend+' sin confirmar · '+_rvFmt(v.monto_total)+'</div>'+
+      (v._aCobrarEfe>0?'<div class="tag">efectivo a contar: '+_rvFmt(v._aCobrarEfe)+'</div>':'')+
+    '</div>';
+  }).join('');
+}
+
+function rvAbrir(id){
+  _rvSel=_rvViajes.find(function(v){return v.id===id;});
+  if(!_rvSel) return;
+  // solo entregas pendientes (no confirmadas)
+  _rvEnt=(_rvSel._ent||[]).filter(function(e){ return e.rendicion_estado!=='confirmada'; });
+  _rvCobrada={}; _rvEfeContado=null;
+  // por defecto: todo lo no-fiado viene tildado (sin fiado: si se entregó, se cobró)
+  _rvEnt.forEach(function(e){ if(e.forma_cobro!=='cuenta_corriente') _rvCobrada[e.id]=true; });
+  var tit=document.getElementById('rv-vtit'); if(tit) tit.textContent=(_rvSel.chofer||'')+' · '+_rvFecha(_rvSel.fecha_salida);
+  rvRenderPanel(); rvRenderLista();
+}
+
+function rvTildar(id){
+  var e=_rvEnt.find(function(x){return String(x.id)===String(id);});
+  if(e && e.forma_cobro==='cuenta_corriente') return; // fiado no se tilda
+  _rvCobrada[id]=!_rvCobrada[id]; rvRenderPanel();
+}
+function rvSetContado(v){ _rvEfeContado=Number(String(v).replace(/[^\d-]/g,''))||0; rvRenderPanel(); }
+
+function _rvSum(forma, soloCobrada){
+  return _rvEnt.filter(function(e){
+    return e.forma_cobro===forma && (!soloCobrada || _rvCobrada[e.id]);
+  }).reduce(function(a,e){return a+_rvNum(e.monto);},0);
+}
+
+function rvRenderPanel(){
+  var el=document.getElementById('rv-panel'); if(!el) return;
+  if(!_rvSel){ el.innerHTML='<div class="rv-empty">Tocá un viaje para rendirlo.</div>'; return; }
+  if(!_rvEnt.length){ el.innerHTML='<div class="rv-empty">Este viaje no tiene entregas pendientes.</div>'; return; }
+
+  var efeEsp=_rvSum('efectivo', true);
+  var tra=_rvSum('transferencia', true);
+  var che=_rvSum('cheque', true);
+  var contado=(_rvEfeContado===null)?efeEsp:_rvEfeContado;
+  var dif=contado-efeEsp;
+
+  var html='<div class="rv-caja">'+
+    '<div class="rv-box efe"><div class="l">Efectivo esperado</div><div class="v">'+_rvFmt(efeEsp)+'</div></div>'+
+    '<div class="rv-box efe"><div class="l">Efectivo contado</div>'+
+      '<input value="'+Math.round(contado).toLocaleString("es-AR")+'" inputmode="decimal" oninput="rvSetContado(this.value)"></div>'+
+    '<div class="rv-box tra"><div class="l">Transferencias</div><div class="v">'+_rvFmt(tra)+'</div></div>'+
+    '<div class="rv-box che"><div class="l">Cheques</div><div class="v">'+_rvFmt(che)+'</div></div>'+
+  '</div>';
+  html+='<div class="rv-dif '+(dif===0?'ok':'bad')+'">'+
+    (dif===0?'✓ La caja de efectivo cierra':(dif>0?'Sobran ':'Faltan ')+_rvFmt(Math.abs(dif))+' en efectivo')+'</div>';
+
+  html+='<div class="rv-sub">Factura por factura — destildá lo que NO entró</div>';
+  _rvEnt.forEach(function(e){
+    var fiado=e.forma_cobro==='cuenta_corriente';
+    var on=!!_rvCobrada[e.id];
+    html+='<div class="rv-fac'+(on?' done':'')+(fiado?' fiado':'')+'">'+
+      (fiado
+        ? '<div class="rv-chk fiado" title="Fiado autorizado">$</div>'
+        : '<div class="rv-chk'+(on?' on':'')+'" onclick="rvTildar(\''+e.id+'\')">✓</div>')+
+      '<div class="info"><div class="cli">'+_rvEsc(e.cliente||'—')+'</div>'+
+        '<div class="meta">'+_rvEsc(e.ciudad||'')+(e.pedido_id?' · '+_rvEsc(e.pedido_id):'')+'</div></div>'+
+      '<div class="mon"><div class="n">'+_rvFmt(e.monto)+'</div>'+
+        '<div class="f '+_rvFormaCls(e.forma_cobro)+'">'+_rvFormaLbl(e.forma_cobro)+'</div></div>'+
+    '</div>';
+  });
+
+  var nCob=_rvEnt.filter(function(e){return _rvCobrada[e.id];}).length;
+  var nFiado=_rvEnt.filter(function(e){return e.forma_cobro==='cuenta_corriente';}).length;
+  var listo = (dif===0) && !_rvCerrando;
+  html+='<div class="rv-footer">'+
+    '<div class="rv-prog">'+nCob+' cobradas'+(nFiado?' · '+nFiado+' fiado':'')+'</div>'+
+    '<button class="rv-btn" '+(listo?'':'disabled')+' onclick="rvCerrar()">'+(_rvCerrando?'Cerrando…':'Cerrar rendición → Xubio')+'</button>'+
+  '</div>'+
+  '<div class="rv-note">Al cerrar: las cobradas quedan confirmadas y se postean solas a Xubio (efectivo y transferencias). Cheques quedan registrados. Lo que destildaste queda pendiente.</div>';
+
+  el.innerHTML=html;
+}
+
+async function rvCerrar(){
+  if(_rvCerrando || !_rvSel) return;
+  var efeEsp=_rvSum('efectivo', true);
+  var contado=(_rvEfeContado===null)?efeEsp:_rvEfeContado;
+  if(contado-efeEsp!==0){ alert('La caja de efectivo no cierra. Ajustá el contado o destildá lo que no entró.'); return; }
+  var aConfirmar=_rvEnt.filter(function(e){ return _rvCobrada[e.id] || e.forma_cobro==='cuenta_corriente'; });
+  if(!aConfirmar.length){ alert('No hay nada para confirmar.'); return; }
+  if(!confirm('Confirmás la rendición de '+aConfirmar.length+' entregas de '+(_rvSel.chofer||'')+'?')) return;
+
+  _rvCerrando=true; rvRenderPanel();
+  var ok=0, err=0, ahora=new Date().toISOString(), quien=(typeof usuarioActual!=='undefined'&&usuarioActual)?usuarioActual:'admin';
+  for(var i=0;i<aConfirmar.length;i++){
+    var e=aConfirmar[i];
+    var fiado=e.forma_cobro==='cuenta_corriente';
+    var monto=_rvNum(e.monto);
+    var payload={
+      rendicion_estado:'confirmada',
+      rendicion_confirmada_en:ahora,
+      rendicion_confirmada_por:quien,
+      monto_cobrado_real: fiado?0:monto,
+      rendicion_monto_recibido: fiado?0:monto,
+      rendicion_diferencia:0
+    };
+    if(e.forma_cobro==='transferencia') payload.transfer_conciliada=true;
+    try{
+      await sbFetch('entregas?id=eq.'+encodeURIComponent(e.id),{method:'PATCH',body:JSON.stringify(payload),prefer:'return=minimal'});
+      ok++;
+    }catch(ex){ console.error('[rv] confirmar',e.id,ex); err++; }
+  }
+  _rvCerrando=false;
+  if(typeof toast==='function') toast(err?('Cerrado con '+err+' errores ('+ok+' ok)'):('✓ Rendición cerrada — '+ok+' entregas'), err?'err':'ok');
+  else alert(err?('Cerrado con '+err+' errores ('+ok+' confirmadas)'):('Rendición cerrada: '+ok+' entregas confirmadas. Se postearán a Xubio en la próxima corrida.'));
+  _rvSel=null; _rvEnt=[];
+  await rvCargar();
+  var p=document.getElementById('rv-panel'); if(p) p.innerHTML='<div class="rv-empty">✓ Listo. Elegí otro viaje para seguir.</div>';
+}
+
 // ═══════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════
@@ -19346,6 +19581,7 @@ function cambiarTab(tab) {
 
   // v8.3 admin: tab Rendiciones — cargar al abrir
   if (tab === 'rendiciones') {
+    if (typeof rvCargar === 'function') rvCargar();
     if (typeof admRendCargar === 'function') admRendCargar();
     var v = document.getElementById('view-rendiciones'); if (v) v.scrollTop = 0;
   }
@@ -37945,7 +38181,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.61.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.62.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
