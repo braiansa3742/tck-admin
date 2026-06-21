@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.66.0 — 21/06/2026
+     TCK ADMIN — v13.67.0 — 21/06/2026
+     v13.67.0: PDF OFICIAL de Xubio — botón 📄 en cada factura del Centro que
+        pide a Xubio el PDF oficial (con el QR correcto generado por Xubio) vía
+        Apps Script accion=facturaPdfXubio -> /imprimirPDF. La reconstrucción
+        local queda para vista rápida; el oficial es el que se manda al cliente.
      v13.66.0: FIX QR factura — el documento del receptor en el QR de AFIP
         estaba hardcodeado en 80 (CUIT) con nro 0 para Consumidor Final, y
         AFIP lo registra como 99 (CF) => el QR no validaba al escanear. Ahora
@@ -37678,6 +37682,7 @@ function fcRender() {
                   : '<span class="fc-chip verde">FC ' + _fcEsc(s.xubio_factura_nro || '') + '</span>')
                 + '<button class="fc-fbtn" onclick="_fcVerFactura(\'' + s.pedido_id + '\')" title="Ver factura">👁</button>'
                 + '<button class="fc-fbtn" onclick="_fcImprimirFactura(\'' + s.pedido_id + '\')" title="Imprimir / descargar">🖨</button>'
+                + '<button class="fc-fbtn" onclick="_fcPdfOficial(' + ((s.xubio_factura_id || 0)) + ')" title="PDF oficial de Xubio">📄</button>'
               : '<span class="fc-chip rojo">SIN FACTURA</span>') +
             '</div>';
         });
@@ -38145,6 +38150,18 @@ async function _fcAbrirFacturas(pids, autoPrint) {
 
 function _fcVerFactura(pid) { return _fcAbrirFacturas([pid], false); }
 function _fcImprimirFactura(pid) { return _fcAbrirFacturas([pid], true); }
+function _fcPdfOficial(txId) {
+  txId = Number(txId) || 0;
+  if (!txId) { toast('No tengo el ID de la factura en Xubio', 'err'); return; }
+  toast('📄 Pidiendo el PDF oficial a Xubio...', 'ok');
+  fetch(APPS_SCRIPT_URL + '?accion=facturaPdfXubio&id=' + txId)
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (j && j.status === 'ok' && j.urlPdf) { window.open(j.urlPdf, '_blank'); }
+      else { alert('No se pudo obtener el PDF oficial de Xubio.\n\n' + ((j && j.message) || 'Error desconocido')); }
+    })
+    .catch(function (e) { alert('Error pidiendo el PDF: ' + e); });
+}
 function _fcImprimirTodasFecha() {
   var facturadas = (_fcCache.salidas || []).filter(function (s) { return s.xubio_factura_id; }).map(function (s) { return s.pedido_id; });
   if (!facturadas.length) { toast('No hay facturas en esta fecha', 'ok'); return; }
@@ -38276,7 +38293,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.66.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.67.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
