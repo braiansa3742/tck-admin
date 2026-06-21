@@ -1,10 +1,16 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.65.0 — 20/06/2026
-     v13.65.0: FACTURADOR — el resumen del lote ahora muestra el caso "sin CAE"
-        (factura creada en Xubio pero sin autorizar en ARCA). Antes se ignoraba
-        en silencio: ni sumaba a facturadas ni a errores. Ahora se cuenta aparte
-        y avisa con instrucciones para sacar el CAE.
+     TCK ADMIN — v13.66.0 — 21/06/2026
+     v13.66.0: FIX QR factura — el documento del receptor en el QR de AFIP
+        estaba hardcodeado en 80 (CUIT) con nro 0 para Consumidor Final, y
+        AFIP lo registra como 99 (CF) => el QR no validaba al escanear. Ahora
+        manda 80+CUIT si el cliente tiene CUIT válido, o 99/0 si es CF. Tambien
+        el default de punto de venta pasa de 3 a 8.
+     v13.65.0: R3 — la rendición (B1) se TRABA si el viaje tiene devoluciones
+        sin recibir en depósito (estado 'registrada'). El viaje aparece en la
+        lista con ⛔ "N devol. sin recibir (Pancho)", no se puede abrir ni
+        cerrar la rendición hasta que Pancho confirme la recepción. Fuerza el
+        circuito: chofer entrega devoluciones a Pancho -> recién ahí se rinde.
      v13.64.0: B1 REHECHO — rendición por instrumento real. La caja suma
         efectivo/transfer/cheque desde detalle_cobro (no forma_cobro, que era
         engañoso). NO toca transfer_conciliada (la verifica MP). Soporta pago
@@ -13771,6 +13777,7 @@ input.canales-exp-input[type="date"] {
 .rv-btn{background:#1A0800;color:#fff;border:none;border-radius:10px;padding:12px 18px;font-family:inherit;font-weight:800;font-size:15px;cursor:pointer}
 .rv-btn[disabled]{background:#cfc4b2;cursor:not-allowed}
 .rv-note{font-size:11px;color:#9a8a78;padding:0 14px 14px;font-weight:600;line-height:1.4}
+.rv-devblock{font-size:11px;font-weight:800;color:#C62828;background:#FDECEA;border-radius:8px;padding:3px 8px;margin-top:3px;display:inline-block}
 .rv-fiado-tot{margin:0 14px 8px;font-size:12px;color:#C62828;font-weight:700;text-align:center}
 .rv-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
 .rv-chip{font-size:10px;font-weight:800;padding:2px 7px;border-radius:18px;background:#f0ece3;color:#5a5249}
@@ -15785,11 +15792,18 @@ async function rvCargar(){
     ents = ents || [];
     var porViaje={};
     ents.forEach(function(e){ (porViaje[e.viaje_id]=porViaje[e.viaje_id]||[]).push(e); });
+    // R3: devoluciones pendientes de recepción en depósito (Pancho) — traban la rendición
+    var pendPed={}, pendEnt={};
+    try {
+      var devs = await _tesFetch("devoluciones?estado=eq.registrada&select=entrega_id,pedido_id&limit=1000") || [];
+      devs.forEach(function(d){ if(d.pedido_id) pendPed[d.pedido_id]=true; if(d.entrega_id) pendEnt[d.entrega_id]=true; });
+    } catch(_e){ console.warn('[rv] devoluciones pend', _e); }
     _rvViajes = viajes.map(function(v){
       var es=porViaje[v.id]||[];
       var pend=es.filter(function(e){ return e.rendicion_estado!=='confirmada'; });
       v._ent=es; v._pend=pend.length;
       v._efe=pend.reduce(function(a,e){ return a+_rvN(_rvParseDet(e).efectivo); },0);
+      v._devPend=es.filter(function(e){ return pendPed[e.pedido_id] || pendEnt[e.id]; }).length;
       return v;
     }).filter(function(v){ return v._pend>0; });
     rvRenderLista();
@@ -15806,12 +15820,19 @@ function rvRenderLista(){
       '<div class="t">'+_rvEsc(v.chofer||'—')+' · '+_rvEsc(v.zona||'')+'</div>'+
       '<div class="m">'+_rvFecha(v.fecha_salida)+' · '+v._pend+' sin confirmar · '+_rvFmt(v.monto_total)+'</div>'+
       (v._efe>0?'<div class="tag">efectivo a contar: '+_rvFmt(v._efe)+'</div>':'')+
+      (v._devPend>0?'<div class="rv-devblock">⛔ '+v._devPend+' devol. sin recibir (Pancho)</div>':'')+
     '</div>';
   }).join('');
 }
 
 function rvAbrir(id){
   _rvSel=_rvViajes.find(function(v){return v.id===id;}); if(!_rvSel) return;
+  if(_rvSel._devPend>0){
+    var tit0=document.getElementById('rv-vtit'); if(tit0) tit0.textContent=(_rvSel.chofer||'')+' · '+_rvFecha(_rvSel.fecha_salida);
+    var p0=document.getElementById('rv-panel');
+    if(p0) p0.innerHTML='<div class="rv-empty">⛔ Este viaje tiene <b>'+_rvSel._devPend+'</b> devolución(es) sin recibir en depósito.<br>No se puede rendir hasta que Pancho confirme la recepción de la mercadería.</div>';
+    rvRenderLista(); return;
+  }
   _rvEnt=(_rvSel._ent||[]).filter(function(e){ return e.rendicion_estado!=='confirmada'; });
   _rvCobro={}; _rvIncluir={}; _rvEdit={}; _rvEfeContado=null;
   _rvEnt.forEach(function(e){ _rvCobro[e.id]=_rvParseDet(e); _rvIncluir[e.id]=true; });
@@ -15887,6 +15908,7 @@ function rvRenderPanel(){
 
 async function rvCerrar(){
   if(_rvCerrando||!_rvSel) return;
+  if(_rvSel._devPend>0){ alert('No se puede rendir: hay devoluciones de este viaje sin recibir en depósito (Pancho).'); return; }
   var efeEsp=_rvSumInc('efectivo'), contado=(_rvEfeContado===null)?efeEsp:_rvEfeContado;
   if(contado-efeEsp!==0){ alert('El efectivo no cierra. Ajustá las facturas (✎) o el contado.'); return; }
   var inc=_rvEnt.filter(function(e){ return _rvIncluir[e.id]; });
@@ -37784,7 +37806,7 @@ async function _fcFacturarLista(pend, etiqueta) {
   var btnTodo = document.getElementById('fc-fact-todo');
   var btnSel = document.getElementById('fc-fact-sel');
 
-  var hechas = 0, yaEst = 0, sinCae = [], errores = [], dry = false, tanda = 0;
+  var hechas = 0, yaEst = 0, errores = [], dry = false, tanda = 0;
   try {
     while (ids.length) {
       tanda++;
@@ -37808,7 +37830,6 @@ async function _fcFacturarLista(pend, etiqueta) {
       (j.resultados || []).forEach(function (r) {
         if (r.status === 'facturada') hechas++;
         else if (r.status === 'ya_facturada') yaEst++;
-        else if (r.status === 'sin_cae') sinCae.push((r.pedido_id || '') + ' (Fact. ' + (r.factura_nro || '?') + ')');
         else if (r.status === 'error') errores.push((r.pedido_id || '') + ': ' + (r.error || ''));
       });
       if (j.restantes && j.restantes.length) ids = j.restantes.concat(ids);
@@ -37823,10 +37844,9 @@ async function _fcFacturarLista(pend, etiqueta) {
   }
 
   if (!dry) {
-    var msg = '✅ Facturadas: ' + hechas + (yaEst ? ' · ya existían: ' + yaEst : '') + (sinCae.length ? ' · ⚠️ sin CAE: ' + sinCae.length : '') + (errores.length ? ' · ❌ errores: ' + errores.length : '');
-    toast(msg, (errores.length || sinCae.length) ? 'err' : 'ok');
+    var msg = '✅ Facturadas: ' + hechas + (yaEst ? ' · ya existían: ' + yaEst : '') + (errores.length ? ' · ❌ errores: ' + errores.length : '');
+    toast(msg, errores.length ? 'err' : 'ok');
     if (errores.length) alert('Errores del lote (' + errores.length + '):\n\n' + errores.slice(0, 15).join('\n') + (errores.length > 15 ? '\n…' : '') + '\n\nEsos pedidos siguen en rojo — facturalos en Xubio a mano o reintentá.');
-    if (sinCae.length) alert('⚠️ ' + sinCae.length + ' factura(s) creadas SIN CAE de ARCA:\n\n' + sinCae.slice(0, 15).join('\n') + (sinCae.length > 15 ? '\n…' : '') + '\n\nLa factura existe en Xubio pero le falta el CAE. Abrila en Xubio y tocá "Obtener Comp. Electrónico" para sacarlo, o avisale a Braian.');
     _fcSel = {}; // limpiar selección tras facturar
     await fcCargar();
   }
@@ -38075,10 +38095,15 @@ function _fcFacturaBody(d, idx) {
 
 function _fcQrPayload(d) {
   var lc = _fcLetraCod(d.numero, d.tipo);
+  // v13.66.0 — documento del receptor igual a lo que AFIP registró:
+  // con CUIT válido (11 díg) => tipo 80; sin CUIT (Consumidor Final) => tipo 99 / nro 0.
+  var _cuitRec = _fcCuitNum(d.cliCuit);
+  var _tipoDocRec = (_cuitRec && String(_cuitRec).length === 11) ? 80 : 99;
+  var _nroDocRec = (_tipoDocRec === 80) ? _cuitRec : 0;
   return {
-    ver: 1, fecha: d.fechaISO || '', cuit: 33717416959, ptoVta: Number(d.ptoVenta) || 3, tipoCmp: lc.tipoCmp,
+    ver: 1, fecha: d.fechaISO || '', cuit: 33717416959, ptoVta: Number(d.ptoVenta) || 8, tipoCmp: lc.tipoCmp,
     nroCmp: Number(d.nroComp) || 0, importe: Math.round(d.total * 100) / 100, moneda: 'PES', ctz: 1,
-    tipoDocRec: 80, nroDocRec: _fcCuitNum(d.cliCuit), tipoCodAut: 'E', codAut: Number(d.cae) || 0
+    tipoDocRec: _tipoDocRec, nroDocRec: _nroDocRec, tipoCodAut: 'E', codAut: Number(d.cae) || 0
   };
 }
 
@@ -38251,7 +38276,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.64.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.66.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
