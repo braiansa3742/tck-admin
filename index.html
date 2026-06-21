@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.67.0 — 21/06/2026
-     v13.67.0: PDF OFICIAL de Xubio — botón 📄 en cada factura del Centro que
+     TCK ADMIN — v13.68.0 — 21/06/2026
+     v13.68.0: PDF OFICIAL de Xubio — botón 📄 en cada factura del Centro que
         pide a Xubio el PDF oficial (con el QR correcto generado por Xubio) vía
         Apps Script accion=facturaPdfXubio -> /imprimirPDF. La reconstrucción
         local queda para vista rápida; el oficial es el que se manda al cliente.
@@ -37500,9 +37500,9 @@ function _fcRefrescarBtnImp() {
   b.textContent = '🖨 Imprimir tildadas (' + n + ')';
 }
 function _fcImprimirTildadas() {
-  var ids = (_fcCache.salidas || []).filter(function (s) { return s.xubio_factura_id && _fcSelImp[s.pedido_id]; }).map(function (s) { return s.pedido_id; });
+  var ids = (_fcCache.salidas || []).filter(function (s) { return s.xubio_factura_id && _fcSelImp[s.pedido_id]; }).map(function (s) { return s.xubio_factura_id; });
   if (!ids.length) { toast('Tildá al menos una factura', 'ok'); return; }
-  return _fcAbrirFacturas(ids, true);
+  return _fcOficialLote(ids);
 }
 
 function _fcMoneda(n) {
@@ -37680,8 +37680,6 @@ function fcRender() {
               ? ((_fcCache.caeMap && (s.pedido_id in _fcCache.caeMap) && !_fcCache.caeMap[s.pedido_id])
                   ? '<span class="fc-chip rojo" title="El comprobante existe en Xubio pero ARCA no le dio CAE">⚠️ CAE pendiente</span>'
                   : '<span class="fc-chip verde">FC ' + _fcEsc(s.xubio_factura_nro || '') + '</span>')
-                + '<button class="fc-fbtn" onclick="_fcVerFactura(\'' + s.pedido_id + '\')" title="Ver factura">👁</button>'
-                + '<button class="fc-fbtn" onclick="_fcImprimirFactura(\'' + s.pedido_id + '\')" title="Imprimir / descargar">🖨</button>'
                 + '<button class="fc-fbtn" onclick="_fcPdfOficial(' + ((s.xubio_factura_id || 0)) + ')" title="PDF oficial de Xubio">📄</button>'
               : '<span class="fc-chip rojo">SIN FACTURA</span>') +
             '</div>';
@@ -38150,22 +38148,102 @@ async function _fcAbrirFacturas(pids, autoPrint) {
 
 function _fcVerFactura(pid) { return _fcAbrirFacturas([pid], false); }
 function _fcImprimirFactura(pid) { return _fcAbrirFacturas([pid], true); }
+// ── PDF OFICIAL DE XUBIO — única fuente de facturas (v13.68.0) ──
+var _PDFLIB_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js';
+var _pdfLibProm = null;
+function _fcCargarPdfLib() {
+  if (window.PDFLib) return Promise.resolve(window.PDFLib);
+  if (_pdfLibProm) return _pdfLibProm;
+  _pdfLibProm = new Promise(function (res, rej) {
+    var sc = document.createElement('script');
+    sc.src = _PDFLIB_URL;
+    sc.onload = function () { res(window.PDFLib); };
+    sc.onerror = function () { _pdfLibProm = null; rej(new Error('no se pudo cargar pdf-lib')); };
+    document.head.appendChild(sc);
+  });
+  return _pdfLibProm;
+}
+function _fcB64Bytes(b64) {
+  var bin = atob(b64), len = bin.length, u8 = new Uint8Array(len);
+  for (var i = 0; i < len; i++) u8[i] = bin.charCodeAt(i);
+  return u8;
+}
+// Baja un PDF oficial (bytes) vía relay del Apps Script. Devuelve {ok, bytes, nombre, txId}.
+function _fcBajarOficial(txId) {
+  return fetch(APPS_SCRIPT_URL + '?accion=facturaPdfXubio&b64=1&id=' + txId)
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (j && j.status === 'ok' && j.b64) return { ok: true, bytes: _fcB64Bytes(j.b64), nombre: j.nombre || ('factura_' + txId + '.pdf'), txId: txId };
+      return { ok: false, txId: txId, msg: (j && j.message) || 'sin PDF' };
+    })
+    .catch(function (e) { return { ok: false, txId: txId, msg: String(e) }; });
+}
+// SINGLE: abre el PDF oficial de Xubio en una pestaña (relay → blob, sin depender de CORS).
 function _fcPdfOficial(txId) {
   txId = Number(txId) || 0;
   if (!txId) { toast('No tengo el ID de la factura en Xubio', 'err'); return; }
   toast('📄 Pidiendo el PDF oficial a Xubio...', 'ok');
-  fetch(APPS_SCRIPT_URL + '?accion=facturaPdfXubio&id=' + txId)
-    .then(function (r) { return r.json(); })
-    .then(function (j) {
-      if (j && j.status === 'ok' && j.urlPdf) { window.open(j.urlPdf, '_blank'); }
-      else { alert('No se pudo obtener el PDF oficial de Xubio.\n\n' + ((j && j.message) || 'Error desconocido')); }
-    })
-    .catch(function (e) { alert('Error pidiendo el PDF: ' + e); });
+  _fcBajarOficial(txId).then(function (res) {
+    if (!res.ok) { alert('No se pudo obtener el PDF oficial de Xubio.\n\n' + (res.msg || '')); return; }
+    var url = URL.createObjectURL(new Blob([res.bytes], { type: 'application/pdf' }));
+    window.open(url, '_blank');
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  });
+}
+// LOTE: baja todos los PDFs oficiales, los une en UNO y manda a imprimir (un solo diálogo).
+function _fcOficialLote(txIds) {
+  txIds = (txIds || []).filter(function (x) { return x; });
+  if (!txIds.length) { toast('No hay facturas para imprimir', 'ok'); return; }
+  var n = txIds.length;
+  toast('🖨 Preparando ' + n + ' factura' + (n > 1 ? 's' : '') + ' de Xubio...', 'ok');
+  _fcCargarPdfLib().then(function (PDFLib) {
+    var bajados = [], fallas = [], i = 0;
+    function siguiente() {
+      if (i >= txIds.length) return Promise.resolve();
+      var tx = txIds[i++];
+      toast('📄 Bajando ' + i + '/' + n + '...', 'ok');
+      return _fcBajarOficial(tx).then(function (res) {
+        if (res.ok) bajados.push(res); else fallas.push(res);
+        return siguiente();
+      });
+    }
+    return siguiente().then(function () {
+      if (!bajados.length) { alert('No se pudo bajar ninguna factura de Xubio.'); return; }
+      return PDFLib.PDFDocument.create().then(function (merged) {
+        var idx = 0;
+        function unir() {
+          if (idx >= bajados.length) return Promise.resolve(merged);
+          var b = bajados[idx++];
+          return PDFLib.PDFDocument.load(b.bytes).then(function (src) {
+            return merged.copyPages(src, src.getPageIndices()).then(function (pgs) {
+              pgs.forEach(function (pg) { merged.addPage(pg); });
+              return unir();
+            });
+          }).catch(function () { fallas.push(b); return unir(); });
+        }
+        return unir().then(function (m) {
+          return m.save().then(function (bytes) {
+            var url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+            var w = window.open(url, '_blank');
+            if (w) {
+              try { w.onload = function () { try { w.focus(); w.print(); } catch (e) {} }; } catch (e) {}
+              setTimeout(function () { try { w.focus(); w.print(); } catch (e) {} }, 1800);
+            }
+            setTimeout(function () { URL.revokeObjectURL(url); }, 120000);
+            if (fallas.length) {
+              alert('Se prepararon ' + bajados.length + ' de ' + n + '.\nNo se pudieron bajar ' + fallas.length + ':\n' +
+                fallas.map(function (f) { return '• tx ' + f.txId + (f.msg ? ' (' + f.msg + ')' : ''); }).join('\n'));
+            }
+          });
+        });
+      });
+    });
+  }).catch(function (e) { alert('Error preparando la impresión: ' + e); });
 }
 function _fcImprimirTodasFecha() {
-  var facturadas = (_fcCache.salidas || []).filter(function (s) { return s.xubio_factura_id; }).map(function (s) { return s.pedido_id; });
-  if (!facturadas.length) { toast('No hay facturas en esta fecha', 'ok'); return; }
-  return _fcAbrirFacturas(facturadas, true);
+  var ids = (_fcCache.salidas || []).filter(function (s) { return s.xubio_factura_id; }).map(function (s) { return s.xubio_factura_id; });
+  if (!ids.length) { toast('No hay facturas en esta fecha', 'ok'); return; }
+  return _fcOficialLote(ids);
 }
 
 
@@ -38293,7 +38371,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.67.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.68.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
