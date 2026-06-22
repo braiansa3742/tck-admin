@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.68.0 — 21/06/2026
-     v13.68.0: PDF OFICIAL de Xubio — botón 📄 en cada factura del Centro que
+     TCK ADMIN — v13.69.0 — 21/06/2026
+     v13.69.0: PDF OFICIAL de Xubio — botón 📄 en cada factura del Centro que
         pide a Xubio el PDF oficial (con el QR correcto generado por Xubio) vía
         Apps Script accion=facturaPdfXubio -> /imprimirPDF. La reconstrucción
         local queda para vista rápida; el oficial es el que se manda al cliente.
@@ -38174,7 +38174,8 @@ function _fcBajarOficial(txId) {
     .then(function (r) { return r.json(); })
     .then(function (j) {
       if (j && j.status === 'ok' && j.b64) return { ok: true, bytes: _fcB64Bytes(j.b64), nombre: j.nombre || ('factura_' + txId + '.pdf'), txId: txId };
-      return { ok: false, txId: txId, msg: (j && j.message) || 'sin PDF' };
+      var diag = (j && j.httpCode) ? (' [HTTP ' + j.httpCode + (j.contentType ? ' \u00b7 ' + j.contentType : '') + ']' + (j.rawBody ? '\n' + j.rawBody : '')) : '';
+      return { ok: false, txId: txId, msg: ((j && j.message) || 'sin PDF') + diag };
     })
     .catch(function (e) { return { ok: false, txId: txId, msg: String(e) }; });
 }
@@ -38371,7 +38372,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.68.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.69.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
