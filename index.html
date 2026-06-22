@@ -1,5 +1,18 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.70.0 — 22/06/2026
+     v13.70.0: TRAZABILIDAD NC EN DEVOLUCIONES — seguimiento del N° de NC.
+        Las NC las emiten los contadores en Xubio; admin solo REGISTRA el N°
+        (no hay sync con Xubio). Antes el N° era opcional y podía quedar null
+        para siempre. Ahora:
+        (a) devMarcarNC: si marcás sin número, confirm de escape — no traba,
+            pero avisa que queda pendiente.
+        (b) Hub de alertas: chip nuevo 🖊️ "NC sin número" que cuenta
+            estado=nc_emitida AND nc_numero IS NULL. Suena hasta completarse.
+        (c) Modal de devolución: aviso "Falta cargar el N° de NC" + botón
+            "🖊️ Completar N°" (nueva fn devCompletarNC: PATCH solo nc_numero,
+            sin cambiar estado, con verificación anti-RLS).
+        Patrón: alerta que empuja, no gate que traba la operación física.
      TCK ADMIN — v13.69.0 — 21/06/2026
      v13.69.0: PDF OFICIAL de Xubio — botón 📄 en cada factura del Centro que
         pide a Xubio el PDF oficial (con el QR correcto generado por Xubio) vía
@@ -17396,18 +17409,21 @@ async function renderAlertasBanner() {
     var manana = new Date(hoy); manana.setDate(manana.getDate() + 1);
     var mananaISO = manana.toISOString();
 
-    var [devsRes, entRes, devsNCRes] = await Promise.all([
+    var [devsRes, entRes, devsNCRes, devsNCSinNroRes] = await Promise.all([
       // Devoluciones pendientes de reclamar (cualquier fecha)
       sbFetch('devoluciones?reclamo_estado=eq.por_reclamar&select=id').catch(function() { return []; }),
       // Entregas "no estaba" del día
       sbFetch('entregas?estado=eq.no_encontrado&fecha_no_encontrado=gte.' + hoyISO + '&fecha_no_encontrado=lt.' + mananaISO + '&select=id').catch(function() { return []; }),
       // v13.29: devoluciones recibidas por Pancho, pendientes de NC
-      sbFetch('devoluciones?estado=eq.recibida_deposito&select=id').catch(function() { return []; })
+      sbFetch('devoluciones?estado=eq.recibida_deposito&select=id').catch(function() { return []; }),
+      // v13.70.0: NC marcada como emitida pero SIN número cargado (seguimiento de trazabilidad)
+      sbFetch('devoluciones?estado=eq.nc_emitida&nc_numero=is.null&select=id').catch(function() { return []; })
     ]);
 
     _alertasCache.devolucionesPorReclamar = (devsRes || []).length;
     _alertasCache.noEstaba = (entRes || []).length;
     _alertasCache.devolucionesSinNC = (devsNCRes || []).length;
+    _alertasCache.devolucionesNCSinNumero = (devsNCSinNroRes || []).length;
 
     // Re-render con la data completa
     _renderChipsAlertas();
@@ -17451,6 +17467,16 @@ function _renderChipsAlertas() {
       icon: '🧾',
       label: 'Emitir NC',
       count: _alertasCache.devolucionesSinNC,
+      onclick: "_alertaIrA('devoluciones')"
+    });
+  }
+  // 🧾 v13.70.0: NC marcada pero sin número cargado — seguimiento hasta completar
+  if (_alertasCache.devolucionesNCSinNumero > 0) {
+    chips.push({
+      cls: 'amarillo',
+      icon: '🖊️',
+      label: 'NC sin número',
+      count: _alertasCache.devolucionesNCSinNumero,
       onclick: "_alertaIrA('devoluciones')"
     });
   }
@@ -31036,6 +31062,10 @@ async function devMarcarNC() {
   }
   var nro = prompt('N° de la Nota de Crédito en Xubio (opcional, podés dejarlo vacío):');
   if (nro === null) return; // canceló
+  // v13.70.0: si no cargás el número, queda pendiente de completar (suena en alertas hasta tenerlo)
+  if (!(nro || '').trim()) {
+    if (!confirm('Vas a marcar la NC como emitida SIN número.\n\nVa a quedar pendiente de completar y va a seguir apareciendo en alertas ("NC sin número") hasta que cargues el N°.\n\n¿Marcar igual?')) return;
+  }
   try {
     var resp = await fetch(SUPABASE_URL + '/rest/v1/devoluciones?id=eq.' + encodeURIComponent(d.id), {
       method: 'PATCH',
@@ -31063,6 +31093,38 @@ async function devMarcarNC() {
   } catch (e) {
     console.error('[devMarcarNC]', e);
     toast('❌ No se pudo marcar la NC — reintentá', 'err');
+  }
+}
+
+// v13.70.0 — Completar el N° de una NC ya marcada como emitida (sin cambiar estado)
+async function devCompletarNC() {
+  var d = _devCache.find(function(x) { return x.id === _devModalId; });
+  if (!d) return;
+  if (d.estado !== 'nc_emitida') { toast('Esta devolución todavía no tiene la NC marcada', 'err'); return; }
+  var nro = prompt('N° de la Nota de Crédito en Xubio:', d.nc_numero || '');
+  if (nro === null) return; // canceló
+  nro = (nro || '').trim();
+  if (!nro) { toast('Cargá el N° para completar (o cancelá)', 'err'); return; }
+  try {
+    var resp = await fetch(SUPABASE_URL + '/rest/v1/devoluciones?id=eq.' + encodeURIComponent(d.id), {
+      method: 'PATCH',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY),
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
+      },
+      body: JSON.stringify({ nc_numero: nro })
+    });
+    var filas = await resp.json();
+    if (!resp.ok || !Array.isArray(filas) || !filas.length) throw new Error('PATCH vacío (¿RLS?)');
+    d.nc_numero = filas[0].nc_numero;
+    toast('🖊️ N° de NC cargado', 'ok');
+    devAbrirModal(d.id);
+    if (typeof renderAlertasBanner === 'function') renderAlertasBanner();
+  } catch (e) {
+    console.error('[devCompletarNC]', e);
+    toast('❌ No se pudo guardar el N° — reintentá', 'err');
   }
 }
 
@@ -31221,6 +31283,11 @@ function devAbrirModal(devolucionId) {
     var fnc = d.nc_emitida_en ? new Date(d.nc_emitida_en) : null;
     html += '<div style="font-size:12px;color:#2E7D32;font-weight:700;margin-top:6px;">🧾 NC ' + (d.nc_numero ? '#' + String(d.nc_numero).replace(/</g,'&lt;') : 'emitida')
       + (fnc ? ' · ' + String(fnc.getDate()).padStart(2,'0') + '/' + String(fnc.getMonth()+1).padStart(2,'0') : '') + '</div>';
+    // v13.70.0: NC emitida pero sin número cargado → permitir completarlo (seguimiento)
+    if (!d.nc_numero) {
+      html += '<div style="font-size:12px;color:#E65100;font-weight:700;margin-top:4px;">⚠️ Falta cargar el N° de NC</div>';
+      html += '<button onclick="devCompletarNC()" style="width:100%;margin-top:6px;background:#fff;color:#1B5E20;border:1.5px solid #2E7D32;border-radius:10px;padding:10px;font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:900;cursor:pointer;touch-action:manipulation;">🖊️ Completar N° de NC</button>';
+    }
   } else {
     html += '<button onclick="devMarcarNC()" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#1B5E20,#2E7D32);color:#fff;border:none;border-radius:10px;padding:11px;font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:900;cursor:pointer;touch-action:manipulation;">🧾 MARCAR NC EMITIDA</button>';
   }
@@ -38372,7 +38439,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.69.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.70.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
