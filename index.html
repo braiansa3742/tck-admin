@@ -1,5 +1,15 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.71.0 — 23/06/2026
+     v13.71.0: FIX RENDICIÓN MÓVIL — al cargar montos en "Cerrar rendición →
+        Xubio" la página se "recargaba" tras cada dígito. Causa: rvSetCobro /
+        rvSetContado llamaban a rvRenderPanel() en cada oninput, reconstruyendo
+        todo el panel con innerHTML y destruyendo el <input> en foco (WebView
+        Android). Ahora oninput llama a rvActualizarVivo(), que actualiza solo
+        los nodos de resumen (esperado/contado/transfer/cheques/diferencia/
+        botón + chips y difF por factura) por ID, sin tocar el input activo.
+        El re-render completo queda solo para abrir viaje / toggles ✎ / ✓.
+
      TCK ADMIN — v13.70.0 — 22/06/2026
      v13.70.0: TRAZABILIDAD NC EN DEVOLUCIONES — seguimiento del N° de NC.
         Las NC las emiten los contadores en Xubio; admin solo REGISTRA el N°
@@ -15859,8 +15869,49 @@ function rvAbrir(id){
 
 function rvToggleInc(id){ _rvIncluir[id]=!_rvIncluir[id]; rvRenderPanel(); }
 function rvToggleEdit(id){ _rvEdit[id]=!_rvEdit[id]; rvRenderPanel(); }
-function rvSetCobro(id,instr,val){ _rvCobro[id][instr]=_rvN(String(val).replace(/[^\d.-]/g,'')); rvRenderPanel(); }
-function rvSetContado(v){ _rvEfeContado=_rvN(String(v).replace(/[^\d.-]/g,'')); rvRenderPanel(); }
+function rvSetCobro(id,instr,val){ _rvCobro[id][instr]=_rvN(String(val).replace(/[^\d.-]/g,'')); rvActualizarVivo(); }
+function rvSetContado(v){ _rvEfeContado=_rvN(String(v).replace(/[^\d.-]/g,'')); rvActualizarVivo(); }
+
+// v13.71.0: actualiza SOLO los nodos de resumen sin reconstruir el panel (no destruye
+// el <input> que el usuario está tipeando → no se "recarga" en el WebView de Android).
+function rvActualizarVivo(){
+  if(!_rvSel||!_rvEnt.length) return;
+  var act=document.activeElement;
+  var efeEsp=_rvSumInc('efectivo'), tra=_rvSumInc('transferencia'), che=_rvSumInc('cheque'), fia=_rvSumInc('cuenta_corriente');
+  var contado=(_rvEfeContado===null)?efeEsp:_rvEfeContado;
+  var dif=contado-efeEsp;
+  var transObj=_rvEnt.filter(function(e){ return _rvIncluir[e.id] && _rvN(_rvCobro[e.id].transferencia)>0; });
+  var transOk=transObj.filter(function(e){ return e.transfer_conciliada; }).length;
+  var nInc=_rvEnt.filter(function(e){return _rvIncluir[e.id];}).length;
+
+  function setTxt(id,txt){ var n=document.getElementById(id); if(n&&n!==act) n.textContent=txt; }
+  setTxt('rv-efeesp', _rvFmt(efeEsp));
+  var ci=document.getElementById('rv-contado');
+  if(ci && ci!==act && _rvEfeContado===null) ci.value=Math.round(contado).toLocaleString('es-AR');
+  setTxt('rv-tralbl', 'Transferencias '+(transObj.length?('· '+transOk+'/'+transObj.length+' ✓MP'):''));
+  setTxt('rv-traval', _rvFmt(tra));
+  setTxt('rv-cheval', _rvFmt(che));
+  var fl=document.getElementById('rv-fiadoline');
+  if(fl){ if(fia>0){ fl.style.display=''; fl.innerHTML='Queda en cuenta corriente (fiado): <b>'+_rvFmt(fia)+'</b>'; } else { fl.style.display='none'; fl.innerHTML=''; } }
+  var dl=document.getElementById('rv-difline');
+  if(dl){ dl.className='rv-dif '+(dif===0?'ok':'bad'); dl.textContent=(dif===0?'✓ El efectivo cierra':(dif>0?'Sobran ':'Faltan ')+_rvFmt(Math.abs(dif))+' en efectivo — ajustá las facturas o el contado'); }
+  setTxt('rv-proglbl', nInc+'/'+_rvEnt.length+' incluidas');
+  var btn=document.getElementById('rv-cerrarbtn');
+  if(btn){ var listo=(dif===0)&&nInc>0&&!_rvCerrando; if(listo) btn.removeAttribute('disabled'); else btn.setAttribute('disabled','disabled'); btn.textContent=_rvCerrando?'Cerrando…':'Cerrar rendición → Xubio'; }
+
+  _rvEnt.forEach(function(e){
+    var c=_rvCobro[e.id], cobr=_rvCobrado(c), tot=_rvN(e.monto);
+    var difF=cobr+_rvN(c.cuenta_corriente)-tot;
+    var chips=[];
+    if(c.efectivo>0) chips.push('<span class="rv-chip efe">efe '+_rvFmt(c.efectivo)+'</span>');
+    if(c.transferencia>0) chips.push('<span class="rv-chip tra">transf '+_rvFmt(c.transferencia)+(e.transfer_conciliada?' ✓':' ⏳')+'</span>');
+    if(c.cheque>0) chips.push('<span class="rv-chip che">cheque '+_rvFmt(c.cheque)+'</span>');
+    if(c.cuenta_corriente>0) chips.push('<span class="rv-chip ccte">fiado '+_rvFmt(c.cuenta_corriente)+'</span>');
+    var ch=document.getElementById('rv-chips-'+e.id); if(ch) ch.innerHTML=chips.join('');
+    var df=document.getElementById('rv-difF-'+e.id);
+    if(df) df.innerHTML=(difF!==0?'<div class="rv-difF '+(difF>0?'up':'down')+'">'+(difF>0?'+':'')+_rvFmt(difF)+'</div>':'');
+  });
+}
 
 function rvRenderPanel(){
   var el=document.getElementById('rv-panel'); if(!el) return;
@@ -15875,14 +15926,14 @@ function rvRenderPanel(){
   var transOk=transObj.filter(function(e){ return e.transfer_conciliada; }).length;
 
   var html='<div class="rv-caja">'+
-    '<div class="rv-box efe"><div class="l">Efectivo esperado</div><div class="v">'+_rvFmt(efeEsp)+'</div></div>'+
+    '<div class="rv-box efe"><div class="l">Efectivo esperado</div><div class="v" id="rv-efeesp">'+_rvFmt(efeEsp)+'</div></div>'+
     '<div class="rv-box efe"><div class="l">Efectivo contado</div>'+
-      '<input value="'+Math.round(contado).toLocaleString("es-AR")+'" inputmode="decimal" oninput="rvSetContado(this.value)"></div>'+
-    '<div class="rv-box tra"><div class="l">Transferencias '+(transObj.length?('· '+transOk+'/'+transObj.length+' ✓MP'):'')+'</div><div class="v">'+_rvFmt(tra)+'</div></div>'+
-    '<div class="rv-box che"><div class="l">Cheques</div><div class="v">'+_rvFmt(che)+'</div></div>'+
+      '<input id="rv-contado" value="'+Math.round(contado).toLocaleString("es-AR")+'" inputmode="decimal" oninput="rvSetContado(this.value)"></div>'+
+    '<div class="rv-box tra"><div class="l" id="rv-tralbl">Transferencias '+(transObj.length?('· '+transOk+'/'+transObj.length+' ✓MP'):'')+'</div><div class="v" id="rv-traval">'+_rvFmt(tra)+'</div></div>'+
+    '<div class="rv-box che"><div class="l">Cheques</div><div class="v" id="rv-cheval">'+_rvFmt(che)+'</div></div>'+
   '</div>';
-  if(fia>0) html+='<div class="rv-fiado-tot">Queda en cuenta corriente (fiado): <b>'+_rvFmt(fia)+'</b></div>';
-  html+='<div class="rv-dif '+(dif===0?'ok':'bad')+'">'+
+  html+='<div class="rv-fiado-tot" id="rv-fiadoline" style="'+(fia>0?'':'display:none')+'">'+(fia>0?('Queda en cuenta corriente (fiado): <b>'+_rvFmt(fia)+'</b>'):'')+'</div>';
+  html+='<div class="rv-dif '+(dif===0?'ok':'bad')+'" id="rv-difline">'+
     (dif===0?'✓ El efectivo cierra':(dif>0?'Sobran ':'Faltan ')+_rvFmt(Math.abs(dif))+' en efectivo — ajustá las facturas o el contado')+'</div>';
 
   html+='<div class="rv-sub">Factura por factura — ✎ para ajustar si pagó distinto</div>';
@@ -15898,7 +15949,7 @@ function rvRenderPanel(){
       '<div class="rv-chk'+(inc?' on':'')+'" onclick="rvToggleInc(\''+e.id+'\')">'+(inc?'✓':'')+'</div>'+
       '<div class="info"><div class="cli">'+_rvEsc(e.cliente||'—')+'</div>'+
         '<div class="meta">'+_rvEsc(e.ciudad||'')+(e.pedido_id?' · '+_rvEsc(e.pedido_id):'')+'</div>'+
-        '<div class="rv-chips">'+chips.join('')+'</div>'+
+        '<div class="rv-chips" id="rv-chips-'+e.id+'">'+chips.join('')+'</div>'+
         (edit?(
           '<div class="rv-editbox">'+_RV_INSTR.map(function(k){
             var lbl={efectivo:'Efectivo',transferencia:'Transfer.',cheque:'Cheque',cuenta_corriente:'Fiado'}[k];
@@ -15907,7 +15958,7 @@ function rvRenderPanel(){
         ):'')+
       '</div>'+
       '<div class="mon"><div class="n">'+_rvFmt(tot)+'</div>'+
-        (difF!==0?'<div class="rv-difF '+(difF>0?'up':'down')+'">'+(difF>0?'+':'')+_rvFmt(difF)+'</div>':'')+
+        '<div id="rv-difF-'+e.id+'">'+(difF!==0?'<div class="rv-difF '+(difF>0?'up':'down')+'">'+(difF>0?'+':'')+_rvFmt(difF)+'</div>':'')+'</div>'+
         '<button class="rv-ed" onclick="rvToggleEdit(\''+e.id+'\')">'+(edit?'✓':'✎')+'</button>'+
       '</div>'+
     '</div>';
@@ -15916,8 +15967,8 @@ function rvRenderPanel(){
   var nInc=_rvEnt.filter(function(e){return _rvIncluir[e.id];}).length;
   var listo=(dif===0)&&nInc>0&&!_rvCerrando;
   html+='<div class="rv-footer">'+
-    '<div class="rv-prog">'+nInc+'/'+_rvEnt.length+' incluidas</div>'+
-    '<button class="rv-btn" '+(listo?'':'disabled')+' onclick="rvCerrar()">'+(_rvCerrando?'Cerrando…':'Cerrar rendición → Xubio')+'</button>'+
+    '<div class="rv-prog" id="rv-proglbl">'+nInc+'/'+_rvEnt.length+' incluidas</div>'+
+    '<button class="rv-btn" id="rv-cerrarbtn" '+(listo?'':'disabled')+' onclick="rvCerrar()">'+(_rvCerrando?'Cerrando…':'Cerrar rendición → Xubio')+'</button>'+
   '</div>'+
   '<div class="rv-note">Se confirman las incluidas con lo realmente cobrado por instrumento. Lo que falte de una factura queda como deuda; si pagó de más, el excedente salda lo viejo. Las transferencias las verifica MP por separado.</div>';
   el.innerHTML=html;
@@ -38439,7 +38490,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.70.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.71.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
