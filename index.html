@@ -1,5 +1,15 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.72.0 — 23/06/2026
+     v13.72.0: RENDICIÓN — corte Xubio en el módulo. Viajes con fecha_salida
+        anterior al 20/06 (RV_CORTE_XUBIO) se marcan "📌 Histórico · ya en
+        Xubio (solo control de caja)" y, pasados RV_OCULTAR_DIAS (4) días, se
+        ocultan del listado para no acumular backlog viejo. Al abrir un viaje
+        histórico, banner de aviso de que rendirlo no vuelve a cargar a Xubio.
+        Los viajes del 20/06 en adelante se muestran normal (alimentan el
+        posteo automático). Motivo: Valentina rindió viajes del 2-10/06 que ya
+        estaban en Xubio; el módulo se los mostraba como pendientes sin avisar.
+
      TCK ADMIN — v13.71.0 — 23/06/2026
      v13.71.0: FIX RENDICIÓN MÓVIL — al cargar montos en "Cerrar rendición →
         Xubio" la página se "recargaba" tras cada dígito. Causa: rvSetCobro /
@@ -15784,6 +15794,13 @@ var _rvIncluir = {};    // entrega.id -> bool (entra en la rendición)
 var _rvEdit = {};       // entrega.id -> bool (fila expandida para ajustar)
 var _rvEfeContado = null, _rvCerrando = false;
 var _RV_INSTR = ['efectivo','transferencia','cheque','cuenta_corriente'];
+// v13.72: corte Xubio. Viajes con fecha_salida < RV_CORTE_XUBIO = histórico
+// (ya cargados a Xubio a mano por contaduría). Se marcan con badge y, pasados
+// RV_OCULTAR_DIAS días, se ocultan del listado. Los del corte en adelante son
+// los que alimentan el posteo automático a Xubio (vistas + cron backend).
+var RV_CORTE_XUBIO = '2026-06-20';
+var RV_OCULTAR_DIAS = 4;
+function _rvDiasDesde(f){ if(!f) return 0; var d=new Date(f); return isNaN(d)?0:Math.floor((Date.now()-d.getTime())/86400000); }
 
 function _rvFmt(n){ return '$' + Math.round(Number(n)||0).toLocaleString('es-AR'); }
 function _rvN(n){ return Number(n)||0; }
@@ -15831,8 +15848,11 @@ async function rvCargar(){
       v._ent=es; v._pend=pend.length;
       v._efe=pend.reduce(function(a,e){ return a+_rvN(_rvParseDet(e).efectivo); },0);
       v._devPend=es.filter(function(e){ return pendPed[e.pedido_id] || pendEnt[e.id]; }).length;
+      v._historico = (String(v.fecha_salida||'').slice(0,10) < RV_CORTE_XUBIO);
+      v._diasAntig = _rvDiasDesde(v.fecha_salida);
       return v;
-    }).filter(function(v){ return v._pend>0; });
+    }).filter(function(v){ return v._pend>0; })
+      .filter(function(v){ return !(v._historico && v._diasAntig > RV_OCULTAR_DIAS); });
     rvRenderLista();
   }catch(e){ console.error('[rv] cargar',e); if(lista) lista.innerHTML='<div class="rv-empty">Error al cargar. 🔄</div>'; }
 }
@@ -15846,6 +15866,7 @@ function rvRenderLista(){
     return '<div class="rv-viaje'+sel+'" onclick="rvAbrir(\''+v.id+'\')">'+
       '<div class="t">'+_rvEsc(v.chofer||'—')+' · '+_rvEsc(v.zona||'')+'</div>'+
       '<div class="m">'+_rvFecha(v.fecha_salida)+' · '+v._pend+' sin confirmar · '+_rvFmt(v.monto_total)+'</div>'+
+      (v._historico?'<div style="margin-top:4px;font-size:11px;font-weight:700;color:#B45309;background:#FBE9D2;border-radius:6px;padding:3px 8px;display:inline-block;">📌 Histórico · ya en Xubio (solo control de caja)</div>':'')+
       (v._efe>0?'<div class="tag">efectivo a contar: '+_rvFmt(v._efe)+'</div>':'')+
       (v._devPend>0?'<div class="rv-devblock">⛔ '+v._devPend+' devol. sin recibir (Pancho)</div>':'')+
     '</div>';
@@ -15925,7 +15946,8 @@ function rvRenderPanel(){
   var transObj=_rvEnt.filter(function(e){ return _rvIncluir[e.id] && _rvN(_rvCobro[e.id].transferencia)>0; });
   var transOk=transObj.filter(function(e){ return e.transfer_conciliada; }).length;
 
-  var html='<div class="rv-caja">'+
+  var html=(_rvSel._historico?'<div style="margin-bottom:10px;font-size:12px;font-weight:600;color:#7c2d12;background:#FBE9D2;border:1px solid #D4A574;border-radius:8px;padding:8px 10px;">⚠️ Viaje anterior al 20/06: ya está cargado en Xubio. Rendirlo acá es solo control de caja — no se vuelve a cargar.</div>':'')+
+    '<div class="rv-caja">'+
     '<div class="rv-box efe"><div class="l">Efectivo esperado</div><div class="v" id="rv-efeesp">'+_rvFmt(efeEsp)+'</div></div>'+
     '<div class="rv-box efe"><div class="l">Efectivo contado</div>'+
       '<input id="rv-contado" value="'+Math.round(contado).toLocaleString("es-AR")+'" inputmode="decimal" oninput="rvSetContado(this.value)"></div>'+
@@ -38490,7 +38512,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.71.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.72.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
