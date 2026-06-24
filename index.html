@@ -1,5 +1,12 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.73.0 — 23/06/2026
+     v13.73.0: TAB BUFFET (TCK FOOD) + rol 'tckfood'. Nuevo tab solo-lectura
+        con ventas del buffet/playmatch (Toteat→Supabase): KPIs, ventas por
+        día buffet vs playmatch, medios de pago, top productos y consumo
+        personal. Lee buffet_ventas / buffet_ventas_items vía sbFetch. Nuevo
+        perfil de login 'TCK Food' (rol tckfood) que ve SOLO este tab; ADMIN
+        lo ve en el menú Más. Módulo bf*. Sin cambios SQL ni Apps Script.
      TCK ADMIN — v13.72.0 — 23/06/2026
      v13.72.0: RENDICIÓN — corte Xubio en el módulo. Viajes con fecha_salida
         anterior al 20/06 (RV_CORTE_XUBIO) se marcan "📌 Histórico · ya en
@@ -12178,6 +12185,10 @@ input.canales-exp-input[type="date"] {
         <div class="login-av" style="background:#1E8449;color:#fff;">V</div>
         <div class="login-btn-name">Valentina<div class="login-btn-role">Cobranzas</div></div>
       </button>
+      <button class="login-btn" id="login-btn-tckfood" onclick="seleccionarVendedor('TCK Food','🍔','#C2410C')">
+        <div class="login-av" style="background:#C2410C;color:#fff;">🍔</div>
+        <div class="login-btn-name">TCK Food<div class="login-btn-role">Buffet</div></div>
+      </button>
     </div>
     <div id="paso2" style="display:none;">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;padding:12px 16px;background:var(--cream2);border-radius:12px;">
@@ -14241,6 +14252,10 @@ input.canales-exp-input[type="date"] {
     <span class="tab-icon">📊</span>
     <span class="tab-label">Márgenes</span>
   </button>
+  <button class="tab-btn" id="tab-btn-buffet" onclick="cambiarTab('buffet')" style="display:none !important;">
+    <span class="tab-icon">🍔</span>
+    <span class="tab-label">Buffet</span>
+  </button>
 </nav>
 
 <!-- MENÚ "MÁS" (sheet inferior) — solo Clientes + Visitas -->
@@ -14269,6 +14284,10 @@ input.canales-exp-input[type="date"] {
       <button class="menu-mas-item" id="menu-mas-margenes" onclick="cambiarTab('margenes');cerrarMenuMas()">
         <div class="menu-mas-icon">📊</div>
         <div class="menu-mas-lbl">Márgenes</div>
+      </button>
+      <button class="menu-mas-item" id="menu-mas-buffet" onclick="cambiarTab('buffet');cerrarMenuMas()">
+        <div class="menu-mas-icon">🍔</div>
+        <div class="menu-mas-lbl">Buffet</div>
       </button>
       <!-- v13.36.0 — Tab Facturación (Centro de Facturación) -->
       <button class="menu-mas-item" id="menu-mas-facturacion" onclick="cambiarTab('facturacion');cerrarMenuMas()">
@@ -14488,6 +14507,75 @@ input.canales-exp-input[type="date"] {
     </div>
     <button class="export-cancelar" onclick="cerrarExportBtn()">Cancelar</button>
   </div>
+</div>
+
+<div class="view" id="view-buffet">
+<style>
+  #view-buffet{ padding:0 0 60px; }
+  #view-buffet .bf-head{ background:linear-gradient(135deg,#9A3412,#C2410C); color:#fff; padding:14px 14px 12px; border-radius:0 0 14px 14px; box-shadow:0 2px 8px rgba(0,0,0,.12); }
+  #view-buffet .bf-head h2{ font-size:19px; font-weight:900; text-transform:uppercase; letter-spacing:.5px; margin:0; display:flex; align-items:center; gap:7px; }
+  #view-buffet .bf-head .bf-sub{ font-size:12px; opacity:.85; margin-top:2px; font-weight:500; }
+  #view-buffet .bf-rango{ display:flex; gap:6px; margin-top:11px; }
+  #view-buffet .bf-rango button{ flex:1; border:none; background:rgba(255,255,255,.18); color:#fff; padding:7px 0; border-radius:8px; font-family:inherit; font-size:12px; font-weight:800; cursor:pointer; letter-spacing:.3px; }
+  #view-buffet .bf-rango button.on{ background:#fff; color:#9A3412; }
+  #view-buffet .bf-kpis{ display:grid; grid-template-columns:repeat(4,1fr); gap:6px; padding:12px 12px 4px; }
+  #view-buffet .bf-kpi{ background:#fff; border-radius:10px; padding:9px 5px; text-align:center; box-shadow:0 1px 4px rgba(0,0,0,.07); border-top:3px solid #EA580C; }
+  #view-buffet .bf-kpi .v{ font-size:17px; font-weight:900; line-height:1; color:#2C2416; }
+  #view-buffet .bf-kpi .l{ font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.2px; color:#8A7B63; margin-top:5px; }
+  #view-buffet .bf-kpi.big{ border-top-color:#9A3412; } #view-buffet .bf-kpi.big .v{ color:#9A3412; font-size:18px; }
+  #view-buffet .bf-kpi.cp{ border-top-color:#9E9E9E; } #view-buffet .bf-kpi.cp .v{ color:#8A6E4B; }
+  #view-buffet .bf-sec{ background:#fff; margin:10px 12px 0; border-radius:12px; padding:13px 13px 14px; box-shadow:0 1px 4px rgba(0,0,0,.07); }
+  #view-buffet .bf-sec h3{ font-size:13px; font-weight:900; text-transform:uppercase; letter-spacing:.4px; margin:0 0 11px; color:#2C2416; display:flex; align-items:center; justify-content:space-between; }
+  #view-buffet .bf-sec h3 .leg{ font-size:10px; font-weight:700; color:#8A7B63; display:flex; gap:9px; }
+  #view-buffet .bf-sec h3 .leg i{ font-style:normal; display:inline-flex; align-items:center; gap:3px; }
+  #view-buffet .dot{ width:9px; height:9px; border-radius:3px; display:inline-block; }
+  #view-buffet .bf-dias{ display:flex; align-items:flex-end; gap:5px; height:120px; padding-top:6px; }
+  #view-buffet .bf-dia{ flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; height:100%; justify-content:flex-end; }
+  #view-buffet .bf-dia .barwrap{ width:100%; display:flex; flex-direction:column; justify-content:flex-end; height:100%; border-radius:5px 5px 0 0; overflow:hidden; background:#F3ECE0; }
+  #view-buffet .bf-dia .seg-bf{ background:linear-gradient(180deg,#EA580C,#C2410C); }
+  #view-buffet .bf-dia .seg-pl{ background:#1E6B8C; }
+  #view-buffet .bf-dia .dn{ font-size:8.5px; color:#8A7B63; font-weight:700; }
+  #view-buffet .bf-mp-row{ margin-bottom:10px; } #view-buffet .bf-mp-row:last-child{ margin-bottom:0; }
+  #view-buffet .bf-mp-top{ display:flex; justify-content:space-between; font-size:12px; font-weight:700; margin-bottom:4px; }
+  #view-buffet .bf-mp-top .pct{ color:#8A7B63; font-weight:800; }
+  #view-buffet .bf-mp-bar{ height:9px; border-radius:6px; background:#F0E9DC; overflow:hidden; }
+  #view-buffet .bf-mp-fill{ height:100%; border-radius:6px; }
+  #view-buffet .bf-tp{ display:flex; align-items:center; gap:9px; padding:8px 0; border-bottom:1px solid #EFE7DA; }
+  #view-buffet .bf-tp:last-child{ border-bottom:none; }
+  #view-buffet .bf-tp .rk{ font-size:12px; font-weight:900; color:#EA580C; width:18px; text-align:center; flex-shrink:0; }
+  #view-buffet .bf-tp .info{ flex:1; min-width:0; }
+  #view-buffet .bf-tp .nm{ font-size:12.5px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #view-buffet .bf-tp .meta{ font-size:10px; color:#8A7B63; margin-top:2px; }
+  #view-buffet .bf-badge{ font-size:8px; font-weight:800; text-transform:uppercase; padding:1px 5px; border-radius:4px; }
+  #view-buffet .bf-badge.bf{ background:#FBEADB; color:#9A3412; }
+  #view-buffet .bf-badge.pl{ background:#E1F0F6; color:#1E6B8C; }
+  #view-buffet .bf-tp .amt{ font-size:12.5px; font-weight:900; color:#2C2416; flex-shrink:0; }
+  #view-buffet .bf-cp{ background:linear-gradient(135deg,#6B5B4A,#8A7B63); color:#fff; margin:10px 12px 0; border-radius:12px; padding:14px; display:flex; align-items:center; gap:14px; box-shadow:0 1px 4px rgba(0,0,0,.1); }
+  #view-buffet .bf-cp .big{ font-size:26px; font-weight:900; line-height:1; }
+  #view-buffet .bf-cp .txt{ font-size:12px; opacity:.92; } #view-buffet .bf-cp .txt b{ font-size:14px; }
+  #view-buffet .bf-loading{ text-align:center; color:#8A7B63; font-size:13px; padding:30px 0; }
+</style>
+  <div class="bf-head">
+    <h2>🍔 Buffet TCK Food</h2>
+    <div class="bf-sub" id="bf-sub">Cargando…</div>
+    <div class="bf-rango" id="bf-rango">
+      <button onclick="buffetSetRango('hoy',this)">Hoy</button>
+      <button onclick="buffetSetRango('7d',this)">7 días</button>
+      <button class="on" onclick="buffetSetRango('30d',this)">30 días</button>
+      <button onclick="buffetSetRango('periodo',this)">Todo</button>
+    </div>
+  </div>
+  <div class="bf-kpis" id="bf-kpis"></div>
+  <div class="bf-sec">
+    <h3>Ventas por día
+      <span class="leg"><i><span class="dot" style="background:#EA580C"></span>Buffet</i><i><span class="dot" style="background:#1E6B8C"></span>Playmatch</i></span>
+    </h3>
+    <div class="bf-dias" id="bf-dias"></div>
+  </div>
+  <div class="bf-sec"><h3>Medios de pago</h3><div id="bf-mp"></div></div>
+  <div class="bf-sec"><h3>Top productos <span class="leg" style="font-weight:700">por facturación</span></h3><div id="bf-top"></div></div>
+  <div class="bf-cp" id="bf-cp" style="display:none;"></div>
+  <div class="bf-loading" id="bf-loading" style="display:none;">Cargando datos del buffet…</div>
 </div>
 
 <script>
@@ -16813,7 +16901,8 @@ const ROL_TABS = {
   dueno:       'ALL',
   operaciones: 'ALL',
   admin:       'ALL',
-  cobranzas:   ['pedidos','logistica','clientes','facturacion','cc','tesoreria','rendiciones','acc-dup']
+  cobranzas:   ['pedidos','logistica','clientes','facturacion','cc','tesoreria','rendiciones','acc-dup'],
+  tckfood:     ['buffet']
 };
 
 function puedeVer(tab) {
@@ -19698,11 +19787,12 @@ function cerrarMenuMasFondo(e) {
 function cambiarTab(tab) {
   // v13.57.0 — Cobranzas no puede abrir tabs fuera de su perfil ni por código
   if (rolActual === 'cobranzas' && typeof puedeVer === 'function' && !puedeVer(tab)) tab = 'pedidos';
+  if (rolActual === 'tckfood' && tab !== 'buffet') tab = 'buffet';
   if (_tabActual === tab) return;
   _tabActual = tab;
 
   // Views — incluye logistica + stock (v12.15.0) + compras (v12.18.0) + tesoreria (v12.20.0)
-  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock','compras','cc','tesoreria','margenes','facturacion'].forEach(function(t) {
+  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock','compras','cc','tesoreria','margenes','facturacion','buffet'].forEach(function(t) {
     var v = document.getElementById('view-' + t);
     var b = document.getElementById('tab-btn-' + t);
     if (v) v.classList.toggle('active', t === tab);
@@ -19711,7 +19801,13 @@ function cambiarTab(tab) {
 
   // El botón "Más" se marca activo si estás en un tab oculto
   var btnMas = document.getElementById('tab-btn-mas');
-  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes' || tab === 'rendiciones' || tab === 'acc-dup' || tab === 'prod-canon' || tab === 'ccanon' || tab === 'stock' || tab === 'compras' || tab === 'cc' || tab === 'tesoreria' || tab === 'margenes' || tab === 'facturacion');
+  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes' || tab === 'rendiciones' || tab === 'acc-dup' || tab === 'prod-canon' || tab === 'ccanon' || tab === 'stock' || tab === 'compras' || tab === 'cc' || tab === 'tesoreria' || tab === 'margenes' || tab === 'facturacion' || tab === 'buffet');
+
+  // v13.73.0 — Buffet (TCK Food): cargar al abrir
+  if (tab === 'buffet') {
+    if (typeof buffetCargar === 'function') buffetCargar();
+    var vbf = document.getElementById('view-buffet'); if (vbf) vbf.scrollTop = 0;
+  }
 
   // v13.36.0 — Facturación: cargar al abrir
   if (tab === 'facturacion') {
@@ -19808,6 +19904,129 @@ function cambiarTab(tab) {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// v13.73.0 — TAB BUFFET (TCK Food). Solo lectura desde buffet_ventas /
+// buffet_ventas_items (Toteat→Supabase). Módulo bf*.
+// ═══════════════════════════════════════════════════════════════
+var _bfRango = '30d';
+
+function buffetSetRango(r, btn){
+  _bfRango = r;
+  if (btn && btn.parentNode){ [].forEach.call(btn.parentNode.children, function(c){ c.classList.remove('on'); }); btn.classList.add('on'); }
+  buffetCargar();
+}
+function _bfHoy(){ return new Date().toLocaleDateString('en-CA', { timeZone:'America/Argentina/Buenos_Aires' }); }
+function _bfRestarDias(yyyy_mm_dd, n){
+  var p = yyyy_mm_dd.split('-'); var d = new Date(Date.UTC(+p[0], +p[1]-1, +p[2]));
+  d = new Date(d.getTime() - n*86400000);
+  return d.toISOString().slice(0,10);
+}
+function _bfMoney(n){ return '$' + Math.round(n).toLocaleString('es-AR'); }
+function _bfRangoFechas(){
+  var hoy = _bfHoy();
+  if (_bfRango === 'hoy')     return { desde: hoy, hasta: hoy };
+  if (_bfRango === '7d')      return { desde: _bfRestarDias(hoy,6), hasta: hoy };
+  if (_bfRango === 'periodo') return { desde: '2026-01-01', hasta: hoy };
+  return { desde: _bfRestarDias(hoy,29), hasta: hoy };  // 30d
+}
+
+async function buffetCargar(){
+  var sub = document.getElementById('bf-sub');
+  var load = document.getElementById('bf-loading');
+  if (load) load.style.display = 'block';
+  try {
+    var rg = _bfRangoFechas();
+    var ventas = await sbFetchAll('buffet_ventas?select=order_id,fecha_jornada,total,unidad_negocio,es_consumo_personal,pago_efectivo,pago_debito,pago_credito,pago_consumo_personal,pago_otros&fecha_jornada=gte.' + rg.desde + '&fecha_jornada=lte.' + rg.hasta + '&order=order_id.asc', 1000, 40);
+    ventas = Array.isArray(ventas) ? ventas : [];
+    if (sub) sub.textContent = 'Ventas del buffet y Playmatch · ' + rg.desde + ' → ' + rg.hasta;
+
+    // KPIs + medios de pago + por día + consumo personal
+    var total=0, efe=0, deb=0, cred=0, cp=0, otros=0, cpOrd=0, cpMonto=0;
+    var porDia = {}, ids = {};
+    ventas.forEach(function(v){
+      var t = Number(v.total)||0; total += t;
+      efe += Number(v.pago_efectivo)||0; deb += Number(v.pago_debito)||0;
+      cred += Number(v.pago_credito)||0; cp += Number(v.pago_consumo_personal)||0;
+      otros += Number(v.pago_otros)||0;
+      if (v.es_consumo_personal){ cpOrd++; cpMonto += t; }
+      ids[v.order_id] = true;
+      var d = v.fecha_jornada || '—';
+      if (!porDia[d]) porDia[d] = { t:0, bf:0, pl:0 };
+      porDia[d].t += t;
+      if (v.unidad_negocio === 'playmatch') porDia[d].pl++; else porDia[d].bf++;
+    });
+    var nOrd = ventas.length;
+    var ticket = nOrd ? total/nOrd : 0;
+    var cpPct = total ? Math.round(cpMonto/total*100) : 0;
+
+    document.getElementById('bf-kpis').innerHTML =
+      '<div class="bf-kpi big"><div class="v">' + _bfMoney(total) + '</div><div class="l">Ventas</div></div>' +
+      '<div class="bf-kpi"><div class="v">' + nOrd + '</div><div class="l">Órdenes</div></div>' +
+      '<div class="bf-kpi"><div class="v">' + _bfMoney(ticket) + '</div><div class="l">Ticket prom</div></div>' +
+      '<div class="bf-kpi cp"><div class="v">' + cpPct + '%</div><div class="l">Cons. pers.</div></div>';
+
+    // por día
+    var dias = Object.keys(porDia).sort();
+    var maxT = 1; dias.forEach(function(d){ if (porDia[d].t > maxT) maxT = porDia[d].t; });
+    document.getElementById('bf-dias').innerHTML = dias.length ? dias.map(function(d){
+      var x = porDia[d]; var h = Math.round(x.t/maxT*100);
+      var tot = (x.bf + x.pl) || 1; var plH = Math.round(x.pl/tot*100);
+      var dd = d.slice(8,10);
+      return '<div class="bf-dia"><div class="barwrap" style="height:' + h + '%">' +
+        '<div class="seg-pl" style="height:' + plH + '%"></div><div class="seg-bf" style="flex:1"></div></div>' +
+        '<div class="dn">' + dd + '</div></div>';
+    }).join('') : '<div class="bf-loading">Sin ventas en el período</div>';
+
+    // medios de pago
+    var mpTot = efe + deb + cred + cp + otros || 1;
+    var MP = [
+      { n:'Débito', v:deb, c:'#C2410C' }, { n:'Efectivo', v:efe, c:'#EA580C' },
+      { n:'Consumo personal', v:cp, c:'#8A7B63' }, { n:'Crédito', v:cred, c:'#D4A574' }
+    ];
+    if (otros > 0) MP.push({ n:'Otros', v:otros, c:'#B0A595' });
+    document.getElementById('bf-mp').innerHTML = MP.map(function(m){
+      var p = Math.round(m.v/mpTot*1000)/10;
+      return '<div class="bf-mp-row"><div class="bf-mp-top"><span>' + m.n + '</span>' +
+        '<span class="pct">' + p + '% · ' + _bfMoney(m.v) + '</span></div>' +
+        '<div class="bf-mp-bar"><div class="bf-mp-fill" style="width:' + p + '%;background:' + m.c + '"></div></div></div>';
+    }).join('');
+
+    // consumo personal
+    var cpEl = document.getElementById('bf-cp');
+    if (cpOrd > 0){
+      cpEl.style.display = 'flex';
+      cpEl.innerHTML = '<div class="big">' + cpOrd + '</div><div class="txt">órdenes de <b>consumo personal</b><br>' +
+        _bfMoney(cpMonto) + ' · ' + cpPct + '% del total <span style="opacity:.7">(autofactura)</span></div>';
+    } else { cpEl.style.display = 'none'; }
+
+    // top productos — filtrar items por las órdenes del rango (no hay FK, se filtra en cliente)
+    var items = await sbFetchAll('buffet_ventas_items?select=order_id,producto_nombre,unidad_negocio,cantidad,total_linea&order=order_id.asc', 1000, 60);
+    items = Array.isArray(items) ? items : [];
+    var agg = {};
+    items.forEach(function(it){
+      if (!ids[it.order_id]) return;
+      var k = it.producto_nombre || '(sin nombre)';
+      if (!agg[k]) agg[k] = { u:it.unidad_negocio, un:0, a:0 };
+      agg[k].un += Number(it.cantidad)||0;
+      agg[k].a  += Number(it.total_linea)||0;
+    });
+    var top = Object.keys(agg).map(function(k){ return { n:k, u:agg[k].u, un:agg[k].un, a:agg[k].a }; })
+      .sort(function(a,b){ return b.a - a.a; }).slice(0,12);
+    document.getElementById('bf-top').innerHTML = top.length ? top.map(function(x,i){
+      var b = x.u === 'playmatch' ? '<span class="bf-badge pl">Play</span>' : '<span class="bf-badge bf">Buffet</span>';
+      return '<div class="bf-tp"><div class="rk">' + (i+1) + '</div><div class="info">' +
+        '<div class="nm">' + x.n + '</div><div class="meta">' + b + ' &nbsp;' + Math.round(x.un) + ' u</div></div>' +
+        '<div class="amt">' + _bfMoney(x.a) + '</div></div>';
+    }).join('') : '<div class="bf-loading">Sin datos</div>';
+
+  } catch(e){
+    console.error('[buffet] cargar:', e);
+    if (sub) sub.textContent = 'Error al cargar datos del buffet';
+  } finally {
+    if (load) load.style.display = 'none';
+  }
+}
+
 function mostrarTabs() {
   var nav = document.getElementById('tab-nav');
   if (nav) nav.classList.add('visible');
@@ -19817,6 +20036,19 @@ function mostrarTabs() {
   // Tab Visitas — nunca en el nav, vive en el menú "Más"
   var tabGps = document.getElementById('tab-btn-gps');
   if (tabGps) tabGps.style.display = 'none';
+
+  // v13.73.0 — perfil TCK Food: ve SOLO el tab Buffet
+  if (rolActual === 'tckfood') {
+    ['logistica','reportes','mapa','pedidos','clientes','gps'].forEach(function(t){ _tckSetDisp('tab-btn-'+t, false); });
+    document.querySelectorAll('#menu-mas-backdrop .menu-mas-item').forEach(function(it){
+      it.style.display = (it.id === 'menu-mas-buffet') ? '' : 'none';
+    });
+    _tckSetDisp('tab-btn-buffet', true);
+    _tckSetDisp('menu-mas-buffet', true);
+    if (_tabActual !== 'buffet') cambiarTab('buffet');
+    tckDesktopNav();
+    return;
+  }
 
   if (!esAdmin) {
     // ── Flujo vendedor / campo (comportamiento original) ──
@@ -19852,6 +20084,7 @@ function mostrarTabs() {
   _tckSetDisp('menu-mas-acc-dup',     puedeVer('acc-dup'));
   _tckSetDisp('menu-mas-prod-canon',  puedeVer('prod-canon'));
   _tckSetDisp('menu-mas-ccanon',      puedeVer('ccanon'));
+  _tckSetDisp('menu-mas-buffet',      puedeVer('buffet'));
 
   // Si el tab activo dejó de estar permitido para este rol, ir a Pedidos
   if (_tabActual && _tabActual !== 'pedidos' && !puedeVer(_tabActual)) cambiarTab('pedidos');
