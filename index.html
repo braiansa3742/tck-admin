@@ -1,5 +1,13 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.74.0 — 23/06/2026
+     v13.74.0: FIX Tab Buffet — (1) _bfHoy() ya no usa toLocaleDateString con
+        timeZone (fallaba/devolvía formato raro en Android WebView → la carga
+        quedaba vacía); ahora calcula la fecha AR con offset -3h. (2) Errores
+        de buffetCargar se muestran EN el tab, no solo en consola. (3) Visitas
+        ya no aparece en el menú Más para no-admin (ternario roto en
+        abrirMenuMas). (4) El tab Buffet sale de la vista ADMIN: queda SOLO en
+        el perfil TCK Food (separación total). Módulo bf*.
      TCK ADMIN — v13.73.0 — 23/06/2026
      v13.73.0: TAB BUFFET (TCK FOOD) + rol 'tckfood'. Nuevo tab solo-lectura
         con ventas del buffet/playmatch (Toteat→Supabase): KPIs, ventas por
@@ -19774,7 +19782,7 @@ function abrirMenuMas() {
   // Mostrar/ocultar Visitas según rol (solo admin las ve, vendedores van directo desde Visitas tab)
   var esAdmin = vendedorActual === 'ADMIN';
   var visBtn = document.getElementById('menu-mas-visitas');
-  if (visBtn) visBtn.style.display = esAdmin ? 'flex' : 'flex';
+  if (visBtn) visBtn.style.display = esAdmin ? 'flex' : 'none';
 }
 function cerrarMenuMas() {
   var b = document.getElementById('menu-mas-backdrop');
@@ -19915,7 +19923,7 @@ function buffetSetRango(r, btn){
   if (btn && btn.parentNode){ [].forEach.call(btn.parentNode.children, function(c){ c.classList.remove('on'); }); btn.classList.add('on'); }
   buffetCargar();
 }
-function _bfHoy(){ return new Date().toLocaleDateString('en-CA', { timeZone:'America/Argentina/Buenos_Aires' }); }
+function _bfHoy(){ var d = new Date(Date.now() - 3*3600000); return d.toISOString().slice(0,10); }
 function _bfRestarDias(yyyy_mm_dd, n){
   var p = yyyy_mm_dd.split('-'); var d = new Date(Date.UTC(+p[0], +p[1]-1, +p[2]));
   d = new Date(d.getTime() - n*86400000);
@@ -20021,7 +20029,10 @@ async function buffetCargar(){
 
   } catch(e){
     console.error('[buffet] cargar:', e);
-    if (sub) sub.textContent = 'Error al cargar datos del buffet';
+    var msg = (e && e.message) ? e.message : String(e);
+    if (sub) sub.textContent = 'Error: ' + msg;
+    var k = document.getElementById('bf-kpis');
+    if (k) k.innerHTML = '<div style="grid-column:1/-1;padding:14px;color:#9A3412;font-size:12px;text-align:center;background:#FBEADB;border-radius:10px">No se pudieron cargar los datos del buffet.<br>' + msg + '</div>';
   } finally {
     if (load) load.style.display = 'none';
   }
@@ -20084,7 +20095,7 @@ function mostrarTabs() {
   _tckSetDisp('menu-mas-acc-dup',     puedeVer('acc-dup'));
   _tckSetDisp('menu-mas-prod-canon',  puedeVer('prod-canon'));
   _tckSetDisp('menu-mas-ccanon',      puedeVer('ccanon'));
-  _tckSetDisp('menu-mas-buffet',      puedeVer('buffet'));
+  _tckSetDisp('menu-mas-buffet',      false);
 
   // Si el tab activo dejó de estar permitido para este rol, ir a Pedidos
   if (_tabActual && _tabActual !== 'pedidos' && !puedeVer(_tabActual)) cambiarTab('pedidos');
