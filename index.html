@@ -38908,18 +38908,27 @@ function fcBadge() {
 async function fcSync() {
   var btn = document.getElementById('fc-sync-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Sincronizando…'; }
-  try {
-    var resp = await fetch(APPS_SCRIPT_URL + '?accion=xubioSyncVentasManual&porQuien=' + encodeURIComponent(vendedorActual || 'ADMIN'));
-    var j = await resp.json();
-    toast('Sync: ' + (j.presupuestos || 0) + ' presup · ' + (j.facturas || 0) + ' fact · ' +
-          (j.pedidos_marcados || 0) + ' pedidos marcados', j.errores ? 'err' : 'ok');
-    await fcCargar();
-  } catch (e) {
-    console.error('[FC] fcSync', e);
-    toast('Error en el sync: ' + e.message, 'err');
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '🔄 Sincronizar'; }
-  }
+
+  // El sync del Apps Script puede tardar varios minutos. NO bloqueamos la app:
+  // lo disparamos, liberamos el botón enseguida y refrescamos desde Supabase
+  // a medida que entran los datos (el server ya tiene candado anti-solape).
+  var url = APPS_SCRIPT_URL + '?accion=xubioSyncVentasManual&porQuien=' + encodeURIComponent(vendedorActual || 'ADMIN');
+  fetch(url)
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (j && j.status === 'ya_corriendo') {
+        toast('Ya hay una sincronización en curso. Esperá ~1–2 min.', 'ok');
+      } else {
+        toast('Sync: ' + ((j && j.presupuestos) || 0) + ' presup · ' + ((j && j.facturas) || 0) + ' fact · ' +
+              ((j && j.pedidos_marcados) || 0) + ' pedidos marcados', (j && j.errores) ? 'err' : 'ok');
+      }
+      fcCargar();
+    })
+    .catch(function (e) { console.error('[FC] fcSync', e); });
+
+  toast('Sincronización iniciada. Los datos se actualizan en ~1–2 min.', 'ok');
+  setTimeout(function () { fcCargar(); }, 90000);   // refresco optimista mientras corre el sync
+  setTimeout(function () { if (btn) { btn.disabled = false; btn.textContent = '🔄 Sincronizar'; } }, 4000);
 }
 
 // Badge del menú Más al abrir la app (sin entrar al tab): lo rojo se ve
