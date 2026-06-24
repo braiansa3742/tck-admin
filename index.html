@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.75.0 — 24/06/2026
+     TCK ADMIN — v13.76.0 — 24/06/2026
+     v13.76.0: FACTURACION — cartel de progreso (overlay) + tandas de 4.
+               _fcFacturarLista factura de a FCP_CHUNK y muestra avance en
+               vivo (barra, contador, lista por pedido). Acompana al backend
+               Apps Script v25.81.0.
      v13.75.0: LOGÍSTICA — bandeja "Pedidos sin viaje" (Capa 2 del fix
                de pedidos invisibles). Detecta pedidos activos con viaje_id
                NULL (fallo de asociación en Apps Script) y deja a Francisco
@@ -37921,6 +37925,42 @@ async function comprasDetailCargarFecha() {
 .fc-fact-btn{background:#1B5E20;color:#fff;border:none;border-radius:9px;padding:6px 12px;font-weight:800;font-size:12px;cursor:pointer;flex-shrink:0;}
 .fc-fact-btn:disabled{opacity:.55;cursor:wait;}
 .fc-fact-btn.zona{padding:4px 10px;font-size:11px;}
+.fcp-overlay{position:fixed;inset:0;background:rgba(26,8,0,.55);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;padding:16px;z-index:9999;}
+.fcp{background:var(--cream);border-radius:18px;width:min(460px,100%);max-height:88vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(139,0,0,.28);border:1px solid var(--cream3);}
+.fcp-head{background:linear-gradient(135deg,var(--red),var(--red2));color:#fff;padding:16px 18px;}
+.fcp-title{font-size:16px;font-weight:800;display:flex;align-items:center;gap:8px;}
+.fcp-sub{font-size:12px;opacity:.85;margin-top:2px;}
+.fcp-counter{padding:16px 18px 8px;text-align:center;}
+.fcp-big{font-size:34px;font-weight:900;color:var(--text);line-height:1;}
+.fcp-big small{font-size:18px;color:var(--text3);font-weight:800;}
+.fcp-bar-wrap{height:14px;background:var(--cream3);border-radius:99px;margin:12px 0 4px;overflow:hidden;}
+.fcp-bar{height:100%;width:0;border-radius:99px;background:linear-gradient(90deg,var(--green2),var(--green));transition:width .5s ease;}
+.fcp-bar.done{background:linear-gradient(90deg,var(--gold2),var(--orange));}
+.fcp-stats{display:flex;gap:8px;padding:4px 18px 12px;}
+.fcp-stat{flex:1;text-align:center;background:#fff;border:1px solid var(--border);border-radius:10px;padding:7px 4px;}
+.fcp-stat b{display:block;font-size:18px;font-weight:900;}
+.fcp-stat span{font-size:10px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.3px;}
+.fcp-stat.ok b{color:var(--green);}
+.fcp-stat.ya b{color:var(--blue);}
+.fcp-stat.err b{color:var(--red2);}
+.fcp-list{overflow-y:auto;padding:0 18px;flex:1;min-height:120px;}
+.fcp-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--cream2);font-size:13px;}
+.fcp-row:last-child{border-bottom:none;}
+.fcp-ico{width:22px;text-align:center;font-size:15px;flex-shrink:0;}
+.fcp-info{flex:1;min-width:0;}
+.fcp-cli{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.fcp-meta{font-size:11px;color:var(--text3);}
+.fcp-row.cola{opacity:.5;}
+.fcp-row.activa{background:var(--orange2);margin:0 -10px;padding-left:10px;padding-right:10px;border-radius:8px;}
+.fcp-row.err .fcp-cli{color:var(--red2);}
+.fcp-spin{display:inline-block;animation:fcpsp 1s linear infinite;}
+@keyframes fcpsp{to{transform:rotate(360deg);}}
+.fcp-foot{padding:14px 18px;border-top:1px solid var(--cream3);background:var(--cream);}
+.fcp-tanda{font-size:11px;color:var(--text3);text-align:center;margin-bottom:10px;min-height:14px;}
+.fcp-btn{width:100%;background:var(--green);color:#fff;border:none;border-radius:10px;padding:12px;font-weight:800;font-size:14px;cursor:pointer;}
+.fcp-btn:disabled{opacity:.5;cursor:wait;}
+.fcp-btn.done{background:var(--text2);}
+.fcp-err-note{background:var(--orange2);border:1px solid #FFCCBC;border-radius:10px;padding:10px 12px;font-size:12px;color:var(--text2);margin-bottom:10px;}
 /* v13.43.0 — selector de fecha del Centro (navegar salidas por día, como en Xubio) */
 .fc-fecha-nav{display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:nowrap;}
 .fc-fecha-btn{background:var(--cream2);color:var(--text2);border:1px solid var(--line);border-radius:8px;width:36px;height:36px;font-size:14px;font-weight:900;cursor:pointer;flex-shrink:0;line-height:1;}
@@ -38351,6 +38391,42 @@ function _fcPendientesDeZona(zona) {
   });
 }
 
+// v13.76.0 — CARTEL DE PROGRESO de facturacion (tandas chicas + avance visible)
+var FCP_CHUNK = 4;
+function _fcpHost(){ var h=document.getElementById('fcp-host'); if(!h){ h=document.createElement('div'); h.id='fcp-host'; document.body.appendChild(h); } return h; }
+function _fcpCerrar(){ var h=document.getElementById('fcp-host'); if(h) h.innerHTML=''; }
+function _fcpRender(o){
+  var done=o.hechas+o.ya+o.err, pct=o.n?Math.round((done/o.n)*100):0;
+  var rows=o.orden.map(function(id){
+    var e=o.st[id], ico, cls='';
+    if(e.status==='cola'){ ico='⏳'; cls='cola'; }
+    else if(e.status==='activa'){ ico='<span class="fcp-spin">🔄</span>'; cls='activa'; }
+    else if(e.status==='ok'){ ico='✅'; }
+    else if(e.status==='ya'){ ico='⚠️'; }
+    else { ico='❌'; cls='err'; }
+    return '<div class="fcp-row '+cls+'"><div class="fcp-ico">'+ico+'</div>'+
+      '<div class="fcp-info"><div class="fcp-cli">'+_fcEsc(e.cli)+'</div>'+
+      '<div class="fcp-meta">'+_fcEsc(e.meta||'')+'</div></div></div>';
+  }).join('');
+  _fcpHost().innerHTML =
+   '<div class="fcp-overlay"><div class="fcp">'+
+    '<div class="fcp-head"><div class="fcp-title">🧾 Facturando '+_fcEsc(o.nombre)+'</div>'+
+      '<div class="fcp-sub">Xubio emite cada factura con CAE, una por una</div></div>'+
+    '<div class="fcp-counter"><div class="fcp-big">'+done+' <small>/ '+o.n+'</small></div>'+
+      '<div class="fcp-bar-wrap"><div class="fcp-bar '+(o.terminado?'done':'')+'" style="width:'+pct+'%"></div></div></div>'+
+    '<div class="fcp-stats">'+
+      '<div class="fcp-stat ok"><b>'+o.hechas+'</b><span>Facturadas</span></div>'+
+      '<div class="fcp-stat ya"><b>'+o.ya+'</b><span>Ya existían</span></div>'+
+      '<div class="fcp-stat err"><b>'+o.err+'</b><span>Errores</span></div></div>'+
+    '<div class="fcp-list">'+rows+'</div>'+
+    '<div class="fcp-foot">'+
+      (o.terminado && o.err ? '<div class="fcp-err-note">⚠️ '+o.err+' pedido(s) quedaron en rojo. Revisalos en Xubio o reintentá la zona.</div>' : '')+
+      '<div class="fcp-tanda">'+(o.terminado?'':'Tanda '+o.tanda+' · de a '+FCP_CHUNK)+'</div>'+
+      '<button class="fcp-btn '+(o.terminado?'done':'')+'" '+(o.terminado?'onclick="_fcpCerrar()"':'disabled')+'>'+
+        (o.terminado?'Cerrar':'⏳ Facturando…')+'</button>'+
+    '</div></div></div>';
+}
+
 // v13.44.0 — motor compartido: factura una lista de pedidos (todo / por zona / tildados)
 async function _fcFacturarLista(pend, etiqueta) {
   if (vendedorActual !== 'ADMIN') { toast('Solo un admin puede facturar', 'err'); return; }
@@ -38369,33 +38445,44 @@ async function _fcFacturarLista(pend, etiqueta) {
   var btnTodo = document.getElementById('fc-fact-todo');
   var btnSel = document.getElementById('fc-fact-sel');
 
-  var hechas = 0, yaEst = 0, errores = [], dry = false, tanda = 0;
+  // v13.76.0 — estado por pedido para el cartel de progreso
+  var _fst = {}, _ford = [];
+  pend.forEach(function (s) { _fst[s.pedido_id] = { cli: s.cliente || s.pedido_id, status: 'cola', meta: 'En cola' }; _ford.push(s.pedido_id); });
+  var _fnom = etiqueta || '(todas las zonas)';
+  var _fn = _ford.length;
+
+  var hechas = 0, yaEst = 0, errN = 0, errores = [], dry = false, tanda = 0;
+  _fcpRender({ nombre: _fnom, orden: _ford, st: _fst, n: _fn, hechas: 0, ya: 0, err: 0, tanda: 1, terminado: false });
   try {
     while (ids.length) {
       tanda++;
-      var chunk = ids.splice(0, 20);
-      if (btnTodo) btnTodo.textContent = '⏳ Facturando… ' + hechas + '/' + pend.length;
-      if (btnSel) btnSel.textContent = '⏳ Facturando… ' + hechas + '/' + pend.length;
-      toast('⏳ Tanda ' + tanda + ': facturando ' + chunk.length + ' pedidos…', 'ok');
+      var chunk = ids.splice(0, FCP_CHUNK);
+      chunk.forEach(function (id) { if (_fst[id]) { _fst[id].status = 'activa'; _fst[id].meta = 'Facturando en Xubio…'; } });
+      _fcpRender({ nombre: _fnom, orden: _ford, st: _fst, n: _fn, hechas: hechas, ya: yaEst, err: errN, tanda: tanda, terminado: false });
       var resp = await fetch(APPS_SCRIPT_URL + '?accion=facturarLote&ids=' + encodeURIComponent(chunk.join(',')));
       var j = await resp.json();
 
       if (j.status === 'deshabilitado') {
+        _fcpCerrar(); btns.forEach(function (b) { b.disabled = false; }); _fcRefrescarBtnSel();
         alert('⛔ El facturador está APAGADO.\n\n' + (j.message || '') + '\n\nFalta el OK de Gastón y Ricardo. Mientras tanto: facturar en Xubio y tocar Sincronizar.');
         return;
       }
-      if (j.status === 'ocupado') { alert('⏳ ' + j.message); return; }
+      if (j.status === 'ocupado') { _fcpCerrar(); btns.forEach(function (b) { b.disabled = false; }); _fcRefrescarBtnSel(); alert('⏳ ' + j.message); return; }
       if (j.status === 'dry_run') {
-        dry = true;
+        dry = true; _fcpCerrar(); btns.forEach(function (b) { b.disabled = false; }); _fcRefrescarBtnSel();
         alert('🧪 MODO PRUEBA (dry-run): no se facturó nada.\nEl payload de muestra quedó en el log del Apps Script para validar antes del primer disparo real.');
         return;
       }
       (j.resultados || []).forEach(function (r) {
-        if (r.status === 'facturada') hechas++;
-        else if (r.status === 'ya_facturada') yaEst++;
-        else if (r.status === 'error') errores.push((r.pedido_id || '') + ': ' + (r.error || ''));
+        var _e = _fst[r.pedido_id];
+        if (r.status === 'facturada') { hechas++; if (_e) { _e.status = 'ok'; _e.meta = 'Facturada · ' + (r.factura_nro || ''); } }
+        else if (r.status === 'ya_facturada') { yaEst++; if (_e) { _e.status = 'ya'; _e.meta = 'Ya existía · ' + (r.factura_nro || r.factura_id || ''); } }
+        else if (r.status === 'sin_cae') { errN++; errores.push((r.pedido_id || '') + ': sin CAE (revisar en Xubio)'); if (_e) { _e.status = 'err'; _e.meta = '⚠️ Sin CAE — revisar en Xubio'; } }
+        else if (r.status === 'omitido_fecha') { if (_e) { _e.status = 'ya'; _e.meta = 'Omitido (previo al corte)'; } }
+        else if (r.status === 'error') { errN++; errores.push((r.pedido_id || '') + ': ' + (r.error || '')); if (_e) { _e.status = 'err'; _e.meta = r.error || 'Error'; } }
       });
       if (j.restantes && j.restantes.length) ids = j.restantes.concat(ids);
+      _fcpRender({ nombre: _fnom, orden: _ford, st: _fst, n: _fn, hechas: hechas, ya: yaEst, err: errN, tanda: tanda, terminado: false });
     }
   } catch (e) {
     console.error('[FC] facturarLista', e);
@@ -38407,9 +38494,9 @@ async function _fcFacturarLista(pend, etiqueta) {
   }
 
   if (!dry) {
+    _fcpRender({ nombre: _fnom, orden: _ford, st: _fst, n: _fn, hechas: hechas, ya: yaEst, err: errN, tanda: tanda, terminado: true });
     var msg = '✅ Facturadas: ' + hechas + (yaEst ? ' · ya existían: ' + yaEst : '') + (errores.length ? ' · ❌ errores: ' + errores.length : '');
     toast(msg, errores.length ? 'err' : 'ok');
-    if (errores.length) alert('Errores del lote (' + errores.length + '):\n\n' + errores.slice(0, 15).join('\n') + (errores.length > 15 ? '\n…' : '') + '\n\nEsos pedidos siguen en rojo — facturalos en Xubio a mano o reintentá.');
     _fcSel = {}; // limpiar selección tras facturar
     await fcCargar();
   }
