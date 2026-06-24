@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.74.0 — 23/06/2026
+     TCK ADMIN — v13.75.0 — 24/06/2026
+     v13.75.0: LOGÍSTICA — bandeja "Pedidos sin viaje" (Capa 2 del fix
+               de pedidos invisibles). Detecta pedidos activos con viaje_id
+               NULL (fallo de asociación en Apps Script) y deja a Francisco
+               asignarlos a un viaje planificado con un click. Usa endpoints
+               existentes viajesPlanificadosZona + viajeAgregarPedido (que
+               escribe pedidos_zona + entregas y recalcula totales). Fila de
+               alerta con contador, calcada de "Sin Zona". No toca Apps
+               Script ni requiere SQL. Caso Maira/Paulina 24/06.
      v13.74.0: FIX Tab Buffet — (1) _bfHoy() ya no usa toLocaleDateString con
         timeZone (fallaba/devolvía formato raro en Android WebView → la carga
         quedaba vacía); ahora calcula la fecha AR con offset -3h. (2) Errores
@@ -26229,9 +26237,16 @@ function lzRenderViajes(el) {
   // ── Sección de alertas (solo si hay) ──────────────────────
   const cSinZ  = _lzSinZona ? _lzSinZona.length : 0;
   const cNoEnt = _lzNoEntregados ? _lzNoEntregados.length : 0;
-  if (cSinZ > 0 || cNoEnt > 0) {
+  const cSinV  = _lzSinViaje ? _lzSinViaje.length : 0;   // v13.75.0
+  if (cSinZ > 0 || cNoEnt > 0 || cSinV > 0) {
     html += '<div class="lz-alertas-section">';
     html += '  <div class="lz-alertas-titulo">⚠️ Atención</div>';
+    if (cSinV > 0) {
+      html += '  <div class="lz-alerta-row" onclick="lzAlertaPlaceholder(\'sin_viaje\')">';
+      html += '    <span>🚚 Pedidos sin viaje</span>';
+      html += '    <span class="lz-alerta-num">' + cSinV + '</span>';
+      html += '  </div>';
+    }
     if (cSinZ > 0) {
       html += '  <div class="lz-alerta-row" onclick="lzAlertaPlaceholder(\'sin_zona\')">';
       html += '    <span>📭 Pedidos sin zona</span>';
@@ -28090,6 +28105,9 @@ function lzCerrarSheet(id, event) {
 
 let _lzNoEntregados = [];   // cache de tabla entregas con estado=no_entregado
 let _lzSinZona      = [];   // pedidos sin zona asignada
+let _lzSinViaje     = [];   // v13.75.0: pedidos activos sin viaje_id (red de seguridad)
+let _lzSvPedidoSel  = null; // v13.75.0: pedido seleccionado para asignar a viaje
+let _lzSvViajes     = [];   // v13.75.0: viajes planificados de la zona del seleccionado
 let _lzSzPedidoSel  = null; // pedido_id seleccionado para asignar ciudad
 
 // ── CARGA: refresca counts y caches de drawers ───────────────
@@ -28142,6 +28160,24 @@ async function lzCargarDrawers() {
     return false;
   });
   if (window.LZ_DEBUG) console.log('[lz] Sin Zona:', _lzSinZona.length);
+
+  // v13.75.0 — Sin Viaje: pedidos activos con viaje_id NULL (no cuelgan de
+  // ningún viaje → invisibles en planillas y en el panel de Pancho). Solo
+  // recientes (salida <= 7 días) y con zona válida (los sin zona van a la
+  // otra bandeja). Orden: más viejo primero, para priorizar.
+  const _svHoy = Date.now();
+  _lzSinViaje = _lzPedidosZona.filter(p => {
+    if (p.viaje_id) return false;
+    const est = (p.estado || '').toLowerCase();
+    if (est === 'cancelado' || est === 'entregado' || est === 'rendido') return false;
+    if (!lzGetZonaUI(p)) return false;
+    if (p.salida_planificada) {
+      const d = new Date(p.salida_planificada + 'T00:00:00');
+      if (!isNaN(d.getTime()) && (_svHoy - d.getTime()) > 7 * 86400000) return false;
+    }
+    return true;
+  }).sort((a, b) => String(a.salida_planificada || '').localeCompare(String(b.salida_planificada || '')));
+  if (window.LZ_DEBUG) console.log('[lz] Sin Viaje:', _lzSinViaje.length);
 
   // Re-renderizar la barra de chips para que muestre los counts reales
   if (typeof _tabActual !== 'undefined' && _tabActual === 'logistica' && _logTab === 'asignar') {
@@ -28471,9 +28507,131 @@ async function lzSzCancelar(pid) {
 }
 
 // ── REEMPLAZO del placeholder de bloque C ───────────────────
+// ════════════════════════════════════════════════════════════════
+// v13.75.0 — DRAWER: PEDIDOS SIN VIAJE (red de seguridad lado admin)
+// Asigna un pedido huérfano a un viaje planificado de su zona vía
+// viajeAgregarPedido (Apps Script), que escribe pedidos_zona + entregas
+// y recalcula totales. No hace PATCH directo para no dejar la entrega
+// sin viaje_id ni los totales mal.
+// ════════════════════════════════════════════════════════════════
+function _lzSvZonaViaje(p) {
+  const ui = lzGetZonaUI(p);
+  const m = { tlm: 'tl_manana', tlt: 'tl_tarde', z1: 'zona1', z2: 'zona2', af: 'america_fortin' };
+  return m[ui] || null;
+}
+
+async function lzAbrirSinViaje() {
+  const cont = document.getElementById('lz-sv-content');
+  cont.innerHTML = '<div class="lz-empty"><div class="loading-spinner" style="margin:0 auto 12px;"></div>Cargando...</div>';
+  lzAbrirSheet('lz-drawer-sv');
+  await lzCargarDrawers();
+  _lzSvPedidoSel = null;
+  const wrap = document.getElementById('lz-sv-grid-wrap'); if (wrap) wrap.style.display = 'none';
+  if (!_lzSinViaje.length) {
+    cont.innerHTML = '<div class="lz-empty"><div class="lz-empty-icon">✅</div>Todos los pedidos tienen viaje asignado.</div>';
+  } else {
+    cont.innerHTML = _lzSinViaje.map(p => lzRenderPedidoSinViaje(p)).join('');
+  }
+}
+
+function lzRenderPedidoSinViaje(p) {
+  const pid = lzEsc(p.pedido_id);
+  const vKey = (p.vendedor || '').toLowerCase().substring(0, 3);
+  const sel = _lzSvPedidoSel === p.pedido_id;
+  const borde = sel ? 'border:2px solid #E65100;background:#FFF6EC;' : '';
+  const zonaUI = lzGetZonaUI(p);
+  const zonaNom = (LZ_ZONAS.find(z => z.key === zonaUI) || {}).nombre || (p.zona || '?');
+  const fact = p.xubio_factura_nro
+    ? '🧾 ' + lzEsc(p.xubio_factura_nro)
+    : '<span style="color:#C62828;font-weight:800;">⛔ Sin factura</span>';
+  let diasTxt = '';
+  if (p.creado_at) {
+    const dd = Math.floor((Date.now() - new Date(p.creado_at).getTime()) / 86400000);
+    diasTxt = dd <= 0 ? 'hoy' : ('hace ' + dd + 'd');
+  }
+  return '<div class="lz-pedido" id="lz-sv-' + pid + '" style="margin-bottom:8px;' + borde + '">'
+    + '<div class="lz-pedido-hdr">'
+      + '<div style="flex:1;min-width:0;"><div class="lz-pedido-cliente">' + lzEsc(p.cliente || '—') + '</div></div>'
+      + '<div class="lz-pedido-total">' + LZ_FMT_MONEY(lzParseMonto(p)) + '</div>'
+    + '</div>'
+    + '<div class="lz-pedido-foot" style="margin-bottom:8px;flex-wrap:wrap;gap:4px;">'
+      + '<span class="lz-chip lz-chip-vend-' + vKey + '">' + lzEsc(p.vendedor || '?') + '</span>'
+      + '<span class="lz-chip">' + lzEsc(zonaNom) + '</span>'
+      + '<span class="lz-chip">📍 ' + lzEsc(p.localidad_canonica || '?') + '</span>'
+      + '<span class="lz-chip">' + fact + '</span>'
+      + (diasTxt ? '<span class="lz-chip lz-chip-pend">' + diasTxt + '</span>' : '')
+    + '</div>'
+    + '<button class="lz-btn-pedido" style="width:100%;background:#E65100;color:#fff;border-color:#E65100;" '
+      + 'onclick="lzSvSeleccionar(\'' + pid + '\')">🚚 Asignar a viaje</button>'
+  + '</div>';
+}
+
+async function lzSvSeleccionar(pid) {
+  _lzSvPedidoSel = pid;
+  const cont = document.getElementById('lz-sv-content');
+  cont.innerHTML = _lzSinViaje.map(p => lzRenderPedidoSinViaje(p)).join('');
+  const p = _lzSinViaje.find(x => x.pedido_id === pid);
+  if (!p) return;
+  document.getElementById('lz-sv-pedido-nombre').textContent = p.cliente || '';
+  const wrap = document.getElementById('lz-sv-grid-wrap'); wrap.style.display = 'block';
+  const grid = document.getElementById('lz-sv-grid');
+  grid.innerHTML = '<div class="lz-empty">Buscando viajes…</div>';
+  const zonaViaje = _lzSvZonaViaje(p);
+  if (!zonaViaje) { grid.innerHTML = '<div class="lz-empty">Este pedido no tiene zona válida. Asignale zona primero (bandeja Sin Zona).</div>'; return; }
+  try {
+    const url = APPS_SCRIPT_URL + '?accion=viajesPlanificadosZona&zona=' + encodeURIComponent(zonaViaje) + '&dias=10';
+    const resp = await fetch(url);
+    const data = await resp.json();
+    _lzSvViajes = (data.status === 'ok' && Array.isArray(data.viajes)) ? data.viajes : [];
+    if (!_lzSvViajes.length) {
+      grid.innerHTML = '<div class="lz-empty">No hay viajes planificados para esta zona.<br>Creá uno desde el detalle de la zona y volvé.</div>';
+      return;
+    }
+    grid.innerHTML = _lzSvViajes.map(v => {
+      const f = v.fecha_salida || '?';
+      const ch = (v.chofer && v.chofer !== '—') ? (' · ' + lzEsc(v.chofer)) : ' · sin chofer';
+      const np = (v.total_pedidos != null ? v.total_pedidos : 0);
+      return '<button class="lz-ciudad-grid-btn" style="text-align:left;" onclick="lzSvAsignar(\'' + lzEsc(v.id) + '\')">'
+        + '📅 ' + lzEsc(f) + ch + ' · ' + np + ' ped.</button>';
+    }).join('');
+  } catch (err) {
+    grid.innerHTML = '<div class="lz-empty">❌ Error buscando viajes. Reintentá.</div>';
+    console.warn('[lz] sv viajes:', err);
+  }
+  setTimeout(() => { const w = document.getElementById('lz-sv-grid-wrap'); if (w) w.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, 50);
+}
+
+async function lzSvAsignar(viajeId) {
+  if (!_lzSvPedidoSel) { toast('Primero seleccioná un pedido', 'err'); return; }
+  const pid = _lzSvPedidoSel;
+  try {
+    const url = APPS_SCRIPT_URL + '?accion=viajeAgregarPedido&viaje_id=' + encodeURIComponent(viajeId) + '&pedido_id=' + encodeURIComponent(pid);
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (data.status !== 'ok') { toast('❌ ' + (data.message || 'No se pudo asignar'), 'err'); return; }
+    const idx = _lzPedidosZona.findIndex(x => x.pedido_id === pid);
+    if (idx >= 0) _lzPedidosZona[idx].viaje_id = viajeId;
+    _lzSinViaje = _lzSinViaje.filter(p => p.pedido_id !== pid);
+    _lzSvPedidoSel = null;
+    toast('🚚 Pedido asignado al viaje', 'ok');
+    const wrap = document.getElementById('lz-sv-grid-wrap'); if (wrap) wrap.style.display = 'none';
+    const cont = document.getElementById('lz-sv-content');
+    if (!_lzSinViaje.length) {
+      cont.innerHTML = '<div class="lz-empty"><div class="lz-empty-icon">✅</div>Todos los pedidos tienen viaje asignado.</div>';
+    } else {
+      cont.innerHTML = _lzSinViaje.map(p => lzRenderPedidoSinViaje(p)).join('');
+    }
+    if (typeof lzCargarViajes === 'function') lzCargarViajes();
+  } catch (err) {
+    toast('❌ Error de conexión', 'err');
+    console.warn('[lz] sv asignar:', err);
+  }
+}
+
 function lzAlertaPlaceholder(tipo) {
   if (tipo === 'no_entregados') return lzAbrirNoEntregados();
   if (tipo === 'sin_zona')      return lzAbrirSinZona();
+  if (tipo === 'sin_viaje')     return lzAbrirSinViaje();
 }
 
 // ── CARGAR ASIGNACIONES DESDE SUPABASE ───────────────────────
@@ -37809,6 +37967,24 @@ async function comprasDetailCargarFecha() {
         📍 Asignar a ciudad: <span id="lz-sz-pedido-nombre" style="color:var(--red);"></span>
       </div>
       <div class="lz-ciudad-grid" id="lz-sz-grid"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Drawer: Sin Viaje (pedidos activos con viaje_id NULL) — v13.75.0 -->
+<div class="lz-drawer-overlay" id="lz-drawer-sv" onclick="lzCerrarSheet('lz-drawer-sv', event)">
+  <div class="lz-drawer-sheet" onclick="event.stopPropagation()">
+    <div class="lz-modal-pill"></div>
+    <div class="lz-drawer-header">
+      <div class="lz-drawer-title">🚚 Pedidos sin viaje</div>
+      <button class="lz-drawer-close" onclick="lzCerrarSheet('lz-drawer-sv')">✕</button>
+    </div>
+    <div id="lz-sv-content"></div>
+    <div id="lz-sv-grid-wrap" style="display:none;margin-top:12px;padding-top:12px;border-top:1.5px solid var(--cream2);">
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:800;color:var(--text2);margin-bottom:8px;">
+        🚚 Asignar al viaje: <span id="lz-sv-pedido-nombre" style="color:#E65100;"></span>
+      </div>
+      <div class="lz-ciudad-grid" id="lz-sv-grid"></div>
     </div>
   </div>
 </div>
