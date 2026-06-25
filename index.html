@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.80.0 — 25/06/2026
+     TCK ADMIN — v13.81.0 — 25/06/2026
+     v13.81.0: COBRANZAS — botón "✎ Ajustar monto" en cada transferencia. Cuando
+               el comprobante/MP no coincide con lo registrado, Valen ajusta el
+               monto real (la diferencia queda como deuda del cliente) y puede
+               conciliar en el mismo paso. Antes solo se podía conciliar el monto
+               inflado o corregir desde "Rendir un viaje" (y solo si el viaje ya
+               estaba cerrado). A Xubio se postea el monto real.
      v13.80.0: RENDICIÓN — al rendir un viaje ahora aparecen también las entregas
                que el chofer dejó SIN MARCAR (estado 'pendiente'), en un grupo
                aparte "🚩 Sin marcar por el chofer". Valen carga el cobro por
@@ -30224,6 +30230,77 @@ async function transferConciliar(id, conciliar) {
   }
 }
 
+// ── v13.81: ✎ Ajustar monto de una transferencia que no coincide ──
+// Corrige el componente 'transferencia' del detalle_cobro al monto real que
+// entró (banco/MP), preservando otras formas si el pago era mixto. La diferencia
+// con la factura queda como deuda del cliente. Opcionalmente concilia en el acto.
+// A Xubio se postea el monto real (la vista lee detalle_cobro->>'transferencia').
+function transferAjustarMonto(id) {
+  var e = _ltState.rows.find(function(r){ return r.id === id; });
+  if (!e) { toast('No encontré la entrega', 'err'); return; }
+  var actual = _ltMontoTransfer(e);
+  var facturaTot = Math.round(parseFloat(e.monto) || 0);
+  var ocrC = e.transfer_ocr || null;
+  var sug = (ocrC && ocrC.monto) ? Math.round(parseFloat(ocrC.monto) || 0) : Math.round(actual);
+  if (!(sug > 0)) sug = Math.round(actual);
+  var prev = document.getElementById('lt-ajuste-modal'); if (prev) prev.remove();
+  var m = document.createElement('div');
+  m.id = 'lt-ajuste-modal';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100000;display:flex;align-items:center;justify-content:center;padding:18px;';
+  m.innerHTML =
+    '<div style="background:#fff;border-radius:14px;max-width:400px;width:100%;padding:20px;">' +
+      '<div style="font-family:Barlow Condensed,sans-serif;font-size:19px;font-weight:900;color:#283593;margin-bottom:4px;">✎ Ajustar monto de la transferencia</div>' +
+      '<div style="font-size:13px;color:var(--text3);margin-bottom:12px;">' + (e.cliente || '—') + ' · registrado: <b>$' + Math.round(actual).toLocaleString('es-AR') + '</b></div>' +
+      '<label style="font-size:12px;font-weight:700;color:var(--text2);">Monto real que entró al banco / MP</label>' +
+      '<input id="lt-ajuste-input" type="text" inputmode="decimal" value="' + sug.toLocaleString('es-AR') + '" style="width:100%;padding:12px;border:1.5px solid #283593;border-radius:10px;font-family:Barlow Condensed,sans-serif;font-size:20px;font-weight:900;box-sizing:border-box;margin:6px 0;">' +
+      '<div id="lt-ajuste-dif" style="font-size:12px;font-weight:700;margin-bottom:12px;min-height:16px;"></div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+        '<button id="lt-ajuste-cancel" style="flex:1;min-width:84px;padding:11px;background:#eee;color:#333;border:none;border-radius:10px;font-weight:700;cursor:pointer;">Cancelar</button>' +
+        '<button id="lt-ajuste-save" style="flex:1;min-width:104px;padding:11px;background:#fff;color:#283593;border:1.5px solid #283593;border-radius:10px;font-weight:800;cursor:pointer;">Guardar</button>' +
+        '<button id="lt-ajuste-saveconc" style="flex:1.4;min-width:124px;padding:11px;background:#2E7D32;color:#fff;border:none;border-radius:10px;font-weight:900;cursor:pointer;">Guardar y conciliar</button>' +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--text3);margin-top:10px;line-height:1.35;">La diferencia con la factura ($' + facturaTot.toLocaleString('es-AR') + ') queda como deuda del cliente. A Xubio se postea el monto real.</div>' +
+    '</div>';
+  document.body.appendChild(m);
+  function actualizarDif() {
+    var v = Number((document.getElementById('lt-ajuste-input').value || '').replace(/[^\d]/g, '')) || 0;
+    var d = facturaTot - v;
+    var el = document.getElementById('lt-ajuste-dif');
+    if (v <= 0) { el.style.color = '#B71C1C'; el.textContent = 'Ingresá un monto válido'; }
+    else if (d > 0) { el.style.color = '#B45309'; el.textContent = 'Quedan $' + d.toLocaleString('es-AR') + ' como deuda del cliente'; }
+    else if (d < 0) { el.style.color = '#B71C1C'; el.textContent = 'Es $' + (-d).toLocaleString('es-AR') + ' MÁS que la factura — verificá'; }
+    else { el.style.color = '#1B5E20'; el.textContent = '✓ Coincide con la factura'; }
+  }
+  document.getElementById('lt-ajuste-input').addEventListener('input', actualizarDif);
+  actualizarDif();
+  document.getElementById('lt-ajuste-cancel').onclick = function(){ m.remove(); };
+  document.getElementById('lt-ajuste-save').onclick = function(){ _transferAjustarGuardar(id, document.getElementById('lt-ajuste-input').value, false, m); };
+  document.getElementById('lt-ajuste-saveconc').onclick = function(){ _transferAjustarGuardar(id, document.getElementById('lt-ajuste-input').value, true, m); };
+}
+
+async function _transferAjustarGuardar(id, valStr, conciliar, modalEl) {
+  var nuevo = Number(String(valStr || '').replace(/[^\d]/g, '')) || 0;
+  if (nuevo <= 0) { toast('Monto inválido', 'err'); return; }
+  var e = _ltState.rows.find(function(r){ return r.id === id; });
+  if (!e) { toast('No encontré la entrega', 'err'); return; }
+  var det = _rvParseDet(e);          // {efectivo,transferencia,cheque,cuenta_corriente} con fallback
+  det.transferencia = nuevo;         // ajusto SOLO el componente transferencia
+  var detJson = {};
+  ['efectivo','transferencia','cheque','cuenta_corriente'].forEach(function(k){ if ((Number(det[k]) || 0) > 0) detJson[k] = Math.round(Number(det[k])); });
+  var payload = { detalle_cobro: JSON.stringify(detJson) };
+  if (conciliar) { payload.transfer_conciliada = true; payload.transfer_conciliada_en = new Date().toISOString(); }
+  try {
+    await sbFetch('entregas?id=eq.' + encodeURIComponent(id), { method: 'PATCH', headers: { 'Prefer': 'return=minimal' }, body: JSON.stringify(payload) });
+    if (modalEl) modalEl.remove();
+    toast(conciliar ? '✅ Ajustada y conciliada' : '✎ Monto ajustado', 'ok');
+    var el = document.getElementById('logistica-contenido');
+    if (el) renderLogisticaTransferencias(el);
+  } catch (ex) {
+    console.error('transferAjustarMonto:', ex);
+    toast('❌ Error al guardar', 'err');
+  }
+}
+
 // ══════════════════════════════════════════════════════════
 // v13.12 — PANEL DE TRANSFERENCIAS A CONCILIAR
 // ══════════════════════════════════════════════════════════
@@ -30632,6 +30709,7 @@ function _ltPintar() {
     } else {
       s += '<button onclick="transferConciliar(\'' + e.id + '\',true)" style="flex:1;min-width:120px;padding:9px;background:#2E7D32;color:#fff;border:none;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">✓ Conciliada</button>';
     }
+    s += '<button onclick="transferAjustarMonto(\'' + e.id + '\')" style="flex:1;min-width:120px;padding:9px;background:#fff;color:#283593;border:1.5px solid #283593;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;' + (montoDelta ? 'box-shadow:0 0 0 2px #C5CAE9;' : '') + '">✎ Ajustar monto</button>';
     s += '<button onclick="transferDisputar(\'' + e.id + '\')" style="flex:1;min-width:120px;padding:9px;background:#fff;color:#E65100;border:1.5px solid #E65100;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">⚠️ No acreditó</button>';
     s += '</div></div>';
     return s;
