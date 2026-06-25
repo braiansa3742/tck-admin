@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.79.0 — 25/06/2026
+     TCK ADMIN — v13.80.0 — 25/06/2026
+     v13.80.0: RENDICIÓN — al rendir un viaje ahora aparecen también las entregas
+               que el chofer dejó SIN MARCAR (estado 'pendiente'), en un grupo
+               aparte "🚩 Sin marcar por el chofer". Valen carga el cobro por
+               instrumento (efectivo/transfer/cheque/fiado — multi-forma) y al
+               tildarlas se confirman: se marcan 'entregado' y entran a la
+               rendición. Resuelve el caso Chiabrando ($2.224.020 que no aparecía
+               porque Joan no lo marcó). La tarjeta del viaje muestra "N sin marcar".
      v13.79.0: RENDICIÓN — el selector de viajes ahora incluye los viajes en
                estado "rindiendo" (antes solo "cerrado"). Sin esto, los viajes
                en curso (América/Fortín 23/6, el Daily del 24/6, etc.) quedaban
@@ -16053,10 +16060,14 @@ async function rvCargar(){
     viajes = viajes || [];
     if(!viajes.length){ _rvViajes=[]; rvRenderLista(); return; }
     var ids = viajes.map(function(v){ return '"'+v.id+'"'; }).join(',');
-    var ents = await _tesFetch("entregas?viaje_id=in.("+ids+")&estado=eq.entregado&select=id,viaje_id,cliente,ciudad,pedido_id,monto,forma_cobro,detalle_cobro,transfer_conciliada,rendicion_estado&limit=3000");
+    // v13.80: traemos también las 'pendiente' (entregas que el chofer NO marcó) para poder rendirlas
+    var ents = await _tesFetch("entregas?viaje_id=in.("+ids+")&estado=in.(entregado,pendiente)&select=id,viaje_id,cliente,ciudad,pedido_id,monto,forma_cobro,detalle_cobro,transfer_conciliada,rendicion_estado,estado&limit=3000");
     ents = ents || [];
-    var porViaje={};
-    ents.forEach(function(e){ (porViaje[e.viaje_id]=porViaje[e.viaje_id]||[]).push(e); });
+    var porViaje={}, smViaje={};   // porViaje = entregado · smViaje = pendiente (sin marcar)
+    ents.forEach(function(e){
+      if(e.estado==='pendiente'){ (smViaje[e.viaje_id]=smViaje[e.viaje_id]||[]).push(e); }
+      else { (porViaje[e.viaje_id]=porViaje[e.viaje_id]||[]).push(e); }
+    });
     // R3: devoluciones pendientes de recepción en depósito (Pancho) — traban la rendición
     var pendPed={}, pendEnt={};
     try {
@@ -16067,12 +16078,13 @@ async function rvCargar(){
       var es=porViaje[v.id]||[];
       var pend=es.filter(function(e){ return e.rendicion_estado!=='confirmada'; });
       v._ent=es; v._pend=pend.length;
+      v._sm=smViaje[v.id]||[]; v._smN=v._sm.length;   // v13.80: entregas sin marcar por el chofer
       v._efe=pend.reduce(function(a,e){ return a+_rvN(_rvParseDet(e).efectivo); },0);
       v._devPend=es.filter(function(e){ return pendPed[e.pedido_id] || pendEnt[e.id]; }).length;
       v._historico = (String(v.fecha_salida||'').slice(0,10) < RV_CORTE_XUBIO);
       v._diasAntig = _rvDiasDesde(v.fecha_salida);
       return v;
-    }).filter(function(v){ return v._pend>0; })
+    }).filter(function(v){ return v._pend>0 || v._smN>0; })
       .filter(function(v){ return !(v._historico && v._diasAntig > RV_OCULTAR_DIAS); });
     rvRenderLista();
   }catch(e){ console.error('[rv] cargar',e); if(lista) lista.innerHTML='<div class="rv-empty">Error al cargar. 🔄</div>'; }
@@ -16089,6 +16101,7 @@ function rvRenderLista(){
       '<div class="m">'+_rvFecha(v.fecha_salida)+' · '+v._pend+' sin confirmar · '+_rvFmt(v.monto_total)+'</div>'+
       (v._historico?'<div style="margin-top:4px;font-size:11px;font-weight:700;color:#B45309;background:#FBE9D2;border-radius:6px;padding:3px 8px;display:inline-block;">📌 Histórico · ya en Xubio (solo control de caja)</div>':'')+
       (v._efe>0?'<div class="tag">efectivo a contar: '+_rvFmt(v._efe)+'</div>':'')+
+      (v._smN>0?'<div style="margin-top:4px;font-size:11px;font-weight:800;color:#B45309;background:#FFF3E0;border:1px solid #FFCC80;border-radius:6px;padding:3px 8px;display:inline-block;">🚩 '+v._smN+' sin marcar por el chofer</div>':'')+
       (v._devPend>0?'<div class="rv-devblock">⛔ '+v._devPend+' devol. sin recibir (Pancho)</div>':'')+
     '</div>';
   }).join('');
@@ -16102,9 +16115,14 @@ function rvAbrir(id){
     if(p0) p0.innerHTML='<div class="rv-empty">⛔ Este viaje tiene <b>'+_rvSel._devPend+'</b> devolución(es) sin recibir en depósito.<br>No se puede rendir hasta que Pancho confirme la recepción de la mercadería.</div>';
     rvRenderLista(); return;
   }
-  _rvEnt=(_rvSel._ent||[]).filter(function(e){ return e.rendicion_estado!=='confirmada'; });
+  // v13.80: el panel trabaja con las marcadas (entregado) + las sin marcar (pendiente)
+  var entMarc=(_rvSel._ent||[]).filter(function(e){ return e.rendicion_estado!=='confirmada'; });
+  var entSM=(_rvSel._sm||[]).map(function(e){ e._sm=true; return e; });
+  _rvEnt=entMarc.concat(entSM);
   _rvCobro={}; _rvIncluir={}; _rvEdit={}; _rvEfeContado=null;
-  _rvEnt.forEach(function(e){ _rvCobro[e.id]=_rvParseDet(e); _rvIncluir[e.id]=true; });
+  entMarc.forEach(function(e){ _rvCobro[e.id]=_rvParseDet(e); _rvIncluir[e.id]=true; });
+  // sin marcar: arrancan en cero, NO incluidas (Valen decide), con el editor de formas abierto
+  entSM.forEach(function(e){ _rvCobro[e.id]={efectivo:0,transferencia:0,cheque:0,cuenta_corriente:0}; _rvIncluir[e.id]=false; _rvEdit[e.id]=true; });
   var tit=document.getElementById('rv-vtit'); if(tit) tit.textContent=(_rvSel.chofer||'')+' · '+_rvFecha(_rvSel.fecha_salida);
   rvRenderPanel(); rvRenderLista();
 }
@@ -16180,7 +16198,11 @@ function rvRenderPanel(){
     (dif===0?'✓ El efectivo cierra':(dif>0?'Sobran ':'Faltan ')+_rvFmt(Math.abs(dif))+' en efectivo — ajustá las facturas o el contado')+'</div>';
 
   html+='<div class="rv-sub">Factura por factura — ✎ para ajustar si pagó distinto</div>';
+  var _smHdr=false;   // v13.80: header del grupo "sin marcar"
   _rvEnt.forEach(function(e){
+    if(e._sm && !_smHdr){ _smHdr=true;
+      html+='<div class="rv-sub" style="margin-top:14px;color:#B45309;background:#FFF3E0;border:1px solid #FFCC80;border-radius:8px;padding:7px 10px;">🚩 Sin marcar por el chofer — cargá el cobro (✎) y tildá ✓ para incluirla</div>';
+    }
     var c=_rvCobro[e.id], inc=!!_rvIncluir[e.id], cobr=_rvCobrado(c), tot=_rvN(e.monto), edit=!!_rvEdit[e.id];
     var difF=cobr+_rvN(c.cuenta_corriente)-tot;
     var chips=[];
@@ -16190,7 +16212,7 @@ function rvRenderPanel(){
     if(c.cuenta_corriente>0) chips.push('<span class="rv-chip ccte">fiado '+_rvFmt(c.cuenta_corriente)+'</span>');
     html+='<div class="rv-fac'+(inc?'':' off')+'">'+
       '<div class="rv-chk'+(inc?' on':'')+'" onclick="rvToggleInc(\''+e.id+'\')">'+(inc?'✓':'')+'</div>'+
-      '<div class="info"><div class="cli">'+_rvEsc(e.cliente||'—')+'</div>'+
+      '<div class="info"><div class="cli">'+_rvEsc(e.cliente||'—')+(e._sm?' <span style="font-size:9px;font-weight:800;color:#B71C1C;background:#FFCDD2;border-radius:5px;padding:1px 6px;vertical-align:middle;">SIN MARCAR</span>':'')+'</div>'+
         '<div class="meta">'+_rvEsc(e.ciudad||'')+(e.pedido_id?' · '+_rvEsc(e.pedido_id):'')+'</div>'+
         '<div class="rv-chips" id="rv-chips-'+e.id+'">'+chips.join('')+'</div>'+
         (edit?(
@@ -16240,6 +16262,14 @@ async function rvCerrar(){
       rendicion_monto_recibido:Math.round(cobr),
       rendicion_diferencia:Math.round(cobr+_rvN(c.cuenta_corriente)-tot)
     };
+    if(e._sm){
+      // v13.80: el chofer la dejó pendiente; al rendirla la damos por entregada
+      payload.estado='entregado';
+      payload.fecha_entrega=ahora;
+      var domK='efectivo', domV=-1;   // forma_cobro = instrumento dominante (el desglose va en detalle_cobro)
+      _RV_INSTR.forEach(function(k){ if(_rvN(c[k])>domV){ domV=_rvN(c[k]); domK=k; } });
+      payload.forma_cobro=domK;
+    }
     // NO tocar transfer_conciliada (MP) ni monto_cobrado_real (lo postean las vistas por instrumento)
     try{ await sbFetch('entregas?id=eq.'+encodeURIComponent(e.id),{method:'PATCH',body:JSON.stringify(payload),prefer:'return=minimal'}); ok++; }
     catch(ex){ console.error('[rv] confirmar',e.id,ex); err++; }
