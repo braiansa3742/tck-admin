@@ -1,6 +1,21 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.81.0 — 25/06/2026
+     TCK ADMIN — v13.83.0 — 25/06/2026
+     v13.83.0: AJUSTES FISCALES — la bandeja ahora VIVE en Logística → 📦 Depósito
+               (junto a las conformidades de carga, que es de donde nace el
+               problema), con los pendientes arriba y un historial de resueltos
+               para trazabilidad. El chip "🧾 Ajustes fiscales" del hub ahora
+               ENRUTA a ese tab (como el resto de los chips), en vez de abrir un
+               modal suelto. Antes solo se accedía por el chip y no había forma
+               de ver el historial.
+     v13.82.0: AJUSTES FISCALES — bandeja para resolver lo que Pancho reporta al
+               cargar (falta/sustitución de un producto facturado). Chip rojo
+               "🧾 Ajustes fiscales" en el hub de alertas que cuenta
+               cargas_ajustes.estado=pendiente. Por cada caso muestra qué faltó
+               (→ NC) y qué se cargó en su lugar (→ factura del sustituto) con la
+               factura original. Francisco carga N° de NC + N° de factura nueva
+               y marca resuelto (PATCH anti-RLS). Cierra el circuito del
+               "Faltó / cambié algo" de tck-ventas v14.96.0.
      v13.81.0: COBRANZAS — botón "✎ Ajustar monto" en cada transferencia. Cuando
                el comprobante/MP no coincide con lo registrado, Valen ajusta el
                monto real (la diferencia queda como deuda del cliente) y puede
@@ -3960,6 +3975,19 @@ body {
 .badge-confirmado { background: var(--green3); color: var(--green2); }
 .badge-entregado { background: var(--blue2); color: var(--blue); }
 .badge-cancelado { background: #FFEBEE; color: #C62828; }
+/* v13.82.0/v13.83.0 — Ajustes fiscales (cards dentro de Logística → Depósito) */
+.ajf-item { border:1.5px solid #E8DFD5;border-radius:12px;padding:12px;margin-bottom:10px;background:#fff; }
+.ajf-item-top { display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:15px; }
+.ajf-fact { font-size:12px;color:#2E7D32;font-weight:700; }
+.ajf-row { font-size:13px;color:#2A2018;margin-top:6px; }
+.ajf-lbl { color:#8A7E72;font-size:11px;text-transform:uppercase;letter-spacing:.4px;font-weight:800; }
+.ajf-nota { font-size:12px;color:#7A5800;background:#FBF3E6;border-radius:7px;padding:6px 9px;margin-top:6px; }
+.ajf-meta { font-size:11px;color:#9A8F85;margin-top:6px; }
+.ajf-form { margin-top:10px;border-top:1px dashed #E8DFD5;padding-top:10px;display:flex;flex-direction:column;gap:7px; }
+.ajf-inp { width:100%;padding:10px;border:1.5px solid #E8DFD5;border-radius:8px;font-size:14px;background:#fff;color:#2A2018; }
+.ajf-err { color:#C62828;font-size:12px;font-weight:700;min-height:14px; }
+.ajf-btn { background:linear-gradient(135deg,#1B5E20,#2E7D32);color:#fff;border:none;border-radius:9px;padding:12px;font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:900;cursor:pointer; }
+.ajf-btn:disabled { opacity:.5; }
 .badge-dup-exacto { background: #C62828; color: #fff; animation: pulse 1s infinite; }
 .badge-dup-parcial { background: var(--orange); color: #fff; animation: pulse 1.5s infinite; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
@@ -17740,7 +17768,7 @@ async function renderAlertasBanner() {
     var manana = new Date(hoy); manana.setDate(manana.getDate() + 1);
     var mananaISO = manana.toISOString();
 
-    var [devsRes, entRes, devsNCRes, devsNCSinNroRes] = await Promise.all([
+    var [devsRes, entRes, devsNCRes, devsNCSinNroRes, ajfRes] = await Promise.all([
       // Devoluciones pendientes de reclamar (cualquier fecha)
       sbFetch('devoluciones?reclamo_estado=eq.por_reclamar&select=id').catch(function() { return []; }),
       // Entregas "no estaba" del día
@@ -17748,13 +17776,16 @@ async function renderAlertasBanner() {
       // v13.29: devoluciones recibidas por Pancho, pendientes de NC
       sbFetch('devoluciones?estado=eq.recibida_deposito&select=id').catch(function() { return []; }),
       // v13.70.0: NC marcada como emitida pero SIN número cargado (seguimiento de trazabilidad)
-      sbFetch('devoluciones?estado=eq.nc_emitida&nc_numero=is.null&select=id').catch(function() { return []; })
+      sbFetch('devoluciones?estado=eq.nc_emitida&nc_numero=is.null&select=id').catch(function() { return []; }),
+      // v13.82.0: ajustes fiscales pendientes (Pancho reportó falta/sustitución en la carga)
+      sbFetch('cargas_ajustes?estado=eq.pendiente&select=id').catch(function() { return []; })
     ]);
 
     _alertasCache.devolucionesPorReclamar = (devsRes || []).length;
     _alertasCache.noEstaba = (entRes || []).length;
     _alertasCache.devolucionesSinNC = (devsNCRes || []).length;
     _alertasCache.devolucionesNCSinNumero = (devsNCSinNroRes || []).length;
+    _alertasCache.ajustesFiscales = (ajfRes || []).length;
 
     // Re-render con la data completa
     _renderChipsAlertas();
@@ -17771,6 +17802,16 @@ function _renderChipsAlertas() {
   if (!banner || !inner) return;
 
   var chips = [];
+  // 🧾 v13.82.0: ajustes fiscales pendientes (falta/sustitución reportada por Pancho)
+  if (_alertasCache.ajustesFiscales > 0) {
+    chips.push({
+      cls: 'rojo',
+      icon: '🧾',
+      label: 'Ajustes fiscales',
+      count: _alertasCache.ajustesFiscales,
+      onclick: "_alertaIrA('ajustes')"
+    });
+  }
   // 🔴 Duplicados
   if (_alertasCache.duplicados > 0) {
     chips.push({
@@ -17869,6 +17910,9 @@ function _alertaIrA(destino) {
   } else if (destino === 'devoluciones') {
     cambiarTab('logistica');
     setTimeout(function() { logisticaSelTab('devoluciones', document.getElementById('log-tab-devoluciones')); }, 100);
+  } else if (destino === 'ajustes') {
+    cambiarTab('logistica');
+    setTimeout(function() { logisticaSelTab('deposito', document.getElementById('log-tab-deposito')); }, 100);
   } else if (destino === 'noestaba') {
     cambiarTab('logistica');
     setTimeout(function() { logisticaSelTab('seguimiento', document.getElementById('log-tab-seguimiento')); }, 100);
@@ -31682,13 +31726,25 @@ async function renderLogisticaDeposito(el) {
   var fmt = function(n) { return '$' + Math.round(Number(n) || 0).toLocaleString('es-AR'); };
   try {
     var desde7 = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
-    var [confs, recuentos, sinNC] = await Promise.all([
+    var [confs, recuentos, sinNC, ajustes] = await Promise.all([
       sbFetch('cargas_conformidad?select=*&fecha=gte.' + desde7 + '&order=conformado_en.desc&limit=40').catch(function() { return []; }),
       sbFetch('deposito_recuentos?select=*&order=creado_at.desc&limit=10').catch(function() { return []; }),
-      sbFetch('devoluciones?estado=eq.recibida_deposito&select=id').catch(function() { return []; })
+      sbFetch('devoluciones?estado=eq.recibida_deposito&select=id').catch(function() { return []; }),
+      sbFetch('cargas_ajustes?select=*&order=creado_at.desc&limit=60').catch(function() { return []; })
     ]);
+    var ajPend = (ajustes || []).filter(function(a) { return a.estado === 'pendiente'; });
+    var ajResueltos = (ajustes || []).filter(function(a) { return a.estado === 'resuelto'; });
+    _ajfCache = ajPend;  // lo usa ajustesResolver
 
     var html = '';
+    // 🧾 v13.83.0 — Ajustes fiscales pendientes ARRIBA (es plata sin facturar)
+    if (ajPend.length) {
+      html += '<div style="background:#FDECEA;border:1.5px solid #F5B7B1;border-radius:12px;padding:12px;margin-bottom:14px;">';
+      html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:16px;font-weight:900;color:#C62828;margin-bottom:4px;">🧾 ' + ajPend.length + ' ajuste(s) fiscal(es) pendiente(s)</div>';
+      html += '<div style="font-size:12px;color:#7A4A45;margin-bottom:10px;line-height:1.45;">Pancho cargó algo distinto a lo facturado. Hacé la <b>Nota de Crédito</b> de lo que faltó y la <b>factura del sustituto</b> en Xubio, y marcá resuelto.</div>';
+      html += ajPend.map(ajustesCardHtml).join('');
+      html += '</div>';
+    }
     if ((sinNC || []).length) {
       html += '<div style="background:#FFF3E0;border:1.5px solid #FFB74D;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px;font-weight:800;color:#E65100;">'
         + '🧾 ' + sinNC.length + ' devolución' + (sinNC.length === 1 ? '' : 'es') + ' recibida' + (sinNC.length === 1 ? '' : 's')
@@ -31733,6 +31789,19 @@ async function renderLogisticaDeposito(el) {
           return esc((it.cantidad != null ? it.cantidad : '?') + '× ' + (it.producto || ''));
         }).join(' · ') + '</div>';
         if (r.nota) html += '<div style="font-size:11px;color:var(--text3);margin-top:3px;">📝 ' + esc(r.nota) + '</div>';
+        html += '</div>';
+      });
+    }
+
+    // 🧾 v13.83.0 — Ajustes fiscales resueltos (historial para trazabilidad)
+    if (ajResueltos.length) {
+      html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:900;color:var(--text3);text-transform:uppercase;letter-spacing:.6px;margin:14px 0 8px;">🧾 Ajustes resueltos · últimos ' + ajResueltos.length + '</div>';
+      ajResueltos.forEach(function(a) {
+        html += '<div style="background:#fff;border:1.5px solid var(--cream3);border-radius:12px;padding:10px 12px;margin-bottom:7px;opacity:.85;">';
+        html += '<div style="font-size:13px;font-weight:700;color:var(--text);">' + esc(a.cliente || '—') + ' · Fact. #' + esc(a.factura_nro || '—') + '</div>';
+        html += '<div style="font-size:12px;color:var(--text2);margin-top:3px;">Faltó <b>' + esc((a.cantidad_falto || 0) + '× ' + (a.producto_falto || '—')) + '</b>'
+          + (a.producto_cargado ? ' → cargó <b>' + esc((a.cantidad_cargada || 0) + '× ' + a.producto_cargado) + '</b>' : ' (de menos)') + '</div>';
+        html += '<div style="font-size:11px;color:#2E7D32;font-weight:700;margin-top:3px;">✅ NC #' + esc(a.nc_numero || '—') + (a.factura_nueva_numero ? ' · Fact. nueva #' + esc(a.factura_nueva_numero) : '') + ' · ' + esc(a.resuelto_por || '—') + '</div>';
         html += '</div>';
       });
     }
@@ -31826,6 +31895,86 @@ async function devCompletarNC() {
     console.error('[devCompletarNC]', e);
     toast('❌ No se pudo guardar el N° — reintentá', 'err');
   }
+}
+
+// ═══ v13.82.0 — Bandeja de ajustes fiscales (falta/sustitución reportada por Pancho) ═══
+// v13.83.0: vive dentro de Logística → 📦 Depósito (renderLogisticaDeposito).
+// El chip del hub enruta ahí (ver _alertaIrA). Acá quedan los helpers de card y resolución.
+var _ajfCache = [];   // ajustes pendientes en pantalla (lo llena renderLogisticaDeposito)
+
+function ajustesCardHtml(a) {
+  var falto = (a.cantidad_falto || 0) + '× ' + (a.producto_falto || '—');
+  var carg = a.producto_cargado
+    ? (a.cantidad_cargada || 0) + '× ' + _ajfEsc(a.producto_cargado)
+    : '<i>nada (va de menos)</i>';
+  var h = '<div class="ajf-item" id="ajf-item-' + a.id + '">';
+  h += '<div class="ajf-item-top"><b>' + _ajfEsc(a.cliente || '—') + '</b>'
+     + '<span class="ajf-fact">Fact. #' + _ajfEsc(a.factura_nro || '—') + '</span></div>';
+  h += '<div class="ajf-row"><span class="ajf-lbl">Faltó (hacer NC):</span><br><b style="color:#C62828;">' + _ajfEsc(falto) + '</b></div>';
+  h += '<div class="ajf-row"><span class="ajf-lbl">Cargó en su lugar (facturar):</span><br><b style="color:#2E7D32;">' + carg + '</b></div>';
+  if (a.nota) h += '<div class="ajf-nota">📝 ' + _ajfEsc(a.nota) + '</div>';
+  h += '<div class="ajf-meta">Reportó ' + _ajfEsc(a.reportado_por || '—') + ' · ' + _ajfFecha(a.creado_at) + '</div>';
+  h += '<div class="ajf-form">';
+  h += '  <input class="ajf-inp" id="ajf-nc-' + a.id + '" type="text" placeholder="N° Nota de Crédito (lo que faltó)">';
+  if (a.producto_cargado) {
+    h += '  <input class="ajf-inp" id="ajf-fn-' + a.id + '" type="text" placeholder="N° Factura del sustituto">';
+  }
+  h += '  <input class="ajf-inp" id="ajf-rn-' + a.id + '" type="text" placeholder="Nota (opcional)">';
+  h += '  <div class="ajf-err" id="ajf-err-' + a.id + '"></div>';
+  h += '  <button class="ajf-btn" id="ajf-btn-' + a.id + '" onclick="ajustesResolver(\'' + a.id + '\')">✅ Marcar resuelto</button>';
+  h += '</div>';
+  h += '</div>';
+  return h;
+}
+
+async function ajustesResolver(id) {
+  var a = _ajfCache.find(function(x) { return x.id === id; });
+  if (!a) return;
+  var err = document.getElementById('ajf-err-' + id); if (err) err.textContent = '';
+  var nc = ((document.getElementById('ajf-nc-' + id) || {}).value || '').trim();
+  var fnEl = document.getElementById('ajf-fn-' + id);
+  var fn = fnEl ? (fnEl.value || '').trim() : '';
+  var rn = ((document.getElementById('ajf-rn-' + id) || {}).value || '').trim();
+  if (!nc) { if (err) err.textContent = 'Cargá el N° de la Nota de Crédito.'; return; }
+  if (a.producto_cargado && !fn) { if (err) err.textContent = 'Cargá el N° de factura del sustituto.'; return; }
+  var btn = document.getElementById('ajf-btn-' + id);
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
+  try {
+    var resp = await fetch(SUPABASE_URL + '/rest/v1/cargas_ajustes?id=eq.' + encodeURIComponent(id), {
+      method: 'PATCH',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY),
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
+      },
+      body: JSON.stringify({
+        estado: 'resuelto',
+        nc_numero: nc,
+        factura_nueva_numero: fn || null,
+        resolucion_nota: rn || null,
+        resuelto_por: vendedorActual || 'Admin',
+        resuelto_at: new Date().toISOString()
+      })
+    });
+    var filas = await resp.json();
+    if (!resp.ok || !Array.isArray(filas) || !filas.length) throw new Error('PATCH vacío (¿RLS?)');
+    if (typeof toast === 'function') toast('✅ Ajuste resuelto', 'ok');
+    _ajfCache = _ajfCache.filter(function(x) { return x.id !== id; });
+    if (typeof renderLogistica === 'function') renderLogistica();   // re-render del subtab Depósito
+    if (typeof renderAlertasBanner === 'function') renderAlertasBanner();
+  } catch (e) {
+    console.error('[ajustesResolver]', e);
+    if (err) err.textContent = 'No se pudo guardar — reintentá.';
+    if (btn) { btn.disabled = false; btn.textContent = '✅ Marcar resuelto'; }
+  }
+}
+
+function _ajfEsc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function _ajfFecha(iso) {
+  if (!iso) return '—';
+  try { var d = new Date(iso); return d.toLocaleDateString('es-AR') + ' ' + d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }); }
+  catch (e) { return '—'; }
 }
 
 function devAbrirModal(devolucionId) {
