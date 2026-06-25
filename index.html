@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.76.0 — 24/06/2026
+     TCK ADMIN — v13.77.0 — 25/06/2026
+     v13.77.0: RENDICIONES — cada tarjeta (pendientes e historial) ahora muestra
+               la FECHA DEL VIAJE ("📅 Viaje del DD/MM"), no solo la fecha en que
+               se cerró la rendición. Resuelve el caso de rendir varios días
+               juntos: ahora se sabe el total de cada viaje por su fecha real.
      v13.76.0: FACTURACION — cartel de progreso (overlay) + tandas de 4.
                _fcFacturarLista factura de a FCP_CHUNK y muestra avance en
                vivo (barra, contador, lista por pedido). Acompana al backend
@@ -15246,16 +15250,40 @@ async function admRendEnriquecerConEntregas(rendiciones) {
     try {
       var entregas = await sbFetch(
         'entregas?rendicion_id=eq.' + encodeURIComponent(r.id) +
-        '&select=id,cliente,ciudad,monto,forma_cobro,detalle_cobro,rendicion_estado,rendicion_monto_recibido,rendicion_diferencia,rendicion_nota_diferencia,pedido_id'
+        '&select=id,cliente,ciudad,monto,forma_cobro,detalle_cobro,rendicion_estado,rendicion_monto_recibido,rendicion_diferencia,rendicion_nota_diferencia,pedido_id,viaje_id'
       );
       r._entregas = entregas || [];
       r._totales = admRendCalcularTotales(r._entregas);
+      // v13.77.0: viaje_id de la rendición (sus entregas comparten viaje)
+      var _ve = r._entregas.find(function(e){ return e.viaje_id; });
+      r._viajeId = _ve ? _ve.viaje_id : null;
     } catch(e) {
-      console.error('[v8.3 admin] error trayendo entregas de', r.id, e);
+      console.error('[v13.77 admin] error trayendo entregas de', r.id, e);
       r._entregas = [];
       r._totales = { efectivo: 0, cheque: 0, total: 0, n: 0 };
+      r._viajeId = null;
     }
   }
+  // v13.77.0: traer la fecha de salida del viaje de cada rendición (batch)
+  try {
+    var _ids = [];
+    rendiciones.forEach(function(r){ if (r._viajeId && _ids.indexOf(r._viajeId) < 0) _ids.push(r._viajeId); });
+    if (_ids.length) {
+      var _viajes = await sbFetch('viajes?id=in.(' + _ids.map(encodeURIComponent).join(',') + ')&select=id,fecha_salida');
+      var _mapa = {};
+      (_viajes || []).forEach(function(v){ _mapa[v.id] = v.fecha_salida; });
+      rendiciones.forEach(function(r){ r._viajeFecha = r._viajeId ? (_mapa[r._viajeId] || null) : null; });
+    }
+  } catch(e) {
+    console.error('[v13.77 admin] error trayendo fechas de viaje', e);
+  }
+}
+
+// v13.77.0: fecha del viaje en formato DD/MM (parse manual para evitar corrimiento de zona horaria)
+function admRendFechaViajeStr(r) {
+  if (!r || !r._viajeFecha) return '';
+  var p = String(r._viajeFecha).slice(0,10).split('-');
+  return p.length >= 3 ? (p[2] + '/' + p[1]) : '';
 }
 
 function admRendCalcularTotales(entregas) {
@@ -15367,6 +15395,7 @@ function admRendRenderPendientes() {
       '<div class="adm-rend-card-hdr">' +
         '<div>' +
           '<div class="adm-rend-card-chofer">🚚 ' + r.chofer + '</div>' +
+          (admRendFechaViajeStr(r) ? '<div class="adm-rend-card-fecha">📅 Viaje del ' + admRendFechaViajeStr(r) + '</div>' : '') +
           '<div class="adm-rend-card-fecha">📤 Enviada ' + fechaStr + ' · ' + tiempoStr + '</div>' +
           '<div class="adm-rend-card-estado">' + estadoLabel + '</div>' +
         '</div>' +
@@ -15426,6 +15455,7 @@ function admRendRenderHistorial() {
       '<div class="adm-rend-card-hdr">' +
         '<div>' +
           '<div class="adm-rend-card-chofer">🚚 ' + r.chofer + '</div>' +
+          (admRendFechaViajeStr(r) ? '<div class="adm-rend-card-fecha">📅 Viaje del ' + admRendFechaViajeStr(r) + '</div>' : '') +
           '<div class="adm-rend-card-fecha">✅ Confirmada ' + fechaStr + '</div>' +
           '<div class="adm-rend-card-estado">💰 Rendida</div>' +
         '</div>' +
