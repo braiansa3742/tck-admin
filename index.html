@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.84.0 — 26/06/2026
+     TCK ADMIN — v13.85.0 — 26/06/2026
+     v13.85.0: RECONCILIACIÓN — UX. La bandeja de facturas sueltas ahora se
+               agrupa: "🔗 Para enganchar" (con candidato) arriba y visible;
+               "Sin pedido", "Notas de crédito" e "Ignoradas" en acordeones
+               colapsados → mucho menos scroll, deja de estar mezclado.
+               Fechas legibles (_fcFechaCorta): hoy / ayer / "jue 25/06" en
+               vez de 2026-06-25.
      v13.84.0: RECONCILIACIÓN DE FACTURAS SUELTAS. La sección "Facturas sueltas
                (sin pedido)" del Centro de Facturación ahora permite ENGANCHAR
                cada factura a un pedido existente del mismo cliente (Modo A:
@@ -38381,6 +38387,14 @@ async function comprasDetailCargarFecha() {
 .fc-recon-ign-cli{font-size:12px;font-weight:700;color:var(--text2);}
 .fc-recon-ign-why{font-size:10.5px;color:var(--text3);margin-top:1px;}
 .fc-recon-undo{font-size:11px;color:var(--blue);font-weight:800;background:none;border:none;cursor:pointer;flex-shrink:0;}
+.fc-recon-grupo-h{font-size:12px;font-weight:800;color:var(--green);margin:4px 0 8px;}
+.fc-recon-grupo-vacio{font-size:11.5px;color:var(--text3);background:var(--cream2);border-radius:9px;padding:9px 10px;margin-bottom:8px;text-align:center;}
+.fc-recon-grp{margin-top:8px;border:1px solid var(--line);border-radius:10px;background:var(--cream2);overflow:hidden;}
+.fc-recon-grp>summary{list-style:none;cursor:pointer;font-size:12px;font-weight:800;color:var(--text2);padding:10px 12px;user-select:none;}
+.fc-recon-grp>summary::-webkit-details-marker{display:none;}
+.fc-recon-grp>summary::before{content:'▸ ';color:var(--text3);}
+.fc-recon-grp[open]>summary::before{content:'▾ ';}
+.fc-recon-grp-body{padding:0 8px 8px;}
 </style>
 
 <!-- ═══ v12.0 BLOQUE D — MODALES DE LOGÍSTICA ZONAS ═══ -->
@@ -38810,6 +38824,21 @@ function _fcCandidatosDe(clienteXubioId) {
 
 function fcReconSetFiltro(pv) { _fcReconFiltroPV = pv; _fcRenderSueltas(); }
 
+// 'YYYY-MM-DD' → "hoy" / "ayer" / "mañana" / "jue 25/06"
+function _fcFechaCorta(iso) {
+  if (!iso) return '';
+  var p = String(iso).substring(0, 10).split('-');
+  if (p.length !== 3) return iso;
+  var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+  var hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  var dif = Math.round((d - hoy) / 86400000);
+  if (dif === 0) return 'hoy';
+  if (dif === -1) return 'ayer';
+  if (dif === 1) return 'mañana';
+  var dias = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+  return dias[d.getDay()] + ' ' + p[2] + '/' + p[1];
+}
+
 function _fcRenderSueltas() {
   var todas     = _fcCache.sueltas || [];
   var bandeja   = todas.filter(function (r) { return r.reconciliacion_estado !== 'ignorada'; });
@@ -38833,20 +38862,49 @@ function _fcRenderSueltas() {
 
   var visibles = bandeja.filter(function (r) { return _fcReconPVKey(r.punto_venta) === _fcReconFiltroPV; });
 
-  var html = '<div class="fc-recon-filtros">' + chips + '</div>';
-  html += visibles.length
-    ? visibles.map(_fcReconCard).join('')
-    : '<div class="fc-vacio">Sin facturas sueltas en este punto de venta. 🎉</div>';
+  // Clasificar: accionables (con candidato) arriba; sin-pedido y NC abajo, colapsados.
+  var conCand = [], sinPed = [], ncs = [];
+  visibles.forEach(function (r) {
+    if (String(r.tipo) === '3') { ncs.push(r); return; }
+    if (_fcCandidatosDe(r.cliente_xubio_id).length) conCand.push(r);
+    else sinPed.push(r);
+  });
 
+  var html = '<div class="fc-recon-filtros">' + chips + '</div>';
+
+  if (!visibles.length) {
+    html += '<div class="fc-vacio">Sin facturas sueltas en este punto de venta. 🎉</div>';
+  } else {
+    // 1) Para enganchar (el trabajo real) — siempre visible
+    if (conCand.length) {
+      html += '<div class="fc-recon-grupo-h ok">🔗 Para enganchar · ' + conCand.length + '</div>';
+      html += conCand.map(_fcReconCard).join('');
+    } else {
+      html += '<div class="fc-recon-grupo-vacio">Nada para enganchar acá. ✓</div>';
+    }
+    // 2) Sin pedido — colapsado
+    if (sinPed.length) {
+      html += '<details class="fc-recon-grp"><summary>📄 Sin pedido en la app · ' + sinPed.length +
+        '</summary><div class="fc-recon-grp-body">' + sinPed.map(_fcReconCard).join('') + '</div></details>';
+    }
+    // 3) Notas de crédito — colapsado
+    if (ncs.length) {
+      html += '<details class="fc-recon-grp"><summary>🧾 Notas de crédito · ' + ncs.length +
+        '</summary><div class="fc-recon-grp-body">' + ncs.map(_fcReconCard).join('') + '</div></details>';
+    }
+  }
+
+  // Historial de ignoradas — colapsado
   if (ignoradas.length) {
-    html += '<div class="fc-recon-hist-h">Ignoradas · ' + ignoradas.length + '</div>';
-    html += ignoradas.map(function (r) {
-      return '<div class="fc-recon-ign">' +
-        '<div><div class="fc-recon-ign-cli">' + _fcEsc(r.cliente_nombre || '') + ' · ' + _fcEsc(r.numero) + '</div>' +
-        '<div class="fc-recon-ign-why">' + _fcEsc(r.reconciliacion_motivo || 'sin motivo') + '</div></div>' +
-        '<button class="fc-recon-undo" onclick="fcReconDesignorar(' + r.transaccion_id + ')">deshacer</button>' +
-        '</div>';
-    }).join('');
+    html += '<details class="fc-recon-grp"><summary>🙈 Ignoradas · ' + ignoradas.length +
+      '</summary><div class="fc-recon-grp-body">' +
+      ignoradas.map(function (r) {
+        return '<div class="fc-recon-ign">' +
+          '<div><div class="fc-recon-ign-cli">' + _fcEsc(r.cliente_nombre || '') + ' · ' + _fcEsc(r.numero) + '</div>' +
+          '<div class="fc-recon-ign-why">' + _fcEsc(r.reconciliacion_motivo || 'sin motivo') + '</div></div>' +
+          '<button class="fc-recon-undo" onclick="fcReconDesignorar(' + r.transaccion_id + ')">deshacer</button>' +
+          '</div>';
+      }).join('') + '</div></details>';
   }
 
   cont.innerHTML = html;
@@ -38858,7 +38916,7 @@ function _fcReconCard(r) {
   var head =
     '<div class="fc-recon-top">' +
       '<div><div class="fc-cli">' + _fcEsc(r.cliente_nombre || '(sin cliente)') + '</div>' +
-      '<div class="fc-meta">' + (esNC ? 'NC ' : 'FC ') + _fcEsc(r.numero) + ' · ' + _fcEsc(r.fecha || '') + '</div></div>' +
+      '<div class="fc-meta">' + (esNC ? 'NC ' : 'FC ') + _fcEsc(r.numero) + ' · ' + _fcFechaCorta(r.fecha) + '</div></div>' +
       '<div class="fc-monto">' + _fcMoneda(r.importe_total) + '</div>' +
     '</div>';
 
