@@ -1,6 +1,16 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.85.0 — 26/06/2026
+     TCK ADMIN — v13.87.0 — 26/06/2026
+     v13.87.0: RECONCILIACIÓN Modo B. Las facturas sin pedido candidato ahora
+               tienen botón "➕ Crear pedido": modal con vendedor (Miguel/
+               Juan/Lisandro/Mostrador), estado (venta cerrada / a reparto)
+               y ciudad si va a reparto. Llama Apps Script v25.87.0
+               (modo=crear) → crea el pedido en Sheet + pedidos_zona, ya
+               facturado, atribuido al vendedor (cuenta en reportes).
+     v13.86.0: FECHAS LEGIBLES en todo el Centro de Facturación. _fcFechaCorta
+               aplicado en Por facturar, Próximas salidas (el encabezado
+               "mar 2026-06-30" ahora es "mar 30/06") y Solo en Xubio. Fin
+               de la confusión mes/día-de-semana.
      v13.85.0: RECONCILIACIÓN — UX. La bandeja de facturas sueltas ahora se
                agrupa: "🔗 Para enganchar" (con candidato) arriba y visible;
                "Sin pedido", "Notas de crédito" e "Ignoradas" en acordeones
@@ -38395,6 +38405,24 @@ async function comprasDetailCargarFecha() {
 .fc-recon-grp>summary::before{content:'▸ ';color:var(--text3);}
 .fc-recon-grp[open]>summary::before{content:'▾ ';}
 .fc-recon-grp-body{padding:0 8px 8px;}
+.fc-recon-btn.crear{background:var(--orange);color:#fff;}
+/* Modal crear pedido retroactivo */
+.fc-rc-overlay{position:fixed;inset:0;background:rgba(26,8,0,.55);z-index:9999;display:flex;align-items:flex-end;justify-content:center;}
+.fc-rc{background:#fff;width:100%;max-width:460px;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));box-shadow:0 -6px 24px rgba(0,0,0,.25);}
+.fc-rc-tit{font-size:16px;font-weight:800;color:var(--red);margin-bottom:10px;}
+.fc-rc-fac{background:var(--cream2);border-radius:10px;padding:9px 11px;font-size:14px;font-weight:800;color:var(--text);margin-bottom:12px;}
+.fc-rc-fac span{display:block;font-size:11.5px;font-weight:600;color:var(--text3);margin-top:3px;}
+.fc-rc-lbl{display:block;font-size:11px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin:10px 0 5px;}
+.fc-rc-sel,.fc-rc-inp{width:100%;font-size:14px;padding:10px 11px;border:1px solid var(--cream3);border-radius:10px;background:#fff;color:var(--text);font-weight:700;font-family:inherit;}
+.fc-rc-radios{display:flex;flex-direction:column;gap:6px;}
+.fc-rc-radio{display:flex;align-items:flex-start;gap:8px;background:var(--cream);border:1px solid var(--cream3);border-radius:10px;padding:9px 11px;font-size:13px;font-weight:700;color:var(--text);cursor:pointer;}
+.fc-rc-radio small{display:block;font-weight:600;color:var(--text3);font-size:11px;}
+.fc-rc-radio input{margin-top:2px;accent-color:var(--green2);}
+.fc-rc-acc{display:flex;gap:8px;margin-top:16px;}
+.fc-rc-btn{flex:1;border:none;border-radius:11px;padding:12px;font-size:14px;font-weight:800;cursor:pointer;}
+.fc-rc-btn.cancel{background:var(--cream2);color:var(--text2);}
+.fc-rc-btn.ok{background:var(--orange);color:#fff;}
+.fc-rc-btn:active{opacity:.7;}
 </style>
 
 <!-- ═══ v12.0 BLOQUE D — MODALES DE LOGÍSTICA ZONAS ═══ -->
@@ -38737,7 +38765,7 @@ function fcRender() {
           '<div class="fc-dot no"></div>' +
           '<div class="fc-main"><div class="fc-cli">' + _fcEsc(r.cliente) + '</div>' +
           '<div class="fc-meta">' + _fcEsc(r.localidad_canonica || '') + ' · ' + _fcEsc(r.vendedor || '') +
-          ' · Presup #' + _fcEsc(r.presupuesto_nro || '—') + ' · salida ' + _fcEsc(r.salida_planificada || '—') + '</div></div>' +
+          ' · Presup #' + _fcEsc(r.presupuesto_nro || '—') + ' · sale ' + (r.salida_planificada ? _fcFechaCorta(r.salida_planificada) : '—') + '</div></div>' +
           '<div class="fc-monto">' + _fcMoneda(r.total) + '</div>' +
           (dias > 0 ? '<span class="fc-chip rojo">' + dias + 'd vencido</span>' : '<span class="fc-chip rojo">HOY</span>') +
           '</div>';
@@ -38755,14 +38783,11 @@ function fcRender() {
         var f = r.salida_planificada || 'sin fecha';
         (porFecha[f] = porFecha[f] || []).push(r);
       });
-      var DIAS_ES = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
       var htmlF = '';
       Object.keys(porFecha).sort().forEach(function (f) {
         var arr = porFecha[f];
         var montoF = arr.reduce(function (a, r) { return a + Number(r.total || 0); }, 0);
-        var dia = '';
-        try { dia = DIAS_ES[new Date(f + 'T12:00:00').getDay()] + ' '; } catch (eD) {}
-        htmlF += '<div class="fc-zona-h"><span>📅 ' + dia + _fcEsc(f) + '</span>' +
+        htmlF += '<div class="fc-zona-h"><span>📅 ' + _fcEsc(_fcFechaCorta(f)) + '</span>' +
           '<span class="fc-chip gris">' + arr.length + ' pedidos · ' + _fcMoneda(montoF) + '</span></div>';
         htmlF += arr.map(function (r) {
           return '<div class="fc-row" style="opacity:.75;">' +
@@ -38788,7 +38813,7 @@ function fcRender() {
         return '<div class="fc-row">' +
           '<div class="fc-dot no" style="background:#EF6C00;"></div>' +
           '<div class="fc-main"><div class="fc-cli">' + _fcEsc(r.cliente_nombre || '(sin cliente)') + '</div>' +
-          '<div class="fc-meta">Presup #' + _fcEsc(r.numero) + ' · ' + _fcEsc(r.fecha || '') + ' · ' + _fcEsc(r.estado_xubio || '') + '</div></div>' +
+          '<div class="fc-meta">Presup #' + _fcEsc(r.numero) + ' · ' + _fcFechaCorta(r.fecha) + ' · ' + _fcEsc(r.estado_xubio || '') + '</div></div>' +
           '<div class="fc-monto">' + _fcMoneda(r.importe_total) + '</div>' +
           '</div>';
       }).join('');
@@ -38944,11 +38969,15 @@ function _fcReconCard(r) {
     body += '</div>';
   } else {
     body = '<div class="fc-recon-nopedido">Sin pedido en la app para este cliente. ' +
-      'Crear el pedido (atribuido al vendedor) llega en la próxima versión.</div>';
+      'Creá el pedido — se atribuye a un vendedor y cuenta en reportes y comisiones.</div>';
   }
 
+  var accCrear = cands.length ? '' :
+    '<button class="fc-recon-btn crear" onclick="fcReconCrearAbrir(' + fid + ')">➕ Crear pedido</button>';
+
   return '<div class="fc-recon-card">' + head + body +
-    '<div class="fc-recon-acc"><button class="fc-recon-btn ghost" onclick="fcReconIgnorar(' + fid + ')">🙈 Ignorar</button></div>' +
+    '<div class="fc-recon-acc">' + accCrear +
+      '<button class="fc-recon-btn ghost" onclick="fcReconIgnorar(' + fid + ')">🙈 Ignorar</button></div>' +
     '</div>';
 }
 
@@ -38989,6 +39018,64 @@ function fcReconIgnorar(facturaId) {
 
 function fcReconDesignorar(facturaId) {
   _fcReconLlamar('modo=designorar&facturaId=' + facturaId, '↩ Vuelta a la bandeja');
+}
+
+// ── Modo B: modal "Crear pedido retroactivo" (v13.87.0) ──
+function _fcReconCrearHost() {
+  var h = document.getElementById('fc-recon-crear-host');
+  if (!h) { h = document.createElement('div'); h.id = 'fc-recon-crear-host'; document.body.appendChild(h); }
+  return h;
+}
+function fcReconCrearCerrar() { var h = document.getElementById('fc-recon-crear-host'); if (h) h.innerHTML = ''; }
+
+function fcReconCrearAbrir(facturaId) {
+  var f = (_fcCache.sueltas || []).find(function (r) { return Number(r.transaccion_id) === Number(facturaId); });
+  if (!f) { toast('No encontré la factura', 'err'); return; }
+  var vends = ['Miguel', 'Juan', 'Lisandro', 'Mostrador'];
+  var opts = vends.map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('');
+  _fcReconCrearHost().innerHTML =
+    '<div class="fc-rc-overlay" onclick="if(event.target===this)fcReconCrearCerrar()">' +
+    '<div class="fc-rc">' +
+      '<div class="fc-rc-tit">➕ Crear pedido desde factura</div>' +
+      '<div class="fc-rc-fac">' + _fcEsc(f.cliente_nombre || '(sin cliente)') +
+        '<span>FC ' + _fcEsc(f.numero) + ' · ' + _fcMoneda(f.importe_total) + ' · ' + _fcFechaCorta(f.fecha) + '</span></div>' +
+      '<label class="fc-rc-lbl">Atribuir a vendedor</label>' +
+      '<select id="fc-rc-vend" class="fc-rc-sel">' + opts + '</select>' +
+      '<label class="fc-rc-lbl">Estado del pedido</label>' +
+      '<div class="fc-rc-radios">' +
+        '<label class="fc-rc-radio"><input type="radio" name="fc-rc-est" value="cerrada" checked onchange="_fcRcToggleCiudad()"> <span>Venta cerrada <small>(no va a reparto)</small></span></label>' +
+        '<label class="fc-rc-radio"><input type="radio" name="fc-rc-est" value="reparto" onchange="_fcRcToggleCiudad()"> <span>Va a reparto <small>(se asigna a un viaje desde Logística)</small></span></label>' +
+      '</div>' +
+      '<div id="fc-rc-ciudad-wrap" style="display:none;">' +
+        '<label class="fc-rc-lbl">Ciudad</label>' +
+        '<input id="fc-rc-ciudad" class="fc-rc-inp" type="text" placeholder="Ej: Pehuajó">' +
+      '</div>' +
+      '<div class="fc-rc-acc">' +
+        '<button class="fc-rc-btn cancel" onclick="fcReconCrearCerrar()">Cancelar</button>' +
+        '<button class="fc-rc-btn ok" onclick="fcReconCrearConfirmar(' + facturaId + ')">➕ Crear</button>' +
+      '</div>' +
+    '</div></div>';
+}
+
+function _fcRcToggleCiudad() {
+  var sel = document.querySelector('input[name="fc-rc-est"]:checked');
+  var wrap = document.getElementById('fc-rc-ciudad-wrap');
+  if (wrap) wrap.style.display = (sel && sel.value === 'reparto') ? 'block' : 'none';
+}
+
+function fcReconCrearConfirmar(facturaId) {
+  var vend = (document.getElementById('fc-rc-vend') || {}).value || '';
+  var selR = document.querySelector('input[name="fc-rc-est"]:checked');
+  var est  = selR ? selR.value : 'cerrada';
+  var ciudad = (document.getElementById('fc-rc-ciudad') || {}).value || '';
+  if (!vend) { toast('Elegí un vendedor', 'err'); return; }
+  if (est === 'reparto' && !ciudad.trim()) { toast('Poné la ciudad para el reparto', 'err'); return; }
+  fcReconCrearCerrar();
+  _fcReconLlamar('modo=crear&facturaId=' + facturaId +
+    '&vendedor=' + encodeURIComponent(vend) +
+    '&estadoSel=' + est +
+    '&ciudad=' + encodeURIComponent(ciudad.trim()),
+    '➕ Pedido creado y atribuido a ' + vend);
 }
 
 // ═══ v13.38.0 — FACTURACIÓN MASIVA ═══
