@@ -1,5 +1,15 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.84.0 — 26/06/2026
+     v13.84.0: RECONCILIACIÓN DE FACTURAS SUELTAS. La sección "Facturas sueltas
+               (sin pedido)" del Centro de Facturación ahora permite ENGANCHAR
+               cada factura a un pedido existente del mismo cliente (Modo A:
+               ajusta el total real, marca Sheet col7/col18 + entregas.monto +
+               facturas_xubio.pedido_id vía Apps Script v25.86.0) o IGNORARLA
+               (refacturación / NC) con historial y "deshacer". Filtro por punto
+               de venta (TCK distribuid / Chicken Kings / Otros). Requiere
+               recrear vw_fact_sueltas (+ punto_venta, reconciliacion_estado).
+               Modo B (crear pedido retroactivo) llega en la próxima.
      TCK ADMIN — v13.83.0 — 25/06/2026
      v13.83.0: AJUSTES FISCALES — la bandeja ahora VIVE en Logística → 📦 Depósito
                (junto a las conformidades de carga, que es de donde nace el
@@ -38345,6 +38355,32 @@ async function comprasDetailCargarFecha() {
 .fc-check{width:20px;height:20px;flex-shrink:0;cursor:pointer;accent-color:#1B5E20;margin:0;}
 .fc-check-imp{accent-color:#0D47A1;}
 .fc-check-zona{width:17px;height:17px;cursor:pointer;accent-color:#1B5E20;vertical-align:middle;margin-right:5px;}
+/* v13.84.0 — Reconciliación de facturas sueltas */
+.fc-recon-filtros{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
+.fc-recon-chip{font-size:11px;font-weight:700;border:1px solid var(--line);background:#fff;color:var(--text2);border-radius:14px;padding:5px 11px;cursor:pointer;}
+.fc-recon-chip.on{background:var(--red);color:#fff;border-color:var(--red);}
+.fc-recon-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px;margin-bottom:9px;box-shadow:var(--shadow);}
+.fc-recon-card.nc{opacity:.85;background:var(--cream2);}
+.fc-recon-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}
+.fc-recon-cands{margin-top:9px;display:flex;flex-direction:column;gap:6px;}
+.fc-recon-cand{display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--cream);border:1px dashed var(--cream3);border-radius:9px;padding:7px 9px;}
+.fc-recon-cand-cli{font-size:12.5px;font-weight:700;color:var(--text);}
+.fc-recon-cand-meta{font-size:11px;color:var(--text2);margin-top:2px;}
+.fc-recon-dif{color:var(--orange);font-weight:800;}
+.fc-recon-okm{color:var(--green);font-weight:800;}
+.fc-recon-mas{font-size:11px;color:var(--text3);padding:2px 4px;}
+.fc-recon-nopedido{margin-top:8px;font-size:11.5px;color:var(--text3);background:var(--orange2);border-left:3px solid var(--gold2);border-radius:7px;padding:8px 9px;}
+.fc-recon-nc-nota{margin-top:8px;font-size:11.5px;color:var(--text2);}
+.fc-recon-acc{display:flex;gap:7px;margin-top:10px;}
+.fc-recon-btn{border:none;border-radius:9px;padding:9px 12px;font-size:12.5px;font-weight:800;cursor:pointer;}
+.fc-recon-btn.ok{background:var(--green2);color:#fff;}
+.fc-recon-btn.ghost{background:var(--cream2);color:var(--text2);}
+.fc-recon-btn:active{opacity:.65;}
+.fc-recon-hist-h{font-size:11px;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin:16px 0 7px;}
+.fc-recon-ign{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#fff;border:1px solid var(--cream2);border-radius:9px;padding:8px 10px;margin-bottom:6px;}
+.fc-recon-ign-cli{font-size:12px;font-weight:700;color:var(--text2);}
+.fc-recon-ign-why{font-size:10.5px;color:var(--text3);margin-top:1px;}
+.fc-recon-undo{font-size:11px;color:var(--blue);font-weight:800;background:none;border:none;cursor:pointer;flex-shrink:0;}
 </style>
 
 <!-- ═══ v12.0 BLOQUE D — MODALES DE LOGÍSTICA ZONAS ═══ -->
@@ -38407,7 +38443,7 @@ async function comprasDetailCargarFecha() {
 //  Flag de facturado: pedidos_zona.xubio_factura_id.
 // ═══════════════════════════════════════════════════════════════════════════
 
-var _fcCache = { porFacturar: [], soloXubio: [], sueltas: [], salidas: [], presupMap: {}, ultimaSync: null };
+var _fcCache = { porFacturar: [], soloXubio: [], sueltas: [], salidas: [], presupMap: {}, ultimaSync: null, sinFactura: [] };
 var _fcCargando = false;
 
 function _fcHoyISO() {
@@ -38505,6 +38541,16 @@ async function fcCargar() {
     _fcCache.sueltas     = res[2] || [];
     _fcCache.salidas     = res[3] || [];
     _fcCache.ultimaSync  = (res[4] && res[4][0]) || null;
+
+    // v13.84.0 — pedidos sin factura del período (candidatos para enganchar
+    // facturas sueltas). Se matchean en memoria por cliente_xubio_id.
+    try {
+      _fcCache.sinFactura = await sbFetch('pedidos_zona?xubio_factura_id=is.null' +
+        '&creado_at=gte.2026-06-12' +
+        '&estado=not.in.(Cancelado,%22Cancelado%20por%20admin%22)' +
+        '&select=pedido_id,cliente,vendedor,total,cliente_xubio_id,estado,localidad_canonica' +
+        '&order=creado_at.desc&limit=600') || [];
+    } catch (e) { _fcCache.sinFactura = []; console.warn('[FC] sinFactura', e); }
 
     // Números de presupuesto para las salidas (lookup por chunks)
     var tids = [];
@@ -38735,23 +38781,156 @@ function fcRender() {
     }
   }
 
-  // ── Facturas sueltas ──
+  // ── Facturas sueltas → bandeja de reconciliación (v13.84.0) ──
+  _fcRenderSueltas();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// v13.84.0 — RECONCILIACIÓN DE FACTURAS SUELTAS (sin pedido)
+// Bandeja dentro del Centro de Facturación. Modo A (enganchar a un
+// pedido existente) + Ignorar/Deshacer. Llama a Apps Script v25.86.0
+// (accion=reconciliarFactura). Modo B (crear pedido) llega después.
+// ═══════════════════════════════════════════════════════════════════
+var _fcReconFiltroPV = 'TCK distribuid';
+
+function _fcReconPVKey(pv) {
+  pv = String(pv || '').trim();
+  if (pv.indexOf('TCK') === 0 || pv.indexOf('distribuid') >= 0) return 'TCK distribuid';
+  if (pv.toUpperCase().indexOf('CHICKEN') >= 0) return 'THE CHICKEN KINGS';
+  return 'Otros';
+}
+
+function _fcCandidatosDe(clienteXubioId) {
+  if (!clienteXubioId) return [];
+  var cid = String(clienteXubioId);
+  return (_fcCache.sinFactura || []).filter(function (p) {
+    return String(p.cliente_xubio_id || '') === cid;
+  });
+}
+
+function fcReconSetFiltro(pv) { _fcReconFiltroPV = pv; _fcRenderSueltas(); }
+
+function _fcRenderSueltas() {
+  var todas     = _fcCache.sueltas || [];
+  var bandeja   = todas.filter(function (r) { return r.reconciliacion_estado !== 'ignorada'; });
+  var ignoradas = todas.filter(function (r) { return r.reconciliacion_estado === 'ignorada'; });
+
+  var grupos = { 'TCK distribuid': 0, 'THE CHICKEN KINGS': 0, 'Otros': 0 };
+  bandeja.forEach(function (r) { grupos[_fcReconPVKey(r.punto_venta)]++; });
+
   var nS = document.getElementById('fc-sueltas-n');
-  if (nS) nS.textContent = '(' + c.sueltas.length + ')';
-  var contF = document.getElementById('fc-sueltas');
-  if (contF) {
-    contF.innerHTML = c.sueltas.length
-      ? c.sueltas.map(function (r) {
-          var esNC = String(r.tipo) === '3';
-          return '<div class="fc-row">' +
-            '<div class="fc-main"><div class="fc-cli">' + _fcEsc(r.cliente_nombre || '') + '</div>' +
-            '<div class="fc-meta">' + (esNC ? 'NC ' : 'FC ') + _fcEsc(r.numero) + ' · ' + _fcEsc(r.fecha || '') + '</div></div>' +
-            '<div class="fc-monto">' + _fcMoneda(r.importe_total) + '</div>' +
-            (esNC ? '<span class="fc-chip gris">Nota Crédito</span>' : '') +
-            '</div>';
-        }).join('')
-      : '<div class="fc-vacio">Sin facturas sueltas.</div>';
+  if (nS) nS.textContent = '(' + bandeja.length + ')';
+
+  var cont = document.getElementById('fc-sueltas');
+  if (!cont) return;
+
+  var chips = ['TCK distribuid', 'THE CHICKEN KINGS', 'Otros'].map(function (pv) {
+    var on = (_fcReconFiltroPV === pv);
+    var lbl = pv === 'TCK distribuid' ? 'TCK distribuid' : (pv === 'THE CHICKEN KINGS' ? 'Chicken Kings' : 'Otros');
+    return '<button class="fc-recon-chip' + (on ? ' on' : '') + '" onclick="fcReconSetFiltro(\'' + pv + '\')">' +
+      lbl + ' (' + grupos[pv] + ')</button>';
+  }).join('');
+
+  var visibles = bandeja.filter(function (r) { return _fcReconPVKey(r.punto_venta) === _fcReconFiltroPV; });
+
+  var html = '<div class="fc-recon-filtros">' + chips + '</div>';
+  html += visibles.length
+    ? visibles.map(_fcReconCard).join('')
+    : '<div class="fc-vacio">Sin facturas sueltas en este punto de venta. 🎉</div>';
+
+  if (ignoradas.length) {
+    html += '<div class="fc-recon-hist-h">Ignoradas · ' + ignoradas.length + '</div>';
+    html += ignoradas.map(function (r) {
+      return '<div class="fc-recon-ign">' +
+        '<div><div class="fc-recon-ign-cli">' + _fcEsc(r.cliente_nombre || '') + ' · ' + _fcEsc(r.numero) + '</div>' +
+        '<div class="fc-recon-ign-why">' + _fcEsc(r.reconciliacion_motivo || 'sin motivo') + '</div></div>' +
+        '<button class="fc-recon-undo" onclick="fcReconDesignorar(' + r.transaccion_id + ')">deshacer</button>' +
+        '</div>';
+    }).join('');
   }
+
+  cont.innerHTML = html;
+}
+
+function _fcReconCard(r) {
+  var esNC = String(r.tipo) === '3';
+  var fid  = r.transaccion_id;
+  var head =
+    '<div class="fc-recon-top">' +
+      '<div><div class="fc-cli">' + _fcEsc(r.cliente_nombre || '(sin cliente)') + '</div>' +
+      '<div class="fc-meta">' + (esNC ? 'NC ' : 'FC ') + _fcEsc(r.numero) + ' · ' + _fcEsc(r.fecha || '') + '</div></div>' +
+      '<div class="fc-monto">' + _fcMoneda(r.importe_total) + '</div>' +
+    '</div>';
+
+  if (esNC) {
+    return '<div class="fc-recon-card nc">' + head +
+      '<div class="fc-recon-nc-nota">Nota de Crédito — no es una venta. Si ya está resuelta, ignorala.</div>' +
+      '<div class="fc-recon-acc"><button class="fc-recon-btn ghost" onclick="fcReconIgnorar(' + fid + ')">🙈 Ignorar</button></div>' +
+      '</div>';
+  }
+
+  var cands = _fcCandidatosDe(r.cliente_xubio_id);
+  var body = '';
+  if (cands.length) {
+    body = '<div class="fc-recon-cands">';
+    cands.slice(0, 3).forEach(function (p) {
+      var dif = Math.abs(Number(p.total || 0) - Number(r.importe_total || 0)) > 0.5;
+      body += '<div class="fc-recon-cand">' +
+        '<div class="fc-recon-cand-info"><div class="fc-recon-cand-cli">' + _fcEsc(p.pedido_id) + '</div>' +
+        '<div class="fc-recon-cand-meta">' + _fcEsc(p.vendedor || '') + ' · ' + _fcMoneda(p.total) +
+          (dif ? ' <span class="fc-recon-dif">≠ monto</span>' : ' <span class="fc-recon-okm">✓ igual</span>') + '</div></div>' +
+        '<button class="fc-recon-btn ok" onclick="fcReconEnganchar(' + fid + ',\'' + p.pedido_id + '\',' + (p.total || 0) + ',' + (r.importe_total || 0) + ')">🔗 Enganchar</button>' +
+        '</div>';
+    });
+    if (cands.length > 3) body += '<div class="fc-recon-mas">+' + (cands.length - 3) + ' pedidos más del cliente</div>';
+    body += '</div>';
+  } else {
+    body = '<div class="fc-recon-nopedido">Sin pedido en la app para este cliente. ' +
+      'Crear el pedido (atribuido al vendedor) llega en la próxima versión.</div>';
+  }
+
+  return '<div class="fc-recon-card">' + head + body +
+    '<div class="fc-recon-acc"><button class="fc-recon-btn ghost" onclick="fcReconIgnorar(' + fid + ')">🙈 Ignorar</button></div>' +
+    '</div>';
+}
+
+async function _fcReconLlamar(params, okMsg) {
+  try {
+    var url = APPS_SCRIPT_URL + '?accion=reconciliarFactura&' + params +
+      '&porQuien=' + encodeURIComponent(vendedorActual || 'admin');
+    var resp = await fetch(url);
+    var data = await resp.json();
+    if (data && data.status === 'ok') {
+      toast(okMsg || '✅ Listo', 'ok');
+      await fcCargar();
+      return true;
+    }
+    toast('⚠️ ' + ((data && data.error) || 'No se pudo'), 'err');
+    return false;
+  } catch (e) {
+    toast('Error de conexión', 'err');
+    return false;
+  }
+}
+
+function fcReconEnganchar(facturaId, pedidoId, totalPed, totalFac) {
+  var dif = Math.abs(Number(totalPed || 0) - Number(totalFac || 0)) > 0.5;
+  var msg = '¿Enganchar esta factura al pedido ' + pedidoId + '?';
+  if (dif) msg += '\n\n⚠️ El pedido pasa de ' + _fcMoneda(totalPed) + ' a ' + _fcMoneda(totalFac) + ' (el total real de la factura).';
+  if (!confirm(msg)) return;
+  _fcReconLlamar('modo=enganchar&facturaId=' + facturaId + '&pedidoId=' + encodeURIComponent(pedidoId),
+    '🔗 Factura enganchada al pedido');
+}
+
+function fcReconIgnorar(facturaId) {
+  var motivo = prompt('¿Por qué se ignora? (refacturación, NC, no es un pedido…)', '');
+  if (motivo === null) return;
+  _fcReconLlamar('modo=ignorar&facturaId=' + facturaId + '&motivo=' + encodeURIComponent(motivo || ''),
+    '🙈 Factura ignorada');
+}
+
+function fcReconDesignorar(facturaId) {
+  _fcReconLlamar('modo=designorar&facturaId=' + facturaId, '↩ Vuelta a la bandeja');
 }
 
 // ═══ v13.38.0 — FACTURACIÓN MASIVA ═══
