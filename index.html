@@ -1,5 +1,13 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.88.0 — 27/06/2026
+     v13.88.0: BUFFET — sección Facturación en el tab. Estado Xubio por venta:
+               facturadas (n° comprobante + CAE), pendientes y fallidas
+               (sin_mapear/error) con motivo. Resumen de 3 chips + alerta si
+               hay algo sin facturar. Consumo personal excluido (autofactura).
+               Reusa buffetCargar (select ampliado) + _bfFacturacion. Tab
+               reactivado para admin/oficina (estaba en false) y habilitado
+               para cobranzas (Roman/Valentina, el mostrador).
      TCK ADMIN — v13.87.0 — 26/06/2026
      v13.87.0: RECONCILIACIÓN Modo B. Las facturas sin pedido candidato ahora
                tienen botón "➕ Crear pedido": modal con vendedor (Miguel/
@@ -14673,6 +14681,37 @@ input.canales-exp-input[type="date"] {
   #view-buffet .bf-cp .big{ font-size:26px; font-weight:900; line-height:1; }
   #view-buffet .bf-cp .txt{ font-size:12px; opacity:.92; } #view-buffet .bf-cp .txt b{ font-size:14px; }
   #view-buffet .bf-loading{ text-align:center; color:#8A7B63; font-size:13px; padding:30px 0; }
+  /* v13.88.0 — sección Facturación */
+  #view-buffet .bf-fact-resumen{ display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-bottom:11px; }
+  #view-buffet .bf-fch{ border-radius:10px; padding:9px 4px; text-align:center; }
+  #view-buffet .bf-fch .n{ font-size:17px; font-weight:900; line-height:1; }
+  #view-buffet .bf-fch .m{ font-size:11px; font-weight:700; margin-top:3px; }
+  #view-buffet .bf-fch .l{ font-size:9px; font-weight:800; text-transform:uppercase; margin-top:4px; }
+  #view-buffet .bf-fch.ok{ background:#E7F5EC; border-top:3px solid #15803D; } #view-buffet .bf-fch.ok .n,#view-buffet .bf-fch.ok .m{ color:#166534; } #view-buffet .bf-fch.ok .l{ color:#15803D; }
+  #view-buffet .bf-fch.pe{ background:#FEF3C7; border-top:3px solid #B45309; } #view-buffet .bf-fch.pe .n,#view-buffet .bf-fch.pe .m{ color:#92400E; } #view-buffet .bf-fch.pe .l{ color:#B45309; }
+  #view-buffet .bf-fch.er{ background:#F1EFE8; border-top:3px solid #B4B2A9; } #view-buffet .bf-fch.er .n,#view-buffet .bf-fch.er .m{ color:#5F5E5A; } #view-buffet .bf-fch.er .l{ color:#888780; }
+  #view-buffet .bf-fch.er.hay{ background:#FCEBEB; border-top-color:#A32D2D; } #view-buffet .bf-fch.er.hay .n,#view-buffet .bf-fch.er.hay .m{ color:#991B1B; } #view-buffet .bf-fch.er.hay .l{ color:#A32D2D; }
+  #view-buffet .bf-fact-alerta{ border-radius:8px; padding:9px 11px; display:flex; align-items:center; gap:8px; margin-bottom:13px; font-size:12px; font-weight:700; }
+  #view-buffet .bf-fact-grp{ font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; color:#8A7B63; margin:0 0 7px; display:flex; justify-content:space-between; }
+  #view-buffet .bf-fact-grp .c{ color:#15803D; }
+  #view-buffet .bf-frow{ padding:8px 11px; margin-bottom:6px; }
+  #view-buffet .bf-frow.pe{ border-left:3px solid #B45309; background:#FEFBF4; }
+  #view-buffet .bf-frow.er{ border-left:3px solid #A32D2D; background:#FDF6F6; }
+  #view-buffet .bf-frow.ok{ border-left:3px solid #15803D; background:#FAFCFA; }
+  #view-buffet .bf-frow .top{ display:flex; justify-content:space-between; align-items:baseline; }
+  #view-buffet .bf-frow .hora{ font-size:13px; font-weight:700; color:#2C2416; }
+  #view-buffet .bf-frow .un-bf{ color:#C2410C; } #view-buffet .bf-frow .un-pl{ color:#1E6B8C; }
+  #view-buffet .bf-frow .monto{ font-size:14px; font-weight:800; color:#2C2416; }
+  #view-buffet .bf-frow .bot{ display:flex; justify-content:space-between; align-items:center; margin-top:4px; gap:8px; }
+  #view-buffet .bf-fbadge{ font-size:10px; font-weight:700; padding:2px 7px; border-radius:5px; flex-shrink:0; }
+  #view-buffet .bf-fbadge.pe{ background:#FEF3C7; color:#92400E; }
+  #view-buffet .bf-fbadge.er{ background:#FCEBEB; color:#991B1B; }
+  #view-buffet .bf-fmotivo{ font-size:10.5px; color:#8A7B63; text-align:right; }
+  #view-buffet .bf-fmotivo.er{ color:#991B1B; }
+  #view-buffet .bf-fcomp{ font-size:10.5px; color:#166534; font-weight:700; }
+  #view-buffet .bf-fcae{ font-size:10px; color:#8A7B63; font-family:ui-monospace,Menlo,monospace; }
+  #view-buffet .bf-fmore{ font-size:11px; color:#8A7B63; text-align:center; padding:6px 0 0; }
+  #view-buffet .bf-fvacio{ font-size:12px; color:#8A7B63; text-align:center; padding:8px 0; }
 </style>
   <div class="bf-head">
     <h2>🍔 Buffet TCK Food</h2>
@@ -14685,6 +14724,12 @@ input.canales-exp-input[type="date"] {
     </div>
   </div>
   <div class="bf-kpis" id="bf-kpis"></div>
+  <div class="bf-sec" id="bf-fact-sec">
+    <h3>Facturación <span class="leg" id="bf-fact-head" style="font-weight:700"></span></h3>
+    <div class="bf-fact-resumen" id="bf-fact-resumen"></div>
+    <div class="bf-fact-alerta" id="bf-fact-alerta" style="display:none;"></div>
+    <div id="bf-fact-lista"></div>
+  </div>
   <div class="bf-sec">
     <h3>Ventas por día
       <span class="leg"><i><span class="dot" style="background:#EA580C"></span>Buffet</i><i><span class="dot" style="background:#1E6B8C"></span>Playmatch</i></span>
@@ -17124,7 +17169,7 @@ const ROL_TABS = {
   dueno:       'ALL',
   operaciones: 'ALL',
   admin:       'ALL',
-  cobranzas:   ['pedidos','logistica','clientes','facturacion','cc','tesoreria','rendiciones','acc-dup'],
+  cobranzas:   ['pedidos','logistica','clientes','facturacion','cc','tesoreria','rendiciones','acc-dup','buffet'],
   tckfood:     ['buffet']
 };
 
@@ -20175,7 +20220,7 @@ async function buffetCargar(){
   if (load) load.style.display = 'block';
   try {
     var rg = _bfRangoFechas();
-    var ventas = await sbFetchAll('buffet_ventas?select=order_id,fecha_jornada,total,unidad_negocio,es_consumo_personal,pago_efectivo,pago_debito,pago_credito,pago_consumo_personal,pago_otros&fecha_jornada=gte.' + rg.desde + '&fecha_jornada=lte.' + rg.hasta + '&order=order_id.asc', 1000, 40);
+    var ventas = await sbFetchAll('buffet_ventas?select=order_id,fecha_jornada,date_closed,total,unidad_negocio,es_consumo_personal,pago_efectivo,pago_debito,pago_credito,pago_consumo_personal,pago_otros,xubio_estado,xubio_nro_comprobante,xubio_cae&fecha_jornada=gte.' + rg.desde + '&fecha_jornada=lte.' + rg.hasta + '&order=order_id.asc', 1000, 40);
     ventas = Array.isArray(ventas) ? ventas : [];
     if (sub) sub.textContent = 'Ventas del buffet y Playmatch · ' + rg.desde + ' → ' + rg.hasta;
 
@@ -20203,6 +20248,9 @@ async function buffetCargar(){
       '<div class="bf-kpi"><div class="v">' + nOrd + '</div><div class="l">Órdenes</div></div>' +
       '<div class="bf-kpi"><div class="v">' + _bfMoney(ticket) + '</div><div class="l">Ticket prom</div></div>' +
       '<div class="bf-kpi cp"><div class="v">' + cpPct + '%</div><div class="l">Cons. pers.</div></div>';
+
+    // v13.88.0 — sección Facturación (estado Xubio)
+    _bfFacturacion(ventas);
 
     // por día
     var dias = Object.keys(porDia).sort();
@@ -20269,6 +20317,89 @@ async function buffetCargar(){
   }
 }
 
+// ═══ v13.88.0 — Sección Facturación del buffet (estado Xubio) ═══
+function _bfHora(ts){
+  if (!ts) return '--:--';
+  var s = String(ts);
+  var i = s.indexOf('T'); if (i === -1) i = s.indexOf(' ');
+  return (i !== -1) ? s.slice(i+1, i+6) : '--:--';
+}
+function _bfFactMotivo(est){
+  if (est === 'sin_mapear') return 'producto sin mapear';
+  if (est === 'error')      return 'error al facturar';
+  if (est === 'sin_cae')    return 'facturada sin CAE';
+  if (est === 'pendiente')  return 'esperando próximo ciclo';
+  return 'sin procesar aún';   // NULL u otro
+}
+function _bfFacturacion(ventas){
+  var sec = document.getElementById('bf-fact-sec');
+  if (!sec) return;
+  // Solo facturables: el consumo personal es autofactura, no va por Xubio
+  var vs = (ventas || []).filter(function(v){ return !v.es_consumo_personal; });
+
+  var okN=0, okM=0, peN=0, peM=0, erN=0, erM=0, noFact=[], fact=[];
+  vs.forEach(function(v){
+    var t = Number(v.total)||0, e = v.xubio_estado;
+    if (e === 'facturada'){ okN++; okM+=t; fact.push(v); }
+    else if (e === 'sin_mapear' || e === 'error'){ erN++; erM+=t; noFact.push(v); }
+    else { peN++; peM+=t; noFact.push(v); }   // pendiente / sin_cae / NULL
+  });
+
+  var head = document.getElementById('bf-fact-head');
+  if (head) head.textContent = vs.length + ' venta' + (vs.length !== 1 ? 's' : '');
+
+  document.getElementById('bf-fact-resumen').innerHTML =
+    '<div class="bf-fch ok"><div class="n">'+okN+'</div><div class="m">'+_bfMoney(okM)+'</div><div class="l">Facturadas</div></div>' +
+    '<div class="bf-fch pe"><div class="n">'+peN+'</div><div class="m">'+_bfMoney(peM)+'</div><div class="l">Pendientes</div></div>' +
+    '<div class="bf-fch er'+(erN>0?' hay':'')+'"><div class="n">'+erN+'</div><div class="m">'+_bfMoney(erM)+'</div><div class="l">Fallidas</div></div>';
+
+  var al = document.getElementById('bf-fact-alerta');
+  var sinFactN = peN + erN, sinFactM = peM + erM;
+  al.style.display = 'flex';
+  if (sinFactN > 0){
+    al.style.background = '#FEF3C7'; al.style.color = '#92400E';
+    al.innerHTML = '<span style="font-size:16px;font-weight:900;color:#B45309">⚠</span>' +
+      '<span>'+sinFactN+' venta'+(sinFactN>1?'s':'')+' sin facturar — '+_bfMoney(sinFactM)+'</span>';
+  } else {
+    al.style.background = '#E7F5EC'; al.style.color = '#166534';
+    al.innerHTML = '<span style="font-size:16px;font-weight:900;color:#15803D">✓</span><span>Todo facturado en el período</span>';
+  }
+
+  var html = '';
+  if (noFact.length){
+    noFact.sort(function(a,b){ return String(a.date_closed||'').localeCompare(String(b.date_closed||'')); });
+    html += '<div class="bf-fact-grp"><span>Sin facturar</span></div>';
+    html += noFact.map(function(v){
+      var e = v.xubio_estado, fall = (e === 'sin_mapear' || e === 'error');
+      var cls = fall ? 'er' : 'pe';
+      var un = (v.unidad_negocio === 'playmatch') ? '<span class="un-pl">Play</span>' : '<span class="un-bf">Buffet</span>';
+      var lbl = fall ? (e === 'sin_mapear' ? 'Sin mapear' : 'Error') : 'Pendiente';
+      return '<div class="bf-frow '+cls+'"><div class="top"><div class="hora">'+_bfHora(v.date_closed)+' · '+un+'</div>'+
+        '<div class="monto">'+_bfMoney(Number(v.total)||0)+'</div></div>'+
+        '<div class="bot"><span class="bf-fbadge '+cls+'">'+lbl+'</span>'+
+        '<span class="bf-fmotivo'+(fall?' er':'')+'">'+_bfFactMotivo(e)+'</span></div></div>';
+    }).join('');
+  }
+  if (fact.length){
+    fact.sort(function(a,b){ return String(b.date_closed||'').localeCompare(String(a.date_closed||'')); });
+    var TOPF = 20, extra = fact.length - TOPF;
+    html += '<div class="bf-fact-grp" style="margin-top:13px"><span>Facturadas</span><span class="c">✓ con CAE</span></div>';
+    html += fact.slice(0, TOPF).map(function(v){
+      var un = (v.unidad_negocio === 'playmatch') ? '<span class="un-pl">Play</span>' : '<span class="un-bf">Buffet</span>';
+      var comp = v.xubio_nro_comprobante || '(sin nº)';
+      var cae = v.xubio_cae ? ('CAE …' + String(v.xubio_cae).slice(-6)) : 'sin CAE';
+      return '<div class="bf-frow ok"><div class="top"><div class="hora">'+_bfHora(v.date_closed)+' · '+un+'</div>'+
+        '<div class="monto">'+_bfMoney(Number(v.total)||0)+'</div></div>'+
+        '<div class="bot"><span class="bf-fcomp">'+comp+'</span><span class="bf-fcae">'+cae+'</span></div></div>';
+    }).join('');
+    if (extra > 0) html += '<div class="bf-fmore">y '+extra+' facturada'+(extra>1?'s':'')+' más</div>';
+  }
+  if (!noFact.length && !fact.length){
+    html = '<div class="bf-fvacio">Sin ventas facturables en el período</div>';
+  }
+  document.getElementById('bf-fact-lista').innerHTML = html;
+}
+
 function mostrarTabs() {
   var nav = document.getElementById('tab-nav');
   if (nav) nav.classList.add('visible');
@@ -20326,7 +20457,7 @@ function mostrarTabs() {
   _tckSetDisp('menu-mas-acc-dup',     puedeVer('acc-dup'));
   _tckSetDisp('menu-mas-prod-canon',  puedeVer('prod-canon'));
   _tckSetDisp('menu-mas-ccanon',      puedeVer('ccanon'));
-  _tckSetDisp('menu-mas-buffet',      false);
+  _tckSetDisp('menu-mas-buffet',      puedeVer('buffet'));   // v13.88.0 — visible para admin/oficina + cobranzas
 
   // Si el tab activo dejó de estar permitido para este rol, ir a Pedidos
   if (_tabActual && _tabActual !== 'pedidos' && !puedeVer(_tabActual)) cambiarTab('pedidos');
@@ -39722,7 +39853,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.72.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.88.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
