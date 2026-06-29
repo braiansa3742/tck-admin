@@ -1,5 +1,12 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.100.0 — 29/06/2026
+     v13.100.0: BUFFET — pane SUB-RECETAS (sub-tab). Cierra la reestructura #10.
+                Los sub-preparados (vw_buffet_costo_sub): resumen (total / completas
+                / incompletas), buscador, lista sub · costo unitario /rinde · badge
+                sin costo, clickeable → composición (ingrediente · cantidad · unidad).
+                Carga lazy. Solo lectura. Con esto el tab Buffet queda completo:
+                Resumen · Facturación · Costos · Recetas · Sub-recetas · Ingredientes · Stock.
      TCK ADMIN — v13.99.0 — 29/06/2026
      v13.99.0: BUFFET — pane RECETAS (sub-tab). Composición de los 161 platos
                (vw_buffet_food_cost_linea): resumen (platos / completas /
@@ -14955,9 +14962,12 @@ input.canales-exp-input[type="date"] {
     <div class="bf-pc-foot" id="bf-rec-foot"></div>
   </div>
 
-  <!-- PANE: SUB-RECETAS (se construye en v13.100) -->
+  <!-- PANE: SUB-RECETAS (v13.100.0) -->
   <div class="bf-pane" id="bfp-subrecetas">
-    <div class="bf-sec"><h3>Sub-recetas</h3><div class="bf-fvacio">Próximamente — los 9 sub-preparados (Prepizza, salsas, etc.).</div></div>
+    <div class="bf-pc-resumen" id="bf-sub-resumen"></div>
+    <input class="bf-stock-search" id="bf-sub-search" type="text" placeholder="Buscar sub-receta…" oninput="_bfSubFiltrar(this.value)">
+    <div class="bf-pc-scroll" id="bf-sub-lista" style="max-height:480px;"><div class="bf-fvacio">Tocá la pestaña para cargar las sub-recetas.</div></div>
+    <div class="bf-pc-foot" id="bf-sub-foot"></div>
   </div>
 
   <!-- PANE: INGREDIENTES (v13.98.0) -->
@@ -20469,6 +20479,7 @@ function bfSubtab(p, btn){
   if (p === 'stock' && !_bfStockCargado){ _bfStockCargado = true; _bfStock(); }
   if (p === 'ingr'  && !_bfIngrCargado){  _bfIngrCargado  = true; _bfIngr();  }
   if (p === 'recetas' && !_bfRecCargado){ _bfRecCargado = true; _bfRec(); }
+  if (p === 'subrecetas' && !_bfSubCargado){ _bfSubCargado = true; _bfSub(); }
   var v = document.getElementById('view-buffet'); if (v) v.scrollTop = 0;
 }
 
@@ -20680,6 +20691,72 @@ function _bfRecRender(q){
     var row = '<div class="bf-rec-row" onclick="_bfPrecToggle(this)"><span class="cx"></span>'+
       '<span class="nm">'+_bfEsc(d.nombre)+'</span>'+bad+
       '<span class="ct">'+d.nIngr+' ingr</span></div>';
+    return row + _bfRecDet(d.lineas);
+  }).join('');
+}
+
+// ═══ v13.100.0 — Pane SUB-RECETAS (sub-preparados · lectura) ═══
+var _bfSubCargado = false;
+var _bfSubData = [];
+async function _bfSub(){
+  var lst = document.getElementById('bf-sub-lista');
+  if (!lst) return;
+  lst.innerHTML = '<div class="bf-fvacio">Cargando sub-recetas…</div>';
+  try {
+    var subs = await sbFetchAll('vw_buffet_costo_sub?select=sub_id,sub_nombre,rinde_unidad,costo_unitario,ingr_sin_costo,ingr_total&order=sub_nombre.asc', 1000, 3);
+    subs = Array.isArray(subs) ? subs : [];
+    var recetas = await sbFetchAll('buffet_recetas?select=producto_id,ingrediente_id,ingrediente_nombre,cantidad,unidad&order=producto_id.asc', 1000, 5);
+    var lineasMap = {};
+    (Array.isArray(recetas) ? recetas : []).forEach(function(r){
+      if (!lineasMap[r.producto_id]) lineasMap[r.producto_id] = [];
+      lineasMap[r.producto_id].push(r);
+    });
+    var ingr = await sbFetchAll('buffet_costo_ingrediente?select=codigo,costo_base', 1000, 3);
+    var sinCostoSet = {};
+    (Array.isArray(ingr) ? ingr : []).forEach(function(i){ if (!(Number(i.costo_base) > 0)) sinCostoSet[i.codigo] = true; });
+
+    _bfSubData = subs.map(function(s){
+      var lin = (lineasMap[s.sub_id] || []).map(function(l){
+        return { ing:l.ingrediente_nombre || '(ingrediente)', cant:l.cantidad, unidad:l.unidad || '', sinCosto: sinCostoSet[l.ingrediente_id] === true };
+      });
+      var sin = Number(s.ingr_sin_costo) || 0;
+      return { id:s.sub_id, nombre:s.sub_nombre || '(sin nombre)', costo:Number(s.costo_unitario)||0,
+               rinde:s.rinde_unidad || '', sin:sin, total:Number(s.ingr_total)||0, lineas:lin, incompleta:sin > 0 };
+    });
+    var inc = _bfSubData.filter(function(d){ return d.incompleta; }).length;
+    var res = document.getElementById('bf-sub-resumen');
+    if (res) res.innerHTML =
+      '<div class="bf-pch gr"><div class="n">'+_bfSubData.length+'</div><div class="l">Sub-recetas</div></div>'+
+      '<div class="bf-pch ok"><div class="n">'+(_bfSubData.length-inc)+'</div><div class="l">Completas</div></div>'+
+      '<div class="bf-pch '+(inc>0?'er':'ok')+'"><div class="n">'+inc+'</div><div class="l">Incompletas</div></div>';
+    var foot = document.getElementById('bf-sub-foot');
+    if (foot) foot.textContent = 'Sub-preparados (masa, salsas, etc.) que se usan como ingrediente en los platos. Costo unitario por rinde. Tocá una para ver su composición.';
+    _bfSubRender();
+  } catch(e){
+    console.error('[buffet] sub-recetas:', e);
+    lst.innerHTML = '<div class="bf-fvacio">No se pudieron cargar las sub-recetas.</div>';
+  }
+}
+function _bfSubFiltrar(q){
+  q = (q || '').trim().toLowerCase();
+  _bfSubRender(q);
+}
+function _bfSubRender(q){
+  var lst = document.getElementById('bf-sub-lista');
+  if (!lst) return;
+  var arr = _bfSubData.slice();
+  if (q) arr = arr.filter(function(d){ return d.nombre.toLowerCase().indexOf(q) >= 0; });
+  arr.sort(function(a,b){
+    if (a.incompleta !== b.incompleta) return a.incompleta ? -1 : 1;
+    return a.nombre.localeCompare(b.nombre);
+  });
+  if (!arr.length){ lst.innerHTML = '<div class="bf-fvacio">Sin resultados</div>'; return; }
+  lst.innerHTML = arr.map(function(d){
+    var bad = d.incompleta ? '<span class="bad">'+d.sin+' sin costo</span>' : '';
+    var costoTxt = (d.costo > 0) ? (_bfMoney(d.costo) + (d.rinde ? (' /'+_bfEsc(d.rinde)) : '')) : '—';
+    var row = '<div class="bf-rec-row" onclick="_bfPrecToggle(this)"><span class="cx"></span>'+
+      '<span class="nm">'+_bfEsc(d.nombre)+'</span>'+bad+
+      '<span class="ct">'+costoTxt+'</span></div>';
     return row + _bfRecDet(d.lineas);
   }).join('');
 }
@@ -40616,7 +40693,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.99.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.100.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
