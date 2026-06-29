@@ -1,5 +1,11 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.89.0 — 27/06/2026
+     v13.89.0: BUFFET Facturación — rediseño COMPACTO. Las listas (sin facturar /
+               facturadas) pasan a acordeones colapsables, filas de 1 línea
+               (hora · unidad · monto · estado), agrupadas por día (Hoy/Ayer/
+               DD-MM) y con scroll interno. Resumen + alerta siempre visibles.
+               Evita el scroll eterno cuando hay muchas pendientes.
      TCK ADMIN — v13.88.0 — 27/06/2026
      v13.88.0: BUFFET — sección Facturación en el tab. Estado Xubio por venta:
                facturadas (n° comprobante + CAE), pendientes y fallidas
@@ -14681,37 +14687,43 @@ input.canales-exp-input[type="date"] {
   #view-buffet .bf-cp .big{ font-size:26px; font-weight:900; line-height:1; }
   #view-buffet .bf-cp .txt{ font-size:12px; opacity:.92; } #view-buffet .bf-cp .txt b{ font-size:14px; }
   #view-buffet .bf-loading{ text-align:center; color:#8A7B63; font-size:13px; padding:30px 0; }
-  /* v13.88.0 — sección Facturación */
-  #view-buffet .bf-fact-resumen{ display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-bottom:11px; }
-  #view-buffet .bf-fch{ border-radius:10px; padding:9px 4px; text-align:center; }
-  #view-buffet .bf-fch .n{ font-size:17px; font-weight:900; line-height:1; }
-  #view-buffet .bf-fch .m{ font-size:11px; font-weight:700; margin-top:3px; }
-  #view-buffet .bf-fch .l{ font-size:9px; font-weight:800; text-transform:uppercase; margin-top:4px; }
+  /* v13.89.0 — sección Facturación (compacta + acordeones) */
+  #view-buffet .bf-fact-resumen{ display:grid; grid-template-columns:repeat(3,1fr); gap:5px; margin-bottom:9px; }
+  #view-buffet .bf-fch{ border-radius:9px; padding:7px 4px; text-align:center; }
+  #view-buffet .bf-fch .n{ font-size:15px; font-weight:900; line-height:1; }
+  #view-buffet .bf-fch .m{ font-size:10.5px; font-weight:700; margin-top:2px; }
+  #view-buffet .bf-fch .l{ font-size:8.5px; font-weight:800; text-transform:uppercase; margin-top:3px; }
   #view-buffet .bf-fch.ok{ background:#E7F5EC; border-top:3px solid #15803D; } #view-buffet .bf-fch.ok .n,#view-buffet .bf-fch.ok .m{ color:#166534; } #view-buffet .bf-fch.ok .l{ color:#15803D; }
   #view-buffet .bf-fch.pe{ background:#FEF3C7; border-top:3px solid #B45309; } #view-buffet .bf-fch.pe .n,#view-buffet .bf-fch.pe .m{ color:#92400E; } #view-buffet .bf-fch.pe .l{ color:#B45309; }
   #view-buffet .bf-fch.er{ background:#F1EFE8; border-top:3px solid #B4B2A9; } #view-buffet .bf-fch.er .n,#view-buffet .bf-fch.er .m{ color:#5F5E5A; } #view-buffet .bf-fch.er .l{ color:#888780; }
   #view-buffet .bf-fch.er.hay{ background:#FCEBEB; border-top-color:#A32D2D; } #view-buffet .bf-fch.er.hay .n,#view-buffet .bf-fch.er.hay .m{ color:#991B1B; } #view-buffet .bf-fch.er.hay .l{ color:#A32D2D; }
-  #view-buffet .bf-fact-alerta{ border-radius:8px; padding:9px 11px; display:flex; align-items:center; gap:8px; margin-bottom:13px; font-size:12px; font-weight:700; }
-  #view-buffet .bf-fact-grp{ font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; color:#8A7B63; margin:0 0 7px; display:flex; justify-content:space-between; }
-  #view-buffet .bf-fact-grp .c{ color:#15803D; }
-  #view-buffet .bf-frow{ padding:8px 11px; margin-bottom:6px; }
-  #view-buffet .bf-frow.pe{ border-left:3px solid #B45309; background:#FEFBF4; }
-  #view-buffet .bf-frow.er{ border-left:3px solid #A32D2D; background:#FDF6F6; }
-  #view-buffet .bf-frow.ok{ border-left:3px solid #15803D; background:#FAFCFA; }
-  #view-buffet .bf-frow .top{ display:flex; justify-content:space-between; align-items:baseline; }
-  #view-buffet .bf-frow .hora{ font-size:13px; font-weight:700; color:#2C2416; }
-  #view-buffet .bf-frow .un-bf{ color:#C2410C; } #view-buffet .bf-frow .un-pl{ color:#1E6B8C; }
-  #view-buffet .bf-frow .monto{ font-size:14px; font-weight:800; color:#2C2416; }
-  #view-buffet .bf-frow .bot{ display:flex; justify-content:space-between; align-items:center; margin-top:4px; gap:8px; }
-  #view-buffet .bf-fbadge{ font-size:10px; font-weight:700; padding:2px 7px; border-radius:5px; flex-shrink:0; }
-  #view-buffet .bf-fbadge.pe{ background:#FEF3C7; color:#92400E; }
-  #view-buffet .bf-fbadge.er{ background:#FCEBEB; color:#991B1B; }
-  #view-buffet .bf-fmotivo{ font-size:10.5px; color:#8A7B63; text-align:right; }
-  #view-buffet .bf-fmotivo.er{ color:#991B1B; }
-  #view-buffet .bf-fcomp{ font-size:10.5px; color:#166534; font-weight:700; }
-  #view-buffet .bf-fcae{ font-size:10px; color:#8A7B63; font-family:ui-monospace,Menlo,monospace; }
-  #view-buffet .bf-fmore{ font-size:11px; color:#8A7B63; text-align:center; padding:6px 0 0; }
-  #view-buffet .bf-fvacio{ font-size:12px; color:#8A7B63; text-align:center; padding:8px 0; }
+  #view-buffet .bf-fact-alerta{ border-radius:8px; padding:8px 10px; display:flex; align-items:center; gap:7px; margin-bottom:10px; font-size:11.5px; font-weight:700; }
+  /* acordeón */
+  #view-buffet .bf-acc{ border:1px solid #EFE7DA; border-radius:9px; margin-bottom:7px; overflow:hidden; }
+  #view-buffet .bf-acc-h{ display:flex; align-items:center; gap:8px; padding:9px 11px; cursor:pointer; background:#FBF7F0; user-select:none; }
+  #view-buffet .bf-acc-h .car{ font-size:10px; color:#8A7B63; width:10px; flex-shrink:0; }
+  #view-buffet .bf-acc-h .car::before{ content:'\\25B8'; }
+  #view-buffet .bf-acc.open .bf-acc-h .car::before{ content:'\\25BE'; }
+  #view-buffet .bf-acc-h .ti{ font-size:9.5px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; flex:1; }
+  #view-buffet .bf-acc-h .ti.pe{ color:#92400E; } #view-buffet .bf-acc-h .ti.ok{ color:#15803D; }
+  #view-buffet .bf-acc-h .ct{ font-size:11px; font-weight:900; color:#2C2416; }
+  #view-buffet .bf-acc-h .mt{ font-size:10.5px; color:#8A7B63; margin-left:6px; }
+  #view-buffet .bf-acc-b{ display:none; border-top:1px solid #EFE7DA; }
+  #view-buffet .bf-acc.open .bf-acc-b{ display:block; }
+  #view-buffet .bf-acc-scroll{ max-height:240px; overflow-y:auto; }
+  #view-buffet .bf-daygrp{ font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:.4px; color:#B4956A; background:#FCF8F2; padding:4px 11px; }
+  /* fila de 1 línea */
+  #view-buffet .bf-frow{ display:flex; align-items:center; gap:8px; padding:6px 11px; border-bottom:1px solid #F4EEE4; font-size:12px; }
+  #view-buffet .bf-frow:last-child{ border-bottom:none; }
+  #view-buffet .bf-frow .h{ font-weight:700; color:#5F5E5A; width:38px; flex-shrink:0; }
+  #view-buffet .bf-frow .u{ font-weight:700; width:46px; flex-shrink:0; }
+  #view-buffet .bf-frow .u.bf{ color:#C2410C; } #view-buffet .bf-frow .u.pl{ color:#1E6B8C; }
+  #view-buffet .bf-frow .mo{ flex:1; text-align:right; font-weight:800; color:#2C2416; }
+  #view-buffet .bf-frow .bg{ font-size:9px; font-weight:700; padding:1px 6px; border-radius:4px; flex-shrink:0; min-width:62px; text-align:center; }
+  #view-buffet .bf-frow .bg.pe{ background:#FEF3C7; color:#92400E; }
+  #view-buffet .bf-frow .bg.er{ background:#FCEBEB; color:#991B1B; }
+  #view-buffet .bf-frow .cae{ font-size:9px; color:#8A7B63; font-family:ui-monospace,Menlo,monospace; flex-shrink:0; }
+  #view-buffet .bf-fvacio{ font-size:12px; color:#8A7B63; text-align:center; padding:10px 0; }
 </style>
   <div class="bf-head">
     <h2>🍔 Buffet TCK Food</h2>
@@ -20249,7 +20261,7 @@ async function buffetCargar(){
       '<div class="bf-kpi"><div class="v">' + _bfMoney(ticket) + '</div><div class="l">Ticket prom</div></div>' +
       '<div class="bf-kpi cp"><div class="v">' + cpPct + '%</div><div class="l">Cons. pers.</div></div>';
 
-    // v13.88.0 — sección Facturación (estado Xubio)
+    // v13.89.0 — sección Facturación (estado Xubio)
     _bfFacturacion(ventas);
 
     // por día
@@ -20317,19 +20329,54 @@ async function buffetCargar(){
   }
 }
 
-// ═══ v13.88.0 — Sección Facturación del buffet (estado Xubio) ═══
+// ═══ v13.89.0 — Sección Facturación del buffet (compacta + acordeones) ═══
 function _bfHora(ts){
   if (!ts) return '--:--';
   var s = String(ts);
   var i = s.indexOf('T'); if (i === -1) i = s.indexOf(' ');
   return (i !== -1) ? s.slice(i+1, i+6) : '--:--';
 }
-function _bfFactMotivo(est){
-  if (est === 'sin_mapear') return 'producto sin mapear';
-  if (est === 'error')      return 'error al facturar';
-  if (est === 'sin_cae')    return 'facturada sin CAE';
-  if (est === 'pendiente')  return 'esperando próximo ciclo';
-  return 'sin procesar aún';   // NULL u otro
+function _bfDDMM(fj){ var p = String(fj||'').split('-'); return (p.length === 3) ? (p[2]+'/'+p[1]) : String(fj||''); }
+function _bfFechaLbl(fj){
+  var h = new Date();
+  var pad = function(x){ return String(x).padStart(2,'0'); };
+  var hoyStr = h.getFullYear()+'-'+pad(h.getMonth()+1)+'-'+pad(h.getDate());
+  var a = new Date(h.getTime() - 86400000);
+  var ayStr = a.getFullYear()+'-'+pad(a.getMonth()+1)+'-'+pad(a.getDate());
+  if (fj === hoyStr) return 'Hoy · ' + _bfDDMM(fj);
+  if (fj === ayStr)  return 'Ayer · ' + _bfDDMM(fj);
+  return _bfDDMM(fj);
+}
+function _bfAccToggle(h){ var a = h.parentNode; if (a) a.classList.toggle('open'); }
+function _bfGrupoDias(arr, render){
+  var dias = [], map = {};
+  arr.forEach(function(v){ var fj = v.fecha_jornada; if (!map[fj]){ map[fj] = []; dias.push(fj); } map[fj].push(v); });
+  return dias.map(function(fj){
+    return '<div class="bf-daygrp">'+_bfFechaLbl(fj)+'</div>' + map[fj].map(render).join('');
+  }).join('');
+}
+function _bfUnid(v){
+  return (v.unidad_negocio === 'playmatch') ? '<span class="u pl">Play</span>' : '<span class="u bf">Buffet</span>';
+}
+function _bfRowNoFact(v){
+  var e = v.xubio_estado, fall = (e === 'sin_mapear' || e === 'error');
+  var bg = fall ? 'er' : 'pe';
+  var lbl = fall ? (e === 'sin_mapear' ? 'Sin mapear' : 'Error') : 'Pendiente';
+  return '<div class="bf-frow"><span class="h">'+_bfHora(v.date_closed)+'</span>'+_bfUnid(v)+
+    '<span class="mo">'+_bfMoney(Number(v.total)||0)+'</span>'+
+    '<span class="bg '+bg+'">'+lbl+'</span></div>';
+}
+function _bfRowFact(v){
+  var cae = v.xubio_cae ? ('…' + String(v.xubio_cae).slice(-6)) : 's/CAE';
+  return '<div class="bf-frow"><span class="h">'+_bfHora(v.date_closed)+'</span>'+_bfUnid(v)+
+    '<span class="mo">'+_bfMoney(Number(v.total)||0)+'</span>'+
+    '<span class="cae">'+cae+'</span></div>';
+}
+function _bfAcc(titulo, cls, n, montoStr, cuerpo){
+  return '<div class="bf-acc"><div class="bf-acc-h" onclick="_bfAccToggle(this)">'+
+    '<span class="car"></span><span class="ti '+cls+'">'+titulo+'</span>'+
+    '<span class="ct">'+n+'</span><span class="mt">'+montoStr+'</span></div>'+
+    '<div class="bf-acc-b"><div class="bf-acc-scroll">'+cuerpo+'</div></div></div>';
 }
 function _bfFacturacion(ventas){
   var sec = document.getElementById('bf-fact-sec');
@@ -20358,45 +20405,18 @@ function _bfFacturacion(ventas){
   al.style.display = 'flex';
   if (sinFactN > 0){
     al.style.background = '#FEF3C7'; al.style.color = '#92400E';
-    al.innerHTML = '<span style="font-size:16px;font-weight:900;color:#B45309">⚠</span>' +
+    al.innerHTML = '<span style="font-size:15px;font-weight:900;color:#B45309">⚠</span>' +
       '<span>'+sinFactN+' venta'+(sinFactN>1?'s':'')+' sin facturar — '+_bfMoney(sinFactM)+'</span>';
   } else {
     al.style.background = '#E7F5EC'; al.style.color = '#166534';
-    al.innerHTML = '<span style="font-size:16px;font-weight:900;color:#15803D">✓</span><span>Todo facturado en el período</span>';
+    al.innerHTML = '<span style="font-size:15px;font-weight:900;color:#15803D">✓</span><span>Todo facturado en el período</span>';
   }
 
+  var byClosedDesc = function(a,b){ return String(b.date_closed||'').localeCompare(String(a.date_closed||'')); };
   var html = '';
-  if (noFact.length){
-    noFact.sort(function(a,b){ return String(a.date_closed||'').localeCompare(String(b.date_closed||'')); });
-    html += '<div class="bf-fact-grp"><span>Sin facturar</span></div>';
-    html += noFact.map(function(v){
-      var e = v.xubio_estado, fall = (e === 'sin_mapear' || e === 'error');
-      var cls = fall ? 'er' : 'pe';
-      var un = (v.unidad_negocio === 'playmatch') ? '<span class="un-pl">Play</span>' : '<span class="un-bf">Buffet</span>';
-      var lbl = fall ? (e === 'sin_mapear' ? 'Sin mapear' : 'Error') : 'Pendiente';
-      return '<div class="bf-frow '+cls+'"><div class="top"><div class="hora">'+_bfHora(v.date_closed)+' · '+un+'</div>'+
-        '<div class="monto">'+_bfMoney(Number(v.total)||0)+'</div></div>'+
-        '<div class="bot"><span class="bf-fbadge '+cls+'">'+lbl+'</span>'+
-        '<span class="bf-fmotivo'+(fall?' er':'')+'">'+_bfFactMotivo(e)+'</span></div></div>';
-    }).join('');
-  }
-  if (fact.length){
-    fact.sort(function(a,b){ return String(b.date_closed||'').localeCompare(String(a.date_closed||'')); });
-    var TOPF = 20, extra = fact.length - TOPF;
-    html += '<div class="bf-fact-grp" style="margin-top:13px"><span>Facturadas</span><span class="c">✓ con CAE</span></div>';
-    html += fact.slice(0, TOPF).map(function(v){
-      var un = (v.unidad_negocio === 'playmatch') ? '<span class="un-pl">Play</span>' : '<span class="un-bf">Buffet</span>';
-      var comp = v.xubio_nro_comprobante || '(sin nº)';
-      var cae = v.xubio_cae ? ('CAE …' + String(v.xubio_cae).slice(-6)) : 'sin CAE';
-      return '<div class="bf-frow ok"><div class="top"><div class="hora">'+_bfHora(v.date_closed)+' · '+un+'</div>'+
-        '<div class="monto">'+_bfMoney(Number(v.total)||0)+'</div></div>'+
-        '<div class="bot"><span class="bf-fcomp">'+comp+'</span><span class="bf-fcae">'+cae+'</span></div></div>';
-    }).join('');
-    if (extra > 0) html += '<div class="bf-fmore">y '+extra+' facturada'+(extra>1?'s':'')+' más</div>';
-  }
-  if (!noFact.length && !fact.length){
-    html = '<div class="bf-fvacio">Sin ventas facturables en el período</div>';
-  }
+  if (noFact.length){ noFact.sort(byClosedDesc); html += _bfAcc('Sin facturar','pe',sinFactN,_bfMoney(sinFactM),_bfGrupoDias(noFact,_bfRowNoFact)); }
+  if (fact.length){   fact.sort(byClosedDesc);   html += _bfAcc('Facturadas','ok',okN,_bfMoney(okM),_bfGrupoDias(fact,_bfRowFact)); }
+  if (!noFact.length && !fact.length){ html = '<div class="bf-fvacio">Sin ventas facturables en el período</div>'; }
   document.getElementById('bf-fact-lista').innerHTML = html;
 }
 
@@ -20457,7 +20477,7 @@ function mostrarTabs() {
   _tckSetDisp('menu-mas-acc-dup',     puedeVer('acc-dup'));
   _tckSetDisp('menu-mas-prod-canon',  puedeVer('prod-canon'));
   _tckSetDisp('menu-mas-ccanon',      puedeVer('ccanon'));
-  _tckSetDisp('menu-mas-buffet',      puedeVer('buffet'));   // v13.88.0 — visible para admin/oficina + cobranzas
+  _tckSetDisp('menu-mas-buffet',      puedeVer('buffet'));   // v13.88.0 — visible para admin/oficina + cobranzas (rediseño v13.89.0)
 
   // Si el tab activo dejó de estar permitido para este rol, ir a Pedidos
   if (_tabActual && _tabActual !== 'pedidos' && !puedeVer(_tabActual)) cambiarTab('pedidos');
@@ -39853,7 +39873,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.88.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.89.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
