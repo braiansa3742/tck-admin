@@ -1,5 +1,12 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.99.0 — 29/06/2026
+     v13.99.0: BUFFET — pane RECETAS (sub-tab). Composición de los 161 platos
+               (vw_buffet_food_cost_linea): resumen (platos / completas /
+               incompletas), filtro "incompletas", buscador, lista de platos
+               clickeable → drill-down ingrediente · cantidad · unidad, con los
+               SIN COSTO en rojo. Incompletas arriba. Carga lazy. Solo lectura
+               (editar recetas = #11).
      TCK ADMIN — v13.98.0 — 29/06/2026
      v13.98.0: BUFFET — pane INGREDIENTES (sub-tab). 139 insumos de
                buffet_costo_ingrediente: resumen (con costo / sin costo / total),
@@ -14868,6 +14875,15 @@ input.canales-exp-input[type="date"] {
   #view-buffet .bf-ing-row .meta{ font-size:9.5px; color:#8A7B63; margin-top:2px; }
   #view-buffet .bf-ing-row .c{ font-weight:800; color:#2C2416; flex-shrink:0; text-align:right; font-size:12px; }
   #view-buffet .bf-ing-row .c.sc{ color:#991B1B; font-size:9px; font-weight:800; background:#FCEBEB; padding:3px 7px; border-radius:5px; }
+  /* v13.99.0 — pane Recetas */
+  #view-buffet .bf-rec-row{ display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid #F4EEE4; font-size:12px; cursor:pointer; }
+  #view-buffet .bf-rec-row:last-child{ border-bottom:none; }
+  #view-buffet .bf-rec-row .cx{ display:inline-block; width:11px; font-size:9px; color:#9A3412; flex-shrink:0; }
+  #view-buffet .bf-rec-row .cx::before{ content:'\\25B8'; }
+  #view-buffet .bf-rec-row.open .cx::before{ content:'\\25BE'; }
+  #view-buffet .bf-rec-row .nm{ flex:1; min-width:0; font-weight:600; color:#2C2416; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #view-buffet .bf-rec-row .ct{ font-size:10px; color:#8A7B63; flex-shrink:0; }
+  #view-buffet .bf-rec-row .bad{ font-size:8px; font-weight:800; text-transform:uppercase; padding:2px 6px; border-radius:5px; background:#FCEBEB; color:#991B1B; flex-shrink:0; }
 </style>
   <div class="bf-head">
     <h2>🍔 Buffet TCK Food</h2>
@@ -14930,9 +14946,13 @@ input.canales-exp-input[type="date"] {
     </div>
   </div>
 
-  <!-- PANE: RECETAS (se construye en v13.99) -->
+  <!-- PANE: RECETAS (v13.99.0) -->
   <div class="bf-pane" id="bfp-recetas">
-    <div class="bf-sec"><h3>Recetas</h3><div class="bf-fvacio">Próximamente — composición de los 161 platos.</div></div>
+    <div class="bf-pc-resumen" id="bf-rec-resumen"></div>
+    <div class="bf-pc-filtros" id="bf-rec-filtros"></div>
+    <input class="bf-stock-search" id="bf-rec-search" type="text" placeholder="Buscar plato…" oninput="_bfRecFiltrar(this.value)">
+    <div class="bf-pc-scroll" id="bf-rec-lista" style="max-height:480px;"><div class="bf-fvacio">Tocá la pestaña para cargar las recetas.</div></div>
+    <div class="bf-pc-foot" id="bf-rec-foot"></div>
   </div>
 
   <!-- PANE: SUB-RECETAS (se construye en v13.100) -->
@@ -20448,6 +20468,7 @@ function bfSubtab(p, btn){
   // v13.97.0 — carga lazy por pane (solo la 1ª vez)
   if (p === 'stock' && !_bfStockCargado){ _bfStockCargado = true; _bfStock(); }
   if (p === 'ingr'  && !_bfIngrCargado){  _bfIngrCargado  = true; _bfIngr();  }
+  if (p === 'recetas' && !_bfRecCargado){ _bfRecCargado = true; _bfRec(); }
   var v = document.getElementById('view-buffet'); if (v) v.scrollTop = 0;
 }
 
@@ -20584,6 +20605,82 @@ function _bfIngrRender(q){
     var c = d.sinCosto ? '<span class="c sc">sin costo</span>'
                        : '<span class="c">'+_bfMoney(d.costo)+(d.unidad?(' /'+_bfEsc(d.unidad)):'')+'</span>';
     return '<div class="bf-ing-row"><div class="n"><div class="nm">'+_bfEsc(d.nombre)+'</div><div class="meta">'+meta+'</div></div>'+c+'</div>';
+  }).join('');
+}
+
+// ═══ v13.99.0 — Pane RECETAS (composición de platos · lectura · base de #11) ═══
+var _bfRecCargado = false;
+var _bfRecData = [];
+var _bfRecFiltro = 'todos';
+async function _bfRec(){
+  var lst = document.getElementById('bf-rec-lista');
+  if (!lst) return;
+  lst.innerHTML = '<div class="bf-fvacio">Cargando recetas…</div>';
+  try {
+    var lineas = await sbFetchAll('vw_buffet_food_cost_linea?select=producto_id,producto_nombre,ingrediente_nombre,cantidad,unidad,sin_costo&order=producto_nombre.asc', 1000, 5);
+    lineas = Array.isArray(lineas) ? lineas : [];
+    var map = {}, orden = [];
+    lineas.forEach(function(l){
+      var k = l.producto_id;
+      if (!map[k]){ map[k] = { id:k, nombre:l.producto_nombre||'(sin nombre)', lineas:[], sin:0 }; orden.push(k); }
+      var sc = Number(l.sin_costo) === 1;
+      map[k].lineas.push({ ing:l.ingrediente_nombre||'(ingrediente)', cant:l.cantidad, unidad:l.unidad||'', sinCosto:sc });
+      if (sc) map[k].sin++;
+    });
+    _bfRecData = orden.map(function(k){
+      var p = map[k];
+      return { id:p.id, nombre:p.nombre, lineas:p.lineas, nIngr:p.lineas.length, sin:p.sin, incompleta:p.sin>0 };
+    });
+    var incompletas = _bfRecData.filter(function(d){ return d.incompleta; }).length;
+    var res = document.getElementById('bf-rec-resumen');
+    if (res) res.innerHTML =
+      '<div class="bf-pch gr"><div class="n">'+_bfRecData.length+'</div><div class="l">Platos</div></div>'+
+      '<div class="bf-pch ok"><div class="n">'+(_bfRecData.length-incompletas)+'</div><div class="l">Completas</div></div>'+
+      '<div class="bf-pch '+(incompletas>0?'er':'ok')+'"><div class="n">'+incompletas+'</div><div class="l">Incompletas</div></div>';
+    document.getElementById('bf-rec-filtros').innerHTML =
+      '<button class="bf-pc-chip on" onclick="_bfRecFiltro2(\'todos\',this)">Todas ('+_bfRecData.length+')</button>'+
+      '<button class="bf-pc-chip" onclick="_bfRecFiltro2(\'inc\',this)">Incompletas ('+incompletas+')</button>';
+    var foot = document.getElementById('bf-rec-foot');
+    if (foot) foot.textContent = 'Composición de cada plato. "Incompleta" = tiene algún ingrediente sin costo (en rojo). Editar las recetas será parte de #11.';
+    _bfRecRender();
+  } catch(e){
+    console.error('[buffet] recetas:', e);
+    lst.innerHTML = '<div class="bf-fvacio">No se pudieron cargar las recetas.</div>';
+  }
+}
+function _bfRecFiltro2(f, btn){
+  _bfRecFiltro = f;
+  var box = document.getElementById('bf-rec-filtros');
+  if (box) box.querySelectorAll('.bf-pc-chip').forEach(function(c){ c.classList.remove('on'); });
+  if (btn) btn.classList.add('on');
+  _bfRecRender();
+}
+function _bfRecFiltrar(q){ _bfRecRender((q || '').trim().toLowerCase()); }
+function _bfRecDet(lineas){
+  return '<div class="bf-prow-det" style="display:none;">' + lineas.map(function(l){
+    var sc = l.sinCosto;
+    var dc = sc ? '<span class="dc">sin costo</span>' : '<span class="dc"></span>';
+    return '<div class="bf-det-line'+(sc?' sc':'')+'"><span class="di">'+_bfEsc(l.ing)+'</span>'+
+      '<span class="dq">'+_bfCant(l.cant)+' '+_bfEsc(l.unidad)+'</span>'+dc+'</div>';
+  }).join('') + '</div>';
+}
+function _bfRecRender(q){
+  var lst = document.getElementById('bf-rec-lista');
+  if (!lst) return;
+  var arr = _bfRecData.slice();
+  if (_bfRecFiltro === 'inc') arr = arr.filter(function(d){ return d.incompleta; });
+  if (q) arr = arr.filter(function(d){ return d.nombre.toLowerCase().indexOf(q) >= 0; });
+  arr.sort(function(a,b){
+    if (a.incompleta !== b.incompleta) return a.incompleta ? -1 : 1;   // incompletas arriba
+    return a.nombre.localeCompare(b.nombre);
+  });
+  if (!arr.length){ lst.innerHTML = '<div class="bf-fvacio">Sin resultados</div>'; return; }
+  lst.innerHTML = arr.map(function(d){
+    var bad = d.incompleta ? '<span class="bad">'+d.sin+' sin costo</span>' : '';
+    var row = '<div class="bf-rec-row" onclick="_bfPrecToggle(this)"><span class="cx"></span>'+
+      '<span class="nm">'+_bfEsc(d.nombre)+'</span>'+bad+
+      '<span class="ct">'+d.nIngr+' ingr</span></div>';
+    return row + _bfRecDet(d.lineas);
   }).join('');
 }
 function _bfHoy(){ var d = new Date(Date.now() - 3*3600000); return d.toISOString().slice(0,10); }
@@ -40519,7 +40616,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.98.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.99.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
