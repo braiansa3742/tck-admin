@@ -1,5 +1,12 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.101.0 — 29/06/2026
+     v13.101.0: BUFFET FIX — el HUECO BLANCO del tab Buffet. Causa: el bloque
+                #view-buffet estaba FUERA del #panel (después del tab-nav), así que
+                al abrir buffet el #panel quedaba vacío con su min-height (~876px)
+                = el hueco, y el buffet renderizaba al fondo. Fix: se movió el
+                bloque #view-buffet ADENTRO del #panel, junto a las demás views.
+                Sin cambios de lógica (mismo HTML/JS, solo reubicado).
      TCK ADMIN — v13.100.0 — 29/06/2026
      v13.100.0: BUFFET — pane SUB-RECETAS (sub-tab). Cierra la reestructura #10.
                 Los sub-preparados (vw_buffet_costo_sub): resumen (total / completas
@@ -14399,6 +14406,264 @@ input.canales-exp-input[type="date"] {
     <div class="mg-list" id="mg-list"><div class="mg-estado">Cargando márgenes…</div></div>
   </div>
 
+<div class="view" id="view-buffet">
+<style>
+  #view-buffet{ padding:0 0 60px; }
+  #view-buffet .bf-head{ background:linear-gradient(135deg,#9A3412,#C2410C); color:#fff; padding:14px 14px 12px; border-radius:0 0 14px 14px; box-shadow:0 2px 8px rgba(0,0,0,.12); }
+  #view-buffet .bf-head h2{ font-size:19px; font-weight:900; text-transform:uppercase; letter-spacing:.5px; margin:0; display:flex; align-items:center; gap:7px; }
+  #view-buffet .bf-head .bf-sub{ font-size:12px; opacity:.85; margin-top:2px; font-weight:500; }
+  #view-buffet .bf-rango{ display:flex; gap:6px; margin-top:11px; }
+  #view-buffet .bf-rango button{ flex:1; border:none; background:rgba(255,255,255,.18); color:#fff; padding:7px 0; border-radius:8px; font-family:inherit; font-size:12px; font-weight:800; cursor:pointer; letter-spacing:.3px; }
+  #view-buffet .bf-rango button.on{ background:#fff; color:#9A3412; }
+  #view-buffet .bf-kpis{ display:grid; grid-template-columns:repeat(4,1fr); gap:6px; padding:12px 12px 4px; }
+  #view-buffet .bf-kpi{ background:#fff; border-radius:10px; padding:9px 5px; text-align:center; box-shadow:0 1px 4px rgba(0,0,0,.07); border-top:3px solid #EA580C; }
+  #view-buffet .bf-kpi .v{ font-size:17px; font-weight:900; line-height:1; color:#2C2416; }
+  #view-buffet .bf-kpi .l{ font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.2px; color:#8A7B63; margin-top:5px; }
+  #view-buffet .bf-kpi.big{ border-top-color:#9A3412; } #view-buffet .bf-kpi.big .v{ color:#9A3412; font-size:18px; }
+  #view-buffet .bf-kpi.cp{ border-top-color:#9E9E9E; } #view-buffet .bf-kpi.cp .v{ color:#8A6E4B; }
+  #view-buffet .bf-sec{ background:#fff; margin:10px 12px 0; border-radius:12px; padding:13px 13px 14px; box-shadow:0 1px 4px rgba(0,0,0,.07); }
+  #view-buffet .bf-sec h3{ font-size:13px; font-weight:900; text-transform:uppercase; letter-spacing:.4px; margin:0 0 11px; color:#2C2416; display:flex; align-items:center; justify-content:space-between; }
+  #view-buffet .bf-sec h3 .leg{ font-size:10px; font-weight:700; color:#8A7B63; display:flex; gap:9px; }
+  #view-buffet .bf-sec h3 .leg i{ font-style:normal; display:inline-flex; align-items:center; gap:3px; }
+  #view-buffet .dot{ width:9px; height:9px; border-radius:3px; display:inline-block; }
+  #view-buffet .bf-dias{ display:flex; align-items:flex-end; gap:5px; height:120px; padding-top:6px; }
+  #view-buffet .bf-dia{ flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; height:100%; justify-content:flex-end; }
+  #view-buffet .bf-dia .barwrap{ width:100%; display:flex; flex-direction:column; justify-content:flex-end; height:100%; border-radius:5px 5px 0 0; overflow:hidden; background:#F3ECE0; }
+  #view-buffet .bf-dia .seg-bf{ background:linear-gradient(180deg,#EA580C,#C2410C); }
+  #view-buffet .bf-dia .seg-pl{ background:#1E6B8C; }
+  #view-buffet .bf-dia .dn{ font-size:8.5px; color:#8A7B63; font-weight:700; }
+  #view-buffet .bf-mp-row{ margin-bottom:10px; } #view-buffet .bf-mp-row:last-child{ margin-bottom:0; }
+  #view-buffet .bf-mp-top{ display:flex; justify-content:space-between; font-size:12px; font-weight:700; margin-bottom:4px; }
+  #view-buffet .bf-mp-top .pct{ color:#8A7B63; font-weight:800; }
+  #view-buffet .bf-mp-bar{ height:9px; border-radius:6px; background:#F0E9DC; overflow:hidden; }
+  #view-buffet .bf-mp-fill{ height:100%; border-radius:6px; }
+  #view-buffet .bf-tp{ display:flex; align-items:center; gap:9px; padding:8px 0; border-bottom:1px solid #EFE7DA; }
+  #view-buffet .bf-tp:last-child{ border-bottom:none; }
+  #view-buffet .bf-tp .rk{ font-size:12px; font-weight:900; color:#EA580C; width:18px; text-align:center; flex-shrink:0; }
+  #view-buffet .bf-tp .info{ flex:1; min-width:0; }
+  #view-buffet .bf-tp .nm{ font-size:12.5px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #view-buffet .bf-tp .meta{ font-size:10px; color:#8A7B63; margin-top:2px; }
+  #view-buffet .bf-badge{ font-size:8px; font-weight:800; text-transform:uppercase; padding:1px 5px; border-radius:4px; }
+  #view-buffet .bf-badge.bf{ background:#FBEADB; color:#9A3412; }
+  #view-buffet .bf-badge.pl{ background:#E1F0F6; color:#1E6B8C; }
+  #view-buffet .bf-tp .amt{ font-size:12.5px; font-weight:900; color:#2C2416; flex-shrink:0; }
+  #view-buffet .bf-cp{ background:linear-gradient(135deg,#6B5B4A,#8A7B63); color:#fff; margin:10px 12px 0; border-radius:12px; padding:14px; display:flex; align-items:center; gap:14px; box-shadow:0 1px 4px rgba(0,0,0,.1); }
+  #view-buffet .bf-cp .big{ font-size:26px; font-weight:900; line-height:1; }
+  #view-buffet .bf-cp .txt{ font-size:12px; opacity:.92; } #view-buffet .bf-cp .txt b{ font-size:14px; }
+  #view-buffet .bf-loading{ text-align:center; color:#8A7B63; font-size:13px; padding:30px 0; }
+  /* v13.89.0 — sección Facturación (compacta + acordeones) */
+  #view-buffet .bf-fact-resumen{ display:grid; grid-template-columns:repeat(3,1fr); gap:5px; margin-bottom:9px; }
+  #view-buffet .bf-fch{ border-radius:9px; padding:7px 4px; text-align:center; }
+  #view-buffet .bf-fch .n{ font-size:15px; font-weight:900; line-height:1; }
+  #view-buffet .bf-fch .m{ font-size:10.5px; font-weight:700; margin-top:2px; }
+  #view-buffet .bf-fch .l{ font-size:8.5px; font-weight:800; text-transform:uppercase; margin-top:3px; }
+  #view-buffet .bf-fch.ok{ background:#E7F5EC; border-top:3px solid #15803D; } #view-buffet .bf-fch.ok .n,#view-buffet .bf-fch.ok .m{ color:#166534; } #view-buffet .bf-fch.ok .l{ color:#15803D; }
+  #view-buffet .bf-fch.pe{ background:#FEF3C7; border-top:3px solid #B45309; } #view-buffet .bf-fch.pe .n,#view-buffet .bf-fch.pe .m{ color:#92400E; } #view-buffet .bf-fch.pe .l{ color:#B45309; }
+  #view-buffet .bf-fch.er{ background:#F1EFE8; border-top:3px solid #B4B2A9; } #view-buffet .bf-fch.er .n,#view-buffet .bf-fch.er .m{ color:#5F5E5A; } #view-buffet .bf-fch.er .l{ color:#888780; }
+  #view-buffet .bf-fch.er.hay{ background:#FCEBEB; border-top-color:#A32D2D; } #view-buffet .bf-fch.er.hay .n,#view-buffet .bf-fch.er.hay .m{ color:#991B1B; } #view-buffet .bf-fch.er.hay .l{ color:#A32D2D; }
+  #view-buffet .bf-fact-alerta{ border-radius:8px; padding:8px 10px; display:flex; align-items:center; gap:7px; margin-bottom:10px; font-size:11.5px; font-weight:700; }
+  /* acordeón */
+  #view-buffet .bf-acc{ border:1px solid #EFE7DA; border-radius:9px; margin-bottom:7px; overflow:hidden; }
+  #view-buffet .bf-acc-h{ display:flex; align-items:center; gap:8px; padding:9px 11px; cursor:pointer; background:#FBF7F0; user-select:none; }
+  #view-buffet .bf-acc-h .car{ font-size:10px; color:#8A7B63; width:10px; flex-shrink:0; }
+  #view-buffet .bf-acc-h .car::before{ content:'\\25B8'; }
+  #view-buffet .bf-acc.open .bf-acc-h .car::before{ content:'\\25BE'; }
+  #view-buffet .bf-acc-h .ti{ font-size:9.5px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; flex:1; }
+  #view-buffet .bf-acc-h .ti.pe{ color:#92400E; } #view-buffet .bf-acc-h .ti.ok{ color:#15803D; }
+  #view-buffet .bf-acc-h .ct{ font-size:11px; font-weight:900; color:#2C2416; }
+  #view-buffet .bf-acc-h .mt{ font-size:10.5px; color:#8A7B63; margin-left:6px; }
+  #view-buffet .bf-acc-b{ display:none; border-top:1px solid #EFE7DA; }
+  #view-buffet .bf-acc.open .bf-acc-b{ display:block; }
+  #view-buffet .bf-acc-scroll{ max-height:240px; overflow-y:auto; }
+  #view-buffet .bf-daygrp{ font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:.4px; color:#B4956A; background:#FCF8F2; padding:4px 11px; }
+  /* fila de 1 línea */
+  #view-buffet .bf-frow{ display:flex; align-items:center; gap:8px; padding:6px 11px; border-bottom:1px solid #F4EEE4; font-size:12px; }
+  #view-buffet .bf-frow:last-child{ border-bottom:none; }
+  #view-buffet .bf-frow .h{ font-weight:700; color:#5F5E5A; width:38px; flex-shrink:0; }
+  #view-buffet .bf-frow .u{ font-weight:700; width:46px; flex-shrink:0; }
+  #view-buffet .bf-frow .u.bf{ color:#C2410C; } #view-buffet .bf-frow .u.pl{ color:#1E6B8C; }
+  #view-buffet .bf-frow .mo{ flex:1; text-align:right; font-weight:800; color:#2C2416; }
+  #view-buffet .bf-frow .bg{ font-size:9px; font-weight:700; padding:1px 6px; border-radius:4px; flex-shrink:0; min-width:62px; text-align:center; }
+  #view-buffet .bf-frow .bg.pe{ background:#FEF3C7; color:#92400E; }
+  #view-buffet .bf-frow .bg.er{ background:#FCEBEB; color:#991B1B; }
+  #view-buffet .bf-frow .cae{ font-size:9px; color:#8A7B63; font-family:ui-monospace,Menlo,monospace; flex-shrink:0; }
+  #view-buffet .bf-fvacio{ font-size:12px; color:#8A7B63; text-align:center; padding:10px 0; }
+  /* v13.92.0 — Precios y márgenes (solo visibilidad) */
+  #view-buffet .bf-pc-resumen{ display:grid; grid-template-columns:repeat(3,1fr); gap:5px; margin-bottom:9px; }
+  #view-buffet .bf-pch{ border-radius:9px; padding:8px 4px; text-align:center; }
+  #view-buffet .bf-pch .n{ font-size:17px; font-weight:900; line-height:1; }
+  #view-buffet .bf-pch .l{ font-size:8.5px; font-weight:800; text-transform:uppercase; margin-top:4px; letter-spacing:.2px; }
+  #view-buffet .bf-pch.ok{ background:#E7F5EC; border-top:3px solid #15803D; } #view-buffet .bf-pch.ok .n{ color:#166534; } #view-buffet .bf-pch.ok .l{ color:#15803D; }
+  #view-buffet .bf-pch.gr{ background:#F1EFE8; border-top:3px solid #B4B2A9; } #view-buffet .bf-pch.gr .n{ color:#5F5E5A; } #view-buffet .bf-pch.gr .l{ color:#888780; }
+  #view-buffet .bf-pch.okneg{ background:#E7F5EC; border-top:3px solid #15803D; } #view-buffet .bf-pch.okneg .n{ color:#166534; } #view-buffet .bf-pch.okneg .l{ color:#15803D; }
+  #view-buffet .bf-pch.er{ background:#FCEBEB; border-top:3px solid #A32D2D; } #view-buffet .bf-pch.er .n{ color:#991B1B; } #view-buffet .bf-pch.er .l{ color:#A32D2D; }
+  #view-buffet .bf-pc-alerta{ border-radius:8px; padding:8px 10px; display:flex; align-items:center; gap:7px; margin-bottom:10px; font-size:11.5px; font-weight:700; background:#FCEBEB; color:#991B1B; }
+  #view-buffet .bf-pc-filtros{ display:flex; flex-wrap:wrap; gap:5px; margin-bottom:10px; }
+  #view-buffet .bf-pc-chip{ border:1px solid #EFE7DA; background:#FBF7F0; color:#5F5E5A; padding:5px 9px; border-radius:14px; font-family:inherit; font-size:10.5px; font-weight:800; cursor:pointer; white-space:nowrap; }
+  #view-buffet .bf-pc-chip.on{ background:#9A3412; border-color:#9A3412; color:#fff; }
+  #view-buffet .bf-pc-scroll{ max-height:420px; overflow-y:auto; border:1px solid #EFE7DA; border-radius:9px; }
+  #view-buffet .bf-prow{ display:grid; grid-template-columns:1fr 64px 64px 64px 50px; align-items:center; gap:6px; padding:7px 9px; border-bottom:1px solid #F4EEE4; font-size:12px; }
+  #view-buffet .bf-prow:last-child{ border-bottom:none; }
+  #view-buffet .bf-prow.hd{ position:sticky; top:0; background:#FBF7F0; z-index:1; font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; color:#8A7B63; padding-top:8px; padding-bottom:8px; }
+  #view-buffet .bf-prow.hd .pp,#view-buffet .bf-prow.hd .pc,#view-buffet .bf-prow.hd .pm,#view-buffet .bf-prow.hd .pf{ text-align:right; }
+  #view-buffet .bf-prow .pn{ min-width:0; }
+  #view-buffet .bf-prow .pn .t{ font-size:12px; font-weight:700; color:#2C2416; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #view-buffet .bf-prow .pn .m{ font-size:9.5px; color:#8A7B63; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #view-buffet .bf-prow .pp{ text-align:right; font-weight:800; color:#2C2416; }
+  #view-buffet .bf-prow .pc{ text-align:right; font-weight:600; color:#5F5E5A; }
+  #view-buffet .bf-prow .pm{ text-align:right; font-weight:800; color:#166534; }
+  #view-buffet .bf-prow .pm.neg{ color:#991B1B; }
+  #view-buffet .bf-prow .pf{ text-align:right; }
+  #view-buffet .bf-prow .sem{ font-size:10.5px; font-weight:900; padding:2px 6px; border-radius:6px; display:inline-block; min-width:40px; text-align:center; }
+  #view-buffet .bf-prow .sem.verde{ background:#E7F5EC; color:#15803D; }
+  #view-buffet .bf-prow .sem.amar{ background:#FEF3C7; color:#B45309; }
+  #view-buffet .bf-prow .sem.rojo{ background:#FCEBEB; color:#991B1B; }
+  #view-buffet .bf-prow .sem.gris{ background:#F1EFE8; color:#A09A8E; }
+  #view-buffet .bf-pc-foot{ font-size:10px; color:#8A7B63; margin-top:9px; line-height:1.4; font-style:italic; }
+  /* v13.95.0 — drill-down de receta dentro del panel Precios */
+  #view-buffet .bf-prow.exp{ cursor:pointer; }
+  #view-buffet .bf-prow .cx{ display:inline-block; width:11px; font-size:9px; color:#9A3412; flex-shrink:0; }
+  #view-buffet .bf-prow .cx::before{ content:'\\25B8'; }
+  #view-buffet .bf-prow.open .cx::before{ content:'\\25BE'; }
+  #view-buffet .bf-prow .cx.ph::before{ content:''; }
+  #view-buffet .bf-prow-det{ background:#FBF7F0; border-bottom:1px solid #F4EEE4; padding:6px 9px 8px 26px; }
+  #view-buffet .bf-det-line{ display:flex; align-items:center; gap:8px; font-size:11px; padding:3px 0; }
+  #view-buffet .bf-det-line .di{ flex:1; color:#5F5E5A; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #view-buffet .bf-det-line .dq{ color:#8A7B63; flex-shrink:0; font-size:10px; width:62px; text-align:right; }
+  #view-buffet .bf-det-line .dc{ font-weight:700; color:#2C2416; flex-shrink:0; width:76px; text-align:right; }
+  #view-buffet .bf-det-line.sc .di{ color:#991B1B; font-weight:700; }
+  #view-buffet .bf-det-line.sc .dc{ color:#991B1B; font-weight:800; }
+  #view-buffet .bf-det-tot{ display:flex; justify-content:space-between; font-size:10.5px; font-weight:800; color:#2C2416; border-top:1px dashed #E0D6C6; margin-top:5px; padding-top:5px; }
+  /* v13.96.0 — sub-tabs internas del tab Buffet */
+  #view-buffet .bf-subnav{ display:flex; overflow-x:auto; background:linear-gradient(135deg,#9A3412,#C2410C); padding:0 6px; -webkit-overflow-scrolling:touch; position:sticky; top:0; z-index:6; box-shadow:0 2px 6px rgba(0,0,0,.12); }
+  #view-buffet .bf-subnav::-webkit-scrollbar{ display:none; }
+  #view-buffet .bf-subnav button{ flex:0 0 auto; border:none; background:transparent; color:rgba(255,255,255,.72); font-family:inherit; font-size:12px; font-weight:800; padding:11px 12px 12px; cursor:pointer; border-bottom:3px solid transparent; white-space:nowrap; letter-spacing:.2px; }
+  #view-buffet .bf-subnav button.on{ color:#fff; border-bottom-color:#fff; }
+  #view-buffet .bf-pane{ display:none; }
+  #view-buffet .bf-pane.on{ display:block; }
+  /* v13.97.0 — pane Stock */
+  #view-buffet .bf-stock-search{ width:100%; border:1px solid #EFE7DA; border-radius:9px; padding:9px 11px; font-family:inherit; font-size:13px; margin:0 0 10px; background:#fff; color:#2C2416; }
+  #view-buffet .bf-stock-search:focus{ outline:none; border-color:#C2410C; }
+  #view-buffet .bf-stock-row{ display:flex; align-items:center; gap:8px; padding:7px 10px; border-bottom:1px solid #F4EEE4; font-size:12px; }
+  #view-buffet .bf-stock-row:last-child{ border-bottom:none; }
+  #view-buffet .bf-stock-row .n{ flex:1; min-width:0; font-weight:600; color:#2C2416; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #view-buffet .bf-stock-row .q{ font-weight:800; color:#2C2416; flex-shrink:0; }
+  #view-buffet .bf-stock-row.cero .n{ color:#A09A8E; } #view-buffet .bf-stock-row.cero .q{ color:#B4A88E; }
+  /* v13.98.0 — pane Ingredientes */
+  #view-buffet .bf-ing-row{ display:flex; align-items:center; gap:8px; padding:7px 10px; border-bottom:1px solid #F4EEE4; font-size:12px; }
+  #view-buffet .bf-ing-row:last-child{ border-bottom:none; }
+  #view-buffet .bf-ing-row .n{ flex:1; min-width:0; }
+  #view-buffet .bf-ing-row .nm{ font-weight:600; color:#2C2416; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #view-buffet .bf-ing-row .meta{ font-size:9.5px; color:#8A7B63; margin-top:2px; }
+  #view-buffet .bf-ing-row .c{ font-weight:800; color:#2C2416; flex-shrink:0; text-align:right; font-size:12px; }
+  #view-buffet .bf-ing-row .c.sc{ color:#991B1B; font-size:9px; font-weight:800; background:#FCEBEB; padding:3px 7px; border-radius:5px; }
+  /* v13.99.0 — pane Recetas */
+  #view-buffet .bf-rec-row{ display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid #F4EEE4; font-size:12px; cursor:pointer; }
+  #view-buffet .bf-rec-row:last-child{ border-bottom:none; }
+  #view-buffet .bf-rec-row .cx{ display:inline-block; width:11px; font-size:9px; color:#9A3412; flex-shrink:0; }
+  #view-buffet .bf-rec-row .cx::before{ content:'\\25B8'; }
+  #view-buffet .bf-rec-row.open .cx::before{ content:'\\25BE'; }
+  #view-buffet .bf-rec-row .nm{ flex:1; min-width:0; font-weight:600; color:#2C2416; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #view-buffet .bf-rec-row .ct{ font-size:10px; color:#8A7B63; flex-shrink:0; }
+  #view-buffet .bf-rec-row .bad{ font-size:8px; font-weight:800; text-transform:uppercase; padding:2px 6px; border-radius:5px; background:#FCEBEB; color:#991B1B; flex-shrink:0; }
+</style>
+  <div class="bf-head">
+    <h2>🍔 Buffet TCK Food</h2>
+    <div class="bf-sub" id="bf-sub">Cargando…</div>
+    <div class="bf-rango" id="bf-rango">
+      <button onclick="buffetSetRango('hoy',this)">Hoy</button>
+      <button onclick="buffetSetRango('7d',this)">7 días</button>
+      <button class="on" onclick="buffetSetRango('30d',this)">30 días</button>
+      <button onclick="buffetSetRango('periodo',this)">Todo</button>
+    </div>
+  </div>
+  <div class="bf-subnav" id="bf-subnav">
+    <button class="on" onclick="bfSubtab('resumen',this)">Resumen</button>
+    <button onclick="bfSubtab('fact',this)">Facturación</button>
+    <button onclick="bfSubtab('costos',this)">Costos</button>
+    <button onclick="bfSubtab('recetas',this)">Recetas</button>
+    <button onclick="bfSubtab('subrecetas',this)">Sub-recetas</button>
+    <button onclick="bfSubtab('ingr',this)">Ingredientes</button>
+    <button onclick="bfSubtab('stock',this)">Stock</button>
+  </div>
+
+  <!-- PANE: RESUMEN -->
+  <div class="bf-pane on" id="bfp-resumen">
+    <div class="bf-kpis" id="bf-kpis"></div>
+    <div class="bf-sec">
+      <h3>Ventas por día
+        <span class="leg"><i><span class="dot" style="background:#EA580C"></span>Buffet</i><i><span class="dot" style="background:#1E6B8C"></span>Playmatch</i></span>
+      </h3>
+      <div class="bf-dias" id="bf-dias"></div>
+    </div>
+    <div class="bf-sec"><h3>Medios de pago</h3><div id="bf-mp"></div></div>
+    <div class="bf-sec"><h3>Top productos <span class="leg" style="font-weight:700">por facturación</span></h3><div id="bf-top"></div></div>
+    <div class="bf-cp" id="bf-cp" style="display:none;"></div>
+  </div>
+
+  <!-- PANE: FACTURACIÓN -->
+  <div class="bf-pane" id="bfp-fact">
+    <div class="bf-sec" id="bf-fact-sec">
+      <h3>Facturación <span class="leg" id="bf-fact-head" style="font-weight:700"></span></h3>
+      <div class="bf-fact-resumen" id="bf-fact-resumen"></div>
+      <div class="bf-fact-alerta" id="bf-fact-alerta" style="display:none;"></div>
+      <div id="bf-fact-lista"></div>
+    </div>
+    <div class="bf-sec" id="bf-trab-sec" style="display:none;">
+      <h3>⚠ Productos que traban facturación <span class="leg" id="bf-trab-head" style="font-weight:700"></span></h3>
+      <div id="bf-trab-lista"></div>
+      <div class="bf-pc-foot">Cargá el <b>precio de última compra</b> de estos productos en Xubio (Compras → Productos de Compra) y reintentá. Es lo único que falta para que ARCA los acepte. Ordenados por cuántas ventas trabó cada uno.</div>
+    </div>
+  </div>
+
+  <!-- PANE: COSTOS -->
+  <div class="bf-pane" id="bfp-costos">
+    <div class="bf-sec" id="bf-prec-sec">
+      <h3>Precios y márgenes <span class="leg" id="bf-prec-head" style="font-weight:700"></span></h3>
+      <div class="bf-pc-resumen" id="bf-prec-resumen"></div>
+      <div class="bf-pc-alerta" id="bf-prec-alerta" style="display:none;"></div>
+      <div class="bf-pc-filtros" id="bf-prec-filtros"></div>
+      <div class="bf-pc-scroll" id="bf-prec-lista"></div>
+      <div class="bf-pc-foot">El precio de venta se edita en Toteat — esta vista es solo para decidir qué precio revisar. Food cost: <b>verde ≤40%</b> · <b>amarillo 41-60%</b> · <b>rojo &gt;60% o negativo</b> · gris sin costo cargado.</div>
+    </div>
+  </div>
+
+  <!-- PANE: RECETAS (v13.99.0) -->
+  <div class="bf-pane" id="bfp-recetas">
+    <div class="bf-pc-resumen" id="bf-rec-resumen"></div>
+    <div class="bf-pc-filtros" id="bf-rec-filtros"></div>
+    <input class="bf-stock-search" id="bf-rec-search" type="text" placeholder="Buscar plato…" oninput="_bfRecFiltrar(this.value)">
+    <div class="bf-pc-scroll" id="bf-rec-lista" style="max-height:480px;"><div class="bf-fvacio">Tocá la pestaña para cargar las recetas.</div></div>
+    <div class="bf-pc-foot" id="bf-rec-foot"></div>
+  </div>
+
+  <!-- PANE: SUB-RECETAS (v13.100.0) -->
+  <div class="bf-pane" id="bfp-subrecetas">
+    <div class="bf-pc-resumen" id="bf-sub-resumen"></div>
+    <input class="bf-stock-search" id="bf-sub-search" type="text" placeholder="Buscar sub-receta…" oninput="_bfSubFiltrar(this.value)">
+    <div class="bf-pc-scroll" id="bf-sub-lista" style="max-height:480px;"><div class="bf-fvacio">Tocá la pestaña para cargar las sub-recetas.</div></div>
+    <div class="bf-pc-foot" id="bf-sub-foot"></div>
+  </div>
+
+  <!-- PANE: INGREDIENTES (v13.98.0) -->
+  <div class="bf-pane" id="bfp-ingr">
+    <div class="bf-pc-resumen" id="bf-ingr-resumen"></div>
+    <div class="bf-pc-filtros" id="bf-ingr-filtros"></div>
+    <input class="bf-stock-search" id="bf-ingr-search" type="text" placeholder="Buscar ingrediente…" oninput="_bfIngrFiltrar(this.value)">
+    <div class="bf-pc-scroll" id="bf-ingr-lista" style="max-height:480px;"><div class="bf-fvacio">Tocá la pestaña para cargar los ingredientes.</div></div>
+    <div class="bf-pc-foot" id="bf-ingr-foot"></div>
+  </div>
+
+  <!-- PANE: STOCK (v13.97.0) -->
+  <div class="bf-pane" id="bfp-stock">
+    <div class="bf-pc-resumen" id="bf-stock-resumen"></div>
+    <input class="bf-stock-search" id="bf-stock-search" type="text" placeholder="Buscar producto…" oninput="_bfStockFiltrar(this.value)">
+    <div class="bf-pc-scroll" id="bf-stock-lista" style="max-height:480px;"><div class="bf-fvacio">Tocá la pestaña para cargar el inventario.</div></div>
+    <div class="bf-pc-foot" id="bf-stock-foot"></div>
+  </div>
+
+  <div class="bf-loading" id="bf-loading" style="display:none;">Cargando datos del buffet…</div>
+</div>
 </div>
 <nav class="tab-nav" id="tab-nav">
   <button class="tab-btn" id="tab-btn-logistica" onclick="cambiarTab('logistica')">
@@ -14731,264 +14996,6 @@ input.canales-exp-input[type="date"] {
   </div>
 </div>
 
-<div class="view" id="view-buffet">
-<style>
-  #view-buffet{ padding:0 0 60px; }
-  #view-buffet .bf-head{ background:linear-gradient(135deg,#9A3412,#C2410C); color:#fff; padding:14px 14px 12px; border-radius:0 0 14px 14px; box-shadow:0 2px 8px rgba(0,0,0,.12); }
-  #view-buffet .bf-head h2{ font-size:19px; font-weight:900; text-transform:uppercase; letter-spacing:.5px; margin:0; display:flex; align-items:center; gap:7px; }
-  #view-buffet .bf-head .bf-sub{ font-size:12px; opacity:.85; margin-top:2px; font-weight:500; }
-  #view-buffet .bf-rango{ display:flex; gap:6px; margin-top:11px; }
-  #view-buffet .bf-rango button{ flex:1; border:none; background:rgba(255,255,255,.18); color:#fff; padding:7px 0; border-radius:8px; font-family:inherit; font-size:12px; font-weight:800; cursor:pointer; letter-spacing:.3px; }
-  #view-buffet .bf-rango button.on{ background:#fff; color:#9A3412; }
-  #view-buffet .bf-kpis{ display:grid; grid-template-columns:repeat(4,1fr); gap:6px; padding:12px 12px 4px; }
-  #view-buffet .bf-kpi{ background:#fff; border-radius:10px; padding:9px 5px; text-align:center; box-shadow:0 1px 4px rgba(0,0,0,.07); border-top:3px solid #EA580C; }
-  #view-buffet .bf-kpi .v{ font-size:17px; font-weight:900; line-height:1; color:#2C2416; }
-  #view-buffet .bf-kpi .l{ font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.2px; color:#8A7B63; margin-top:5px; }
-  #view-buffet .bf-kpi.big{ border-top-color:#9A3412; } #view-buffet .bf-kpi.big .v{ color:#9A3412; font-size:18px; }
-  #view-buffet .bf-kpi.cp{ border-top-color:#9E9E9E; } #view-buffet .bf-kpi.cp .v{ color:#8A6E4B; }
-  #view-buffet .bf-sec{ background:#fff; margin:10px 12px 0; border-radius:12px; padding:13px 13px 14px; box-shadow:0 1px 4px rgba(0,0,0,.07); }
-  #view-buffet .bf-sec h3{ font-size:13px; font-weight:900; text-transform:uppercase; letter-spacing:.4px; margin:0 0 11px; color:#2C2416; display:flex; align-items:center; justify-content:space-between; }
-  #view-buffet .bf-sec h3 .leg{ font-size:10px; font-weight:700; color:#8A7B63; display:flex; gap:9px; }
-  #view-buffet .bf-sec h3 .leg i{ font-style:normal; display:inline-flex; align-items:center; gap:3px; }
-  #view-buffet .dot{ width:9px; height:9px; border-radius:3px; display:inline-block; }
-  #view-buffet .bf-dias{ display:flex; align-items:flex-end; gap:5px; height:120px; padding-top:6px; }
-  #view-buffet .bf-dia{ flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; height:100%; justify-content:flex-end; }
-  #view-buffet .bf-dia .barwrap{ width:100%; display:flex; flex-direction:column; justify-content:flex-end; height:100%; border-radius:5px 5px 0 0; overflow:hidden; background:#F3ECE0; }
-  #view-buffet .bf-dia .seg-bf{ background:linear-gradient(180deg,#EA580C,#C2410C); }
-  #view-buffet .bf-dia .seg-pl{ background:#1E6B8C; }
-  #view-buffet .bf-dia .dn{ font-size:8.5px; color:#8A7B63; font-weight:700; }
-  #view-buffet .bf-mp-row{ margin-bottom:10px; } #view-buffet .bf-mp-row:last-child{ margin-bottom:0; }
-  #view-buffet .bf-mp-top{ display:flex; justify-content:space-between; font-size:12px; font-weight:700; margin-bottom:4px; }
-  #view-buffet .bf-mp-top .pct{ color:#8A7B63; font-weight:800; }
-  #view-buffet .bf-mp-bar{ height:9px; border-radius:6px; background:#F0E9DC; overflow:hidden; }
-  #view-buffet .bf-mp-fill{ height:100%; border-radius:6px; }
-  #view-buffet .bf-tp{ display:flex; align-items:center; gap:9px; padding:8px 0; border-bottom:1px solid #EFE7DA; }
-  #view-buffet .bf-tp:last-child{ border-bottom:none; }
-  #view-buffet .bf-tp .rk{ font-size:12px; font-weight:900; color:#EA580C; width:18px; text-align:center; flex-shrink:0; }
-  #view-buffet .bf-tp .info{ flex:1; min-width:0; }
-  #view-buffet .bf-tp .nm{ font-size:12.5px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  #view-buffet .bf-tp .meta{ font-size:10px; color:#8A7B63; margin-top:2px; }
-  #view-buffet .bf-badge{ font-size:8px; font-weight:800; text-transform:uppercase; padding:1px 5px; border-radius:4px; }
-  #view-buffet .bf-badge.bf{ background:#FBEADB; color:#9A3412; }
-  #view-buffet .bf-badge.pl{ background:#E1F0F6; color:#1E6B8C; }
-  #view-buffet .bf-tp .amt{ font-size:12.5px; font-weight:900; color:#2C2416; flex-shrink:0; }
-  #view-buffet .bf-cp{ background:linear-gradient(135deg,#6B5B4A,#8A7B63); color:#fff; margin:10px 12px 0; border-radius:12px; padding:14px; display:flex; align-items:center; gap:14px; box-shadow:0 1px 4px rgba(0,0,0,.1); }
-  #view-buffet .bf-cp .big{ font-size:26px; font-weight:900; line-height:1; }
-  #view-buffet .bf-cp .txt{ font-size:12px; opacity:.92; } #view-buffet .bf-cp .txt b{ font-size:14px; }
-  #view-buffet .bf-loading{ text-align:center; color:#8A7B63; font-size:13px; padding:30px 0; }
-  /* v13.89.0 — sección Facturación (compacta + acordeones) */
-  #view-buffet .bf-fact-resumen{ display:grid; grid-template-columns:repeat(3,1fr); gap:5px; margin-bottom:9px; }
-  #view-buffet .bf-fch{ border-radius:9px; padding:7px 4px; text-align:center; }
-  #view-buffet .bf-fch .n{ font-size:15px; font-weight:900; line-height:1; }
-  #view-buffet .bf-fch .m{ font-size:10.5px; font-weight:700; margin-top:2px; }
-  #view-buffet .bf-fch .l{ font-size:8.5px; font-weight:800; text-transform:uppercase; margin-top:3px; }
-  #view-buffet .bf-fch.ok{ background:#E7F5EC; border-top:3px solid #15803D; } #view-buffet .bf-fch.ok .n,#view-buffet .bf-fch.ok .m{ color:#166534; } #view-buffet .bf-fch.ok .l{ color:#15803D; }
-  #view-buffet .bf-fch.pe{ background:#FEF3C7; border-top:3px solid #B45309; } #view-buffet .bf-fch.pe .n,#view-buffet .bf-fch.pe .m{ color:#92400E; } #view-buffet .bf-fch.pe .l{ color:#B45309; }
-  #view-buffet .bf-fch.er{ background:#F1EFE8; border-top:3px solid #B4B2A9; } #view-buffet .bf-fch.er .n,#view-buffet .bf-fch.er .m{ color:#5F5E5A; } #view-buffet .bf-fch.er .l{ color:#888780; }
-  #view-buffet .bf-fch.er.hay{ background:#FCEBEB; border-top-color:#A32D2D; } #view-buffet .bf-fch.er.hay .n,#view-buffet .bf-fch.er.hay .m{ color:#991B1B; } #view-buffet .bf-fch.er.hay .l{ color:#A32D2D; }
-  #view-buffet .bf-fact-alerta{ border-radius:8px; padding:8px 10px; display:flex; align-items:center; gap:7px; margin-bottom:10px; font-size:11.5px; font-weight:700; }
-  /* acordeón */
-  #view-buffet .bf-acc{ border:1px solid #EFE7DA; border-radius:9px; margin-bottom:7px; overflow:hidden; }
-  #view-buffet .bf-acc-h{ display:flex; align-items:center; gap:8px; padding:9px 11px; cursor:pointer; background:#FBF7F0; user-select:none; }
-  #view-buffet .bf-acc-h .car{ font-size:10px; color:#8A7B63; width:10px; flex-shrink:0; }
-  #view-buffet .bf-acc-h .car::before{ content:'\\25B8'; }
-  #view-buffet .bf-acc.open .bf-acc-h .car::before{ content:'\\25BE'; }
-  #view-buffet .bf-acc-h .ti{ font-size:9.5px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; flex:1; }
-  #view-buffet .bf-acc-h .ti.pe{ color:#92400E; } #view-buffet .bf-acc-h .ti.ok{ color:#15803D; }
-  #view-buffet .bf-acc-h .ct{ font-size:11px; font-weight:900; color:#2C2416; }
-  #view-buffet .bf-acc-h .mt{ font-size:10.5px; color:#8A7B63; margin-left:6px; }
-  #view-buffet .bf-acc-b{ display:none; border-top:1px solid #EFE7DA; }
-  #view-buffet .bf-acc.open .bf-acc-b{ display:block; }
-  #view-buffet .bf-acc-scroll{ max-height:240px; overflow-y:auto; }
-  #view-buffet .bf-daygrp{ font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:.4px; color:#B4956A; background:#FCF8F2; padding:4px 11px; }
-  /* fila de 1 línea */
-  #view-buffet .bf-frow{ display:flex; align-items:center; gap:8px; padding:6px 11px; border-bottom:1px solid #F4EEE4; font-size:12px; }
-  #view-buffet .bf-frow:last-child{ border-bottom:none; }
-  #view-buffet .bf-frow .h{ font-weight:700; color:#5F5E5A; width:38px; flex-shrink:0; }
-  #view-buffet .bf-frow .u{ font-weight:700; width:46px; flex-shrink:0; }
-  #view-buffet .bf-frow .u.bf{ color:#C2410C; } #view-buffet .bf-frow .u.pl{ color:#1E6B8C; }
-  #view-buffet .bf-frow .mo{ flex:1; text-align:right; font-weight:800; color:#2C2416; }
-  #view-buffet .bf-frow .bg{ font-size:9px; font-weight:700; padding:1px 6px; border-radius:4px; flex-shrink:0; min-width:62px; text-align:center; }
-  #view-buffet .bf-frow .bg.pe{ background:#FEF3C7; color:#92400E; }
-  #view-buffet .bf-frow .bg.er{ background:#FCEBEB; color:#991B1B; }
-  #view-buffet .bf-frow .cae{ font-size:9px; color:#8A7B63; font-family:ui-monospace,Menlo,monospace; flex-shrink:0; }
-  #view-buffet .bf-fvacio{ font-size:12px; color:#8A7B63; text-align:center; padding:10px 0; }
-  /* v13.92.0 — Precios y márgenes (solo visibilidad) */
-  #view-buffet .bf-pc-resumen{ display:grid; grid-template-columns:repeat(3,1fr); gap:5px; margin-bottom:9px; }
-  #view-buffet .bf-pch{ border-radius:9px; padding:8px 4px; text-align:center; }
-  #view-buffet .bf-pch .n{ font-size:17px; font-weight:900; line-height:1; }
-  #view-buffet .bf-pch .l{ font-size:8.5px; font-weight:800; text-transform:uppercase; margin-top:4px; letter-spacing:.2px; }
-  #view-buffet .bf-pch.ok{ background:#E7F5EC; border-top:3px solid #15803D; } #view-buffet .bf-pch.ok .n{ color:#166534; } #view-buffet .bf-pch.ok .l{ color:#15803D; }
-  #view-buffet .bf-pch.gr{ background:#F1EFE8; border-top:3px solid #B4B2A9; } #view-buffet .bf-pch.gr .n{ color:#5F5E5A; } #view-buffet .bf-pch.gr .l{ color:#888780; }
-  #view-buffet .bf-pch.okneg{ background:#E7F5EC; border-top:3px solid #15803D; } #view-buffet .bf-pch.okneg .n{ color:#166534; } #view-buffet .bf-pch.okneg .l{ color:#15803D; }
-  #view-buffet .bf-pch.er{ background:#FCEBEB; border-top:3px solid #A32D2D; } #view-buffet .bf-pch.er .n{ color:#991B1B; } #view-buffet .bf-pch.er .l{ color:#A32D2D; }
-  #view-buffet .bf-pc-alerta{ border-radius:8px; padding:8px 10px; display:flex; align-items:center; gap:7px; margin-bottom:10px; font-size:11.5px; font-weight:700; background:#FCEBEB; color:#991B1B; }
-  #view-buffet .bf-pc-filtros{ display:flex; flex-wrap:wrap; gap:5px; margin-bottom:10px; }
-  #view-buffet .bf-pc-chip{ border:1px solid #EFE7DA; background:#FBF7F0; color:#5F5E5A; padding:5px 9px; border-radius:14px; font-family:inherit; font-size:10.5px; font-weight:800; cursor:pointer; white-space:nowrap; }
-  #view-buffet .bf-pc-chip.on{ background:#9A3412; border-color:#9A3412; color:#fff; }
-  #view-buffet .bf-pc-scroll{ max-height:420px; overflow-y:auto; border:1px solid #EFE7DA; border-radius:9px; }
-  #view-buffet .bf-prow{ display:grid; grid-template-columns:1fr 64px 64px 64px 50px; align-items:center; gap:6px; padding:7px 9px; border-bottom:1px solid #F4EEE4; font-size:12px; }
-  #view-buffet .bf-prow:last-child{ border-bottom:none; }
-  #view-buffet .bf-prow.hd{ position:sticky; top:0; background:#FBF7F0; z-index:1; font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; color:#8A7B63; padding-top:8px; padding-bottom:8px; }
-  #view-buffet .bf-prow.hd .pp,#view-buffet .bf-prow.hd .pc,#view-buffet .bf-prow.hd .pm,#view-buffet .bf-prow.hd .pf{ text-align:right; }
-  #view-buffet .bf-prow .pn{ min-width:0; }
-  #view-buffet .bf-prow .pn .t{ font-size:12px; font-weight:700; color:#2C2416; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  #view-buffet .bf-prow .pn .m{ font-size:9.5px; color:#8A7B63; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  #view-buffet .bf-prow .pp{ text-align:right; font-weight:800; color:#2C2416; }
-  #view-buffet .bf-prow .pc{ text-align:right; font-weight:600; color:#5F5E5A; }
-  #view-buffet .bf-prow .pm{ text-align:right; font-weight:800; color:#166534; }
-  #view-buffet .bf-prow .pm.neg{ color:#991B1B; }
-  #view-buffet .bf-prow .pf{ text-align:right; }
-  #view-buffet .bf-prow .sem{ font-size:10.5px; font-weight:900; padding:2px 6px; border-radius:6px; display:inline-block; min-width:40px; text-align:center; }
-  #view-buffet .bf-prow .sem.verde{ background:#E7F5EC; color:#15803D; }
-  #view-buffet .bf-prow .sem.amar{ background:#FEF3C7; color:#B45309; }
-  #view-buffet .bf-prow .sem.rojo{ background:#FCEBEB; color:#991B1B; }
-  #view-buffet .bf-prow .sem.gris{ background:#F1EFE8; color:#A09A8E; }
-  #view-buffet .bf-pc-foot{ font-size:10px; color:#8A7B63; margin-top:9px; line-height:1.4; font-style:italic; }
-  /* v13.95.0 — drill-down de receta dentro del panel Precios */
-  #view-buffet .bf-prow.exp{ cursor:pointer; }
-  #view-buffet .bf-prow .cx{ display:inline-block; width:11px; font-size:9px; color:#9A3412; flex-shrink:0; }
-  #view-buffet .bf-prow .cx::before{ content:'\\25B8'; }
-  #view-buffet .bf-prow.open .cx::before{ content:'\\25BE'; }
-  #view-buffet .bf-prow .cx.ph::before{ content:''; }
-  #view-buffet .bf-prow-det{ background:#FBF7F0; border-bottom:1px solid #F4EEE4; padding:6px 9px 8px 26px; }
-  #view-buffet .bf-det-line{ display:flex; align-items:center; gap:8px; font-size:11px; padding:3px 0; }
-  #view-buffet .bf-det-line .di{ flex:1; color:#5F5E5A; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  #view-buffet .bf-det-line .dq{ color:#8A7B63; flex-shrink:0; font-size:10px; width:62px; text-align:right; }
-  #view-buffet .bf-det-line .dc{ font-weight:700; color:#2C2416; flex-shrink:0; width:76px; text-align:right; }
-  #view-buffet .bf-det-line.sc .di{ color:#991B1B; font-weight:700; }
-  #view-buffet .bf-det-line.sc .dc{ color:#991B1B; font-weight:800; }
-  #view-buffet .bf-det-tot{ display:flex; justify-content:space-between; font-size:10.5px; font-weight:800; color:#2C2416; border-top:1px dashed #E0D6C6; margin-top:5px; padding-top:5px; }
-  /* v13.96.0 — sub-tabs internas del tab Buffet */
-  #view-buffet .bf-subnav{ display:flex; overflow-x:auto; background:linear-gradient(135deg,#9A3412,#C2410C); padding:0 6px; -webkit-overflow-scrolling:touch; position:sticky; top:0; z-index:6; box-shadow:0 2px 6px rgba(0,0,0,.12); }
-  #view-buffet .bf-subnav::-webkit-scrollbar{ display:none; }
-  #view-buffet .bf-subnav button{ flex:0 0 auto; border:none; background:transparent; color:rgba(255,255,255,.72); font-family:inherit; font-size:12px; font-weight:800; padding:11px 12px 12px; cursor:pointer; border-bottom:3px solid transparent; white-space:nowrap; letter-spacing:.2px; }
-  #view-buffet .bf-subnav button.on{ color:#fff; border-bottom-color:#fff; }
-  #view-buffet .bf-pane{ display:none; }
-  #view-buffet .bf-pane.on{ display:block; }
-  /* v13.97.0 — pane Stock */
-  #view-buffet .bf-stock-search{ width:100%; border:1px solid #EFE7DA; border-radius:9px; padding:9px 11px; font-family:inherit; font-size:13px; margin:0 0 10px; background:#fff; color:#2C2416; }
-  #view-buffet .bf-stock-search:focus{ outline:none; border-color:#C2410C; }
-  #view-buffet .bf-stock-row{ display:flex; align-items:center; gap:8px; padding:7px 10px; border-bottom:1px solid #F4EEE4; font-size:12px; }
-  #view-buffet .bf-stock-row:last-child{ border-bottom:none; }
-  #view-buffet .bf-stock-row .n{ flex:1; min-width:0; font-weight:600; color:#2C2416; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  #view-buffet .bf-stock-row .q{ font-weight:800; color:#2C2416; flex-shrink:0; }
-  #view-buffet .bf-stock-row.cero .n{ color:#A09A8E; } #view-buffet .bf-stock-row.cero .q{ color:#B4A88E; }
-  /* v13.98.0 — pane Ingredientes */
-  #view-buffet .bf-ing-row{ display:flex; align-items:center; gap:8px; padding:7px 10px; border-bottom:1px solid #F4EEE4; font-size:12px; }
-  #view-buffet .bf-ing-row:last-child{ border-bottom:none; }
-  #view-buffet .bf-ing-row .n{ flex:1; min-width:0; }
-  #view-buffet .bf-ing-row .nm{ font-weight:600; color:#2C2416; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  #view-buffet .bf-ing-row .meta{ font-size:9.5px; color:#8A7B63; margin-top:2px; }
-  #view-buffet .bf-ing-row .c{ font-weight:800; color:#2C2416; flex-shrink:0; text-align:right; font-size:12px; }
-  #view-buffet .bf-ing-row .c.sc{ color:#991B1B; font-size:9px; font-weight:800; background:#FCEBEB; padding:3px 7px; border-radius:5px; }
-  /* v13.99.0 — pane Recetas */
-  #view-buffet .bf-rec-row{ display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid #F4EEE4; font-size:12px; cursor:pointer; }
-  #view-buffet .bf-rec-row:last-child{ border-bottom:none; }
-  #view-buffet .bf-rec-row .cx{ display:inline-block; width:11px; font-size:9px; color:#9A3412; flex-shrink:0; }
-  #view-buffet .bf-rec-row .cx::before{ content:'\\25B8'; }
-  #view-buffet .bf-rec-row.open .cx::before{ content:'\\25BE'; }
-  #view-buffet .bf-rec-row .nm{ flex:1; min-width:0; font-weight:600; color:#2C2416; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  #view-buffet .bf-rec-row .ct{ font-size:10px; color:#8A7B63; flex-shrink:0; }
-  #view-buffet .bf-rec-row .bad{ font-size:8px; font-weight:800; text-transform:uppercase; padding:2px 6px; border-radius:5px; background:#FCEBEB; color:#991B1B; flex-shrink:0; }
-</style>
-  <div class="bf-head">
-    <h2>🍔 Buffet TCK Food</h2>
-    <div class="bf-sub" id="bf-sub">Cargando…</div>
-    <div class="bf-rango" id="bf-rango">
-      <button onclick="buffetSetRango('hoy',this)">Hoy</button>
-      <button onclick="buffetSetRango('7d',this)">7 días</button>
-      <button class="on" onclick="buffetSetRango('30d',this)">30 días</button>
-      <button onclick="buffetSetRango('periodo',this)">Todo</button>
-    </div>
-  </div>
-  <div class="bf-subnav" id="bf-subnav">
-    <button class="on" onclick="bfSubtab('resumen',this)">Resumen</button>
-    <button onclick="bfSubtab('fact',this)">Facturación</button>
-    <button onclick="bfSubtab('costos',this)">Costos</button>
-    <button onclick="bfSubtab('recetas',this)">Recetas</button>
-    <button onclick="bfSubtab('subrecetas',this)">Sub-recetas</button>
-    <button onclick="bfSubtab('ingr',this)">Ingredientes</button>
-    <button onclick="bfSubtab('stock',this)">Stock</button>
-  </div>
-
-  <!-- PANE: RESUMEN -->
-  <div class="bf-pane on" id="bfp-resumen">
-    <div class="bf-kpis" id="bf-kpis"></div>
-    <div class="bf-sec">
-      <h3>Ventas por día
-        <span class="leg"><i><span class="dot" style="background:#EA580C"></span>Buffet</i><i><span class="dot" style="background:#1E6B8C"></span>Playmatch</i></span>
-      </h3>
-      <div class="bf-dias" id="bf-dias"></div>
-    </div>
-    <div class="bf-sec"><h3>Medios de pago</h3><div id="bf-mp"></div></div>
-    <div class="bf-sec"><h3>Top productos <span class="leg" style="font-weight:700">por facturación</span></h3><div id="bf-top"></div></div>
-    <div class="bf-cp" id="bf-cp" style="display:none;"></div>
-  </div>
-
-  <!-- PANE: FACTURACIÓN -->
-  <div class="bf-pane" id="bfp-fact">
-    <div class="bf-sec" id="bf-fact-sec">
-      <h3>Facturación <span class="leg" id="bf-fact-head" style="font-weight:700"></span></h3>
-      <div class="bf-fact-resumen" id="bf-fact-resumen"></div>
-      <div class="bf-fact-alerta" id="bf-fact-alerta" style="display:none;"></div>
-      <div id="bf-fact-lista"></div>
-    </div>
-    <div class="bf-sec" id="bf-trab-sec" style="display:none;">
-      <h3>⚠ Productos que traban facturación <span class="leg" id="bf-trab-head" style="font-weight:700"></span></h3>
-      <div id="bf-trab-lista"></div>
-      <div class="bf-pc-foot">Cargá el <b>precio de última compra</b> de estos productos en Xubio (Compras → Productos de Compra) y reintentá. Es lo único que falta para que ARCA los acepte. Ordenados por cuántas ventas trabó cada uno.</div>
-    </div>
-  </div>
-
-  <!-- PANE: COSTOS -->
-  <div class="bf-pane" id="bfp-costos">
-    <div class="bf-sec" id="bf-prec-sec">
-      <h3>Precios y márgenes <span class="leg" id="bf-prec-head" style="font-weight:700"></span></h3>
-      <div class="bf-pc-resumen" id="bf-prec-resumen"></div>
-      <div class="bf-pc-alerta" id="bf-prec-alerta" style="display:none;"></div>
-      <div class="bf-pc-filtros" id="bf-prec-filtros"></div>
-      <div class="bf-pc-scroll" id="bf-prec-lista"></div>
-      <div class="bf-pc-foot">El precio de venta se edita en Toteat — esta vista es solo para decidir qué precio revisar. Food cost: <b>verde ≤40%</b> · <b>amarillo 41-60%</b> · <b>rojo &gt;60% o negativo</b> · gris sin costo cargado.</div>
-    </div>
-  </div>
-
-  <!-- PANE: RECETAS (v13.99.0) -->
-  <div class="bf-pane" id="bfp-recetas">
-    <div class="bf-pc-resumen" id="bf-rec-resumen"></div>
-    <div class="bf-pc-filtros" id="bf-rec-filtros"></div>
-    <input class="bf-stock-search" id="bf-rec-search" type="text" placeholder="Buscar plato…" oninput="_bfRecFiltrar(this.value)">
-    <div class="bf-pc-scroll" id="bf-rec-lista" style="max-height:480px;"><div class="bf-fvacio">Tocá la pestaña para cargar las recetas.</div></div>
-    <div class="bf-pc-foot" id="bf-rec-foot"></div>
-  </div>
-
-  <!-- PANE: SUB-RECETAS (v13.100.0) -->
-  <div class="bf-pane" id="bfp-subrecetas">
-    <div class="bf-pc-resumen" id="bf-sub-resumen"></div>
-    <input class="bf-stock-search" id="bf-sub-search" type="text" placeholder="Buscar sub-receta…" oninput="_bfSubFiltrar(this.value)">
-    <div class="bf-pc-scroll" id="bf-sub-lista" style="max-height:480px;"><div class="bf-fvacio">Tocá la pestaña para cargar las sub-recetas.</div></div>
-    <div class="bf-pc-foot" id="bf-sub-foot"></div>
-  </div>
-
-  <!-- PANE: INGREDIENTES (v13.98.0) -->
-  <div class="bf-pane" id="bfp-ingr">
-    <div class="bf-pc-resumen" id="bf-ingr-resumen"></div>
-    <div class="bf-pc-filtros" id="bf-ingr-filtros"></div>
-    <input class="bf-stock-search" id="bf-ingr-search" type="text" placeholder="Buscar ingrediente…" oninput="_bfIngrFiltrar(this.value)">
-    <div class="bf-pc-scroll" id="bf-ingr-lista" style="max-height:480px;"><div class="bf-fvacio">Tocá la pestaña para cargar los ingredientes.</div></div>
-    <div class="bf-pc-foot" id="bf-ingr-foot"></div>
-  </div>
-
-  <!-- PANE: STOCK (v13.97.0) -->
-  <div class="bf-pane" id="bfp-stock">
-    <div class="bf-pc-resumen" id="bf-stock-resumen"></div>
-    <input class="bf-stock-search" id="bf-stock-search" type="text" placeholder="Buscar producto…" oninput="_bfStockFiltrar(this.value)">
-    <div class="bf-pc-scroll" id="bf-stock-lista" style="max-height:480px;"><div class="bf-fvacio">Tocá la pestaña para cargar el inventario.</div></div>
-    <div class="bf-pc-foot" id="bf-stock-foot"></div>
-  </div>
-
-  <div class="bf-loading" id="bf-loading" style="display:none;">Cargando datos del buffet…</div>
-</div>
 
 <script>
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxbx9ma8S5wcuRqFXjRyFYvIo_kLwc5Px4eE4Y7-CqPmIfJbI3VBEP4I9qSV8s0owMMYg/exec';
@@ -40693,7 +40700,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.100.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.101.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
