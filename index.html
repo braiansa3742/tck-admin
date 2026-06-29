@@ -1,5 +1,13 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.92.0 — 29/06/2026
+     v13.92.0: BUFFET — nuevo panel "Precios y márgenes" en el tab Buffet. Por
+               producto: precio de venta (Toteat) + costo de receta (Supabase
+               vw_buffet_food_cost_plato) → margen $ y food cost % con semáforo
+               (verde ≤40 / amarillo 41-60 / rojo >60 o negativo / gris sin costo).
+               Resumen (con margen / falta costo / margen negativo), alerta de
+               márgenes negativos, filtros por categoría + "más vendidos".
+               SOLO visibilidad: el precio se edita en Toteat (su API no escribe).
      TCK ADMIN — v13.91.0 — 29/06/2026
      v13.91.0: BUFFET Facturación — la sección ahora cuenta SOLO ventas desde el
                27/06 (switch a Xubio). Antes sumaba ventas previas que nunca se
@@ -14740,6 +14748,38 @@ input.canales-exp-input[type="date"] {
   #view-buffet .bf-frow .bg.er{ background:#FCEBEB; color:#991B1B; }
   #view-buffet .bf-frow .cae{ font-size:9px; color:#8A7B63; font-family:ui-monospace,Menlo,monospace; flex-shrink:0; }
   #view-buffet .bf-fvacio{ font-size:12px; color:#8A7B63; text-align:center; padding:10px 0; }
+  /* v13.92.0 — Precios y márgenes (solo visibilidad) */
+  #view-buffet .bf-pc-resumen{ display:grid; grid-template-columns:repeat(3,1fr); gap:5px; margin-bottom:9px; }
+  #view-buffet .bf-pch{ border-radius:9px; padding:8px 4px; text-align:center; }
+  #view-buffet .bf-pch .n{ font-size:17px; font-weight:900; line-height:1; }
+  #view-buffet .bf-pch .l{ font-size:8.5px; font-weight:800; text-transform:uppercase; margin-top:4px; letter-spacing:.2px; }
+  #view-buffet .bf-pch.ok{ background:#E7F5EC; border-top:3px solid #15803D; } #view-buffet .bf-pch.ok .n{ color:#166534; } #view-buffet .bf-pch.ok .l{ color:#15803D; }
+  #view-buffet .bf-pch.gr{ background:#F1EFE8; border-top:3px solid #B4B2A9; } #view-buffet .bf-pch.gr .n{ color:#5F5E5A; } #view-buffet .bf-pch.gr .l{ color:#888780; }
+  #view-buffet .bf-pch.okneg{ background:#E7F5EC; border-top:3px solid #15803D; } #view-buffet .bf-pch.okneg .n{ color:#166534; } #view-buffet .bf-pch.okneg .l{ color:#15803D; }
+  #view-buffet .bf-pch.er{ background:#FCEBEB; border-top:3px solid #A32D2D; } #view-buffet .bf-pch.er .n{ color:#991B1B; } #view-buffet .bf-pch.er .l{ color:#A32D2D; }
+  #view-buffet .bf-pc-alerta{ border-radius:8px; padding:8px 10px; display:flex; align-items:center; gap:7px; margin-bottom:10px; font-size:11.5px; font-weight:700; background:#FCEBEB; color:#991B1B; }
+  #view-buffet .bf-pc-filtros{ display:flex; flex-wrap:wrap; gap:5px; margin-bottom:10px; }
+  #view-buffet .bf-pc-chip{ border:1px solid #EFE7DA; background:#FBF7F0; color:#5F5E5A; padding:5px 9px; border-radius:14px; font-family:inherit; font-size:10.5px; font-weight:800; cursor:pointer; white-space:nowrap; }
+  #view-buffet .bf-pc-chip.on{ background:#9A3412; border-color:#9A3412; color:#fff; }
+  #view-buffet .bf-pc-scroll{ max-height:420px; overflow-y:auto; border:1px solid #EFE7DA; border-radius:9px; }
+  #view-buffet .bf-prow{ display:grid; grid-template-columns:1fr 64px 64px 64px 50px; align-items:center; gap:6px; padding:7px 9px; border-bottom:1px solid #F4EEE4; font-size:12px; }
+  #view-buffet .bf-prow:last-child{ border-bottom:none; }
+  #view-buffet .bf-prow.hd{ position:sticky; top:0; background:#FBF7F0; z-index:1; font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; color:#8A7B63; padding-top:8px; padding-bottom:8px; }
+  #view-buffet .bf-prow.hd .pp,#view-buffet .bf-prow.hd .pc,#view-buffet .bf-prow.hd .pm,#view-buffet .bf-prow.hd .pf{ text-align:right; }
+  #view-buffet .bf-prow .pn{ min-width:0; }
+  #view-buffet .bf-prow .pn .t{ font-size:12px; font-weight:700; color:#2C2416; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #view-buffet .bf-prow .pn .m{ font-size:9.5px; color:#8A7B63; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #view-buffet .bf-prow .pp{ text-align:right; font-weight:800; color:#2C2416; }
+  #view-buffet .bf-prow .pc{ text-align:right; font-weight:600; color:#5F5E5A; }
+  #view-buffet .bf-prow .pm{ text-align:right; font-weight:800; color:#166534; }
+  #view-buffet .bf-prow .pm.neg{ color:#991B1B; }
+  #view-buffet .bf-prow .pf{ text-align:right; }
+  #view-buffet .bf-prow .sem{ font-size:10.5px; font-weight:900; padding:2px 6px; border-radius:6px; display:inline-block; min-width:40px; text-align:center; }
+  #view-buffet .bf-prow .sem.verde{ background:#E7F5EC; color:#15803D; }
+  #view-buffet .bf-prow .sem.amar{ background:#FEF3C7; color:#B45309; }
+  #view-buffet .bf-prow .sem.rojo{ background:#FCEBEB; color:#991B1B; }
+  #view-buffet .bf-prow .sem.gris{ background:#F1EFE8; color:#A09A8E; }
+  #view-buffet .bf-pc-foot{ font-size:10px; color:#8A7B63; margin-top:9px; line-height:1.4; font-style:italic; }
 </style>
   <div class="bf-head">
     <h2>🍔 Buffet TCK Food</h2>
@@ -14766,6 +14806,14 @@ input.canales-exp-input[type="date"] {
   </div>
   <div class="bf-sec"><h3>Medios de pago</h3><div id="bf-mp"></div></div>
   <div class="bf-sec"><h3>Top productos <span class="leg" style="font-weight:700">por facturación</span></h3><div id="bf-top"></div></div>
+  <div class="bf-sec" id="bf-prec-sec">
+    <h3>Precios y márgenes <span class="leg" id="bf-prec-head" style="font-weight:700"></span></h3>
+    <div class="bf-pc-resumen" id="bf-prec-resumen"></div>
+    <div class="bf-pc-alerta" id="bf-prec-alerta" style="display:none;"></div>
+    <div class="bf-pc-filtros" id="bf-prec-filtros"></div>
+    <div class="bf-pc-scroll" id="bf-prec-lista"></div>
+    <div class="bf-pc-foot">El precio de venta se edita en Toteat — esta vista es solo para decidir qué precio revisar. Food cost: <b>verde ≤40%</b> · <b>amarillo 41-60%</b> · <b>rojo &gt;60% o negativo</b> · gris sin costo cargado.</div>
+  </div>
   <div class="bf-cp" id="bf-cp" style="display:none;"></div>
   <div class="bf-loading" id="bf-loading" style="display:none;">Cargando datos del buffet…</div>
 </div>
@@ -20329,15 +20377,17 @@ async function buffetCargar(){
     } else { cpEl.style.display = 'none'; }
 
     // top productos — filtrar items por las órdenes del rango (no hay FK, se filtra en cliente)
-    var items = await sbFetchAll('buffet_ventas_items?select=order_id,producto_nombre,unidad_negocio,cantidad,total_linea&order=order_id.asc', 1000, 60);
+    var items = await sbFetchAll('buffet_ventas_items?select=order_id,producto_id,producto_nombre,unidad_negocio,cantidad,total_linea&order=order_id.asc', 1000, 60);
     items = Array.isArray(items) ? items : [];
     var agg = {};
+    var vendId = {};   // v13.92.0 — veces vendido por producto_id (para panel Precios)
     items.forEach(function(it){
       if (!ids[it.order_id]) return;
       var k = it.producto_nombre || '(sin nombre)';
       if (!agg[k]) agg[k] = { u:it.unidad_negocio, un:0, a:0 };
       agg[k].un += Number(it.cantidad)||0;
       agg[k].a  += Number(it.total_linea)||0;
+      if (it.producto_id != null) vendId[it.producto_id] = (vendId[it.producto_id]||0) + (Number(it.cantidad)||0);
     });
     var top = Object.keys(agg).map(function(k){ return { n:k, u:agg[k].u, un:agg[k].un, a:agg[k].a }; })
       .sort(function(a,b){ return b.a - a.a; }).slice(0,12);
@@ -20347,6 +20397,9 @@ async function buffetCargar(){
         '<div class="nm">' + x.n + '</div><div class="meta">' + b + ' &nbsp;' + Math.round(x.un) + ' u</div></div>' +
         '<div class="amt">' + _bfMoney(x.a) + '</div></div>';
     }).join('') : '<div class="bf-loading">Sin datos</div>';
+
+    // v13.92.0 — Precios y márgenes (catálogo + food cost, independiente del rango salvo "veces vendido")
+    await _bfPrecios(vendId);
 
   } catch(e){
     console.error('[buffet] cargar:', e);
@@ -20453,6 +20506,146 @@ function _bfFacturacion(ventas){
   if (fact.length){   fact.sort(byClosedDesc);   html += _bfAcc('Facturadas','ok',okN,_bfMoney(okM),_bfGrupoDias(fact,_bfRowFact)); }
   if (!noFact.length && !fact.length){ html = '<div class="bf-fvacio">Sin ventas facturables en el período</div>'; }
   document.getElementById('bf-fact-lista').innerHTML = html;
+}
+
+// ═══ v13.92.0 — Precios y márgenes del buffet (SOLO visibilidad) ═══
+// El precio de venta se edita en Toteat (su API no escribe). Esta vista
+// junta precio_venta (buffet_productos) + costo_receta (vw_buffet_food_cost_plato)
+// y muestra margen $ y food cost % con semáforo, para decidir qué precio revisar.
+var _bfPrecData   = [];
+var _bfPrecCats   = [];
+var _bfPrecFiltro = '__all';
+
+function _bfEsc(s){
+  return String(s==null?'':s).replace(/[&<>"]/g, function(c){
+    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c];
+  });
+}
+function _bfFcClase(fc, tieneCosto, neg){
+  if (!tieneCosto) return 'gris';
+  if (neg || fc > 60) return 'rojo';
+  if (fc > 40) return 'amar';
+  return 'verde';
+}
+
+async function _bfPrecios(vendId){
+  vendId = vendId || {};
+  var sec = document.getElementById('bf-prec-sec');
+  if (!sec) return;
+  try {
+    var prods = await sbFetchAll('buffet_productos?select=toteat_id,nombre,categoria,unidad_negocio,precio_venta,activo&activo=eq.true&order=nombre.asc', 1000, 5);
+    prods = Array.isArray(prods) ? prods : [];
+    var costos = await sbFetchAll('vw_buffet_food_cost_plato?select=producto_id,costo_receta,estado&order=producto_id.asc', 1000, 5);
+    costos = Array.isArray(costos) ? costos : [];
+    var cmap = {};
+    costos.forEach(function(c){ cmap[c.producto_id] = c; });
+
+    _bfPrecData = prods.map(function(p){
+      var precio = Number(p.precio_venta)||0;
+      var cr = cmap[p.toteat_id];
+      var costo = cr ? (Number(cr.costo_receta)||0) : 0;
+      var tieneCosto = costo > 0 && precio > 0;
+      var margen = tieneCosto ? (precio - costo) : null;
+      var fc = tieneCosto ? (costo / precio * 100) : null;
+      return {
+        nombre: p.nombre || '(sin nombre)',
+        categoria: p.categoria || 'Sin categoría',
+        unidad: p.unidad_negocio || 'buffet',
+        precio: precio, costo: costo, tieneCosto: tieneCosto,
+        margen: margen, fc: fc, neg: tieneCosto && margen < 0,
+        incompleto: cr ? (cr.estado === 'incompleto') : false,
+        vend: Number(vendId[p.toteat_id]) || 0
+      };
+    });
+    _bfPrecRender();
+  } catch(e){
+    console.error('[buffet] precios:', e);
+    var lst = document.getElementById('bf-prec-lista');
+    if (lst) lst.innerHTML = '<div class="bf-fvacio">No se pudieron cargar precios/costos.</div>';
+  }
+}
+
+function _bfPrecRender(){
+  var data = _bfPrecData;
+  var calc=0, sinC=0, negN=0, negNombres=[];
+  data.forEach(function(d){
+    if (d.tieneCosto){ calc++; if (d.neg){ negN++; negNombres.push(d.nombre); } }
+    else sinC++;
+  });
+  var head = document.getElementById('bf-prec-head');
+  if (head) head.textContent = data.length + ' producto' + (data.length!==1?'s':'') + ' activos';
+
+  document.getElementById('bf-prec-resumen').innerHTML =
+    '<div class="bf-pch ok"><div class="n">'+calc+'</div><div class="l">Con margen</div></div>' +
+    '<div class="bf-pch gr"><div class="n">'+sinC+'</div><div class="l">Falta costo</div></div>' +
+    '<div class="bf-pch '+(negN>0?'er':'okneg')+'"><div class="n">'+negN+'</div><div class="l">Margen negativo</div></div>';
+
+  var al = document.getElementById('bf-prec-alerta');
+  if (negN > 0){
+    al.style.display='flex';
+    var ej = negNombres.slice(0,3).map(_bfEsc).join(', ') + (negNombres.length>3 ? '…' : '');
+    al.innerHTML = '<span style="font-size:15px;font-weight:900;color:#991B1B">⚠</span>'+
+      '<span>'+negN+' con margen negativo (revisar receta): '+ej+'</span>';
+  } else { al.style.display='none'; }
+
+  var cats = {};
+  data.forEach(function(d){ cats[d.categoria] = (cats[d.categoria]||0)+1; });
+  _bfPrecCats = Object.keys(cats).sort();
+  var chips = '<button class="bf-pc-chip on" onclick="_bfPrecFilter(\'__all\',this)">Todas ('+data.length+')</button>'+
+    '<button class="bf-pc-chip" onclick="_bfPrecFilter(\'__top\',this)">Más vendidos</button>'+
+    _bfPrecCats.map(function(c,i){
+      return '<button class="bf-pc-chip" onclick="_bfPrecFilter(\'cat:'+i+'\',this)">'+_bfEsc(c)+' ('+cats[c]+')</button>';
+    }).join('');
+  document.getElementById('bf-prec-filtros').innerHTML = chips;
+  _bfPrecFiltro = '__all';
+  _bfPrecRenderTabla();
+}
+
+function _bfPrecFilter(f, el){
+  _bfPrecFiltro = f;
+  var box = document.getElementById('bf-prec-filtros');
+  if (box) box.querySelectorAll('.bf-pc-chip').forEach(function(c){ c.classList.remove('on'); });
+  if (el) el.classList.add('on');
+  _bfPrecRenderTabla();
+}
+
+function _bfPrecRenderTabla(){
+  var f = _bfPrecFiltro, data = _bfPrecData.slice(), filtrados;
+  if (f === '__top')            filtrados = data.filter(function(d){ return d.vend > 0; });
+  else if (f.indexOf('cat:')===0){ var c = _bfPrecCats[Number(f.slice(4))]; filtrados = data.filter(function(d){ return d.categoria === c; }); }
+  else                          filtrados = data;
+
+  if (f === '__top'){
+    filtrados.sort(function(a,b){ return b.vend - a.vend; });
+  } else {
+    filtrados.sort(function(a,b){
+      if (a.tieneCosto !== b.tieneCosto) return a.tieneCosto ? -1 : 1;  // con costo primero
+      if (a.tieneCosto) return b.fc - a.fc;                              // peor food cost arriba
+      return b.vend - a.vend;                                           // sin costo: más vendido arriba
+    });
+  }
+
+  var lst = document.getElementById('bf-prec-lista');
+  if (!filtrados.length){ lst.innerHTML = '<div class="bf-fvacio">Sin productos en este filtro</div>'; return; }
+
+  var hdr = '<div class="bf-prow hd"><div class="pn">Producto</div><div class="pp">Precio</div>'+
+    '<div class="pc">Costo</div><div class="pm">Margen</div><div class="pf">FC%</div></div>';
+  var rows = filtrados.map(function(d){
+    var badge = d.unidad === 'playmatch' ? '<span class="bf-badge pl">Play</span>' : '<span class="bf-badge bf">Buffet</span>';
+    var meta = _bfEsc(d.categoria) + (d.vend>0 ? ' · '+Math.round(d.vend)+' vend' : '') + (d.incompleto ? ' · receta incompleta' : '');
+    var cls = _bfFcClase(d.fc, d.tieneCosto, d.neg);
+    var costoStr  = d.tieneCosto ? _bfMoney(d.costo) : '—';
+    var margenStr = (d.margen!=null) ? _bfMoney(d.margen) : '—';
+    var fcStr     = (d.fc!=null) ? (Math.round(d.fc)+'%') : '—';
+    return '<div class="bf-prow">'+
+      '<div class="pn"><div class="t">'+badge+' '+_bfEsc(d.nombre)+'</div><div class="m">'+meta+'</div></div>'+
+      '<div class="pp">'+_bfMoney(d.precio)+'</div>'+
+      '<div class="pc">'+costoStr+'</div>'+
+      '<div class="pm'+(d.neg?' neg':'')+'">'+margenStr+'</div>'+
+      '<div class="pf"><span class="sem '+cls+'">'+fcStr+'</span></div>'+
+    '</div>';
+  }).join('');
+  lst.innerHTML = hdr + rows;
 }
 
 function mostrarTabs() {
@@ -39908,7 +40101,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.91.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.92.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
