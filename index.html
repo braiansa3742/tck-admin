@@ -1,5 +1,15 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.90.0 — 29/06/2026
+     v13.90.0: RENDICIÓN — carga rápida de pedidos sin marcar. (1) Al abrir un
+               viaje, las entregas que el chofer dejó SIN MARCAR ahora arrancan
+               con el efectivo pre-cargado en el total de la factura (antes en
+               cero), así Valentina solo ajusta (✎) las que se pagaron distinto.
+               (2) Botón "✓ Incluir todas (efectivo)" en el grupo sin marcar:
+               tilda todas de un saque como efectivo = total. Pensado para
+               liquidar el atraso de junio (app del chofer caída) desde admin
+               sin cargar pedido por pedido. Sin impacto fiscal: ya facturado
+               en Xubio, la rendición es registro de cobranza interno.
      TCK ADMIN — v13.89.0 — 27/06/2026
      v13.89.0: BUFFET Facturación — rediseño COMPACTO. Las listas (sin facturar /
                facturadas) pasan a acordeones colapsables, filas de 1 línea
@@ -16239,7 +16249,7 @@ function rvAbrir(id){
   _rvCobro={}; _rvIncluir={}; _rvEdit={}; _rvEfeContado=null;
   entMarc.forEach(function(e){ _rvCobro[e.id]=_rvParseDet(e); _rvIncluir[e.id]=true; });
   // sin marcar: arrancan en cero, NO incluidas (Valen decide), con el editor de formas abierto
-  entSM.forEach(function(e){ _rvCobro[e.id]={efectivo:0,transferencia:0,cheque:0,cuenta_corriente:0}; _rvIncluir[e.id]=false; _rvEdit[e.id]=true; });
+  entSM.forEach(function(e){ _rvCobro[e.id]={efectivo:_rvN(e.monto),transferencia:0,cheque:0,cuenta_corriente:0}; _rvIncluir[e.id]=false; _rvEdit[e.id]=true; });
   var tit=document.getElementById('rv-vtit'); if(tit) tit.textContent=(_rvSel.chofer||'')+' · '+_rvFecha(_rvSel.fecha_salida);
   rvRenderPanel(); rvRenderLista();
 }
@@ -16318,7 +16328,10 @@ function rvRenderPanel(){
   var _smHdr=false;   // v13.80: header del grupo "sin marcar"
   _rvEnt.forEach(function(e){
     if(e._sm && !_smHdr){ _smHdr=true;
-      html+='<div class="rv-sub" style="margin-top:14px;color:#B45309;background:#FFF3E0;border:1px solid #FFCC80;border-radius:8px;padding:7px 10px;">🚩 Sin marcar por el chofer — cargá el cobro (✎) y tildá ✓ para incluirla</div>';
+      html+='<div class="rv-sub" style="margin-top:14px;color:#B45309;background:#FFF3E0;border:1px solid #FFCC80;border-radius:8px;padding:7px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:space-between;">'+
+        '<span>🚩 Sin marcar por el chofer — el efectivo viene cargado con el total; ajustá (✎) si pagó distinto y tildá ✓</span>'+
+        '<button onclick="rvIncluirTodasSM()" style="border:1px solid #B45309;background:#fff;color:#B45309;font-weight:800;font-size:11px;border-radius:6px;padding:5px 11px;cursor:pointer;white-space:nowrap;">✓ Incluir todas (efectivo)</button>'+
+      '</div>';
     }
     var c=_rvCobro[e.id], inc=!!_rvIncluir[e.id], cobr=_rvCobrado(c), tot=_rvN(e.monto), edit=!!_rvEdit[e.id];
     var difF=cobr+_rvN(c.cuenta_corriente)-tot;
@@ -16354,6 +16367,17 @@ function rvRenderPanel(){
   '</div>'+
   '<div class="rv-note">Se confirman las incluidas con lo realmente cobrado por instrumento. Lo que falte de una factura queda como deuda; si pagó de más, el excedente salda lo viejo. Las transferencias las verifica MP por separado.</div>';
   el.innerHTML=html;
+}
+
+function rvIncluirTodasSM(){
+  if(!_rvSel||!_rvEnt.length) return;
+  _rvEnt.forEach(function(e){
+    if(!e._sm) return;
+    _rvIncluir[e.id]=true;
+    var c=_rvCobro[e.id];
+    if(_rvN(c.efectivo)+_rvN(c.transferencia)+_rvN(c.cheque)+_rvN(c.cuenta_corriente)===0){ c.efectivo=_rvN(e.monto); }
+  });
+  rvRenderPanel();
 }
 
 async function rvCerrar(){
@@ -39873,7 +39897,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.89.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.90.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
