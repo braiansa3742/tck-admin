@@ -1,5 +1,21 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.94.0 — 29/06/2026
+     ──────────────────────────────────────────────────────────────────────
+     DIVISIÓN DE ZONAS DE REPARTO — Parte A (logística)
+     Zona 1 -> 1A/1B · Zona 2 -> 2A/2B · 'Solo América y Fortín' -> Zona 3.
+     Calendario: 1A=lun · 1B=mar · Z3=mié · 2A=jue · 2B=vie.
+     (Reaplicado sobre v13.93.0 BUFFET; no toca esa sección.)
+
+     Backward-compatible: reconoce subzonas nuevas Y nomenclatura vieja.
+     Mientras la tabla `rutas` NO esté migrada, todo igual que hoy.
+
+     Cambios: _zonaKeyFromTexto, LZ_ZONAS, LZ_ZONA_MAP, LZ_DIAS_SALIDA,
+     LZ_ZONA_BACKEND, ordenZonasIntra, VIAJE_ESP_ZONAS, _lzSvZonaViaje.
+     Logística data-driven (agrupa por fecha) -> subzonas aparecen solas.
+
+     NO incluido (Parte B): Admin Mi Ronda (AMR_RUTAS_CONFIG).
+     ──────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.93.0 — 29/06/2026
      v13.93.0: BUFFET — nueva sección "Productos que traban facturación" en el tab
                Buffet (debajo de Facturación). Señal EXACTA: desglosa por producto
@@ -15021,6 +15037,11 @@ async function cargarCiudadesCanonicas() {
       if (!t) return null;
       var n = String(t).trim().toLowerCase()
         .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      if (n === 'zona 1a' || n === 'zona1a') return 'zona1a';
+      if (n === 'zona 1b' || n === 'zona1b') return 'zona1b';
+      if (n === 'zona 2a' || n === 'zona2a') return 'zona2a';
+      if (n === 'zona 2b' || n === 'zona2b') return 'zona2b';
+      if (n === 'zona 3'  || n === 'zona3')  return 'zona3';
       if (n === 'zona 1' || n === 'zona1') return 'zona1';
       if (n === 'zona 2' || n === 'zona2') return 'zona2';
       if (n.indexOf('america') >= 0 && n.indexOf('fortin') >= 0) return 'america_fortin';
@@ -26314,6 +26335,11 @@ let _planillaChofer  = 'Joan';
 // Metadata de zonas (orden + nombre + ciudades de referencia).
 // Los counts y montos vienen de Supabase en runtime.
 const LZ_ZONAS = [
+  { key: 'z1a', nombre: 'Zona 1A',  dias: 'Sale Lun' },
+  { key: 'z1b', nombre: 'Zona 1B',  dias: 'Sale Mar' },
+  { key: 'z3',  nombre: 'Zona 3',   dias: 'Sale Mié' },
+  { key: 'z2a', nombre: 'Zona 2A',  dias: 'Sale Jue' },
+  { key: 'z2b', nombre: 'Zona 2B',  dias: 'Sale Vie' },
   { key: 'z1',  nombre: 'Zona 1',     dias: 'Sale Lun (entrega lun-mar)' },
   { key: 'z2',  nombre: 'Zona 2',     dias: 'Sale Jue (entrega jue-vie)' },
   { key: 'af',  nombre: 'Am.Fortín',  dias: 'Mar' },
@@ -26325,6 +26351,8 @@ const LZ_ZONAS = [
 // Schema confirmado: la columna `zona` en pedidos_zona contiene
 // 'zona1', 'zona2', 'america_fortin', 'tl' (genérico hasta v25.2 con turno)
 const LZ_ZONA_MAP = {
+  'zona1a': 'z1a', 'zona1b': 'z1b', 'zona2a': 'z2a', 'zona2b': 'z2b', 'zona3': 'z3',
+  'z1a': 'z1a', 'z1b': 'z1b', 'z2a': 'z2a', 'z2b': 'z2b', 'z3': 'z3',
   'zona1':           'z1',
   'zona2':           'z2',
   'america_fortin':  'af',
@@ -26360,6 +26388,11 @@ function lzNormalizarZona(rawZona) {
 //   · af: sale martes
 //   · tlm/tlt: todos los días hábiles
 const LZ_DIAS_SALIDA = {
+  'z1a': [1],                    // Lunes
+  'z1b': [2],                    // Martes
+  'z3':  [3],                    // Miércoles
+  'z2a': [4],                    // Jueves
+  'z2b': [5],                    // Viernes
   'z1':  [1],                    // SOLO lunes (camión sale lunes)
   'z2':  [4],                    // SOLO jueves (camión sale jueves)
   'af':  [2],                    // Martes
@@ -26734,6 +26767,11 @@ let _lzViajesLoadedAt = null;
 
 // Mapa zona backend → key UI lz (al revés de LZ_ZONA_MAP)
 const LZ_ZONA_BACKEND = {
+  'z1a': 'zona1a',
+  'z1b': 'zona1b',
+  'z2a': 'zona2a',
+  'z2b': 'zona2b',
+  'z3':  'zona3',
   'z1':  'zona1',
   'z2':  'zona2',
   'af':  'america_fortin',
@@ -26966,7 +27004,7 @@ function lzRenderViajes(el) {
   // ── v12.1: AGRUPAR POR FECHA (Opción B) ──────────────────
   // Agrupamos viajes por fecha_salida y dentro de cada fecha
   // los ordenamos por zona (TL primero por volumen)
-  const ordenZonasIntra = ['tl_manana', 'tl_tarde', 'tl', 'zona1', 'zona2', 'america_fortin'];
+  const ordenZonasIntra = ['tl_manana', 'tl_tarde', 'tl', 'zona1a', 'zona1b', 'zona3', 'zona2a', 'zona2b', 'zona1', 'zona2', 'america_fortin'];
   const porFecha = {};
   viajesVisibles.forEach(v => {
     const f = v.fecha_salida || '';
@@ -27343,6 +27381,11 @@ const VEHICULOS_DISPONIBLES = [
 //     extra (puede haber 2 viajes el mismo día — refuerzo del normal).
 
 const VIAJE_ESP_ZONAS = [
+  { key: 'zona1a', label: 'Zona 1A', desc: 'Berutti / Paso / Madero / Pehuajó / Carlos Casares', dias_normales: [1] },
+  { key: 'zona1b', label: 'Zona 1B', desc: 'Mones Cazón / Salazar / Henderson / Daireaux / Urdampilleta / Pirovano / Bolívar / Bonifacio', dias_normales: [2] },
+  { key: 'zona3',  label: 'Zona 3',  desc: 'Gonzalez Moreno / Fortín Olavarría / América', dias_normales: [3] },
+  { key: 'zona2a', label: 'Zona 2A', desc: 'Pellegrini / De Bary / Quenumá / Villa Maza / Salliqueló / Tres Lomas / Thompson', dias_normales: [4] },
+  { key: 'zona2b', label: 'Zona 2B', desc: '30 de Agosto / Garré / Casbas / Cochicó / Guaminí', dias_normales: [5] },
   { key: 'zona1',          label: 'Zona 1', desc: 'Pehuajó / Henderson / Bolívar / Daireaux / ...', dias_normales: [1] },          // lunes
   { key: 'zona2',          label: 'Zona 2', desc: 'Pellegrini / Tres Lomas / Salliqueló / Guaminí / ...', dias_normales: [4] },     // jueves
   { key: 'america_fortin', label: 'América + Fortín', desc: 'América / Fortín Olavarría',          dias_normales: [2] }            // martes
@@ -29183,7 +29226,7 @@ async function lzSzCancelar(pid) {
 // ════════════════════════════════════════════════════════════════
 function _lzSvZonaViaje(p) {
   const ui = lzGetZonaUI(p);
-  const m = { tlm: 'tl_manana', tlt: 'tl_tarde', z1: 'zona1', z2: 'zona2', af: 'america_fortin' };
+  const m = { tlm: 'tl_manana', tlt: 'tl_tarde', z1: 'zona1', z2: 'zona2', af: 'america_fortin', z1a: 'zona1a', z1b: 'zona1b', z2a: 'zona2a', z2b: 'zona2b', z3: 'zona3' };
   return m[ui] || null;
 }
 
@@ -40166,7 +40209,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.93.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.94.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
