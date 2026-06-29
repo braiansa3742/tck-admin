@@ -1,5 +1,12 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.98.0 — 29/06/2026
+     v13.98.0: BUFFET — pane INGREDIENTES (sub-tab). 139 insumos de
+               buffet_costo_ingrediente: resumen (con costo / sin costo / total),
+               filtro "sin costo", buscador, lista ingrediente · costo base/unidad ·
+               "usado en N platos". Los SIN COSTO resaltados en rojo y arriba
+               (ordenados por uso) — son los que traban recetas (antesala de #11).
+               Carga lazy. Solo lectura.
      TCK ADMIN — v13.97.0 — 29/06/2026
      v13.97.0: BUFFET — pane STOCK (sub-tab). Inventario al día desde
                buffet_inventario (última fecha sincronizada de Toteat): resumen
@@ -14853,6 +14860,14 @@ input.canales-exp-input[type="date"] {
   #view-buffet .bf-stock-row .n{ flex:1; min-width:0; font-weight:600; color:#2C2416; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #view-buffet .bf-stock-row .q{ font-weight:800; color:#2C2416; flex-shrink:0; }
   #view-buffet .bf-stock-row.cero .n{ color:#A09A8E; } #view-buffet .bf-stock-row.cero .q{ color:#B4A88E; }
+  /* v13.98.0 — pane Ingredientes */
+  #view-buffet .bf-ing-row{ display:flex; align-items:center; gap:8px; padding:7px 10px; border-bottom:1px solid #F4EEE4; font-size:12px; }
+  #view-buffet .bf-ing-row:last-child{ border-bottom:none; }
+  #view-buffet .bf-ing-row .n{ flex:1; min-width:0; }
+  #view-buffet .bf-ing-row .nm{ font-weight:600; color:#2C2416; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #view-buffet .bf-ing-row .meta{ font-size:9.5px; color:#8A7B63; margin-top:2px; }
+  #view-buffet .bf-ing-row .c{ font-weight:800; color:#2C2416; flex-shrink:0; text-align:right; font-size:12px; }
+  #view-buffet .bf-ing-row .c.sc{ color:#991B1B; font-size:9px; font-weight:800; background:#FCEBEB; padding:3px 7px; border-radius:5px; }
 </style>
   <div class="bf-head">
     <h2>🍔 Buffet TCK Food</h2>
@@ -14925,9 +14940,13 @@ input.canales-exp-input[type="date"] {
     <div class="bf-sec"><h3>Sub-recetas</h3><div class="bf-fvacio">Próximamente — los 9 sub-preparados (Prepizza, salsas, etc.).</div></div>
   </div>
 
-  <!-- PANE: INGREDIENTES (se construye en v13.98) -->
+  <!-- PANE: INGREDIENTES (v13.98.0) -->
   <div class="bf-pane" id="bfp-ingr">
-    <div class="bf-sec"><h3>Ingredientes</h3><div class="bf-fvacio">Próximamente — 139 insumos · 30 sin costo.</div></div>
+    <div class="bf-pc-resumen" id="bf-ingr-resumen"></div>
+    <div class="bf-pc-filtros" id="bf-ingr-filtros"></div>
+    <input class="bf-stock-search" id="bf-ingr-search" type="text" placeholder="Buscar ingrediente…" oninput="_bfIngrFiltrar(this.value)">
+    <div class="bf-pc-scroll" id="bf-ingr-lista" style="max-height:480px;"><div class="bf-fvacio">Tocá la pestaña para cargar los ingredientes.</div></div>
+    <div class="bf-pc-foot" id="bf-ingr-foot"></div>
   </div>
 
   <!-- PANE: STOCK (v13.97.0) -->
@@ -20428,6 +20447,7 @@ function bfSubtab(p, btn){
   });
   // v13.97.0 — carga lazy por pane (solo la 1ª vez)
   if (p === 'stock' && !_bfStockCargado){ _bfStockCargado = true; _bfStock(); }
+  if (p === 'ingr'  && !_bfIngrCargado){  _bfIngrCargado  = true; _bfIngr();  }
   var v = document.getElementById('view-buffet'); if (v) v.scrollTop = 0;
 }
 
@@ -20486,6 +20506,85 @@ function _bfStockFiltrar(q){
   q = (q || '').trim().toLowerCase();
   if (!q){ _bfStockRender(_bfStockData); return; }
   _bfStockRender(_bfStockData.filter(function(d){ return d.nombre.toLowerCase().indexOf(q) >= 0; }));
+}
+
+// ═══ v13.98.0 — Pane INGREDIENTES (costo base · lectura · antesala de #11) ═══
+var _bfIngrCargado = false;
+var _bfIngrData = [];
+var _bfIngrFiltro = 'todos';
+async function _bfIngr(){
+  var lst = document.getElementById('bf-ingr-lista');
+  if (!lst) return;
+  lst.innerHTML = '<div class="bf-fvacio">Cargando ingredientes…</div>';
+  try {
+    var ingr = await sbFetchAll('buffet_costo_ingrediente?select=codigo,nombre,unidad_base,costo_base,fuente&order=nombre.asc', 1000, 3);
+    ingr = Array.isArray(ingr) ? ingr : [];
+    // uso: en cuántos platos (no sub-recetas) aparece cada ingrediente
+    var recetas = await sbFetchAll('buffet_recetas?select=ingrediente_id,producto_id&order=ingrediente_id.asc', 1000, 5);
+    var usoMap = {};
+    (Array.isArray(recetas) ? recetas : []).forEach(function(r){
+      if (String(r.producto_id || '').indexOf('SUB') === 0) return;   // solo platos
+      var k = r.ingrediente_id;
+      if (!usoMap[k]) usoMap[k] = {};
+      usoMap[k][r.producto_id] = true;
+    });
+    _bfIngrData = ingr.map(function(i){
+      var costo = Number(i.costo_base) || 0;
+      return {
+        codigo: i.codigo, nombre: i.nombre || '(sin nombre)',
+        unidad: i.unidad_base || '', costo: costo, fuente: i.fuente || '',
+        sinCosto: !(costo > 0),
+        usos: usoMap[i.codigo] ? Object.keys(usoMap[i.codigo]).length : 0
+      };
+    });
+    var conC = _bfIngrData.filter(function(d){ return !d.sinCosto; }).length;
+    var sinC = _bfIngrData.length - conC;
+    var res = document.getElementById('bf-ingr-resumen');
+    if (res) res.innerHTML =
+      '<div class="bf-pch ok"><div class="n">'+conC+'</div><div class="l">Con costo</div></div>'+
+      '<div class="bf-pch '+(sinC>0?'er':'ok')+'"><div class="n">'+sinC+'</div><div class="l">Sin costo</div></div>'+
+      '<div class="bf-pch gr"><div class="n">'+_bfIngrData.length+'</div><div class="l">Total</div></div>';
+    document.getElementById('bf-ingr-filtros').innerHTML =
+      '<button class="bf-pc-chip on" onclick="_bfIngrFiltro2(\'todos\',this)">Todos ('+_bfIngrData.length+')</button>'+
+      '<button class="bf-pc-chip" onclick="_bfIngrFiltro2(\'sin\',this)">Sin costo ('+sinC+')</button>';
+    var foot = document.getElementById('bf-ingr-foot');
+    if (foot) foot.textContent = 'Costo base por unidad. Los "sin costo" traban el food cost de las recetas que los usan — cargarlos es el #11 (editable, próximamente).';
+    _bfIngrRender();
+  } catch(e){
+    console.error('[buffet] ingredientes:', e);
+    lst.innerHTML = '<div class="bf-fvacio">No se pudieron cargar los ingredientes.</div>';
+  }
+}
+function _bfIngrFiltro2(f, btn){
+  _bfIngrFiltro = f;
+  var box = document.getElementById('bf-ingr-filtros');
+  if (box) box.querySelectorAll('.bf-pc-chip').forEach(function(c){ c.classList.remove('on'); });
+  if (btn) btn.classList.add('on');
+  _bfIngrRender();
+}
+function _bfIngrFiltrar(q){
+  _bfIngrRender((q || '').trim().toLowerCase());
+}
+function _bfIngrRender(q){
+  var lst = document.getElementById('bf-ingr-lista');
+  if (!lst) return;
+  var arr = _bfIngrData.slice();
+  if (_bfIngrFiltro === 'sin') arr = arr.filter(function(d){ return d.sinCosto; });
+  if (q) arr = arr.filter(function(d){ return d.nombre.toLowerCase().indexOf(q) >= 0; });
+  // sin costo primero (accionables), por uso desc; luego con costo por nombre
+  arr.sort(function(a,b){
+    if (a.sinCosto !== b.sinCosto) return a.sinCosto ? -1 : 1;
+    if (a.sinCosto) return b.usos - a.usos;
+    return a.nombre.localeCompare(b.nombre);
+  });
+  if (!arr.length){ lst.innerHTML = '<div class="bf-fvacio">Sin resultados</div>'; return; }
+  lst.innerHTML = arr.map(function(d){
+    var meta = (d.usos > 0 ? ('usado en ' + d.usos + ' plato' + (d.usos !== 1 ? 's' : '')) : 'sin uso en recetas') +
+               (d.fuente ? ' · ' + _bfEsc(d.fuente) : '');
+    var c = d.sinCosto ? '<span class="c sc">sin costo</span>'
+                       : '<span class="c">'+_bfMoney(d.costo)+(d.unidad?(' /'+_bfEsc(d.unidad)):'')+'</span>';
+    return '<div class="bf-ing-row"><div class="n"><div class="nm">'+_bfEsc(d.nombre)+'</div><div class="meta">'+meta+'</div></div>'+c+'</div>';
+  }).join('');
 }
 function _bfHoy(){ var d = new Date(Date.now() - 3*3600000); return d.toISOString().slice(0,10); }
 function _bfRestarDias(yyyy_mm_dd, n){
@@ -40420,7 +40519,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.97.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.98.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
