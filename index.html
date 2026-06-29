@@ -1,5 +1,13 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.93.0 — 29/06/2026
+     v13.93.0: BUFFET — nueva sección "Productos que traban facturación" en el tab
+               Buffet (debajo de Facturación). Señal EXACTA: desglosa por producto
+               las ventas rechazadas por Xubio (error/sin_mapear) desde el 27/06 —
+               cuántas trabó cada uno, monto atribuible y última fecha. Indica qué
+               precio de última compra cargar en Xubio para destrabar. Aparece
+               apenas trabó la primera (antes de que se acumule backlog). Solo se
+               muestra si hay ventas trabadas. (Incluye el panel de Precios de v13.92.0.)
      TCK ADMIN — v13.92.0 — 29/06/2026
      v13.92.0: BUFFET — nuevo panel "Precios y márgenes" en el tab Buffet. Por
                producto: precio de venta (Toteat) + costo de receta (Supabase
@@ -14798,6 +14806,11 @@ input.canales-exp-input[type="date"] {
     <div class="bf-fact-alerta" id="bf-fact-alerta" style="display:none;"></div>
     <div id="bf-fact-lista"></div>
   </div>
+  <div class="bf-sec" id="bf-trab-sec" style="display:none;">
+    <h3>⚠ Productos que traban facturación <span class="leg" id="bf-trab-head" style="font-weight:700"></span></h3>
+    <div id="bf-trab-lista"></div>
+    <div class="bf-pc-foot">Cargá el <b>precio de última compra</b> de estos productos en Xubio (Compras → Productos de Compra) y reintentá. Es lo único que falta para que ARCA los acepte. Ordenados por cuántas ventas trabó cada uno.</div>
+  </div>
   <div class="bf-sec">
     <h3>Ventas por día
       <span class="leg"><i><span class="dot" style="background:#EA580C"></span>Buffet</i><i><span class="dot" style="background:#1E6B8C"></span>Playmatch</i></span>
@@ -20398,6 +20411,8 @@ async function buffetCargar(){
         '<div class="amt">' + _bfMoney(x.a) + '</div></div>';
     }).join('') : '<div class="bf-loading">Sin datos</div>';
 
+    // v13.93.0 — Productos que traban facturación (señal exacta)
+    _bfTraban(ventas, items);
     // v13.92.0 — Precios y márgenes (catálogo + food cost, independiente del rango salvo "veces vendido")
     await _bfPrecios(vendId);
 
@@ -20506,6 +20521,56 @@ function _bfFacturacion(ventas){
   if (fact.length){   fact.sort(byClosedDesc);   html += _bfAcc('Facturadas','ok',okN,_bfMoney(okM),_bfGrupoDias(fact,_bfRowFact)); }
   if (!noFact.length && !fact.length){ html = '<div class="bf-fvacio">Sin ventas facturables en el período</div>'; }
   document.getElementById('bf-fact-lista').innerHTML = html;
+}
+
+// ═══ v13.93.0 — Productos que traban facturación (señal EXACTA: ventas en error) ═══
+// El campo precioUltCompra que exige Xubio no es legible por API, así que la única
+// señal confiable es el resultado real: ventas rechazadas (error / sin_mapear).
+// Desglosa por producto las ventas trabadas desde el switch (27/06) → Gastón sabe
+// exactamente qué costo cargar en Xubio para destrabar.
+function _bfTraban(ventas, items){
+  var sec = document.getElementById('bf-trab-sec');
+  if (!sec) return;
+  var FACT_DESDE = '2026-06-27';
+  var trab = {};   // order_id -> { fj }
+  (ventas||[]).forEach(function(v){
+    if (v.es_consumo_personal) return;
+    if (String(v.fecha_jornada||'') < FACT_DESDE) return;
+    var e = v.xubio_estado;
+    if (e === 'error' || e === 'sin_mapear') trab[v.order_id] = { fj: v.fecha_jornada };
+  });
+  var nTrab = Object.keys(trab).length;
+  if (!nTrab){ sec.style.display = 'none'; return; }
+
+  var agg = {};
+  (items||[]).forEach(function(it){
+    var t = trab[it.order_id];
+    if (!t) return;
+    var k = (it.producto_id != null) ? ('id:'+it.producto_id) : ('nm:'+(it.producto_nombre||'(sin nombre)'));
+    if (!agg[k]) agg[k] = { nombre: it.producto_nombre||'(sin nombre)', u: it.unidad_negocio, ords:{}, monto:0, ult:'' };
+    agg[k].ords[it.order_id] = true;
+    agg[k].monto += Number(it.total_linea)||0;
+    if ((t.fj||'') > agg[k].ult) agg[k].ult = t.fj || '';
+  });
+
+  var lista = Object.keys(agg).map(function(k){
+    var a = agg[k];
+    return { nombre:a.nombre, u:a.u, n:Object.keys(a.ords).length, monto:a.monto, ult:a.ult };
+  }).sort(function(a,b){ return (b.n - a.n) || (b.monto - a.monto); });
+
+  sec.style.display = '';
+  var head = document.getElementById('bf-trab-head');
+  if (head) head.textContent = lista.length + ' producto' + (lista.length!==1?'s':'') +
+    ' · ' + nTrab + ' venta' + (nTrab!==1?'s':'') + ' trabada' + (nTrab!==1?'s':'');
+
+  document.getElementById('bf-trab-lista').innerHTML = lista.map(function(x,i){
+    var badge = x.u === 'playmatch' ? '<span class="bf-badge pl">Play</span>' : '<span class="bf-badge bf">Buffet</span>';
+    return '<div class="bf-tp"><div class="rk" style="color:#991B1B">'+(i+1)+'</div><div class="info">'+
+      '<div class="nm">'+_bfEsc(x.nombre)+'</div>'+
+      '<div class="meta">'+badge+' &nbsp;'+x.n+' venta'+(x.n!==1?'s':'')+' trabada'+(x.n!==1?'s':'')+
+      (x.ult ? ' · última '+_bfDDMM(x.ult) : '')+'</div></div>'+
+      '<div class="amt" style="color:#991B1B">'+_bfMoney(x.monto)+'</div></div>';
+  }).join('');
 }
 
 // ═══ v13.92.0 — Precios y márgenes del buffet (SOLO visibilidad) ═══
@@ -40101,7 +40166,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.92.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.93.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
