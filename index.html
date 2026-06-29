@@ -1,5 +1,13 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.95.0 — 29/06/2026
+     v13.95.0: BUFFET — Food cost drill-down (reaplicado SOBRE v13.94.0 zonas,
+               que no toca el buffet). En el panel Precios, cada plato con receta
+               es clickeable: se expande el desglose ingrediente por ingrediente
+               (cantidad · costo de línea), con los SIN COSTO en rojo y el total
+               de costo de receta al pie. Lee la vista vw_buffet_food_cost_linea.
+               (Esta era la v13.94.0 "buffet" que no había entrado por el choque
+               con la v13.94.0 "zonas". Incluye ambas cosas.)
      TCK ADMIN — v13.94.0 — 29/06/2026
      ──────────────────────────────────────────────────────────────────────
      DIVISIÓN DE ZONAS DE REPARTO — Parte A (logística)
@@ -14804,6 +14812,20 @@ input.canales-exp-input[type="date"] {
   #view-buffet .bf-prow .sem.rojo{ background:#FCEBEB; color:#991B1B; }
   #view-buffet .bf-prow .sem.gris{ background:#F1EFE8; color:#A09A8E; }
   #view-buffet .bf-pc-foot{ font-size:10px; color:#8A7B63; margin-top:9px; line-height:1.4; font-style:italic; }
+  /* v13.95.0 — drill-down de receta dentro del panel Precios */
+  #view-buffet .bf-prow.exp{ cursor:pointer; }
+  #view-buffet .bf-prow .cx{ display:inline-block; width:11px; font-size:9px; color:#9A3412; flex-shrink:0; }
+  #view-buffet .bf-prow .cx::before{ content:'\\25B8'; }
+  #view-buffet .bf-prow.open .cx::before{ content:'\\25BE'; }
+  #view-buffet .bf-prow .cx.ph::before{ content:''; }
+  #view-buffet .bf-prow-det{ background:#FBF7F0; border-bottom:1px solid #F4EEE4; padding:6px 9px 8px 26px; }
+  #view-buffet .bf-det-line{ display:flex; align-items:center; gap:8px; font-size:11px; padding:3px 0; }
+  #view-buffet .bf-det-line .di{ flex:1; color:#5F5E5A; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #view-buffet .bf-det-line .dq{ color:#8A7B63; flex-shrink:0; font-size:10px; width:62px; text-align:right; }
+  #view-buffet .bf-det-line .dc{ font-weight:700; color:#2C2416; flex-shrink:0; width:76px; text-align:right; }
+  #view-buffet .bf-det-line.sc .di{ color:#991B1B; font-weight:700; }
+  #view-buffet .bf-det-line.sc .dc{ color:#991B1B; font-weight:800; }
+  #view-buffet .bf-det-tot{ display:flex; justify-content:space-between; font-size:10.5px; font-weight:800; color:#2C2416; border-top:1px dashed #E0D6C6; margin-top:5px; padding-top:5px; }
 </style>
   <div class="bf-head">
     <h2>🍔 Buffet TCK Food</h2>
@@ -20601,6 +20623,7 @@ function _bfTraban(ventas, items){
 var _bfPrecData   = [];
 var _bfPrecCats   = [];
 var _bfPrecFiltro = '__all';
+var _bfRecetaLineas = {};   // v13.95.0 — producto_id -> [lineas de receta] para el drill-down
 
 function _bfEsc(s){
   return String(s==null?'':s).replace(/[&<>"]/g, function(c){
@@ -20626,6 +20649,17 @@ async function _bfPrecios(vendId){
     var cmap = {};
     costos.forEach(function(c){ cmap[c.producto_id] = c; });
 
+    // v13.95.0 — líneas de receta para el drill-down (vista vw_buffet_food_cost_linea)
+    _bfRecetaLineas = {};
+    try {
+      var lineas = await sbFetchAll('vw_buffet_food_cost_linea?select=producto_id,ingrediente_nombre,cantidad,unidad,costo_linea,sin_costo&order=producto_id.asc', 1000, 5);
+      (Array.isArray(lineas) ? lineas : []).forEach(function(l){
+        var k = l.producto_id;
+        if (!_bfRecetaLineas[k]) _bfRecetaLineas[k] = [];
+        _bfRecetaLineas[k].push(l);
+      });
+    } catch(e){ console.warn('[buffet] lineas receta no disponibles:', e); }
+
     _bfPrecData = prods.map(function(p){
       var precio = Number(p.precio_venta)||0;
       var cr = cmap[p.toteat_id];
@@ -20634,6 +20668,7 @@ async function _bfPrecios(vendId){
       var margen = tieneCosto ? (precio - costo) : null;
       var fc = tieneCosto ? (costo / precio * 100) : null;
       return {
+        id: p.toteat_id,
         nombre: p.nombre || '(sin nombre)',
         categoria: p.categoria || 'Sin categoría',
         unidad: p.unidad_negocio || 'buffet',
@@ -20723,15 +20758,49 @@ function _bfPrecRenderTabla(){
     var costoStr  = d.tieneCosto ? _bfMoney(d.costo) : '—';
     var margenStr = (d.margen!=null) ? _bfMoney(d.margen) : '—';
     var fcStr     = (d.fc!=null) ? (Math.round(d.fc)+'%') : '—';
-    return '<div class="bf-prow">'+
-      '<div class="pn"><div class="t">'+badge+' '+_bfEsc(d.nombre)+'</div><div class="m">'+meta+'</div></div>'+
+    var lineas = _bfRecetaLineas[d.id];
+    var tieneReceta = lineas && lineas.length > 0;
+    var cx = tieneReceta ? '<span class="cx"></span>' : '<span class="cx ph"></span>';
+    var row = '<div class="bf-prow'+(tieneReceta?' exp':'')+'"'+(tieneReceta?' onclick="_bfPrecToggle(this)"':'')+'>'+
+      '<div class="pn"><div class="t">'+cx+badge+' '+_bfEsc(d.nombre)+'</div><div class="m">'+meta+'</div></div>'+
       '<div class="pp">'+_bfMoney(d.precio)+'</div>'+
       '<div class="pc">'+costoStr+'</div>'+
       '<div class="pm'+(d.neg?' neg':'')+'">'+margenStr+'</div>'+
       '<div class="pf"><span class="sem '+cls+'">'+fcStr+'</span></div>'+
     '</div>';
+    if (tieneReceta) row += _bfPrecDet(lineas);
+    return row;
   }).join('');
   lst.innerHTML = hdr + rows;
+}
+
+// Cantidad legible: entero sin decimales, fracción con hasta 2 decimales.
+function _bfCant(n){
+  var q = Number(n)||0;
+  return (Math.round(q) === q) ? String(q) : q.toLocaleString('es-AR', { maximumFractionDigits:2 });
+}
+// Sub-fila de desglose de receta (drill-down).
+function _bfPrecDet(lineas){
+  var tot = 0;
+  var body = lineas.map(function(l){
+    var sc = Number(l.sin_costo) === 1;
+    var c = Number(l.costo_linea)||0; tot += c;
+    var costoTxt = sc ? 'sin costo' : _bfMoney(c);
+    return '<div class="bf-det-line'+(sc?' sc':'')+'">'+
+      '<span class="di">'+_bfEsc(l.ingrediente_nombre || '(ingrediente)')+'</span>'+
+      '<span class="dq">'+_bfCant(l.cantidad)+' '+_bfEsc(l.unidad||'')+'</span>'+
+      '<span class="dc">'+costoTxt+'</span></div>';
+  }).join('');
+  return '<div class="bf-prow-det" style="display:none;">'+body+
+    '<div class="bf-det-tot"><span>Costo receta</span><span>'+_bfMoney(tot)+'</span></div></div>';
+}
+// Toggle del drill-down: la sub-fila es el hermano inmediato de la fila clickeada.
+function _bfPrecToggle(el){
+  var det = el.nextElementSibling;
+  if (!det || !det.classList.contains('bf-prow-det')) return;
+  var abierto = det.style.display !== 'none';
+  det.style.display = abierto ? 'none' : 'block';
+  el.classList.toggle('open', !abierto);
 }
 
 function mostrarTabs() {
@@ -40209,7 +40278,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.94.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.95.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
