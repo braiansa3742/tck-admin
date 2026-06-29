@@ -1,5 +1,11 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.91.0 — 29/06/2026
+     v13.91.0: BUFFET Facturación — la sección ahora cuenta SOLO ventas desde el
+               27/06 (switch a Xubio). Antes sumaba ventas previas que nunca se
+               facturan por Xubio, mostrando un falso "sin facturar" inflado
+               (~$12,9M en 30 días). KPIs y resto de secciones siguen mostrando
+               todo el rango elegido; solo el panel de Facturación se acota.
      TCK ADMIN — v13.90.0 — 29/06/2026
      v13.90.0: RENDICIÓN — carga rápida de pedidos sin marcar. (1) Al abrir un
                viaje, las entregas que el chofer dejó SIN MARCAR ahora arrancan
@@ -20405,8 +20411,13 @@ function _bfAcc(titulo, cls, n, montoStr, cuerpo){
 function _bfFacturacion(ventas){
   var sec = document.getElementById('bf-fact-sec');
   if (!sec) return;
-  // Solo facturables: el consumo personal es autofactura, no va por Xubio
-  var vs = (ventas || []).filter(function(v){ return !v.es_consumo_personal; });
+  // Solo facturables DESDE el switch a Xubio (27/06): antes de esa fecha el buffet
+  // no se factura por Xubio (BUFFET_FACT_DESDE), así que esas ventas NO cuentan como
+  // "sin facturar". El consumo personal es autofactura, tampoco va por Xubio.
+  var FACT_DESDE = '2026-06-27';
+  var vs = (ventas || []).filter(function(v){
+    return !v.es_consumo_personal && String(v.fecha_jornada || '') >= FACT_DESDE;
+  });
 
   var okN=0, okM=0, peN=0, peM=0, erN=0, erM=0, noFact=[], fact=[];
   vs.forEach(function(v){
@@ -20417,7 +20428,7 @@ function _bfFacturacion(ventas){
   });
 
   var head = document.getElementById('bf-fact-head');
-  if (head) head.textContent = vs.length + ' venta' + (vs.length !== 1 ? 's' : '');
+  if (head) head.textContent = vs.length + ' venta' + (vs.length !== 1 ? 's' : '') + ' · desde 27/06';
 
   document.getElementById('bf-fact-resumen').innerHTML =
     '<div class="bf-fch ok"><div class="n">'+okN+'</div><div class="m">'+_bfMoney(okM)+'</div><div class="l">Facturadas</div></div>' +
@@ -39897,7 +39908,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.90.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.91.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
