@@ -1,5 +1,12 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.102.0 — 29/06/2026
+     v13.102.0: CUENTA CORRIENTE DEL PRODUCTO — pantalla nueva (tab oculto en
+        "Mas", visible para dueno/operaciones/cobranzas → Roman, Valentina,
+        Braian). Lee vw_cuenta_corriente_producto: ingresos (compra) + egresos
+        (venta entregada) por producto, con saldo corriente. Devoluciones NO
+        entran aun (hoy texto libre). La Diferencia vs stock real se muestra
+        solo en periodo "Todo". Reaplicado sobre v13.101.0 (no toca buffet).
      TCK ADMIN — v13.101.0 — 29/06/2026
      v13.101.0: BUFFET FIX — el HUECO BLANCO del tab Buffet. Causa: el bloque
                 #view-buffet estaba FUERA del #panel (después del tab-nav), así que
@@ -14665,6 +14672,57 @@ input.canales-exp-input[type="date"] {
   <div class="bf-loading" id="bf-loading" style="display:none;">Cargando datos del buffet…</div>
 </div>
 </div>
+<div class="view" id="view-ccprod">
+  <style>
+    #view-ccprod .ccp-head{margin:4px 0 10px}
+    #view-ccprod .ccp-title{font-weight:700;font-size:20px;color:var(--red)}
+    #view-ccprod .ccp-sub{font-size:13px;color:#6b5a52}
+    #view-ccprod .ccp-controls{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0}
+    #view-ccprod select{font-family:inherit;font-size:15px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--text);min-width:200px}
+    #view-ccprod .ccp-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:8px 0 14px}
+    #view-ccprod .ccp-kpi{background:#fff;border:1px solid var(--border);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow)}
+    #view-ccprod .ccp-kpi .lab{font-size:11px;color:#6b5a52;text-transform:uppercase;letter-spacing:.4px;font-weight:700}
+    #view-ccprod .ccp-kpi .val{font-size:26px;font-weight:700;line-height:1.1;margin-top:3px}
+    #view-ccprod .ccp-kpi .sub{font-size:11px;color:#6b5a52;margin-top:2px}
+    #view-ccprod .ccp-kpi.ok .val{color:var(--green)}
+    #view-ccprod .ccp-kpi.bad{border-color:var(--red);background:#fff5f5}
+    #view-ccprod .ccp-kpi.bad .val{color:var(--red)}
+    #view-ccprod .ccp-tabla-wrap{background:#fff;border:1px solid var(--border);border-radius:12px;overflow:hidden;box-shadow:var(--shadow)}
+    #view-ccprod table.ccp-tabla{width:100%;border-collapse:collapse}
+    #view-ccprod .ccp-tabla thead th{background:#f3e7e2;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#6b5a52;padding:9px 12px;font-weight:700}
+    #view-ccprod .ccp-tabla th.num,#view-ccprod .ccp-tabla td.num{text-align:right;font-variant-numeric:tabular-nums}
+    #view-ccprod .ccp-tabla tbody td{padding:8px 12px;border-top:1px solid var(--border);font-size:14px}
+    #view-ccprod .ccp-tag{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px}
+    #view-ccprod .ccp-tag.compra{background:#e6f2e8;color:var(--green)}
+    #view-ccprod .ccp-tag.venta{background:#fdeaea;color:var(--red)}
+    #view-ccprod .ccp-in{color:var(--green);font-weight:600}
+    #view-ccprod .ccp-out{color:var(--red);font-weight:600}
+    #view-ccprod .ccp-saldo{font-weight:700}
+    #view-ccprod .ccp-ref{color:#6b5a52;font-size:13px}
+    #view-ccprod .ccp-foot{font-size:12px;color:#6b5a52;margin-top:12px;line-height:1.5}
+    @media(max-width:720px){#view-ccprod .ccp-kpis{grid-template-columns:repeat(2,1fr)}}
+  </style>
+  <div class="ccp-head">
+    <div class="ccp-title">📒 Cuenta Corriente del Producto</div>
+    <div class="ccp-sub">Ingresos (compra) y egresos (venta entregada) por producto</div>
+  </div>
+  <div class="ccp-controls">
+    <select id="ccp-sel" onchange="ccprodRender()"><option>Cargando…</option></select>
+    <select id="ccp-per" onchange="ccprodRender()">
+      <option value="30">Últimos 30 días</option>
+      <option value="60">Últimos 60 días</option>
+      <option value="0">Todo</option>
+    </select>
+  </div>
+  <div class="ccp-kpis" id="ccp-kpis"></div>
+  <div class="ccp-tabla-wrap">
+    <table class="ccp-tabla">
+      <thead><tr><th>Fecha</th><th>Tipo</th><th>Detalle</th><th class="num">Entra</th><th class="num">Sale</th><th class="num">Saldo</th></tr></thead>
+      <tbody id="ccp-rows"><tr><td colspan="6" style="text-align:center;color:#6b5a52;padding:20px;">Elegí un producto…</td></tr></tbody>
+    </table>
+  </div>
+  <div class="ccp-foot">El <b>Saldo</b> es el acumulado de los movimientos del período. La <b>Diferencia</b> (solo en período "Todo") compara ese acumulado contra el stock real: si es grande, hay un movimiento sin registrar (devolución sin cargar, ajuste). Las devoluciones todavía no entran al detalle (se guardan como texto libre).</div>
+</div>
 <nav class="tab-nav" id="tab-nav">
   <button class="tab-btn" id="tab-btn-logistica" onclick="cambiarTab('logistica')">
     <span class="tab-icon">🚚</span>
@@ -14727,6 +14785,10 @@ input.canales-exp-input[type="date"] {
     <span class="tab-icon">🛒</span>
     <span class="tab-label">Compras</span>
   </button>
+  <button class="tab-btn" id="tab-btn-ccprod" onclick="cambiarTab('ccprod')" style="display:none !important;">
+    <span class="tab-icon">📒</span>
+    <span class="tab-label">Cta Producto</span>
+  </button>
   <button class="tab-btn" id="tab-btn-prod-canon" onclick="cambiarTab('prod-canon')" style="display:none !important;">
     <span class="tab-icon">🔧</span>
     <span class="tab-label">Sin canon.</span>
@@ -14766,6 +14828,11 @@ input.canales-exp-input[type="date"] {
         <div class="menu-mas-icon">🛒</div>
         <div class="menu-mas-lbl">Compras</div>
         <div class="menu-mas-badge" id="menu-mas-compras-badge" style="display:none;background:#C62828;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;margin-top:3px;">0</div>
+      </button>
+      <!-- v13.92.0 — Cuenta Corriente del Producto -->
+      <button class="menu-mas-item" id="menu-mas-ccprod" onclick="cambiarTab('ccprod');cerrarMenuMas()">
+        <div class="menu-mas-icon">📒</div>
+        <div class="menu-mas-lbl">Cta Producto</div>
       </button>
       <!-- v12.29 — Tab Márgenes -->
       <button class="menu-mas-item" id="menu-mas-margenes" onclick="cambiarTab('margenes');cerrarMenuMas()">
@@ -17443,7 +17510,7 @@ const ROL_TABS = {
   dueno:       'ALL',
   operaciones: 'ALL',
   admin:       'ALL',
-  cobranzas:   ['pedidos','logistica','clientes','facturacion','cc','tesoreria','rendiciones','acc-dup','buffet'],
+  cobranzas:   ['pedidos','logistica','clientes','facturacion','cc','tesoreria','rendiciones','acc-dup','buffet','ccprod'],
   tckfood:     ['buffet']
 };
 
@@ -20342,6 +20409,64 @@ function cerrarMenuMasFondo(e) {
   if (e.target === document.getElementById('menu-mas-backdrop')) cerrarMenuMas();
 }
 
+// ════════════════════════════════════════════════════════════════════
+// v13.92.0 — CUENTA CORRIENTE DEL PRODUCTO
+// Lee vw_cuenta_corriente_producto (compras + ventas entregadas) y arma el
+// saldo corriente por producto. Stock real desde stock_productos.
+// ════════════════════════════════════════════════════════════════════
+var _ccpStock = {};
+var _ccpCargado = false;
+function _ccpEsc(x){return String(x==null?"":x).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];});}
+function _ccpNum(n){return (Math.round(Number(n)||0)).toLocaleString("es-AR");}
+async function ccprodCargar(){
+  var sel=document.getElementById("ccp-sel"); if(!sel) return;
+  if(_ccpCargado) return;
+  try{
+    var prods=await sbFetch("stock_productos?select=producto_tck_nombre,stock_actual&activo=eq.true&order=producto_tck_nombre.asc")||[];
+    _ccpStock={};
+    var opts='<option value="">— Elegí un producto —</option>';
+    prods.forEach(function(p){ _ccpStock[p.producto_tck_nombre]=Number(p.stock_actual)||0; opts+="<option>"+_ccpEsc(p.producto_tck_nombre)+"</option>"; });
+    sel.innerHTML=opts; _ccpCargado=true;
+  }catch(e){ sel.innerHTML="<option>Error cargando productos</option>"; console.warn("[ccprod]",e); }
+}
+async function ccprodRender(){
+  var selEl=document.getElementById("ccp-sel"); if(!selEl) return;
+  var prod=selEl.value;
+  var dias=parseInt(document.getElementById("ccp-per").value,10);
+  var rowsEl=document.getElementById("ccp-rows");
+  var kpisEl=document.getElementById("ccp-kpis");
+  if(!prod){ rowsEl.innerHTML='<tr><td colspan="6" style="text-align:center;color:#6b5a52;padding:20px;">Elegí un producto…</td></tr>'; kpisEl.innerHTML=""; return; }
+  rowsEl.innerHTML='<tr><td colspan="6" style="text-align:center;padding:20px;">Cargando…</td></tr>';
+  try{
+    var path="vw_cuenta_corriente_producto?producto_tck_nombre=eq."+encodeURIComponent(prod)+"&order=fecha.asc&limit=3000";
+    if(dias>0){ var desde=new Date(Date.now()-dias*86400000).toISOString(); path+="&fecha=gte."+encodeURIComponent(desde); }
+    var mov=await sbFetch(path)||[];
+    var saldo=0,ing=0,egr=0;
+    var html=mov.map(function(m){
+      var entra=Number(m.entra)||0, sale=Number(m.sale)||0;
+      saldo+=entra-sale; if(entra)ing+=entra; if(sale)egr+=sale;
+      var f=String(m.fecha||"").slice(0,10).split("-").reverse().join("/");
+      var tag=m.tipo==="compra"?'<span class="ccp-tag compra">Compra</span>':'<span class="ccp-tag venta">Venta</span>';
+      return "<tr><td>"+f+"</td><td>"+tag+"</td><td class=\"ccp-ref\">"+_ccpEsc(m.detalle)+"</td>"+
+             "<td class=\"num ccp-in\">"+(entra?("+"+_ccpNum(entra)):"")+"</td>"+
+             "<td class=\"num ccp-out\">"+(sale?("−"+_ccpNum(sale)):"")+"</td>"+
+             "<td class=\"num ccp-saldo\">"+_ccpNum(saldo)+"</td></tr>";
+    }).join("");
+    rowsEl.innerHTML=html||'<tr><td colspan="6" style="text-align:center;color:#6b5a52;padding:20px;">Sin movimientos en el período.</td></tr>';
+    var k='<div class="ccp-kpi"><div class="lab">Ingresos</div><div class="val" style="color:var(--green)">+'+_ccpNum(ing)+'</div></div>'+
+            '<div class="ccp-kpi"><div class="lab">Egresos</div><div class="val" style="color:var(--red)">−'+_ccpNum(egr)+'</div></div>';
+    var real=_ccpStock[prod];
+    if(dias===0 && real!=null){
+      var diff=real-saldo; var cls=Math.abs(diff)<=2?"ok":"bad";
+      k+='<div class="ccp-kpi"><div class="lab">Saldo (todo)</div><div class="val">'+_ccpNum(saldo)+'</div><div class="sub">stock real: '+_ccpNum(real)+'</div></div>';
+      k+='<div class="ccp-kpi '+cls+'"><div class="lab">Diferencia</div><div class="val">'+(diff>0?"+":"")+_ccpNum(diff)+'</div><div class="sub">'+(cls==="ok"?"cuadra":"revisar mov.")+'</div></div>';
+    } else {
+      k+='<div class="ccp-kpi"><div class="lab">Saldo período</div><div class="val">'+_ccpNum(saldo)+'</div>'+(real!=null?'<div class="sub">stock real: '+_ccpNum(real)+'</div>':"")+'</div>';
+    }
+    kpisEl.innerHTML=k;
+  }catch(e){ rowsEl.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--red);padding:20px;">Error: '+_ccpEsc(e.message||e)+'</td></tr>'; console.warn("[ccprod]",e); }
+}
+
 function cambiarTab(tab) {
   // v13.57.0 — Cobranzas no puede abrir tabs fuera de su perfil ni por código
   if (rolActual === 'cobranzas' && typeof puedeVer === 'function' && !puedeVer(tab)) tab = 'pedidos';
@@ -20350,7 +20475,7 @@ function cambiarTab(tab) {
   _tabActual = tab;
 
   // Views — incluye logistica + stock (v12.15.0) + compras (v12.18.0) + tesoreria (v12.20.0)
-  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock','compras','cc','tesoreria','margenes','facturacion','buffet'].forEach(function(t) {
+  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock','compras','cc','tesoreria','margenes','facturacion','buffet','ccprod'].forEach(function(t) {
     var v = document.getElementById('view-' + t);
     var b = document.getElementById('tab-btn-' + t);
     if (v) v.classList.toggle('active', t === tab);
@@ -20359,7 +20484,7 @@ function cambiarTab(tab) {
 
   // El botón "Más" se marca activo si estás en un tab oculto
   var btnMas = document.getElementById('tab-btn-mas');
-  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes' || tab === 'rendiciones' || tab === 'acc-dup' || tab === 'prod-canon' || tab === 'ccanon' || tab === 'stock' || tab === 'compras' || tab === 'cc' || tab === 'tesoreria' || tab === 'margenes' || tab === 'facturacion' || tab === 'buffet');
+  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes' || tab === 'rendiciones' || tab === 'acc-dup' || tab === 'prod-canon' || tab === 'ccanon' || tab === 'stock' || tab === 'compras' || tab === 'cc' || tab === 'tesoreria' || tab === 'margenes' || tab === 'facturacion' || tab === 'buffet' || tab === 'ccprod');
 
   // v13.73.0 — Buffet (TCK Food): cargar al abrir
   if (tab === 'buffet') {
@@ -20377,6 +20502,12 @@ function cambiarTab(tab) {
   if (tab === 'cc') {
     if (typeof ccCargar === 'function') ccCargar();
     var vcc = document.getElementById('view-cc'); if (vcc) vcc.scrollTop = 0;
+  }
+
+  // v13.92.0 — Cuenta Corriente del Producto: cargar al abrir
+  if (tab === 'ccprod') {
+    if (typeof ccprodCargar === 'function') ccprodCargar();
+    var vcp = document.getElementById('view-ccprod'); if (vcp) vcp.scrollTop = 0;
   }
 
   // v12.20.0 — Tesorería: cargar al abrir
@@ -21282,7 +21413,8 @@ function mostrarTabs() {
   _tckSetDisp('menu-mas-acc-dup',     puedeVer('acc-dup'));
   _tckSetDisp('menu-mas-prod-canon',  puedeVer('prod-canon'));
   _tckSetDisp('menu-mas-ccanon',      puedeVer('ccanon'));
-  _tckSetDisp('menu-mas-buffet',      puedeVer('buffet'));   // v13.88.0 — visible para admin/oficina + cobranzas (rediseño v13.89.0)
+  _tckSetDisp('menu-mas-buffet',      puedeVer('buffet'));
+  _tckSetDisp('menu-mas-ccprod',      puedeVer('ccprod'));   // v13.88.0 — visible para admin/oficina + cobranzas (rediseño v13.89.0)
 
   // Si el tab activo dejó de estar permitido para este rol, ir a Pedidos
   if (_tabActual && _tabActual !== 'pedidos' && !puedeVer(_tabActual)) cambiarTab('pedidos');
@@ -40700,7 +40832,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.101.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.102.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
