@@ -1,5 +1,11 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.96.0 — 29/06/2026
+     v13.96.0: BUFFET — reestructura en SUB-TABS internas (Resumen · Facturación ·
+               Costos · Recetas · Sub-recetas · Ingredientes · Stock). El contenido
+               existente se reubicó en panes (sin tocar buffetCargar — mismos ids).
+               Recetas/Sub-recetas/Ingredientes/Stock quedan como contenedores
+               "próximamente" (se llenan en v13.97-13.100). Barra sticky arriba.
      TCK ADMIN — v13.95.0 — 29/06/2026
      v13.95.0: BUFFET — Food cost drill-down (reaplicado SOBRE v13.94.0 zonas,
                que no toca el buffet). En el panel Precios, cada plato con receta
@@ -14826,6 +14832,13 @@ input.canales-exp-input[type="date"] {
   #view-buffet .bf-det-line.sc .di{ color:#991B1B; font-weight:700; }
   #view-buffet .bf-det-line.sc .dc{ color:#991B1B; font-weight:800; }
   #view-buffet .bf-det-tot{ display:flex; justify-content:space-between; font-size:10.5px; font-weight:800; color:#2C2416; border-top:1px dashed #E0D6C6; margin-top:5px; padding-top:5px; }
+  /* v13.96.0 — sub-tabs internas del tab Buffet */
+  #view-buffet .bf-subnav{ display:flex; overflow-x:auto; background:linear-gradient(135deg,#9A3412,#C2410C); padding:0 6px; -webkit-overflow-scrolling:touch; position:sticky; top:0; z-index:6; box-shadow:0 2px 6px rgba(0,0,0,.12); }
+  #view-buffet .bf-subnav::-webkit-scrollbar{ display:none; }
+  #view-buffet .bf-subnav button{ flex:0 0 auto; border:none; background:transparent; color:rgba(255,255,255,.72); font-family:inherit; font-size:12px; font-weight:800; padding:11px 12px 12px; cursor:pointer; border-bottom:3px solid transparent; white-space:nowrap; letter-spacing:.2px; }
+  #view-buffet .bf-subnav button.on{ color:#fff; border-bottom-color:#fff; }
+  #view-buffet .bf-pane{ display:none; }
+  #view-buffet .bf-pane.on{ display:block; }
 </style>
   <div class="bf-head">
     <h2>🍔 Buffet TCK Food</h2>
@@ -14837,35 +14850,77 @@ input.canales-exp-input[type="date"] {
       <button onclick="buffetSetRango('periodo',this)">Todo</button>
     </div>
   </div>
-  <div class="bf-kpis" id="bf-kpis"></div>
-  <div class="bf-sec" id="bf-fact-sec">
-    <h3>Facturación <span class="leg" id="bf-fact-head" style="font-weight:700"></span></h3>
-    <div class="bf-fact-resumen" id="bf-fact-resumen"></div>
-    <div class="bf-fact-alerta" id="bf-fact-alerta" style="display:none;"></div>
-    <div id="bf-fact-lista"></div>
+  <div class="bf-subnav" id="bf-subnav">
+    <button class="on" onclick="bfSubtab('resumen',this)">Resumen</button>
+    <button onclick="bfSubtab('fact',this)">Facturación</button>
+    <button onclick="bfSubtab('costos',this)">Costos</button>
+    <button onclick="bfSubtab('recetas',this)">Recetas</button>
+    <button onclick="bfSubtab('subrecetas',this)">Sub-recetas</button>
+    <button onclick="bfSubtab('ingr',this)">Ingredientes</button>
+    <button onclick="bfSubtab('stock',this)">Stock</button>
   </div>
-  <div class="bf-sec" id="bf-trab-sec" style="display:none;">
-    <h3>⚠ Productos que traban facturación <span class="leg" id="bf-trab-head" style="font-weight:700"></span></h3>
-    <div id="bf-trab-lista"></div>
-    <div class="bf-pc-foot">Cargá el <b>precio de última compra</b> de estos productos en Xubio (Compras → Productos de Compra) y reintentá. Es lo único que falta para que ARCA los acepte. Ordenados por cuántas ventas trabó cada uno.</div>
+
+  <!-- PANE: RESUMEN -->
+  <div class="bf-pane on" id="bfp-resumen">
+    <div class="bf-kpis" id="bf-kpis"></div>
+    <div class="bf-sec">
+      <h3>Ventas por día
+        <span class="leg"><i><span class="dot" style="background:#EA580C"></span>Buffet</i><i><span class="dot" style="background:#1E6B8C"></span>Playmatch</i></span>
+      </h3>
+      <div class="bf-dias" id="bf-dias"></div>
+    </div>
+    <div class="bf-sec"><h3>Medios de pago</h3><div id="bf-mp"></div></div>
+    <div class="bf-sec"><h3>Top productos <span class="leg" style="font-weight:700">por facturación</span></h3><div id="bf-top"></div></div>
+    <div class="bf-cp" id="bf-cp" style="display:none;"></div>
   </div>
-  <div class="bf-sec">
-    <h3>Ventas por día
-      <span class="leg"><i><span class="dot" style="background:#EA580C"></span>Buffet</i><i><span class="dot" style="background:#1E6B8C"></span>Playmatch</i></span>
-    </h3>
-    <div class="bf-dias" id="bf-dias"></div>
+
+  <!-- PANE: FACTURACIÓN -->
+  <div class="bf-pane" id="bfp-fact">
+    <div class="bf-sec" id="bf-fact-sec">
+      <h3>Facturación <span class="leg" id="bf-fact-head" style="font-weight:700"></span></h3>
+      <div class="bf-fact-resumen" id="bf-fact-resumen"></div>
+      <div class="bf-fact-alerta" id="bf-fact-alerta" style="display:none;"></div>
+      <div id="bf-fact-lista"></div>
+    </div>
+    <div class="bf-sec" id="bf-trab-sec" style="display:none;">
+      <h3>⚠ Productos que traban facturación <span class="leg" id="bf-trab-head" style="font-weight:700"></span></h3>
+      <div id="bf-trab-lista"></div>
+      <div class="bf-pc-foot">Cargá el <b>precio de última compra</b> de estos productos en Xubio (Compras → Productos de Compra) y reintentá. Es lo único que falta para que ARCA los acepte. Ordenados por cuántas ventas trabó cada uno.</div>
+    </div>
   </div>
-  <div class="bf-sec"><h3>Medios de pago</h3><div id="bf-mp"></div></div>
-  <div class="bf-sec"><h3>Top productos <span class="leg" style="font-weight:700">por facturación</span></h3><div id="bf-top"></div></div>
-  <div class="bf-sec" id="bf-prec-sec">
-    <h3>Precios y márgenes <span class="leg" id="bf-prec-head" style="font-weight:700"></span></h3>
-    <div class="bf-pc-resumen" id="bf-prec-resumen"></div>
-    <div class="bf-pc-alerta" id="bf-prec-alerta" style="display:none;"></div>
-    <div class="bf-pc-filtros" id="bf-prec-filtros"></div>
-    <div class="bf-pc-scroll" id="bf-prec-lista"></div>
-    <div class="bf-pc-foot">El precio de venta se edita en Toteat — esta vista es solo para decidir qué precio revisar. Food cost: <b>verde ≤40%</b> · <b>amarillo 41-60%</b> · <b>rojo &gt;60% o negativo</b> · gris sin costo cargado.</div>
+
+  <!-- PANE: COSTOS -->
+  <div class="bf-pane" id="bfp-costos">
+    <div class="bf-sec" id="bf-prec-sec">
+      <h3>Precios y márgenes <span class="leg" id="bf-prec-head" style="font-weight:700"></span></h3>
+      <div class="bf-pc-resumen" id="bf-prec-resumen"></div>
+      <div class="bf-pc-alerta" id="bf-prec-alerta" style="display:none;"></div>
+      <div class="bf-pc-filtros" id="bf-prec-filtros"></div>
+      <div class="bf-pc-scroll" id="bf-prec-lista"></div>
+      <div class="bf-pc-foot">El precio de venta se edita en Toteat — esta vista es solo para decidir qué precio revisar. Food cost: <b>verde ≤40%</b> · <b>amarillo 41-60%</b> · <b>rojo &gt;60% o negativo</b> · gris sin costo cargado.</div>
+    </div>
   </div>
-  <div class="bf-cp" id="bf-cp" style="display:none;"></div>
+
+  <!-- PANE: RECETAS (se construye en v13.99) -->
+  <div class="bf-pane" id="bfp-recetas">
+    <div class="bf-sec"><h3>Recetas</h3><div class="bf-fvacio">Próximamente — composición de los 161 platos.</div></div>
+  </div>
+
+  <!-- PANE: SUB-RECETAS (se construye en v13.100) -->
+  <div class="bf-pane" id="bfp-subrecetas">
+    <div class="bf-sec"><h3>Sub-recetas</h3><div class="bf-fvacio">Próximamente — los 9 sub-preparados (Prepizza, salsas, etc.).</div></div>
+  </div>
+
+  <!-- PANE: INGREDIENTES (se construye en v13.98) -->
+  <div class="bf-pane" id="bfp-ingr">
+    <div class="bf-sec"><h3>Ingredientes</h3><div class="bf-fvacio">Próximamente — 139 insumos · 30 sin costo.</div></div>
+  </div>
+
+  <!-- PANE: STOCK (se construye en v13.97) -->
+  <div class="bf-pane" id="bfp-stock">
+    <div class="bf-sec"><h3>Stock</h3><div class="bf-fvacio">Próximamente — inventario al día (248 productos).</div></div>
+  </div>
+
   <div class="bf-loading" id="bf-loading" style="display:none;">Cargando datos del buffet…</div>
 </div>
 
@@ -20344,6 +20399,17 @@ function buffetSetRango(r, btn){
   _bfRango = r;
   if (btn && btn.parentNode){ [].forEach.call(btn.parentNode.children, function(c){ c.classList.remove('on'); }); btn.classList.add('on'); }
   buffetCargar();
+}
+// v13.96.0 — navegación entre sub-tabs internas del buffet
+function bfSubtab(p, btn){
+  var nav = document.getElementById('bf-subnav');
+  if (nav) [].forEach.call(nav.children, function(b){ b.classList.remove('on'); });
+  if (btn) btn.classList.add('on');
+  ['resumen','fact','costos','recetas','subrecetas','ingr','stock'].forEach(function(x){
+    var pane = document.getElementById('bfp-'+x);
+    if (pane) pane.classList.toggle('on', x === p);
+  });
+  var v = document.getElementById('view-buffet'); if (v) v.scrollTop = 0;
 }
 function _bfHoy(){ var d = new Date(Date.now() - 3*3600000); return d.toISOString().slice(0,10); }
 function _bfRestarDias(yyyy_mm_dd, n){
@@ -40278,7 +40344,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.95.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.96.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
