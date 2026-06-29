@@ -1,5 +1,11 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.97.0 — 29/06/2026
+     v13.97.0: BUFFET — pane STOCK (sub-tab). Inventario al día desde
+               buffet_inventario (última fecha sincronizada de Toteat): resumen
+               (con stock / total productos / valuación aprox), buscador por
+               nombre, lista producto·stock final (suma de depósitos). Carga lazy
+               al abrir el sub-tab. Solo lectura.
      TCK ADMIN — v13.96.0 — 29/06/2026
      v13.96.0: BUFFET — reestructura en SUB-TABS internas (Resumen · Facturación ·
                Costos · Recetas · Sub-recetas · Ingredientes · Stock). El contenido
@@ -14839,6 +14845,14 @@ input.canales-exp-input[type="date"] {
   #view-buffet .bf-subnav button.on{ color:#fff; border-bottom-color:#fff; }
   #view-buffet .bf-pane{ display:none; }
   #view-buffet .bf-pane.on{ display:block; }
+  /* v13.97.0 — pane Stock */
+  #view-buffet .bf-stock-search{ width:100%; border:1px solid #EFE7DA; border-radius:9px; padding:9px 11px; font-family:inherit; font-size:13px; margin:0 0 10px; background:#fff; color:#2C2416; }
+  #view-buffet .bf-stock-search:focus{ outline:none; border-color:#C2410C; }
+  #view-buffet .bf-stock-row{ display:flex; align-items:center; gap:8px; padding:7px 10px; border-bottom:1px solid #F4EEE4; font-size:12px; }
+  #view-buffet .bf-stock-row:last-child{ border-bottom:none; }
+  #view-buffet .bf-stock-row .n{ flex:1; min-width:0; font-weight:600; color:#2C2416; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #view-buffet .bf-stock-row .q{ font-weight:800; color:#2C2416; flex-shrink:0; }
+  #view-buffet .bf-stock-row.cero .n{ color:#A09A8E; } #view-buffet .bf-stock-row.cero .q{ color:#B4A88E; }
 </style>
   <div class="bf-head">
     <h2>🍔 Buffet TCK Food</h2>
@@ -14916,9 +14930,12 @@ input.canales-exp-input[type="date"] {
     <div class="bf-sec"><h3>Ingredientes</h3><div class="bf-fvacio">Próximamente — 139 insumos · 30 sin costo.</div></div>
   </div>
 
-  <!-- PANE: STOCK (se construye en v13.97) -->
+  <!-- PANE: STOCK (v13.97.0) -->
   <div class="bf-pane" id="bfp-stock">
-    <div class="bf-sec"><h3>Stock</h3><div class="bf-fvacio">Próximamente — inventario al día (248 productos).</div></div>
+    <div class="bf-pc-resumen" id="bf-stock-resumen"></div>
+    <input class="bf-stock-search" id="bf-stock-search" type="text" placeholder="Buscar producto…" oninput="_bfStockFiltrar(this.value)">
+    <div class="bf-pc-scroll" id="bf-stock-lista" style="max-height:480px;"><div class="bf-fvacio">Tocá la pestaña para cargar el inventario.</div></div>
+    <div class="bf-pc-foot" id="bf-stock-foot"></div>
   </div>
 
   <div class="bf-loading" id="bf-loading" style="display:none;">Cargando datos del buffet…</div>
@@ -20409,7 +20426,66 @@ function bfSubtab(p, btn){
     var pane = document.getElementById('bfp-'+x);
     if (pane) pane.classList.toggle('on', x === p);
   });
+  // v13.97.0 — carga lazy por pane (solo la 1ª vez)
+  if (p === 'stock' && !_bfStockCargado){ _bfStockCargado = true; _bfStock(); }
   var v = document.getElementById('view-buffet'); if (v) v.scrollTop = 0;
+}
+
+// ═══ v13.97.0 — Pane STOCK (inventario al día, lectura · buffet_inventario) ═══
+var _bfStockCargado = false;
+var _bfStockData = [];
+async function _bfStock(){
+  var lst = document.getElementById('bf-stock-lista');
+  var res = document.getElementById('bf-stock-resumen');
+  if (!lst) return;
+  lst.innerHTML = '<div class="bf-fvacio">Cargando inventario…</div>';
+  try {
+    var u = await sbFetch('buffet_inventario?select=fecha&order=fecha.desc&limit=1');
+    var f = (Array.isArray(u) && u[0]) ? u[0].fecha : null;
+    if (!f){ lst.innerHTML = '<div class="bf-fvacio">Sin datos de inventario.</div>'; return; }
+    var rows = await sbFetchAll('buffet_inventario?fecha=eq.'+f+'&select=toteat_product_id,producto,unit,warehouse_id,final_inventory,cost_toteat&order=producto.asc', 1000, 3);
+    rows = Array.isArray(rows) ? rows : [];
+    var agg = {};   // sumar across depósitos por producto
+    rows.forEach(function(r){
+      var k = (r.toteat_product_id != null) ? ('id:'+r.toteat_product_id) : ('nm:'+(r.producto||''));
+      if (!agg[k]) agg[k] = { nombre:r.producto||'(sin nombre)', unit:r.unit||'', fin:0, val:0 };
+      var fin = Number(r.final_inventory)||0;
+      agg[k].fin += fin;
+      agg[k].val += fin * (Number(r.cost_toteat)||0);
+    });
+    _bfStockData = Object.keys(agg).map(function(k){ return agg[k]; });
+    var conStock = _bfStockData.filter(function(d){ return d.fin > 0; }).length;
+    var valTotal = _bfStockData.reduce(function(s,d){ return s + d.val; }, 0);
+    if (res) res.innerHTML =
+      '<div class="bf-pch ok"><div class="n">'+conStock+'</div><div class="l">Con stock</div></div>'+
+      '<div class="bf-pch gr"><div class="n">'+_bfStockData.length+'</div><div class="l">Productos</div></div>'+
+      '<div class="bf-pch gr"><div class="n" style="font-size:13px">'+_bfMoney(valTotal)+'</div><div class="l">Valuación aprox</div></div>';
+    var foot = document.getElementById('bf-stock-foot');
+    if (foot) foot.textContent = 'Inventario al ' + _bfDDMM(f) + ' · sincronizado de Toteat. Valuación = stock × costo Toteat (solo productos con costo cargado).';
+    _bfStockRender(_bfStockData);
+  } catch(e){
+    console.error('[buffet] stock:', e);
+    lst.innerHTML = '<div class="bf-fvacio">No se pudo cargar el inventario.</div>';
+  }
+}
+function _bfStockRender(arr){
+  var lst = document.getElementById('bf-stock-lista');
+  if (!lst) return;
+  var ord = arr.slice().sort(function(a,b){
+    if ((a.fin > 0) !== (b.fin > 0)) return (a.fin > 0) ? -1 : 1;   // con stock primero
+    return a.nombre.localeCompare(b.nombre);
+  });
+  if (!ord.length){ lst.innerHTML = '<div class="bf-fvacio">Sin resultados</div>'; return; }
+  lst.innerHTML = ord.map(function(d){
+    var cero = d.fin <= 0;
+    var q = cero ? '—' : (_bfCant(d.fin) + (d.unit ? ' ' + _bfEsc(d.unit) : ''));
+    return '<div class="bf-stock-row'+(cero?' cero':'')+'"><span class="n">'+_bfEsc(d.nombre)+'</span><span class="q">'+q+'</span></div>';
+  }).join('');
+}
+function _bfStockFiltrar(q){
+  q = (q || '').trim().toLowerCase();
+  if (!q){ _bfStockRender(_bfStockData); return; }
+  _bfStockRender(_bfStockData.filter(function(d){ return d.nombre.toLowerCase().indexOf(q) >= 0; }));
 }
 function _bfHoy(){ var d = new Date(Date.now() - 3*3600000); return d.toISOString().slice(0,10); }
 function _bfRestarDias(yyyy_mm_dd, n){
@@ -40344,7 +40420,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.96.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.97.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
