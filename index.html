@@ -1,5 +1,10 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.103.0 — 29/06/2026
+     v13.103.0: CUENTA CORRIENTE DEL PRODUCTO — la vista vw_cuenta_corriente_producto
+        ahora suma las DEVOLUCIONES como ingreso (+). Esta pantalla las muestra con
+        etiqueta propia "Devolucion" (verde). Aparecen recien cuando entran
+        devoluciones con items_json (tck-ventas v14.102.0+).
      TCK ADMIN — v13.102.0 — 29/06/2026
      v13.102.0: CUENTA CORRIENTE DEL PRODUCTO — pantalla nueva (tab oculto en
         "Mas", visible para dueno/operaciones/cobranzas → Roman, Valentina,
@@ -14695,6 +14700,7 @@ input.canales-exp-input[type="date"] {
     #view-ccprod .ccp-tag{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px}
     #view-ccprod .ccp-tag.compra{background:#e6f2e8;color:var(--green)}
     #view-ccprod .ccp-tag.venta{background:#fdeaea;color:var(--red)}
+    #view-ccprod .ccp-tag.devol{background:#e6f2e8;color:var(--green)}
     #view-ccprod .ccp-in{color:var(--green);font-weight:600}
     #view-ccprod .ccp-out{color:var(--red);font-weight:600}
     #view-ccprod .ccp-saldo{font-weight:700}
@@ -20446,7 +20452,7 @@ async function ccprodRender(){
       var entra=Number(m.entra)||0, sale=Number(m.sale)||0;
       saldo+=entra-sale; if(entra)ing+=entra; if(sale)egr+=sale;
       var f=String(m.fecha||"").slice(0,10).split("-").reverse().join("/");
-      var tag=m.tipo==="compra"?'<span class="ccp-tag compra">Compra</span>':'<span class="ccp-tag venta">Venta</span>';
+      var tag=m.tipo==="compra"?'<span class="ccp-tag compra">Compra</span>':(m.tipo==="devolucion"?'<span class="ccp-tag devol">Devoluci\u00f3n</span>':'<span class="ccp-tag venta">Venta</span>');
       return "<tr><td>"+f+"</td><td>"+tag+"</td><td class=\"ccp-ref\">"+_ccpEsc(m.detalle)+"</td>"+
              "<td class=\"num ccp-in\">"+(entra?("+"+_ccpNum(entra)):"")+"</td>"+
              "<td class=\"num ccp-out\">"+(sale?("−"+_ccpNum(sale)):"")+"</td>"+
@@ -40832,7 +40838,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.102.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.103.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
