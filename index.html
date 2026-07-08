@@ -1,5 +1,13 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.104.0 — 06/07/2026
+     v13.104.0: BAJAS DEL TOMADOR (pedido del equipo 06/07). Nuevo set
+               TOMADOR_DEPRECADOS + filtro al cargar (patrón de ventas
+               v12.1): Fino de Ave Cocida (se venció) y VERDURAS
+               CONGELADAS completas (se vencieron; la sección desaparece
+               sola). Reversible quitando el nombre del Set.
+               Espejo en catálogo v3.24.0 y ventas v14.108.0. Bocadito
+               Clasico y las veggie no estaban en el tomador del admin.
      TCK ADMIN — v13.103.1 — 02/07/2026
      v13.103.1: SESIÓN VENCIDA VISIBLE. Con el blindaje RLS de Supabase las
                tablas operativas ya NO aceptan la anon key: el fallback
@@ -25953,6 +25961,35 @@ const TOMADOR_CAT = [{"id":"pollos","sec":"POLLOS CONGELADOS","items":[{"n":"Pol
 
 const TOMADOR_SIN_STOCK = new Set(['MDM - Carne Molida de Pollo','Filet de Merluza Rebozado','Filet Merluza Finas Hierbas','Pollo A','Nuggets de Pollo Crocante','Bocadito de Papa y Jamon']);
 
+// v13.104.0 (6/7): productos DEPRECADOS — se filtran completamente del tomador
+// (patrón portado de ventas v12.1). Aplicar a productos que YA NO se venden,
+// no a faltantes temporales. Reversible: quitar el nombre del Set.
+const TOMADOR_DEPRECADOS = new Set([
+  'Fino de Ave Cocida',   // 6/7: se venció (pedido del equipo)
+  // 6/7: VERDURAS CONGELADAS completas — se vencieron. La sección
+  // queda vacía y se elimina sola en el filtro de abajo.
+  'Arándanos Solimeno',
+  'Brocoli',
+  'Espinacas',
+  'Morron',
+  'Primavera',
+  'Frutos Rojos',
+  'Cebolla'
+]);
+
+// Filtrar TOMADOR_CAT una sola vez al cargar; las secciones que queden
+// vacías se eliminan.
+(function _aplicarDeprecadosATomador() {
+  for (var i = TOMADOR_CAT.length - 1; i >= 0; i--) {
+    TOMADOR_CAT[i].items = TOMADOR_CAT[i].items.filter(function(it) {
+      return !TOMADOR_DEPRECADOS.has(it.n);
+    });
+    if (TOMADOR_CAT[i].items.length === 0) {
+      TOMADOR_CAT.splice(i, 1);
+    }
+  }
+})();
+
 var _tomadorQtys       = {}; // { nombreProducto: cantidad }
 var _tomadorCompetencia = {}; // { nombreProducto: { precio, competencia } }
 var _tomadorCatActual  = 'todos';
@@ -40863,7 +40900,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.103.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.104.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
