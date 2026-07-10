@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.104.0 — 06/07/2026
+     TCK ADMIN — v13.104.1 — 10/07/2026
+     v13.104.1: COOLDOWN del botón Sincronizar (Facturación). Antes se
+               re-habilitaba a los 4s pero el sync tarda 28-171s → los admin
+               lo apretaban 4-5 veces seguidas y encimaban syncs que bajan
+               ~544 presupuestos c/u, poniendo lenta la app para todos
+               (incidente 10/07). Ahora: al tocarlo queda gris con cuenta
+               regresiva de 5 min, persistida en localStorage (sobrevive a
+               recargas), + refrescos escalonados (30/60/90s) para ver el
+               resultado sin re-apretar. FC_SYNC_COOLDOWN_MIN configurable.
      v13.104.0: BAJAS DEL TOMADOR (pedido del equipo 06/07). Nuevo set
                TOMADOR_DEPRECADOS + filtro al cargar (patrón de ventas
                v12.1): Fino de Ave Cocida (se venció) y VERDURAS
@@ -39797,6 +39805,7 @@ async function fcCargar() {
 
     fcRender();
     fcBadge();
+    _fcSyncPintarBtn();   // v13.104.1 — refleja el cooldown del botón al abrir/refrescar el tab (sobrevive a recargas)
   } catch (e) {
     console.error('[FC] fcCargar', e);
     toast('Error cargando Facturación: ' + e.message, 'err');
@@ -40777,13 +40786,63 @@ function fcBadge() {
   if (t) { t.textContent = n > 0 ? (n > 99 ? '99+' : n) : ''; t.classList.toggle('on', n > 0); }
 }
 
-async function fcSync() {
+// ── v13.104.1 — COOLDOWN PERSISTENTE del botón Sincronizar (facturación) ──
+// Antes: el botón se re-habilitaba a los 4s, pero el sync tarda 28-171s y el
+// dato recién aparece a los ~90s → los admin lo apretaban 4-5 veces seguidas
+// creyendo que no andaba, disparando syncs encimados que bajan ~544 presupuestos
+// cada uno y ponían lenta la app para TODOS (incidente 10/07). Ahora: al tocarlo
+// queda gris con cuenta regresiva (FC_SYNC_COOLDOWN_MIN min), persistida en
+// localStorage para que sobreviva a recargas. Refrescos escalonados dan feedback
+// rápido (30/60/90s) así el admin ve el resultado sin necesidad de re-apretar.
+var FC_SYNC_COOLDOWN_MIN = 5;
+var FC_SYNC_COOLDOWN_MS  = FC_SYNC_COOLDOWN_MIN * 60 * 1000;
+var FC_SYNC_LS_KEY       = 'fc_sync_ultimo_ts';
+var _fcSyncTimer         = null;
+
+function _fcSyncMsRestante() {
+  var ts = parseInt(localStorage.getItem(FC_SYNC_LS_KEY) || '0', 10);
+  if (!ts) return 0;
+  var falta = FC_SYNC_COOLDOWN_MS - (Date.now() - ts);
+  return falta > 0 ? falta : 0;
+}
+
+// Pinta el botón según el cooldown vigente. Si falta tiempo, lo deja gris con
+// el contador regresivo y arranca un tick de 1s; si ya se puede, lo habilita.
+function _fcSyncPintarBtn() {
   var btn = document.getElementById('fc-sync-btn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Sincronizando…'; }
+  if (!btn) return;
+  var falta = _fcSyncMsRestante();
+  if (falta > 0) {
+    btn.disabled = true;
+    var s = Math.ceil(falta / 1000);
+    var mm = Math.floor(s / 60), ss = s % 60;
+    btn.textContent = '⏳ Esperá ' + mm + ':' + (ss < 10 ? '0' : '') + ss;
+    if (!_fcSyncTimer) _fcSyncTimer = setInterval(_fcSyncPintarBtn, 1000);
+  } else {
+    btn.disabled = false;
+    btn.textContent = '🔄 Sincronizar';
+    if (_fcSyncTimer) { clearInterval(_fcSyncTimer); _fcSyncTimer = null; }
+  }
+}
+
+async function fcSync() {
+  // Guard duro: si el cooldown sigue vigente (o alguien llama la función a mano),
+  // no dispara otro sync — avisa cuánto falta.
+  var falta = _fcSyncMsRestante();
+  if (falta > 0) {
+    var s = Math.ceil(falta / 1000), mm = Math.floor(s / 60), ss = s % 60;
+    toast('El sync corre solo cada 30 min. Podés forzarlo de nuevo en ' + mm + ':' + (ss < 10 ? '0' : '') + ss, 'ok');
+    _fcSyncPintarBtn();
+    return;
+  }
+
+  // Arranca el cooldown ANTES de disparar (persistente + pinta el botón gris).
+  localStorage.setItem(FC_SYNC_LS_KEY, String(Date.now()));
+  _fcSyncPintarBtn();
 
   // El sync del Apps Script puede tardar varios minutos. NO bloqueamos la app:
-  // lo disparamos, liberamos el botón enseguida y refrescamos desde Supabase
-  // a medida que entran los datos (el server ya tiene candado anti-solape).
+  // lo disparamos y refrescamos desde Supabase a medida que entran los datos
+  // (el server ya tiene candado anti-solape).
   var url = APPS_SCRIPT_URL + '?accion=xubioSyncVentasManual&porQuien=' + encodeURIComponent(vendedorActual || 'ADMIN');
   fetch(url)
     .then(function (r) { return r.json(); })
@@ -40799,8 +40858,11 @@ async function fcSync() {
     .catch(function (e) { console.error('[FC] fcSync', e); });
 
   toast('Sincronización iniciada. Los datos se actualizan en ~1–2 min.', 'ok');
-  setTimeout(function () { fcCargar(); }, 90000);   // refresco optimista mientras corre el sync
-  setTimeout(function () { if (btn) { btn.disabled = false; btn.textContent = '🔄 Sincronizar'; } }, 4000);
+  // Refrescos escalonados: feedback rápido para que el admin vea el resultado
+  // sin re-apretar (el botón igual sigue gris hasta cumplir el cooldown).
+  setTimeout(function () { fcCargar(); }, 30000);
+  setTimeout(function () { fcCargar(); }, 60000);
+  setTimeout(function () { fcCargar(); }, 90000);
 }
 
 // Badge del menú Más al abrir la app (sin entrar al tab): lo rojo se ve
@@ -40900,7 +40962,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.104.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.104.1';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
