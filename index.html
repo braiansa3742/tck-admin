@@ -1,5 +1,20 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.105.0 — 13/07/2026
+     v13.105.0: MEJORAS ADMINISTRACIÓN (reunión 13/07 — Valentina/Braian).
+        (1) TRANSFERENCIAS — buscador con debounce 400ms que CONSERVA el foco
+            y el cursor (antes cada letra repintaba todo el subtab y sacaba
+            el foco: no se podía tipear un nombre entero). Botón 🔄 propio.
+        (2) TRANSFERENCIAS/CHEQUES/DEVOLUCIONES/DEPÓSITO — el auto-refresh
+            global de 20s ya NO repinta estos subtabs de revisión manual
+            (volvían a "Cargando…" pisando scroll y foco mientras Valentina
+            miraba un comprobante). Se refrescan al entrar o con su botón.
+        (3) Nº DE FACTURA visible (pendiente 5): tarjetas de Transferencias,
+            filas de la rendición (rv) y tarjetas de Pedidos (chip 🧾 FC en
+            el head + fila en el detalle + línea en el panel Xubio). Fuente:
+            pedidos_zona.xubio_factura_nro (mapa de 45 días, 1 query en
+            cargarPedidos; lookups chunked en transferencias/rendición).
+            Sin factura → "🧾 sin factura" en rojo.
      TCK ADMIN — v13.104.1 — 10/07/2026
      v13.104.1: COOLDOWN del botón Sincronizar (Facturación). Antes se
                re-habilitaba a los 4s pero el sync tarda 28-171s → los admin
@@ -16527,6 +16542,7 @@ function _rvParseDet(e){
 }
 function _rvCobrado(c){ return _rvN(c.efectivo)+_rvN(c.transferencia)+_rvN(c.cheque); } // plata real (sin fiado)
 function _rvTotal(c){ return _rvCobrado(c)+_rvN(c.cuenta_corriente); }
+var _rvFactMap = {};   // v13.105: pedido_id → nº de factura (para ubicarla en Xubio)
 function _rvSumInc(instr){
   return _rvEnt.reduce(function(a,e){ return a+(_rvIncluir[e.id]?_rvN(_rvCobro[e.id][instr]):0); },0);
 }
@@ -16553,6 +16569,18 @@ async function rvCargar(){
       var devs = await _tesFetch("devoluciones?estado=eq.registrada&select=entrega_id,pedido_id&limit=1000") || [];
       devs.forEach(function(d){ if(d.pedido_id) pendPed[d.pedido_id]=true; if(d.entrega_id) pendEnt[d.entrega_id]=true; });
     } catch(_e){ console.warn('[rv] devoluciones pend', _e); }
+    // v13.105: nº de factura por pedido — administración lo pidió para ubicar la
+    // factura en Xubio cuando la fecha del viaje no coincide con la de emisión.
+    _rvFactMap = {};
+    try {
+      var pidsRv = [];
+      ents.forEach(function(e){ var p=String(e.pedido_id||''); if(p && pidsRv.indexOf(p)===-1) pidsRv.push(p); });
+      for (var ri = 0; ri < pidsRv.length; ri += 40) {
+        var idsRv = pidsRv.slice(ri, ri+40).map(function(x){ return '"'+x+'"'; }).join(',');
+        var pzr = await _tesFetch('pedidos_zona?select=pedido_id,xubio_factura_nro&xubio_factura_nro=not.is.null&pedido_id=in.(' + idsRv + ')') || [];
+        pzr.forEach(function(p){ if(p.xubio_factura_nro) _rvFactMap[String(p.pedido_id)] = p.xubio_factura_nro; });
+      }
+    } catch(_eF){ console.warn('[rv] mapa facturas', _eF); }
     _rvViajes = viajes.map(function(v){
       var es=porViaje[v.id]||[];
       var pend=es.filter(function(e){ return e.rendicion_estado!=='confirmada'; });
@@ -16696,6 +16724,9 @@ function rvRenderPanel(){
       '<div class="rv-chk'+(inc?' on':'')+'" onclick="rvToggleInc(\''+e.id+'\')">'+(inc?'✓':'')+'</div>'+
       '<div class="info"><div class="cli">'+_rvEsc(e.cliente||'—')+(e._sm?' <span style="font-size:9px;font-weight:800;color:#B71C1C;background:#FFCDD2;border-radius:5px;padding:1px 6px;vertical-align:middle;">SIN MARCAR</span>':'')+'</div>'+
         '<div class="meta">'+_rvEsc(e.ciudad||'')+(e.pedido_id?' · '+_rvEsc(e.pedido_id):'')+'</div>'+
+        (_rvFactMap[String(e.pedido_id||'')]
+          ? '<div class="meta" style="font-weight:800;color:#283593;">🧾 FC '+_rvEsc(_rvFactMap[String(e.pedido_id||'')])+'</div>'
+          : '<div class="meta" style="font-weight:700;color:#B71C1C;">🧾 sin factura</div>')+
         '<div class="rv-chips" id="rv-chips-'+e.id+'">'+chips.join('')+'</div>'+
         (edit?(
           '<div class="rv-editbox">'+_RV_INSTR.map(function(k){
@@ -17859,6 +17890,20 @@ function salir() {
 }
 
 // ── CARGAR PEDIDOS ───────────────────────────────────────────────
+// v13.105: mapa pedido_id → nº de factura (desde pedidos_zona, últimos 45 días).
+// Administración pidió ver el nº de FACTURA además del presupuesto: es el dato
+// con el que buscan el comprobante en Xubio cuando la fecha no coincide.
+var _factNroMap = {};
+async function _factMapCargar() {
+  try {
+    var d45 = new Date(Date.now() - 45 * 86400000).toISOString();
+    var rowsF = await sbFetch('pedidos_zona?select=pedido_id,xubio_factura_nro&xubio_factura_nro=not.is.null&creado_at=gte.' + encodeURIComponent(d45) + '&limit=5000') || [];
+    var mF = {};
+    rowsF.forEach(function(r) { if (r.pedido_id && r.xubio_factura_nro) mF[r.pedido_id] = r.xubio_factura_nro; });
+    _factNroMap = mF;
+  } catch (eF) { console.warn('[fact] mapa facturas no disponible:', eF.message || eF); }
+}
+
 async function cargarPedidos(silencioso) {
   silencioso = silencioso || false;
   if (!silencioso) document.getElementById('lista-pedidos').innerHTML =
@@ -17873,6 +17918,7 @@ async function cargarPedidos(silencioso) {
     // logica no cambia: los datos siguen estando listos antes de usarse.
     var _pNoDups     = (typeof dupCargarNoDuplicados === 'function') ? dupCargarNoDuplicados().catch(function(){}) : Promise.resolve();
     var _pSucursales = pedidoSucursalesMapCargar().catch(function(){});
+    var _pFacturas   = _factMapCargar().catch(function(){});   // v13.105: nº de factura por pedido
     var res = await fetch(SHEET_CSV_RECIENTES + '&t=' + Date.now());
     var csv = await res.text();
     console.log('[TCK] CSV recibido, líneas:', csv.trim().split('\n').length, 'chars:', csv.length);
@@ -17923,6 +17969,7 @@ async function cargarPedidos(silencioso) {
     // esperamos antes de la deteccion de duplicados (no bloquean si fallan).
     await _pSucursales;
     await _pNoDups;
+    await _pFacturas;   // v13.105: no bloquea si falló (catch interno)
 
     // Detectar duplicados — solo dentro del MISMO DÍA
     // MEJORA (fase A): solo marcar como duplicado si comparten algún producto.
@@ -18082,8 +18129,13 @@ async function cargarPedidos(silencioso) {
     if (!silencioso) document.getElementById('lista-pedidos').innerHTML =
       '<div class="empty">❌ Error al cargar pedidos.<br>Verificá tu conexión.</div>';
   }
-  // Siempre refrescar logística si está abierta (independiente de silencioso)
-  if (_tabActual === 'logistica') renderLogistica();
+  // Refrescar logística si está abierta (independiente de silencioso) — SALVO
+  // los subtabs de revisión manual (transferencias/cheques/devoluciones/depósito):
+  // v13.105 — cada uno recarga sus propios datos al renderizar, y el auto-refresh
+  // de 20s los volvía a "Cargando..." pisando scroll/foco mientras administración
+  // revisaba un comprobante. Se refrescan al entrar al subtab o con su botón 🔄.
+  var _logTabsManuales = ['transferencias', 'cheques', 'devoluciones', 'deposito'];
+  if (_tabActual === 'logistica' && _logTabsManuales.indexOf(_logTab) === -1) renderLogistica();
 }
 
 function esFechaEntregaValida(s) {
@@ -19645,6 +19697,7 @@ function renderCard(p) {
         '<div class="pedido-id">' + p.pedidoId + '</div>' +
         '<div class="pedido-cliente">' + origenIconHtml(p) + (p.cliente||'(sin nombre)') + acuBadgeHtml(p) + '</div>' +
         (p.fechaEntrega ? '<div style="display:inline-flex;align-items:center;gap:4px;background:' + (p.turnoEntrega==='Mañana'?'#E3F2FD':'#FFF3E0') + ';color:' + (p.turnoEntrega==='Mañana'?'#1565C0':'#E65100') + ';border-radius:20px;padding:2px 8px;font-family:Barlow Condensed,sans-serif;font-size:11px;font-weight:800;margin-top:3px;">' + (p.turnoEntrega==='Mañana'?'🌅':'🌆') + ' ' + p.fechaEntrega + ' · ' + (p.turnoEntrega||'') + '</div>' : '') +
+        (_factNroMap[p.pedidoId] ? '<div style="display:inline-flex;align-items:center;gap:4px;background:#E8EAF6;color:#283593;border-radius:20px;padding:2px 8px;font-family:Barlow Condensed,sans-serif;font-size:11px;font-weight:800;margin-top:3px;margin-left:4px;">🧾 FC ' + _factNroMap[p.pedidoId] + '</div>' : '') +
         '<div class="pedido-comercio">' + (p.comercio ? '🏪 '+p.comercio+' · ' : '') + (function(){
           // v8.2 admin: si el pedido tiene sucursal vinculada, mostrarla
           var suc = pedidoSucursalDeMapa(p.pedidoId);
@@ -19677,6 +19730,8 @@ function renderCard(p) {
       '<div class="pedido-detalle-row"><span class="pdr-label">Productos</span><span class="pdr-val">' + p.items + ' unidades</span></div>' +
       '<div class="pedido-detalle-row"><span class="pdr-label">Total</span><span class="pdr-val" style="color:var(--red);font-family:\'Barlow Condensed\',sans-serif;font-size:18px;font-weight:900;">' + fmtTotal(p.total) + '</span></div>' +
       '<div class="pedido-detalle-row"><span class="pdr-label">Fecha/Hora</span><span class="pdr-val">' + p.fechaHora + '</span></div>' +
+      (p.xubioNroPresupuesto ? '<div class="pedido-detalle-row"><span class="pdr-label">Presupuesto</span><span class="pdr-val">N° ' + p.xubioNroPresupuesto + '</span></div>' : '') +
+      (_factNroMap[p.pedidoId] ? '<div class="pedido-detalle-row"><span class="pdr-label">🧾 Factura</span><span class="pdr-val" style="font-weight:800;color:#283593;">' + _factNroMap[p.pedidoId] + '</span></div>' : '') +
       (detalle ? '<div class="pedido-productos">' + detalle + '</div>' : '') +
       (p.estado === 'En revisión' && p.nota && p.nota.includes('DESCUENTOS:') ? (function(){ var m = p.nota.match(/DESCUENTOS: (.+?)(?:\|\||$)/); return '<div class="revision-info"><strong>🔍 Pedido con descuento — requiere aprobación</strong>' + (m ? m[1].trim() : '') + '</div>'; })() : '') +
       dupAlert +
@@ -31571,7 +31626,7 @@ async function _transferAjustarGuardar(id, valStr, conciliar, modalEl) {
 // Columnas nuevas en entregas: transfer_exportada_en, transfer_disputa,
 // transfer_disputa_en (SQL corrido 10/06/2026).
 
-var _ltState = { rows: [], mp: [], docPorEntrega: {}, xidPorEntrega: {}, alias: {}, nombrePorDoc: {}, nombrePorXid: {}, match: {}, ocrDup: {}, chofer: '', q: '', el: null };
+var _ltState = { rows: [], mp: [], docPorEntrega: {}, xidPorEntrega: {}, alias: {}, nombrePorDoc: {}, nombrePorXid: {}, match: {}, ocrDup: {}, factPorPedido: {}, chofer: '', q: '', qRaw: '', el: null };
 
 function _ltMontoTransfer(e) {
   var m = parseFloat(e.monto) || 0;
@@ -31630,12 +31685,20 @@ async function renderLogisticaTransferencias(el) {
     _ltState.docPorEntrega = {};
     try {
       var noConc = rows.filter(function(e) { return !e.transfer_conciliada; });
+      // v13.105: se buscan también las conciliadas visibles (primeras 60) para
+      // poder mostrar el nº de factura en TODAS las tarjetas (pendiente 5 —
+      // Valentina lo usa para ubicar la factura en Xubio al conciliar).
+      var concVis = rows.filter(function(e) { return e.transfer_conciliada; }).slice(0, 60);
       var pidsLk = [];
-      noConc.forEach(function(e) { var p = String(e.pedido_id || ''); if (p && pidsLk.indexOf(p) === -1) pidsLk.push(p); });
+      noConc.concat(concVis).forEach(function(e) { var p = String(e.pedido_id || ''); if (p && pidsLk.indexOf(p) === -1) pidsLk.push(p); });
       var xidPorPedido = {};
+      _ltState.factPorPedido = {};
       for (var li = 0; li < pidsLk.length; li += 40) {
-        var pzl = await _lzSbFetch('pedidos_zona?select=pedido_id,cliente_xubio_id&pedido_id=in.' + encodeURIComponent(_lzInList(pidsLk.slice(li, li + 40)))) || [];
-        pzl.forEach(function(p) { if (p.cliente_xubio_id) xidPorPedido[String(p.pedido_id)] = String(p.cliente_xubio_id); });
+        var pzl = await _lzSbFetch('pedidos_zona?select=pedido_id,cliente_xubio_id,xubio_factura_nro&pedido_id=in.' + encodeURIComponent(_lzInList(pidsLk.slice(li, li + 40)))) || [];
+        pzl.forEach(function(p) {
+          if (p.cliente_xubio_id) xidPorPedido[String(p.pedido_id)] = String(p.cliente_xubio_id);
+          if (p.xubio_factura_nro) _ltState.factPorPedido[String(p.pedido_id)] = p.xubio_factura_nro;
+        });
       }
       var xidsLk = [];
       Object.keys(xidPorPedido).forEach(function(k) { var v = xidPorPedido[k]; if (xidsLk.indexOf(v) === -1) xidsLk.push(v); });
@@ -31854,7 +31917,16 @@ function _ltMovTxt(m) {
 }
 
 function _ltFiltroChofer(v) { _ltState.chofer = v || ''; _ltPintar(); }
-function _ltFiltroQ(v) { _ltState.q = (v || '').toLowerCase(); _ltPintar(); }
+// v13.105: el buscador se reconstruye en cada _ltPintar y perdía el foco con
+// cada letra (no se podía tipear un nombre entero). Debounce de 400ms +
+// restauración de foco/cursor dentro de _ltPintar (input #lt-q).
+var _ltQTimer = null;
+function _ltFiltroQ(v) {
+  _ltState.qRaw = v || '';
+  _ltState.q = (v || '').toLowerCase();
+  if (_ltQTimer) clearTimeout(_ltQTimer);
+  _ltQTimer = setTimeout(function() { _ltQTimer = null; _ltPintar(); }, 400);
+}
 
 function _ltPintar() {
   var el = _ltState.el; if (!el) return;
@@ -31897,10 +31969,18 @@ function _ltPintar() {
   html += '<option value=""' + (!_ltState.chofer ? ' selected' : '') + '>🚚 Todos los choferes</option>';
   choferes.forEach(function(c) { html += '<option value="' + c.replace(/"/g, '') + '"' + (_ltState.chofer === c ? ' selected' : '') + '>' + c + '</option>'; });
   html += '</select>';
-  html += '<input type="text" placeholder="🔍 Cliente..." value="' + (_ltState.q || '').replace(/"/g, '') + '" oninput="_ltFiltroQ(this.value)" style="flex:1.4;padding:9px 10px;border:1.5px solid #E0E0E0;border-radius:9px;font-family:inherit;font-size:13px;">';
+  html += '<input type="text" id="lt-q" placeholder="🔍 Cliente..." value="' + (_ltState.qRaw || _ltState.q || '').replace(/"/g, '') + '" oninput="_ltFiltroQ(this.value)" style="flex:1.4;padding:9px 10px;border:1.5px solid #E0E0E0;border-radius:9px;font-family:inherit;font-size:13px;">';
+  html += '<button onclick="renderLogistica()" title="Actualizar" style="flex-shrink:0;padding:9px 12px;border:1.5px solid #E0E0E0;background:#fff;border-radius:9px;font-size:14px;cursor:pointer;">🔄</button>';
   html += '</div>';
 
   html += '<div style="font-size:12px;color:var(--text3);margin-bottom:12px;line-height:1.4;">Mirá el comprobante y cruzalo contra el banco / Mercado Pago. Si la plata entró → <b>Conciliada</b>. Si NO figura → <b>⚠️ No acreditó</b> y queda en Reclamar.</div>';
+
+  // v13.105: nº de factura del pedido en cada tarjeta (pendiente 5 — Valentina)
+  function lineaFactura(e) {
+    var fN = _ltState.factPorPedido[String(e.pedido_id || '')] || '';
+    if (fN) return '<div style="font-size:11px;font-weight:800;color:#283593;margin-top:2px;">🧾 FC ' + String(fN).replace(/</g, '&lt;') + '</div>';
+    return '<div style="font-size:11px;font-weight:700;color:#B71C1C;margin-top:2px;">🧾 sin factura</div>';
+  }
 
   function btnFoto(e) {
     if (e.comprobante_transfer) {
@@ -31919,7 +31999,7 @@ function _ltPintar() {
     var s = '<div style="background:#fff;border:1.5px solid #E0E0E0;border-left:4px solid ' + accent + ';border-radius:12px;padding:12px 14px;margin-bottom:10px;">';
     s += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">';
     s += '<div style="min-width:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:17px;font-weight:900;color:var(--text);">' + (e.cliente || '—') + '</div>';
-    s += '<div style="font-size:11px;color:var(--text3);">🚚 ' + (e.chofer || '—') + ' · 📍 ' + (e.ciudad || '—') + ' · ' + fecha + '</div></div>';
+    s += '<div style="font-size:11px;color:var(--text3);">🚚 ' + (e.chofer || '—') + ' · 📍 ' + (e.ciudad || '—') + ' · ' + fecha + '</div>' + lineaFactura(e) + '</div>';
     s += '<div style="text-align:right;flex-shrink:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:' + accent + ';">' + fmt(monto) + '</div>';
     if (agingTxt) s += '<div style="font-size:11px;font-weight:800;color:' + agingColor + ';">⏱ ' + agingTxt + '</div>';
     s += '</div></div>';
@@ -31978,7 +32058,7 @@ function _ltPintar() {
     var s = '<div style="background:#FFF8F0;border:1.5px solid #FFCC80;border-left:4px solid #E65100;border-radius:12px;padding:12px 14px;margin-bottom:10px;">';
     s += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">';
     s += '<div style="min-width:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:17px;font-weight:900;color:var(--text);">' + (e.cliente || '—') + '</div>';
-    s += '<div style="font-size:11px;color:var(--text3);">🚚 ' + (e.chofer || '—') + ' · 📍 ' + (e.ciudad || '—') + ' · ' + fecha + '</div>';
+    s += '<div style="font-size:11px;color:var(--text3);">🚚 ' + (e.chofer || '—') + ' · 📍 ' + (e.ciudad || '—') + ' · ' + fecha + '</div>' + lineaFactura(e);
     s += '<div style="font-size:12px;color:#E65100;font-weight:700;margin-top:4px;">⚠️ ' + String(e.transfer_disputa || '').replace(/</g, '&lt;') + (diasR !== null ? ' · en reclamo hace ' + diasR + ' día' + (diasR === 1 ? '' : 's') : '') + '</div></div>';
     s += '<div style="text-align:right;flex-shrink:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:#E65100;">' + fmt(monto) + '</div></div>';
     s += '</div>';
@@ -32022,7 +32102,7 @@ function _ltPintar() {
     var s = '<div style="background:#F1F8E9;border:1.5px solid #E0E0E0;border-left:4px solid #2E7D32;border-radius:12px;padding:12px 14px;margin-bottom:10px;">';
     s += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">';
     s += '<div style="min-width:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:17px;font-weight:900;color:var(--text);">' + (e.cliente || '—') + '</div>';
-    s += '<div style="font-size:11px;color:var(--text3);">🚚 ' + (e.chofer || '—') + ' · 📍 ' + (e.ciudad || '—') + ' · ' + fecha + '</div>';
+    s += '<div style="font-size:11px;color:var(--text3);">🚚 ' + (e.chofer || '—') + ' · 📍 ' + (e.ciudad || '—') + ' · ' + fecha + '</div>' + lineaFactura(e);
     var pillMP = movVinc ? ' <span style="font-size:11px;font-weight:800;color:#283593;background:#E8EAF6;border-radius:7px;padding:3px 8px;">🔗 MP ' + new Date(movVinc.fecha).toLocaleDateString('es-AR') + '</span>' : '';
     s += '<div style="margin-top:5px;">' + pillExp + pillMP + '</div></div>';
     s += '<div style="text-align:right;flex-shrink:0;"><div style="font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900;color:#2E7D32;">' + fmt(monto) + '</div></div>';
@@ -32094,7 +32174,18 @@ function _ltPintar() {
     if (huerf.length > 30) html += '<div style="font-size:12px;color:var(--text3);text-align:center;padding:6px;">… y ' + (huerf.length - 30) + ' más (los más recientes primero)</div>';
     html += '</details>';
   }
+  // v13.105: preservar foco y cursor del buscador (#lt-q) a través del repintado
+  var _qAct = document.activeElement;
+  var _qFoco = !!(_qAct && _qAct.id === 'lt-q');
+  var _qPos = _qFoco ? _qAct.selectionStart : null;
   el.innerHTML = html;
+  if (_qFoco) {
+    var _qi = document.getElementById('lt-q');
+    if (_qi) {
+      _qi.focus();
+      try { if (_qPos !== null) _qi.setSelectionRange(_qPos, _qPos); } catch (_eSel) {}
+    }
+  }
 }
 
 // v13.21: movimientos entrantes sin vincular y que no son candidato de nadie
@@ -34983,6 +35074,7 @@ function buildXubioPanel(p, id) {
       + '<div class="xubio-done-card">'
       +   '<div class="xubio-done-info">'
       +     '<div class="xubio-done-num">Presupuesto N° ' + p.xubioNroPresupuesto + '</div>'
+      +     (_factNroMap[p.pedidoId] ? '<div class="xubio-done-num" style="color:#283593;">🧾 Factura ' + _factNroMap[p.pedidoId] + '</div>' : '')
       +     '<div class="xubio-done-meta">El admin lo convertirá en remito desde Xubio.</div>'
       +   '</div>'
       +   '<a href="https://xubio.com/NXV/ventas/presupuestos" target="_blank" class="xubio-done-link">Ver en Xubio →</a>'
