@@ -1,5 +1,17 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.106.0 — 15/07/2026
+     v13.106.0: EDITOR DE PRECIOS desacoplado del Sheet (front directo a
+        Supabase). Al Aplicar un precio en el tab Márgenes, ahora se escribe
+        SIEMPRE productos_canonicos.precio_actual por PATCH directo (con el
+        JWT del admin). El Sheet (hoja Productos) + la lista Xubio quedan como
+        best-effort via Apps Script: si el producto no tiene fila en el Sheet,
+        el Apps Script aborta pero YA NO importa (el precio real quedó en
+        canónicos). Arregla el error "No encontré X en la hoja Productos" que
+        impedía cambiar precios de Tapa Manía, Pastas La Caseriana y cualquier
+        proveedor nuevo. Un solo punto tocado: aplicarPrecioTierAware (la usan
+        el editor manual mgPrecioConfirmar Y las sugerencias mgSugAprobar).
+        (Nota: v13.105.0 se deployó con TCK_UPD_LOCAL sin bumpear; corregido.)
      TCK ADMIN — v13.105.0 — 13/07/2026
      v13.105.0: MEJORAS ADMINISTRACIÓN (reunión 13/07 — Valentina/Braian).
         (1) TRANSFERENCIAS — buscador con debounce 400ms que CONSERVA el foco
@@ -38078,16 +38090,21 @@ function mgSugRender(){
 }
 
 // Aplica precioNuevo respetando tramos: si el producto tiene tramos, sube TODOS
-// el mismo $ (mantiene el gap por comprar suelto). Después escribe Sheet+canónicos+
-// Xubio+mail con actualizarPrecioVenta (precio de caja). Devuelve el JSON del AS.
+// el mismo $ (mantiene el gap por comprar suelto). v13.106.0: escribe la FUENTE
+// DE VERDAD (productos_canonicos.precio_actual) por PATCH directo a Supabase; el
+// Sheet + lista Xubio quedan best-effort via actualizarPrecioVenta. Devuelve un
+// objeto {status, producto, precioAnterior, precioNuevo, xubio_lista}.
 async function aplicarPrecioTierAware(canonicoId, producto, precioNuevo){
+  precioNuevo = Math.round(Number(precioNuevo) || 0);
+
+  // 1) Tramos (front directo, sin cambios): sube todos manteniendo el gap suelto/caja
   if (canonicoId != null){
     var tramos = await sbFetch('producto_tramos?producto_id=eq.' + canonicoId +
       '&activo=eq.true&zona=eq.todas&select=id,cantidad_min,precio');
     if (Array.isArray(tramos) && tramos.length){
       var caja = tramos[0];   // caja = mayor cantidad_min (lo que ancla la sugerencia)
       for (var i=1;i<tramos.length;i++){ if (Number(tramos[i].cantidad_min) > Number(caja.cantidad_min)) caja = tramos[i]; }
-      var delta = Math.round(Number(precioNuevo) - Number(caja.precio));
+      var delta = Math.round(precioNuevo - Number(caja.precio));
       if (delta !== 0){
         for (var k=0;k<tramos.length;k++){
           await sbFetch('producto_tramos?id=eq.' + tramos[k].id,
@@ -38096,10 +38113,47 @@ async function aplicarPrecioTierAware(canonicoId, producto, precioNuevo){
       }
     }
   }
-  var r = await fetch(APPS_SCRIPT_URL + '?accion=actualizarPrecioVenta&producto=' +
-    encodeURIComponent(producto) + '&precioNuevo=' + Math.round(precioNuevo) +
-    '&porQuien=' + encodeURIComponent('Aprobación precios'));
-  return await r.json();
+
+  // 2) FUENTE DE VERDAD (v13.106.0 — front directo, ya NO depende del Sheet):
+  //    escribe precio_actual en productos_canonicos SIEMPRE. Antes esto lo
+  //    hacía el Apps Script (actualizarPrecioVenta) y abortaba con productos
+  //    sin fila en la hoja Productos del Sheet (Tapa Manía, Pastas La Caseriana,
+  //    cualquier proveedor nuevo) → el precio no cambiaba en ningún lado.
+  var precioAnterior = null;
+  var _cidReal = canonicoId;
+  if (_cidReal == null){
+    // Fallback defensivo por nombre exacto (la vista de márgenes SIEMPRE trae
+    // canonico_id, así que esto casi nunca corre).
+    var byName = await sbFetch('productos_canonicos?nombre=eq.' + encodeURIComponent(producto) + '&select=id,precio_actual');
+    if (Array.isArray(byName) && byName.length){ _cidReal = byName[0].id; precioAnterior = Number(byName[0].precio_actual); }
+    else return { status:'error', message:'No encontré "' + producto + '" en productos_canonicos.' };
+  } else {
+    var actual = await sbFetch('productos_canonicos?id=eq.' + _cidReal + '&select=precio_actual');
+    if (Array.isArray(actual) && actual.length) precioAnterior = Number(actual[0].precio_actual);
+  }
+
+  if (precioAnterior !== null && Math.round(precioAnterior) === precioNuevo){
+    return { status:'sin_cambio', message:'El precio ya estaba en ' + precioNuevo + '.',
+             producto:producto, precioAnterior:precioAnterior, precioNuevo:precioNuevo };
+  }
+
+  await sbFetch('productos_canonicos?id=eq.' + _cidReal,
+    { method:'PATCH', body: JSON.stringify({ precio_actual: precioNuevo, precio_actualizado_at: new Date().toISOString() }) });
+
+  // 3) BEST-EFFORT: hoja Productos del Sheet + lista de precios Xubio via Apps
+  //    Script. Si el producto no tiene fila en el Sheet, el Apps Script aborta:
+  //    lo ignoramos porque el precio REAL ya quedó en canónicos (paso 2).
+  var xubioLista = '';
+  try {
+    var r = await fetch(APPS_SCRIPT_URL + '?accion=actualizarPrecioVenta&producto=' +
+      encodeURIComponent(producto) + '&precioNuevo=' + precioNuevo +
+      '&porQuien=' + encodeURIComponent('Aprobación precios'));
+    var jAS = await r.json();
+    if (jAS && jAS.xubio_lista) xubioLista = String(jAS.xubio_lista);
+  } catch(e){ /* Sheet/Xubio best-effort: no bloquea el cambio de precio */ }
+
+  return { status:'ok', producto:producto, precioAnterior:precioAnterior,
+           precioNuevo:precioNuevo, xubio_lista:xubioLista };
 }
 
 async function mgSugAprobar(id){
@@ -38561,7 +38615,7 @@ async function mgPrecioConfirmar(){
       ok.disabled = false; ok.textContent = '💲 Aplicar';
     }
   } catch(e){
-    st.textContent = '❌ Sin conexión con el Apps Script: ' + (e.message || e);
+    st.textContent = '❌ No se pudo aplicar: ' + (e.message || e);
     ok.disabled = false; ok.textContent = '💲 Aplicar';
   }
 }
@@ -41054,7 +41108,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.104.1';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.106.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
