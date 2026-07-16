@@ -1,5 +1,11 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.113.0 — 16/07/2026
+     v13.113.0: TESORERÍA — el modal de pagos matchea cada pago con la factura de
+        compra real de Xubio por monto exacto (ventana 90 días previos al vto) y
+        muestra N° de documento + proveedor Xubio. Lee vw_pagos_proyectados_detalle
+        (crear en Supabase + GRANT). Reaplicado sobre la 13.112.0. Sueldos/impuestos/
+        servicios sin factura no muestran match.
      TCK ADMIN — v13.111.0 — 16/07/2026
      v13.111.0: PULSO — botón ⬇ Excel en la sección Proyección (descarga el
         proyectado 30 días a .xlsx con SheetJS, para que Roman lo reenvíe a Gastón).
@@ -38199,7 +38205,7 @@ async function tesAbrirModalPagos(dia) {
   document.body.style.overflow = 'hidden';
 
   var _pagos = null;
-  try { _pagos = await _tesFetch('caja_pagos_proyectados?fecha_vto=eq.' + dia + '&order=importe.desc.nullslast'); } catch (e) { _pagos = null; }
+  try { _pagos = await _tesFetch('vw_pagos_proyectados_detalle?fecha_vto=eq.' + dia + '&order=importe.desc.nullslast'); } catch (e) { _pagos = null; }
 
   var html = '';
   if (_pagos && _pagos.length) {
@@ -38213,11 +38219,14 @@ async function tesAbrirModalPagos(dia) {
         : (cond === 'pendiente' ? '<span style="font-size:10px;font-weight:800;color:#B45309;background:#FFF4E5;border-radius:6px;padding:1px 6px;margin-left:6px;">PENDIENTE</span>' : '');
       var sub = []; if (p.concepto) sub.push(p.concepto); if (p.medio_pago) sub.push(p.medio_pago);
       var subTxt = sub.join(' \u00b7 ');
+      var factHtml = '';
+      if (p.facturas) { var _etq = (p.n_facturas > 1 ? (p.n_facturas + ' facturas') : 'Factura'); factHtml = '<div style="font-size:11px;color:#1E8449;font-weight:700;margin-top:2px;">🧾 ' + _etq + ': ' + p.facturas + (p.prov_xubio ? ' \u00b7 ' + p.prov_xubio : '') + '</div>'; }
       html += '<div class="tes-modal-pago">'
         + '<div class="tes-modal-pago-icon">' + icon + '</div>'
         + '<div class="tes-modal-pago-body">'
           + '<div class="tes-modal-pago-prov">' + prov + badge + '</div>'
           + (subTxt ? '<div style="font-size:11.5px;color:#8A7B63;margin-top:2px;">' + subTxt + '</div>' : '')
+          + factHtml
         + '</div>'
         + '<div class="tes-modal-pago-monto">$' + _tesFmtMontoEntero(monto) + '</div>'
       + '</div>';
@@ -41654,7 +41663,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.112.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.113.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
