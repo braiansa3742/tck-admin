@@ -1,5 +1,11 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.110.0 — 16/07/2026
+     v13.110.0: PULSO — nueva sección "Proyección de ventas · 30 días" que lee la
+        vista viva vw_proyeccion_ventas (base por día de semana + tendencia editable
+        en tck_proy_config). Muestra total c/IVA, neto y piso conservador, más el
+        día a día con barras. Es venta por salida = facturación en monto; el mes
+        cierra contra Xubio, el día no. Requiere GRANT SELECT de la vista al rol API.
      TCK ADMIN — v13.109.0 — 16/07/2026
      v13.109.0: PULSO — nueva pestaña (menú Más) con la venta real y la salud
         del circuito. Titular = proyección de cierre de mes desde SALIDAS (venta),
@@ -20670,8 +20676,10 @@ async function pulsoCargar() {
   try {
     var cArr = await sbFetch('vw_pulso_cierre?select=*');
     var sArr = await sbFetch('vw_pulso_salud?select=*');
+    var pvArr = await sbFetch('vw_proyeccion_ventas?select=*&order=dia.asc');
     var c = (cArr && cArr[0]) || {};
     var s = (sArr && sArr[0]) || {};
+    var pv = pvArr || [];
 
     function m1(n){ n = Number(n)||0; return '$' + (n/1e6).toFixed(1).replace('.',',') + 'M'; }
     function full(n){ n = Math.round(Number(n)||0); return '$' + n.toLocaleString('es-AR'); }
@@ -20697,6 +20705,33 @@ async function pulsoCargar() {
     html += '<div style="margin-top:12px;padding-top:11px;border-top:1px solid #EADFCB;font-size:13px;color:#5C5044;">Vendido al d\u00eda (salidas): <b>' + m1(c.salidas_mtd_civa) + '</b> c/IVA \u00b7 d\u00eda <b>' + (c.dias_venta_transcurridos||'\u2014') + '</b> de <b>' + (c.dias_venta_totales||'\u2014') + '</b> de venta</div>';
     html += '<div style="margin-top:6px;font-size:11.5px;color:#A89A85;line-height:1.4;">Proyectado desde las <b>salidas reales</b> (lo que se vende), no desde el facturado \u2014 que va rezagado por el ciclo de facturaci\u00f3n. Dividir el facturado a la fecha da un n\u00famero falso y bajo.</div>';
     html += '</div>';
+
+    // Proyecci\u00f3n de ventas 30 d\u00edas (vw_proyeccion_ventas)
+    if (pv && pv.length) {
+      var _pvC=0,_pvN=0,_pvP=0,_pvMax=0;
+      pv.forEach(function(r){ var v=Number(r.venta_civa)||0; _pvC+=v; _pvN+=Number(r.venta_neto)||0; _pvP+=Number(r.piso_civa)||0; if(v>_pvMax)_pvMax=v; });
+      html += '<div style="background:#fff;border:1px solid #EADFCB;border-radius:16px;padding:18px;margin-bottom:16px;">';
+      html += '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#8A7B63;margin-bottom:10px;">Proyecci\u00f3n de ventas \u00b7 pr\u00f3ximos 30 d\u00edas</div>';
+      html += '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px;">';
+      html += '<div style="flex:1;min-width:120px;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:38px;line-height:1;color:#1E8449;">'+m1(_pvC)+'</div><div style="font-size:11.5px;color:#8A7B63;margin-top:2px;">c/IVA \u00b7 venta</div></div>';
+      html += '<div style="flex:1;min-width:105px;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:26px;line-height:1;color:#1A0800;">'+m1(_pvN)+'</div><div style="font-size:11.5px;color:#8A7B63;margin-top:2px;">neto</div></div>';
+      html += '<div style="flex:1;min-width:105px;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:26px;line-height:1;color:#B45309;">'+m1(_pvP)+'</div><div style="font-size:11.5px;color:#8A7B63;margin-top:2px;">piso (caja)</div></div>';
+      html += '</div>';
+      html += '<div style="font-size:11px;color:#A89A85;line-height:1.4;margin-bottom:12px;">Venta por salida = facturaci\u00f3n en monto (nada sale sin factura). El total del mes cierra contra Xubio; el d\u00eda no (la factura va \u00b11 d\u00eda). La plata entra por cobranza.</div>';
+      html += '<div style="max-height:340px;overflow-y:auto;border-top:1px solid #F2EDE3;padding-top:6px;">';
+      pv.forEach(function(r){
+        var v=Number(r.venta_civa)||0; if(v<=0) return;
+        var w=_pvMax>0?Math.round(100*v/_pvMax):0;
+        var dd=r.dia?(r.dia.slice(8,10)+'/'+r.dia.slice(5,7)):'';
+        html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #F7F2E9;">';
+        html += '<div style="width:70px;font-size:12px;color:#5C5044;font-weight:700;flex-shrink:0;">'+(r.dia_semana||'')+' '+dd+'</div>';
+        html += '<div style="flex:1;height:8px;background:#F2EDE3;border-radius:4px;overflow:hidden;"><div style="width:'+w+'%;height:100%;background:#D4A574;"></div></div>';
+        html += '<div style="width:66px;text-align:right;font-size:12px;font-weight:800;color:#1A0800;flex-shrink:0;">'+m1(v)+'</div>';
+        html += '</div>';
+      });
+      html += '</div>';
+      html += '</div>';
+    }
 
     // Cumplimiento de facturación
     html += '<div style="background:#fff;border:1px solid #EADFCB;border-radius:16px;padding:18px;margin-bottom:16px;">';
@@ -41403,7 +41438,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.109.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.110.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
