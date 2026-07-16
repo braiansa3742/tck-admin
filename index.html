@@ -1,5 +1,20 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.108.0 — 15/07/2026
+     v13.108.0: TCK FOOD / CAJA — arqueo de efectivo persistido + rol-aware. El
+        efectivo contado ahora lo cargan admin/cobranzas (input que guarda solo en
+        buffet_caja_arqueo por upsert con JWT); el dueño/oversight lo ve read-only y
+        le alimenta el faltante. REQUIERE crear la tabla buffet_caja_arqueo (DDL
+        aparte). Sin esa tabla la solapa igual funciona en modo oversight (el fetch
+        del arqueo falla suave y no rompe nada).
+     TCK ADMIN — v13.107.0 — 15/07/2026
+     v13.107.0: TCK FOOD — nueva pestaña CAJA (cierre diario conciliado). Cruza,
+        por jornada y por cajero: efectivo declarado en Toteat vs efectivo contado
+        (input de administración) -> faltante/reclamo; y "débito" de Toteat vs QR
+        real de MercadoPago (mp_movimientos, regular_payment) -> flags de
+        transferencia cargada como débito y de venta por QR no registrada. Solo
+        lectura + calculadora en sesión (el efectivo contado aún no persiste).
+        Pane nuevo bfp-caja + _bfCaja(); no toca el resto del módulo.
      TCK ADMIN — v13.106.0 — 15/07/2026
      v13.106.0: EDITOR DE PRECIOS desacoplado del Sheet (front directo a
         Supabase). Al Aplicar un precio en el tab Márgenes, ahora se escribe
@@ -14629,6 +14644,31 @@ input.canales-exp-input[type="date"] {
   #view-buffet .bf-rec-row .nm{ flex:1; min-width:0; font-weight:600; color:#2C2416; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #view-buffet .bf-rec-row .ct{ font-size:10px; color:#8A7B63; flex-shrink:0; }
   #view-buffet .bf-rec-row .bad{ font-size:8px; font-weight:800; text-transform:uppercase; padding:2px 6px; border-radius:5px; background:#FCEBEB; color:#991B1B; flex-shrink:0; }
+  /* v13.107.0 — pane Caja */
+  #view-buffet .bf-caja-note{ font-size:10.5px; color:#8A7B63; background:#FBF7F0; border-radius:8px; padding:8px 10px; margin:0 0 10px; line-height:1.5; }
+  #view-buffet .bf-cajac{ background:#fff; border-radius:12px; padding:11px 12px 12px; margin:0 0 10px; box-shadow:0 1px 4px rgba(0,0,0,.07); }
+  #view-buffet .bf-cajac-h{ display:flex; justify-content:space-between; align-items:center; font-size:13px; font-weight:900; color:#2C2416; padding-bottom:8px; margin-bottom:8px; border-bottom:2px solid #F0E9DC; }
+  #view-buffet .bf-cj{ background:#FBF7F0; border-radius:9px; padding:8px 10px; margin-bottom:7px; }
+  #view-buffet .bf-cj-h{ display:flex; align-items:center; gap:7px; margin-bottom:6px; }
+  #view-buffet .bf-cj-t{ font-size:8px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; padding:2px 6px; border-radius:5px; }
+  #view-buffet .bf-cj-t.med{ background:#FEF3C7; color:#92400E; } #view-buffet .bf-cj-t.noc{ background:#E0E7F0; color:#3B4A66; }
+  #view-buffet .bf-cj-nm{ font-size:12px; font-weight:800; color:#2C2416; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #view-buffet .bf-cj-hr{ font-size:10px; color:#8A7B63; font-weight:700; flex-shrink:0; }
+  #view-buffet .bf-cj-r{ display:flex; align-items:center; justify-content:space-between; padding:3px 0; }
+  #view-buffet .bf-cj-l{ font-size:11px; color:#6B5B4A; }
+  #view-buffet .bf-cj-v{ font-size:12.5px; font-weight:800; color:#2C2416; }
+  #view-buffet .bf-cj-in{ width:112px; text-align:right; border:1px solid #D9C9A8; border-radius:7px; padding:5px 8px; font-family:inherit; font-size:12.5px; font-weight:700; color:#2C2416; background:#fff; }
+  #view-buffet .bf-cj-in:focus{ outline:none; border-color:#C2410C; }
+  #view-buffet .bf-cj-inwrap{ display:flex; align-items:center; gap:5px; }
+  #view-buffet .bf-cj-sv{ font-size:11px; font-weight:800; min-width:14px; }
+  #view-buffet .bf-cj-sv.ok{ color:#15803D; } #view-buffet .bf-cj-sv.wait{ color:#8A7B63; } #view-buffet .bf-cj-sv.err{ color:#991B1B; font-size:9.5px; }
+  #view-buffet .bf-cj-pend{ color:#B4A88E; font-weight:600; font-size:11px; }
+  #view-buffet .bf-cj-falt{ font-size:12.5px; font-weight:900; }
+  #view-buffet .bf-cj-falt.none{ color:#B4A88E; } #view-buffet .bf-cj-falt.ok{ color:#15803D; }
+  #view-buffet .bf-cj-falt.bad{ color:#991B1B; } #view-buffet .bf-cj-falt.plus{ color:#B45309; }
+  #view-buffet .bf-cajac-mp{ margin-top:8px; padding-top:8px; border-top:1px dashed #E6DCC8; }
+  #view-buffet .bf-cj-flag{ font-size:10.5px; font-weight:800; border-radius:7px; padding:6px 9px; margin-top:6px; line-height:1.3; }
+  #view-buffet .bf-cj-flag.ok{ background:#E7F5EC; color:#166534; } #view-buffet .bf-cj-flag.warn{ background:#FEF3C7; color:#92400E; } #view-buffet .bf-cj-flag.bad{ background:#FCEBEB; color:#991B1B; }
 </style>
   <div class="bf-head">
     <h2>🍔 Buffet TCK Food</h2>
@@ -14642,6 +14682,7 @@ input.canales-exp-input[type="date"] {
   </div>
   <div class="bf-subnav" id="bf-subnav">
     <button class="on" onclick="bfSubtab('resumen',this)">Resumen</button>
+    <button onclick="bfSubtab('caja',this)">Caja</button>
     <button onclick="bfSubtab('fact',this)">Facturación</button>
     <button onclick="bfSubtab('costos',this)">Costos</button>
     <button onclick="bfSubtab('recetas',this)">Recetas</button>
@@ -14723,6 +14764,13 @@ input.canales-exp-input[type="date"] {
     <input class="bf-stock-search" id="bf-stock-search" type="text" placeholder="Buscar producto…" oninput="_bfStockFiltrar(this.value)">
     <div class="bf-pc-scroll" id="bf-stock-lista" style="max-height:480px;"><div class="bf-fvacio">Tocá la pestaña para cargar el inventario.</div></div>
     <div class="bf-pc-foot" id="bf-stock-foot"></div>
+  </div>
+
+  <!-- PANE: CAJA (v13.107.0) -->
+  <div class="bf-pane" id="bfp-caja">
+    <div class="bf-pc-resumen" id="bf-caja-resumen"></div>
+    <div class="bf-caja-note">Efectivo: <b>declarado</b> (Toteat) vs <b>contado</b> (lo cargás al recibir la plata) &rarr; faltante. QR y transferencias se concilian solos contra MercadoPago. El efectivo contado por ahora no se guarda: es para controlar en el momento.</div>
+    <div id="bf-caja-lista"><div class="bf-fvacio">Tocá la pestaña para cargar los cierres.</div></div>
   </div>
 
   <div class="bf-loading" id="bf-loading" style="display:none;">Cargando datos del buffet…</div>
@@ -20717,13 +20765,14 @@ function buffetSetRango(r, btn){
   _bfRango = r;
   if (btn && btn.parentNode){ [].forEach.call(btn.parentNode.children, function(c){ c.classList.remove('on'); }); btn.classList.add('on'); }
   buffetCargar();
+  if (_bfCajaCargado){ _bfCajaCargado = false; var _cp = document.getElementById('bfp-caja'); if (_cp && _cp.classList.contains('on')){ _bfCajaCargado = true; _bfCaja(); } }
 }
 // v13.96.0 — navegación entre sub-tabs internas del buffet
 function bfSubtab(p, btn){
   var nav = document.getElementById('bf-subnav');
   if (nav) [].forEach.call(nav.children, function(b){ b.classList.remove('on'); });
   if (btn) btn.classList.add('on');
-  ['resumen','fact','costos','recetas','subrecetas','ingr','stock'].forEach(function(x){
+  ['resumen','fact','costos','recetas','subrecetas','ingr','stock','caja'].forEach(function(x){
     var pane = document.getElementById('bfp-'+x);
     if (pane) pane.classList.toggle('on', x === p);
   });
@@ -20732,6 +20781,7 @@ function bfSubtab(p, btn){
   if (p === 'ingr'  && !_bfIngrCargado){  _bfIngrCargado  = true; _bfIngr();  }
   if (p === 'recetas' && !_bfRecCargado){ _bfRecCargado = true; _bfRec(); }
   if (p === 'subrecetas' && !_bfSubCargado){ _bfSubCargado = true; _bfSub(); }
+  if (p === 'caja' && !_bfCajaCargado){ _bfCajaCargado = true; _bfCaja(); }
   var v = document.getElementById('view-buffet'); if (v) v.scrollTop = 0;
 }
 
@@ -21025,6 +21075,143 @@ function _bfRangoFechas(){
   if (_bfRango === '7d')      return { desde: _bfRestarDias(hoy,6), hasta: hoy };
   if (_bfRango === 'periodo') return { desde: '2026-01-01', hasta: hoy };
   return { desde: _bfRestarDias(hoy,29), hasta: hoy };  // 30d
+}
+
+// ═══ v13.108.0 — Pane CAJA (cierre diario conciliado + arqueo · buffet_ventas + mp_movimientos + buffet_caja_arqueo) ═══
+// Oversight para todos. El efectivo contado lo cargan admin/cobranzas y persiste en
+// buffet_caja_arqueo (upsert directo con JWT, mismo patrón que el editor de precios).
+// El dueño lo ve read-only y le alimenta el faltante.
+var _bfCajaCargado = false;
+var _bfCajaRows = [];
+var _bfCajaTotNoReg = 0;
+var _bfCajaTotTransfDeb = 0;
+function _bfCajaPuedeContar(){ return rolActual === 'admin' || rolActual === 'cobranzas'; }
+function _bfCajaArt(iso){ var d = new Date(iso); return isNaN(d) ? null : new Date(d.getTime() - 10800000); }
+function _bfCajaArtDate(iso){ var a = _bfCajaArt(iso); return a ? a.toISOString().slice(0,10) : null; }
+function _bfCajaArtHM(iso){ var a = _bfCajaArt(iso); if (!a) return '--:--'; return String(a.getUTCHours()).padStart(2,'0') + ':' + String(a.getUTCMinutes()).padStart(2,'0'); }
+function _bfCajaArtH(iso){ var a = _bfCajaArt(iso); return a ? a.getUTCHours() : 12; }
+async function _bfCaja(){
+  var lst = document.getElementById('bf-caja-lista');
+  if (!lst) return;
+  lst.innerHTML = '<div class="bf-fvacio">Cargando cierres…</div>';
+  try {
+    var rg = _bfRangoFechas();
+    var ventas = await sbFetchAll('buffet_ventas?select=fecha_jornada,date_closed,register_name,pago_efectivo,pago_debito,total&fecha_jornada=gte.' + rg.desde + '&fecha_jornada=lte.' + rg.hasta + '&order=date_closed.asc', 1000, 40);
+    ventas = Array.isArray(ventas) ? ventas : [];
+    var mp = await sbFetchAll('mp_movimientos?status=eq.approved&operation_type=eq.regular_payment&select=fecha,monto&fecha=gte.' + rg.desde + '&fecha=lte.' + rg.hasta + 'T23:59:59&order=fecha.asc', 1000, 40);
+    mp = Array.isArray(mp) ? mp : [];
+    var arq = {};
+    try {
+      var arqRows = await sbFetch('buffet_caja_arqueo?select=fecha_jornada,cajero,efectivo_contado&fecha_jornada=gte.' + rg.desde + '&fecha_jornada=lte.' + rg.hasta);
+      (Array.isArray(arqRows) ? arqRows : []).forEach(function(a){ arq[a.fecha_jornada + '|' + a.cajero] = (a.efectivo_contado == null ? null : Number(a.efectivo_contado)); });
+    } catch(e){ console.warn('[buffet] arqueo (tabla nueva?):', e); }
+    var qrDia = {};
+    mp.forEach(function(m){ var d = _bfCajaArtDate(m.fecha); if (d) qrDia[d] = (qrDia[d] || 0) + (Number(m.monto) || 0); });
+    var jor = {};
+    ventas.forEach(function(v){
+      var d = v.fecha_jornada; if (!d) return;
+      if (!jor[d]) jor[d] = { total:0, deb:0, caj:{} };
+      var t = Number(v.total) || 0, efe = Number(v.pago_efectivo) || 0, deb = Number(v.pago_debito) || 0;
+      jor[d].total += t; jor[d].deb += deb;
+      var cj = v.register_name || '(sin cajero)';
+      if (!jor[d].caj[cj]) jor[d].caj[cj] = { efe:0, min:null, max:null, hs:0, n:0 };
+      var c = jor[d].caj[cj]; c.efe += efe; c.n++;
+      if (v.date_closed){ if (!c.min || v.date_closed < c.min) c.min = v.date_closed; if (!c.max || v.date_closed > c.max) c.max = v.date_closed; c.hs += _bfCajaArtH(v.date_closed); }
+    });
+    _bfCajaRows = []; _bfCajaTotNoReg = 0; _bfCajaTotTransfDeb = 0;
+    var puede = _bfCajaPuedeContar();
+    var dias = Object.keys(jor).sort().reverse();
+    var resEl = document.getElementById('bf-caja-resumen');
+    if (!dias.length){ lst.innerHTML = '<div class="bf-fvacio">Sin cierres en el rango.</div>'; if (resEl) resEl.innerHTML = ''; return; }
+    var out = dias.map(function(d){
+      var J = jor[d], qr = qrDia[d] || 0, difQR = qr - J.deb, com = Math.round(qr * 0.0433);
+      var cajHtml = Object.keys(J.caj).map(function(cj){
+        var c = J.caj[cj];
+        var turno = (c.n ? c.hs / c.n : 12) < 17 ? 'Mediodía' : 'Noche';
+        var saved = arq[d + '|' + cj];
+        var ri = _bfCajaRows.length; _bfCajaRows.push({ efe:c.efe, contado:(saved != null ? saved : null), fj:d, cj:cj });
+        var contadoCell;
+        if (puede){
+          contadoCell = '<span class="bf-cj-inwrap"><input class="bf-cj-in" inputmode="numeric" placeholder="contar…" value="' + (saved != null ? saved : '') + '" onchange="_bfCajaContar(' + ri + ',this.value)"><span class="bf-cj-sv" id="bfcj-s' + ri + '"></span></span>';
+        } else {
+          contadoCell = '<span class="bf-cj-v">' + (saved != null ? _bfMoney(saved) : '<span class="bf-cj-pend">pendiente</span>') + '</span>';
+        }
+        return '<div class="bf-cj">' +
+          '<div class="bf-cj-h"><span class="bf-cj-t ' + (turno === 'Noche' ? 'noc' : 'med') + '">' + turno + '</span>' +
+          '<span class="bf-cj-nm">' + _bfEsc(cj) + '</span>' +
+          '<span class="bf-cj-hr">' + _bfCajaArtHM(c.min) + '–' + _bfCajaArtHM(c.max) + '</span></div>' +
+          '<div class="bf-cj-r"><span class="bf-cj-l">Efectivo declarado</span><span class="bf-cj-v">' + _bfMoney(c.efe) + '</span></div>' +
+          '<div class="bf-cj-r"><span class="bf-cj-l">Efectivo contado</span>' + contadoCell + '</div>' +
+          '<div class="bf-cj-r"><span class="bf-cj-l">Diferencia</span><span class="bf-cj-falt none" id="bfcj-f' + ri + '">—</span></div>' +
+        '</div>';
+      }).join('');
+      var flag;
+      if (difQR > 3000){ _bfCajaTotNoReg += difQR; flag = '<div class="bf-cj-flag bad">⚠ $' + _bfMoney(difQR) + ' cobrado por QR que Toteat NO registró como venta</div>'; }
+      else if (difQR < -3000){ _bfCajaTotTransfDeb += -difQR; flag = '<div class="bf-cj-flag warn">↔ $' + _bfMoney(-difQR) + ' del "débito" fue transferencia, no QR</div>'; }
+      else { flag = '<div class="bf-cj-flag ok">✓ QR cuadra con Toteat</div>'; }
+      var dt = new Date(d + 'T12:00:00Z');
+      var ds = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][dt.getUTCDay()];
+      return '<div class="bf-cajac">' +
+        '<div class="bf-cajac-h"><span>' + ds + ' ' + _bfDDMM(d) + '</span><span>' + _bfMoney(J.total) + '</span></div>' +
+        cajHtml +
+        '<div class="bf-cajac-mp">' +
+          '<div class="bf-cj-r"><span class="bf-cj-l">"Débito" Toteat</span><span class="bf-cj-v">' + _bfMoney(J.deb) + '</span></div>' +
+          '<div class="bf-cj-r"><span class="bf-cj-l">QR real (MercadoPago)</span><span class="bf-cj-v">' + _bfMoney(qr) + '</span></div>' +
+          '<div class="bf-cj-r"><span class="bf-cj-l">Comisión QR estimada</span><span class="bf-cj-v" style="color:#B45309">−' + _bfMoney(com) + '</span></div>' +
+          flag +
+        '</div>' +
+      '</div>';
+    }).join('');
+    lst.innerHTML = out;
+    _bfCajaRows.forEach(function(_, ri){ _bfCajaPintarFila(ri); });
+    _bfCajaResumen();
+  } catch(e){
+    console.error('[buffet] caja:', e);
+    lst.innerHTML = '<div class="bf-fvacio">No se pudo cargar la caja.</div>';
+  }
+}
+function _bfCajaPintarFila(ri){
+  var row = _bfCajaRows[ri]; var span = document.getElementById('bfcj-f' + ri);
+  if (!span || !row) return;
+  if (row.contado == null || isNaN(row.contado)){ span.className = 'bf-cj-falt none'; span.textContent = '—'; }
+  else { var f = row.contado - row.efe; span.className = 'bf-cj-falt ' + (f === 0 ? 'ok' : (f < 0 ? 'bad' : 'plus')); span.textContent = (f >= 0 ? '+' : '') + _bfMoney(f); }
+}
+function _bfCajaContar(ri, val){
+  var row = _bfCajaRows[ri]; if (!row) return;
+  row.contado = (val == null || val === '') ? null : Number(String(val).replace(/[^\d.-]/g, ''));
+  _bfCajaPintarFila(ri);
+  _bfCajaResumen();
+  _bfCajaGuardar(ri);
+}
+async function _bfCajaGuardar(ri){
+  var row = _bfCajaRows[ri]; if (!row) return;
+  var sv = document.getElementById('bfcj-s' + ri); if (sv){ sv.textContent = '…'; sv.className = 'bf-cj-sv wait'; }
+  try {
+    await sbFetch('buffet_caja_arqueo', {
+      method: 'POST',
+      headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({
+        fecha_jornada: row.fj,
+        cajero: row.cj,
+        efectivo_contado: (row.contado == null || isNaN(row.contado)) ? null : row.contado,
+        cargado_por: (usuarioActual || 'admin'),
+        actualizado_at: new Date().toISOString()
+      })
+    });
+    if (sv){ sv.textContent = '✓'; sv.className = 'bf-cj-sv ok'; setTimeout(function(){ if (sv){ sv.textContent = ''; } }, 1600); }
+  } catch(e){
+    console.error('[buffet] arqueo guardar:', e);
+    if (sv){ sv.textContent = '⚠ no guardó'; sv.className = 'bf-cj-sv err'; }
+  }
+}
+function _bfCajaResumen(){
+  var res = document.getElementById('bf-caja-resumen'); if (!res) return;
+  var falt = 0;
+  _bfCajaRows.forEach(function(r){ if (r.contado != null && !isNaN(r.contado)){ var f = r.contado - r.efe; if (f < 0) falt += f; } });
+  res.innerHTML =
+    '<div class="bf-pch ' + (falt < 0 ? 'gr' : 'ok') + '"><div class="n" style="font-size:13px">' + _bfMoney(falt) + '</div><div class="l">Faltante efvo</div></div>' +
+    '<div class="bf-pch ' + (_bfCajaTotNoReg > 0 ? 'gr' : 'ok') + '"><div class="n" style="font-size:13px">' + _bfMoney(_bfCajaTotNoReg) + '</div><div class="l">QR sin registrar</div></div>' +
+    '<div class="bf-pch gr"><div class="n" style="font-size:13px">' + _bfMoney(_bfCajaTotTransfDeb) + '</div><div class="l">Transf. como débito</div></div>';
 }
 
 async function buffetCargar(){
@@ -41108,7 +41295,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.106.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.108.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
