@@ -14861,6 +14861,66 @@ input.canales-exp-input[type="date"] {
   </div>
   <div class="ccp-foot">El <b>Saldo</b> es el acumulado de los movimientos del período. La <b>Diferencia</b> (solo en período "Todo") compara ese acumulado contra el stock real: si es grande, hay un movimiento sin registrar (devolución sin cargar, ajuste). Las devoluciones todavía no entran al detalle (se guardan como texto libre).</div>
 </div>
+<div class="view" id="view-foodconcil">
+  <style>
+    #view-foodconcil .fc-head{margin:4px 0 10px}
+    #view-foodconcil .fc-title{font-weight:700;font-size:20px;color:var(--red)}
+    #view-foodconcil .fc-sub{font-size:13px;color:#6b5a52}
+    #view-foodconcil .fc-controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:10px 0}
+    #view-foodconcil select{font-family:inherit;font-size:15px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--text)}
+    #view-foodconcil .fc-chk{display:flex;align-items:center;gap:6px;font-size:14px;color:#6b5a52}
+    #view-foodconcil .fc-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:8px 0 14px}
+    #view-foodconcil .fc-kpi{background:#fff;border:1px solid var(--border);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow)}
+    #view-foodconcil .fc-kpi .lab{font-size:11px;color:#6b5a52;text-transform:uppercase;letter-spacing:.4px;font-weight:700}
+    #view-foodconcil .fc-kpi .val{font-size:26px;font-weight:700;line-height:1.1;margin-top:3px}
+    #view-foodconcil .fc-wrap{background:#fff;border:1px solid var(--border);border-radius:12px;overflow:hidden;box-shadow:var(--shadow)}
+    #view-foodconcil table.fc-tabla{width:100%;border-collapse:collapse}
+    #view-foodconcil .fc-tabla thead th{background:#f3e7e2;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#6b5a52;padding:9px 12px;font-weight:700}
+    #view-foodconcil .fc-tabla th.num,#view-foodconcil .fc-tabla td.num{text-align:right;font-variant-numeric:tabular-nums}
+    #view-foodconcil .fc-tabla tbody td{padding:9px 12px;border-top:1px solid var(--border);font-size:14px}
+    #view-foodconcil .fc-r{cursor:pointer}
+    #view-foodconcil .fc-r:hover{background:#faf4ec}
+    #view-foodconcil .fc-muted{color:#6b5a52}
+    #view-foodconcil .fc-z{color:#b9a99f}
+    #view-foodconcil .fc-ic{text-align:center;font-size:15px}
+    #view-foodconcil .fc-bad .fc-ic{color:var(--red)}
+    #view-foodconcil .fc-warn .fc-ic{color:#b45309}
+    #view-foodconcil .fc-ok .fc-ic{color:var(--green)}
+    #view-foodconcil .fc-sinv{opacity:.55}
+    #view-foodconcil .fc-det{display:none;margin-top:14px;background:#fff;border:1px solid var(--border);border-radius:12px;padding:14px;box-shadow:var(--shadow)}
+    #view-foodconcil .fc-foot{font-size:12px;color:#6b5a52;margin-top:12px;line-height:1.5}
+    @media(max-width:720px){
+      #view-foodconcil .fc-kpis{grid-template-columns:repeat(2,1fr)}
+      #view-foodconcil .fc-tabla thead{display:none}
+      #view-foodconcil .fc-tabla,#view-foodconcil .fc-tabla tbody,#view-foodconcil .fc-tabla tr,#view-foodconcil .fc-tabla td{display:block;width:auto}
+      #view-foodconcil .fc-tabla tr{border:1px solid var(--border);border-radius:12px;margin:10px;padding:6px 4px}
+      #view-foodconcil .fc-tabla tbody td{border:none;padding:5px 12px;display:flex;justify-content:space-between;font-size:14px}
+      #view-foodconcil .fc-tabla tbody td::before{content:attr(data-l);color:#6b5a52;font-size:12px;font-weight:700}
+      #view-foodconcil .fc-tabla td.fc-ic{justify-content:flex-end}
+    }
+  </style>
+  <div class="fc-head">
+    <div class="fc-title">&#129525; Conciliaci&oacute;n TCK Food</div>
+    <div class="fc-sub">Contado por la cajera vs esperado seg&uacute;n ventas, por caja y turno</div>
+  </div>
+  <div class="fc-controls">
+    <select id="fc-per" onchange="fconcilRender()">
+      <option value="7">&Uacute;ltimos 7 d&iacute;as</option>
+      <option value="14" selected>&Uacute;ltimos 14 d&iacute;as</option>
+      <option value="30">&Uacute;ltimos 30 d&iacute;as</option>
+    </select>
+    <label class="fc-chk"><input type="checkbox" id="fc-solo" onchange="fconcilRender()"> Solo descuadres</label>
+  </div>
+  <div class="fc-kpis" id="fc-kpis"></div>
+  <div class="fc-wrap">
+    <table class="fc-tabla">
+      <thead><tr><th>Fecha</th><th>Caja</th><th class="num">Contado</th><th class="num">Esperado</th><th class="num">&Delta; Efvo</th><th class="num">&Delta; D&eacute;bito</th><th class="num">&Delta; Cr&eacute;d</th><th></th></tr></thead>
+      <tbody id="fc-rows"><tr><td colspan="8" style="text-align:center;padding:20px;">Cargando&hellip;</td></tr></tbody>
+    </table>
+  </div>
+  <div class="fc-det" id="fc-det"></div>
+  <div class="fc-foot">El sem&aacute;foro mira el <b>peor descuadre por instrumento</b>, no solo el neto: una caja que cuadra en el total pero tiene la forma de pago mal cargada igual sale en rojo. Verde &le; $500 &middot; Amarillo &le; $20.000 &middot; Rojo &gt; $20.000. Toc&aacute; una fila para ver las ventas de esa caja.</div>
+</div>
 <nav class="tab-nav" id="tab-nav">
   <button class="tab-btn" id="tab-btn-logistica" onclick="cambiarTab('logistica')">
     <span class="tab-icon">🚚</span>
@@ -14931,6 +14991,10 @@ input.canales-exp-input[type="date"] {
     <span class="tab-icon">📒</span>
     <span class="tab-label">Cta Producto</span>
   </button>
+  <button class="tab-btn" id="tab-btn-foodconcil" onclick="cambiarTab('foodconcil')" style="display:none !important;">
+    <span class="tab-icon">&#129525;</span>
+    <span class="tab-label">Concil. Food</span>
+  </button>
   <button class="tab-btn" id="tab-btn-prod-canon" onclick="cambiarTab('prod-canon')" style="display:none !important;">
     <span class="tab-icon">🔧</span>
     <span class="tab-label">Sin canon.</span>
@@ -14975,6 +15039,10 @@ input.canales-exp-input[type="date"] {
       <button class="menu-mas-item" id="menu-mas-ccprod" onclick="cambiarTab('ccprod');cerrarMenuMas()">
         <div class="menu-mas-icon">📒</div>
         <div class="menu-mas-lbl">Cta Producto</div>
+      </button>
+      <button class="menu-mas-item" id="menu-mas-foodconcil" onclick="cambiarTab('foodconcil');cerrarMenuMas()">
+        <div class="menu-mas-icon">&#129525;</div>
+        <div class="menu-mas-lbl">Concil. Food</div>
       </button>
       <!-- v12.29 — Tab Márgenes -->
       <button class="menu-mas-item" id="menu-mas-margenes" onclick="cambiarTab('margenes');cerrarMenuMas()">
@@ -17690,7 +17758,7 @@ const ROL_TABS = {
   dueno:       'ALL',
   operaciones: 'ALL',
   admin:       'ALL',
-  cobranzas:   ['pedidos','logistica','clientes','facturacion','cc','tesoreria','rendiciones','acc-dup','buffet','ccprod','pulso'],
+  cobranzas:   ['pedidos','logistica','clientes','facturacion','cc','tesoreria','rendiciones','acc-dup','buffet','ccprod','pulso','foodconcil'],
   tckfood:     ['buffet']
 };
 
@@ -20604,6 +20672,8 @@ function abrirMenuMas() {
   var esAdmin = vendedorActual === 'ADMIN';
   var visBtn = document.getElementById('menu-mas-visitas');
   if (visBtn) visBtn.style.display = esAdmin ? 'flex' : 'none';
+  var fcBtn = document.getElementById('menu-mas-foodconcil');
+  if (fcBtn) fcBtn.style.display = esAdmin ? 'flex' : 'none';
 }
 function cerrarMenuMas() {
   var b = document.getElementById('menu-mas-backdrop');
@@ -20806,6 +20876,89 @@ function pulsoDescargarProy() {
   XLSX.writeFile(wb, 'TCK_proyectado_ventas_'+hoy+'.xlsx');
 }
 
+/* == v13.112.0 - CONCILIACION TCK FOOD (vw_buffet_concil) == */
+function _fcNum(n){return (Math.round(Number(n)||0)).toLocaleString("es-AR");}
+function _fcEsc(x){return String(x==null?"":x).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];});}
+function _fcDelta(n){
+  n=Math.round(Number(n)||0);
+  if(!n) return '<span class="fc-z">&mdash;</span>';
+  var a=Math.abs(n);
+  var col=a>20000?'var(--red)':(a>500?'#b45309':'inherit');
+  var w=col==='inherit'?'400':'600';
+  return '<span style="color:'+col+';font-weight:'+w+'">'+(n>0?"+":"\u2212")+_fcNum(a)+'</span>';
+}
+function _fcSem(r){
+  if(!r.n_ventas) return 'sinv';
+  var w=Math.max(Math.abs(r.desc_efectivo||0),Math.abs(r.desc_debito||0),Math.abs(r.desc_credito||0),Math.abs(r.desc_consumo||0));
+  if(w<=500) return 'ok'; if(w<=20000) return 'warn'; return 'bad';
+}
+function fconcilCargar(){ fconcilRender(); }
+async function fconcilRender(){
+  var rowsEl=document.getElementById('fc-rows'); if(!rowsEl) return;
+  var dias=parseInt(document.getElementById('fc-per').value,10);
+  var solo=document.getElementById('fc-solo').checked;
+  var detEl=document.getElementById('fc-det'); if(detEl) detEl.style.display='none';
+  rowsEl.innerHTML='<tr><td colspan="8" style="text-align:center;padding:20px;">Cargando&hellip;</td></tr>';
+  try{
+    var d=new Date(Date.now()-dias*86400000);
+    var desde=d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);
+    if(desde<'2026-06-12') desde='2026-06-12';
+    var path="vw_buffet_concil?estado=eq.cerrada&fecha=gte."+desde+"&order=fecha.desc,register_id.asc&limit=2000";
+    var rows=await sbFetch(path)||[];
+    var nBad=0,nWarn=0,nOk=0,sumDesc=0;
+    var out=rows.map(function(r){
+      var sem=_fcSem(r);
+      if(sem==='bad')nBad++; else if(sem==='warn')nWarn++; else if(sem==='ok')nOk++;
+      sumDesc+=Math.round(Number(r.desc_total)||0);
+      if(solo && (sem==='ok'||sem==='sinv')) return '';
+      var f=String(r.fecha||"").slice(0,10).split("-").reverse().slice(0,2).join("/");
+      var ic={bad:'\u26A0',warn:'\u25CF',ok:'\u2714',sinv:'\u00B7'}[sem];
+      var op=(r.opened_date||'').replace(/'/g,'');
+      return '<tr class="fc-r fc-'+sem+'" onclick="fconcilDetalle(\''+r.fecha+'\','+r.register_id+',\''+op+'\')">'+
+        '<td data-l="Fecha">'+f+'</td>'+
+        '<td data-l="Caja">'+_fcEsc(r.register_name)+'</td>'+
+        '<td data-l="Contado" class="num">'+_fcNum(r.contado_total)+'</td>'+
+        '<td data-l="Esperado" class="num fc-muted">'+_fcNum(r.esp_total)+'</td>'+
+        '<td data-l="\u0394 Efvo" class="num">'+_fcDelta(r.desc_efectivo)+'</td>'+
+        '<td data-l="\u0394 D\u00e9bito" class="num">'+_fcDelta(r.desc_debito)+'</td>'+
+        '<td data-l="\u0394 Cr\u00e9d" class="num">'+_fcDelta(r.desc_credito)+'</td>'+
+        '<td data-l="" class="fc-ic">'+ic+'</td></tr>';
+    }).join("");
+    rowsEl.innerHTML=out||'<tr><td colspan="8" style="text-align:center;color:#6b5a52;padding:20px;">Sin cierres en el per\u00edodo'+(solo?' con descuadre':'')+'.</td></tr>';
+    var kp=document.getElementById('fc-kpis');
+    if(kp) kp.innerHTML=
+      '<div class="fc-kpi"><div class="lab">Descuadran</div><div class="val" style="color:var(--red)">'+nBad+'</div></div>'+
+      '<div class="fc-kpi"><div class="lab">Revisar</div><div class="val" style="color:#b45309">'+nWarn+'</div></div>'+
+      '<div class="fc-kpi"><div class="lab">Cuadran</div><div class="val" style="color:var(--green)">'+nOk+'</div></div>'+
+      '<div class="fc-kpi"><div class="lab">Neto per\u00edodo</div><div class="val">'+(sumDesc>0?"+":"")+_fcNum(sumDesc)+'</div></div>';
+  }catch(e){ rowsEl.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--red);padding:20px;">Error: '+_fcEsc(e.message||e)+'</td></tr>'; console.warn("[fconcil]",e); }
+}
+async function fconcilDetalle(fecha,regId,opened){
+  var box=document.getElementById('fc-det'); if(!box) return;
+  box.style.display='block'; box.scrollIntoView({behavior:'smooth',block:'nearest'});
+  box.innerHTML='<div style="color:#6b5a52">Cargando detalle&hellip;</div>';
+  try{
+    var ci=await sbFetch("buffet_cierres_caja?fecha=eq."+fecha+"&register_id=eq."+regId+"&opened_date=eq."+encodeURIComponent(opened)+"&select=closed_date,register_name")||[];
+    var c=ci[0]||{}; var closed=c.closed_date||'2999-01-01T00:00:00';
+    var vs=await sbFetch("buffet_ventas?register_id=eq."+regId+"&date_closed=gte."+encodeURIComponent(opened)+"&date_closed=lte."+encodeURIComponent(closed)+"&select=date_closed,total,pago_efectivo,pago_debito,pago_credito,pago_consumo_personal&order=date_closed.asc&limit=800")||[];
+    function chip(lab,val){ val=Math.round(Number(val)||0); if(!val)return''; return '<span style="font-size:11px;background:#f3e7e2;color:#6b5a52;border-radius:10px;padding:1px 7px;margin-right:4px">'+lab+' '+_fcNum(val)+'</span>'; }
+    var body=vs.map(function(v){
+      var h=String(v.date_closed||'').slice(11,16);
+      return '<tr><td style="padding:6px 8px;border-top:1px solid var(--border)">'+h+'</td>'+
+        '<td class="num" style="padding:6px 8px;border-top:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums">'+_fcNum(v.total)+'</td>'+
+        '<td style="padding:6px 8px;border-top:1px solid var(--border)">'+chip('efvo',v.pago_efectivo)+chip('d\u00e9b',v.pago_debito)+chip('cr\u00e9d',v.pago_credito)+chip('cp',v.pago_consumo_personal)+'</td></tr>';
+    }).join("");
+    box.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b>'+_fcEsc(c.register_name||'')+' &middot; '+String(fecha).slice(8,10)+'/'+String(fecha).slice(5,7)+'</b>'+
+      '<span style="cursor:pointer;color:#6b5a52" onclick="document.getElementById(\'fc-det\').style.display=\'none\'">&times; cerrar</span></div>'+
+      '<div style="font-size:12px;color:#6b5a52;margin-bottom:6px">'+vs.length+' ventas &middot; ventana '+String(opened).slice(11,16)+'&ndash;'+String(closed).slice(11,16)+'</div>'+
+      '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>'+
+      '<th style="text-align:left;font-size:11px;color:#6b5a52;padding:4px 8px">Hora</th>'+
+      '<th style="text-align:right;font-size:11px;color:#6b5a52;padding:4px 8px">Total</th>'+
+      '<th style="text-align:left;font-size:11px;color:#6b5a52;padding:4px 8px">Forma de pago (Toteat)</th></tr></thead><tbody>'+
+      (body||'<tr><td colspan="3" style="padding:10px;color:#6b5a52">Sin ventas en la ventana.</td></tr>')+'</tbody></table>';
+  }catch(e){ box.innerHTML='<div style="color:var(--red)">Error: '+_fcEsc(e.message||e)+'</div>'; console.warn("[fconcil-det]",e); }
+}
+
 function cambiarTab(tab) {
   // v13.57.0 — Cobranzas no puede abrir tabs fuera de su perfil ni por código
   if (rolActual === 'cobranzas' && typeof puedeVer === 'function' && !puedeVer(tab)) tab = 'pedidos';
@@ -20814,7 +20967,7 @@ function cambiarTab(tab) {
   _tabActual = tab;
 
   // Views — incluye logistica + stock (v12.15.0) + compras (v12.18.0) + tesoreria (v12.20.0)
-  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock','compras','cc','tesoreria','margenes','facturacion','buffet','ccprod','pulso'].forEach(function(t) {
+  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock','compras','cc','tesoreria','margenes','facturacion','buffet','ccprod','pulso','foodconcil'].forEach(function(t) {
     var v = document.getElementById('view-' + t);
     var b = document.getElementById('tab-btn-' + t);
     if (v) v.classList.toggle('active', t === tab);
@@ -20823,7 +20976,7 @@ function cambiarTab(tab) {
 
   // El botón "Más" se marca activo si estás en un tab oculto
   var btnMas = document.getElementById('tab-btn-mas');
-  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes' || tab === 'rendiciones' || tab === 'acc-dup' || tab === 'prod-canon' || tab === 'ccanon' || tab === 'stock' || tab === 'compras' || tab === 'cc' || tab === 'tesoreria' || tab === 'margenes' || tab === 'facturacion' || tab === 'buffet' || tab === 'ccprod' || tab === 'pulso');
+  if (btnMas) btnMas.classList.toggle('active', tab === 'gps' || tab === 'clientes' || tab === 'rendiciones' || tab === 'acc-dup' || tab === 'prod-canon' || tab === 'ccanon' || tab === 'stock' || tab === 'compras' || tab === 'cc' || tab === 'tesoreria' || tab === 'margenes' || tab === 'facturacion' || tab === 'buffet' || tab === 'ccprod' || tab === 'pulso' || tab === 'foodconcil');
 
   // v13.73.0 — Buffet (TCK Food): cargar al abrir
   if (tab === 'buffet') {
@@ -20853,6 +21006,11 @@ function cambiarTab(tab) {
   if (tab === 'ccprod') {
     if (typeof ccprodCargar === 'function') ccprodCargar();
     var vcp = document.getElementById('view-ccprod'); if (vcp) vcp.scrollTop = 0;
+  }
+  // v13.112.0 - Conciliacion TCK Food: cargar al abrir
+  if (tab === 'foodconcil') {
+    if (typeof fconcilCargar === 'function') fconcilCargar();
+    var vfc = document.getElementById('view-foodconcil'); if (vfc) vfc.scrollTop = 0;
   }
 
   // v12.20.0 — Tesorería: cargar al abrir
@@ -41496,7 +41654,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.111.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.112.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
