@@ -1,5 +1,12 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.111.0 — 16/07/2026
+     v13.111.0: PULSO — botón ⬇ Excel en la sección Proyección (descarga el
+        proyectado 30 días a .xlsx con SheetJS, para que Roman lo reenvíe a Gastón).
+        TESORERÍA — el modal de pagos del día ahora trae el detalle real de
+        caja_pagos_proyectados (proveedor, concepto, medio de pago, condición
+        pagado/pendiente), en vez del texto resumido. Requiere GRANT SELECT de
+        caja_pagos_proyectados al rol API.
      TCK ADMIN — v13.110.0 — 16/07/2026
      v13.110.0: PULSO — nueva sección "Proyección de ventas · 30 días" que lee la
         vista viva vw_proyeccion_ventas (base por día de semana + tendencia editable
@@ -20680,6 +20687,7 @@ async function pulsoCargar() {
     var c = (cArr && cArr[0]) || {};
     var s = (sArr && sArr[0]) || {};
     var pv = pvArr || [];
+    window._pulsoProy = pv;
 
     function m1(n){ n = Number(n)||0; return '$' + (n/1e6).toFixed(1).replace('.',',') + 'M'; }
     function full(n){ n = Math.round(Number(n)||0); return '$' + n.toLocaleString('es-AR'); }
@@ -20711,7 +20719,7 @@ async function pulsoCargar() {
       var _pvC=0,_pvN=0,_pvP=0,_pvMax=0;
       pv.forEach(function(r){ var v=Number(r.venta_civa)||0; _pvC+=v; _pvN+=Number(r.venta_neto)||0; _pvP+=Number(r.piso_civa)||0; if(v>_pvMax)_pvMax=v; });
       html += '<div style="background:#fff;border:1px solid #EADFCB;border-radius:16px;padding:18px;margin-bottom:16px;">';
-      html += '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#8A7B63;margin-bottom:10px;">Proyecci\u00f3n de ventas \u00b7 pr\u00f3ximos 30 d\u00edas</div>';
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;"><div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#8A7B63;">Proyecci\u00f3n de ventas \u00b7 pr\u00f3ximos 30 d\u00edas</div><button onclick="pulsoDescargarProy()" style="border:none;background:#1E8449;color:#fff;font-weight:800;font-size:11px;border-radius:8px;padding:6px 11px;cursor:pointer;white-space:nowrap;">\u2b07 Excel</button></div>';
       html += '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px;">';
       html += '<div style="flex:1;min-width:120px;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:38px;line-height:1;color:#1E8449;">'+m1(_pvC)+'</div><div style="font-size:11.5px;color:#8A7B63;margin-top:2px;">c/IVA \u00b7 venta</div></div>';
       html += '<div style="flex:1;min-width:105px;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:26px;line-height:1;color:#1A0800;">'+m1(_pvN)+'</div><div style="font-size:11.5px;color:#8A7B63;margin-top:2px;">neto</div></div>';
@@ -20764,6 +20772,38 @@ async function pulsoCargar() {
     console.error('[PULSO]', e);
     cont.innerHTML = '<div style="padding:24px;color:#C62828;font-size:14px;">No pude cargar el Pulso: ' + (e && e.message ? e.message : e) + '<br><br>\u00bfCorriste las vistas <b>vw_pulso_cierre</b> y <b>vw_pulso_salud</b> en Supabase?</div>';
   }
+}
+
+// v13.111.0 — descarga del proyectado a Excel (SheetJS ya cargado) para reenviar a Gastón
+function pulsoDescargarProy() {
+  var pv = window._pulsoProy || [];
+  if (!pv.length || !window.XLSX) { alert('No hay proyecci\u00f3n para descargar todav\u00eda.'); return; }
+  var aoa = [];
+  aoa.push(['TCK \u2014 Proyectado de ventas \u00b7 pr\u00f3ximos 30 d\u00edas']);
+  aoa.push(['Venta por salida (c/IVA y neto). Es facturaci\u00f3n en monto; el mes cierra contra Xubio, el d\u00eda no.']);
+  aoa.push([]);
+  aoa.push(['Fecha','D\u00eda','Venta c/IVA','Venta neto','Piso conservador','Acumulado c/IVA']);
+  var tc=0,tn=0,tp=0;
+  pv.forEach(function(r){
+    var cc=Number(r.venta_civa)||0, nn=Number(r.venta_neto)||0, pp=Number(r.piso_civa)||0;
+    tc+=cc; tn+=nn; tp+=pp;
+    aoa.push([r.dia, r.dia_semana||'', cc, nn, pp, Number(r.acum_civa)||0]);
+  });
+  aoa.push([]);
+  aoa.push(['TOTAL 30 d\u00edas','', tc, tn, tp, '']);
+  var ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{wch:12},{wch:8},{wch:15},{wch:15},{wch:16},{wch:16}];
+  var range = XLSX.utils.decode_range(ws['!ref']);
+  for (var R=4; R<=range.e.r; R++){
+    for (var C=2; C<=5; C++){
+      var cell = ws[XLSX.utils.encode_cell({r:R,c:C})];
+      if (cell && typeof cell.v==='number') cell.z='$#,##0';
+    }
+  }
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Proyectado 30d');
+  var hoy = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, 'TCK_proyectado_ventas_'+hoy+'.xlsx');
 }
 
 function cambiarTab(tab) {
@@ -37982,7 +38022,7 @@ function tesToggleDia(card) {
 }
 
 // MODAL PAGOS (detalle completo)
-function tesAbrirModalPagos(dia) {
+async function tesAbrirModalPagos(dia) {
   if (!_tesData) return;
   var d = _tesData.find(function(x) { return x.dia === dia; });
   if (!d) return;
@@ -37995,27 +38035,45 @@ function tesAbrirModalPagos(dia) {
   document.getElementById('tes-modal-subtitulo').textContent = d.cant_pagos + ' pagos comprometidos';
   document.getElementById('tes-modal-total-monto').textContent = _tesFmtMontoEntero(d.monto_pagos);
 
-  // Parsear detalle completo
-  var items = (d.detalle_pagos || '').split(/, (?=[^,]+\(\$)/);
-  var html = '';
-  items.forEach(function(item) {
-    var m = item.match(/^(.+?) \(\$(-?\d+)\)$/);
-    if (!m) return;
-    var prov = m[1];
-    var monto = Number(m[2]);
-    var icon = _tesPagoIcon(prov);
-    html += '<div class="tes-modal-pago">'
-      + '<div class="tes-modal-pago-icon">' + icon + '</div>'
-      + '<div class="tes-modal-pago-body">'
-        + '<div class="tes-modal-pago-prov">' + prov + '</div>'
-      + '</div>'
-      + '<div class="tes-modal-pago-monto">$' + _tesFmtMontoEntero(monto) + '</div>'
-      + '</div>';
-  });
-  document.getElementById('tes-modal-lista').innerHTML = html;
-
+  // v13.111.0 — abrir con loading y traer el detalle real de caja_pagos_proyectados
+  document.getElementById('tes-modal-lista').innerHTML = '<div style="padding:24px;text-align:center;color:#999;">Cargando detalle…</div>';
   document.getElementById('tes-modal-pagos').classList.add('activo');
   document.body.style.overflow = 'hidden';
+
+  var _pagos = null;
+  try { _pagos = await _tesFetch('caja_pagos_proyectados?fecha_vto=eq.' + dia + '&order=importe.desc.nullslast'); } catch (e) { _pagos = null; }
+
+  var html = '';
+  if (_pagos && _pagos.length) {
+    _pagos.forEach(function(p) {
+      var prov = p.proveedor || 'Sin proveedor';
+      var monto = Number(p.importe) || 0;
+      var icon = _tesPagoIcon(prov);
+      var cond = (p.condicion || '').toLowerCase();
+      var badge = cond === 'pagado'
+        ? '<span style="font-size:10px;font-weight:800;color:#1E8449;background:#E8F5E9;border-radius:6px;padding:1px 6px;margin-left:6px;">PAGADO</span>'
+        : (cond === 'pendiente' ? '<span style="font-size:10px;font-weight:800;color:#B45309;background:#FFF4E5;border-radius:6px;padding:1px 6px;margin-left:6px;">PENDIENTE</span>' : '');
+      var sub = []; if (p.concepto) sub.push(p.concepto); if (p.medio_pago) sub.push(p.medio_pago);
+      var subTxt = sub.join(' \u00b7 ');
+      html += '<div class="tes-modal-pago">'
+        + '<div class="tes-modal-pago-icon">' + icon + '</div>'
+        + '<div class="tes-modal-pago-body">'
+          + '<div class="tes-modal-pago-prov">' + prov + badge + '</div>'
+          + (subTxt ? '<div style="font-size:11.5px;color:#8A7B63;margin-top:2px;">' + subTxt + '</div>' : '')
+        + '</div>'
+        + '<div class="tes-modal-pago-monto">$' + _tesFmtMontoEntero(monto) + '</div>'
+      + '</div>';
+    });
+  } else {
+    var items = (d.detalle_pagos || '').split(/, (?=[^,]+\(\$)/);
+    items.forEach(function(item) {
+      var m = item.match(/^(.+?) \(\$(-?\d+)\)$/);
+      if (!m) return;
+      html += '<div class="tes-modal-pago"><div class="tes-modal-pago-icon">' + _tesPagoIcon(m[1]) + '</div><div class="tes-modal-pago-body"><div class="tes-modal-pago-prov">' + m[1] + '</div></div><div class="tes-modal-pago-monto">$' + _tesFmtMontoEntero(Number(m[2])) + '</div></div>';
+    });
+    if (!html) html = '<div style="padding:20px;text-align:center;color:#999;">Sin detalle cargado para este día.</div>';
+  }
+  document.getElementById('tes-modal-lista').innerHTML = html;
 }
 
 function tesModalCerrar() {
@@ -41438,7 +41496,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.110.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.111.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
