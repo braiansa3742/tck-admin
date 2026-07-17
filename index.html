@@ -1,5 +1,19 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.121.0 — 20/07/2026
+     v13.121.0: EXPORT XUBIO DE TRANSFERENCIAS (reporte administración 14/07;
+        rebaseado dos veces: nació como "13.106" local, después "13.116", y
+        Braian usó ambos números — queda como 13.121 sobre la 13.120).
+        (1) _lzSbFetch usaba la anon key pelada → 401 desde el blindaje RLS
+            (29/06), y el mensaje de error incluía la URL entera con los
+            pedido IDs (el "banner rojo" gigante). Ahora delega en sbFetch
+            (JWT + retry). Arregla también el Excel de cobranzas del viaje
+            y todo lo demás que usa esa helper.
+        (2) El botón "Exportar a Excel Xubio" respeta el corte 20/06 del
+            cron (vw_transferencias_a_postear). Las conciliadas anteriores
+            se cargaron a mano en Xubio en su momento (344 de 399 ya tienen
+            cobranza igual allá, medido 14/07): exportarlas duplicaría
+            ~$55M. Ahora quedan afuera del botón, con aviso 🔒 aparte.
      TCK ADMIN — v13.120.0 — 17/07/2026
      v13.120.0: FOODCONCIL MP/QR — (1) umbral del cruce a ±$10.000 (los descuadres
         chicos por timing quedan verdes, saltan los reales); (2) cada día es
@@ -29898,15 +29912,9 @@ function _lzParseMixto(detalleStr) {
 
 // ── Helper REST a Supabase (mismo patrón que el resto del admin) ──
 async function _lzSbFetch(pathQuery) {
-  var resp = await fetch(SUPABASE_URL + '/rest/v1/' + pathQuery, {
-    headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY }
-  });
-  if (!resp.ok) {
-    var txt = '';
-    try { txt = await resp.text(); } catch (e) {}
-    throw new Error('Supabase ' + resp.status + ' — ' + pathQuery + (txt ? (' · ' + txt.slice(0, 160)) : ''));
-  }
-  return await resp.json();
+  // v13.106: delega en sbFetch (JWT + retry). Con la anon key pelada moría
+  // en 401 desde el blindaje RLS (29/06), y el throw mostraba la URL entera.
+  return sbFetch(pathQuery);
 }
 
 // ── Lista IN(...) con valores texto entrecomillados para PostgREST ──
@@ -32568,6 +32576,22 @@ function _ltEsMixto(e) {
   } catch (_) { return false; }
 }
 
+// v13.106: mismo corte que vw_transferencias_a_postear (el cron del backend
+// postea solo entregas >= 20/06). Lo anterior ya se cargó a mano en Xubio en
+// su momento (344 de 399 tenían cobranza igual allá, medido 14/07) →
+// exportarlo duplicaría cobranzas. El botón usa el mismo corte.
+var LT_CORTE_EXPORT = '2026-06-20';
+function _ltExportable(e) {
+  return !!(e.transfer_conciliada && !e.transfer_exportada_en && !_ltEsMixto(e) && _ltMontoTransfer(e) > 0);
+}
+function _ltPreCorte(e) {
+  if (!e.fecha_entrega) return false;
+  var d = new Date(e.fecha_entrega);
+  if (isNaN(d)) return false;
+  // fecha calendario argentina (UTC-3 fijo, sin DST)
+  return new Date(d.getTime() - 3 * 3600000).toISOString().slice(0, 10) < LT_CORTE_EXPORT;
+}
+
 async function renderLogisticaTransferencias(el) {
   _ltState.el = el;
   el.innerHTML = '<div class="planilla-empty"><div class="loading-spinner" style="margin:0 auto 12px;"></div>Cargando transferencias...</div>';
@@ -32859,7 +32883,8 @@ function _ltPintar() {
   var conc    = rows.filter(function(e) { return e.transfer_conciliada; });
   var sinFoto = pend.filter(function(e) { return !e.comprobante_transfer; });
   var totalPend = pend.reduce(function(s, e) { return s + _ltMontoTransfer(e); }, 0);
-  var exportables = all.filter(function(e) { return e.transfer_conciliada && !e.transfer_exportada_en && !_ltEsMixto(e) && _ltMontoTransfer(e) > 0; });
+  var exportables = all.filter(function(e) { return _ltExportable(e) && !_ltPreCorte(e); });
+  var expViejas   = all.filter(function(e) { return _ltExportable(e) && _ltPreCorte(e); });
 
   var html = '';
 
@@ -32874,6 +32899,10 @@ function _ltPintar() {
   if (exportables.length) {
     var totalExp = exportables.reduce(function(s, e) { return s + _ltMontoTransfer(e); }, 0);
     html += '<button onclick="ltExportarConciliadas(this)" style="width:100%;padding:13px;margin-bottom:10px;background:var(--blue);color:#fff;border:none;border-radius:12px;font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:900;cursor:pointer;">📥 Exportar a Excel Xubio — ' + exportables.length + ' conciliada' + (exportables.length === 1 ? '' : 's') + ' · ' + fmt(totalExp) + '</button>';
+  }
+  if (expViejas.length) {
+    var totalViejas = expViejas.reduce(function(s, e) { return s + _ltMontoTransfer(e); }, 0);
+    html += '<div style="background:#FFF8E1;border:1px solid #FFE082;border-radius:10px;padding:9px 12px;margin-bottom:10px;font-size:12px;color:#795548;">🔒 ' + expViejas.length + ' conciliada' + (expViejas.length === 1 ? '' : 's') + ' anteriores al 20/6 (' + fmt(totalViejas) + ') no se exportan desde acá: la mayoría ya está cargada a mano en Xubio y se duplicarían. Ese período se revisa aparte con administración.</div>';
   }
 
   var choferes = [];
@@ -33370,13 +33399,14 @@ async function transferDisputaResolver(id, conciliar) {
 // ── 📥 Export de conciliadas a Excel Xubio ──
 // Mismo formato que el Excel del viaje (LZ_COB_HEADERS, cuenta Mercadopago,
 // fecha serial, números correlativos del Apps Script). Marca
-// transfer_exportada_en para no exportar dos veces.
+// transfer_exportada_en para no exportar dos veces. Solo >= 20/06
+// (LT_CORTE_EXPORT): lo anterior ya está a mano en Xubio y duplicaría.
 async function ltExportarConciliadas(btn) {
   var txtOrig = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Armando Excel...'; }
   try {
-    var cand = _ltState.rows.filter(function(e) { return e.transfer_conciliada && !e.transfer_exportada_en && !_ltEsMixto(e) && _ltMontoTransfer(e) > 0; });
-    if (!cand.length) { toast('No hay conciliadas sin exportar', 'err'); return; }
+    var cand = _ltState.rows.filter(function(e) { return _ltExportable(e) && !_ltPreCorte(e); });
+    if (!cand.length) { toast('No hay conciliadas exportables desde el 20/6 (las nuevas las postea solo el sistema, cada hora)', 'err'); return; }
 
     var XLSXlib = await _cargarSheetJS();
 
@@ -42038,7 +42068,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.120.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.121.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
