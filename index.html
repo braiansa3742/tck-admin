@@ -1,5 +1,10 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.114.0 — 16/07/2026
+     v13.114.0: FIX descarga del proyectado — el botón Excel de Pulso ahora carga
+        SheetJS con el loader lazy _cargarSheetJS() antes de generar, en vez de
+        asumir window.XLSX (que se carga bajo demanda). Antes tiraba "no hay
+        proyección para descargar" aunque hubiera datos.
      TCK ADMIN — v13.113.0 — 16/07/2026
      v13.113.0: TESORERÍA — el modal de pagos matchea cada pago con la factura de
         compra real de Xubio por monto exacto (ventana 90 días previos al vto) y
@@ -20851,9 +20856,13 @@ async function pulsoCargar() {
 }
 
 // v13.111.0 — descarga del proyectado a Excel (SheetJS ya cargado) para reenviar a Gastón
-function pulsoDescargarProy() {
+async function pulsoDescargarProy() {
   var pv = window._pulsoProy || [];
-  if (!pv.length || !window.XLSX) { alert('No hay proyecci\u00f3n para descargar todav\u00eda.'); return; }
+  if (!pv.length) { alert('No hay proyecci\u00f3n para descargar todav\u00eda.'); return; }
+  var XLSX;
+  try { XLSX = (typeof _cargarSheetJS === 'function') ? await _cargarSheetJS() : window.XLSX; }
+  catch (e) { alert('No se pudo cargar el generador de Excel. Reintent\u00e1 en unos segundos.'); return; }
+  if (!XLSX) { alert('No se pudo cargar el generador de Excel. Reintent\u00e1 en unos segundos.'); return; }
   var aoa = [];
   aoa.push(['TCK \u2014 Proyectado de ventas \u00b7 pr\u00f3ximos 30 d\u00edas']);
   aoa.push(['Venta por salida (c/IVA y neto). Es facturaci\u00f3n en monto; el mes cierra contra Xubio, el d\u00eda no.']);
@@ -41663,7 +41672,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.113.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.114.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
