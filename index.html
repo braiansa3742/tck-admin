@@ -1,5 +1,11 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.116.0 — 17/07/2026
+     v13.116.0: FIX Disponible hoy — la query tomaba la fila de apertura de mañana
+        (bancos en $0, solo efvo cargado) en vez del último cierre real, mostrando
+        ~$2,5M cuando había ~$21M. Ahora trae las últimas filas con total>0 y
+        fecha<=hoy (AR) y elige la más reciente con saldo bancario cargado
+        (galicia+bbva+mp>0). El header pasa a mostrar la fecha del cierre real.
      TCK ADMIN — v13.115.0 — 17/07/2026
      v13.115.0: FOODCONCIL — motivo estructurado del descuadre. Botón "Asentar
         motivo" en el detalle de cada cierre (reemplaza el texto libre del grupo
@@ -37956,13 +37962,19 @@ async function tesCargar() {
     var promises = [
       _tesFetch('vw_proyeccion_caja_30d?select=*&order=dia.asc'),
       _tesFetch('vw_deuda_vencida?select=*'),
-      _tesFetch('caja_saldo_diario?select=*&total_tck=gt.0&order=fecha.desc&limit=1')
+      _tesFetch('caja_saldo_diario?select=*&total_tck=gt.0&fecha=lte.' + (new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' })) + '&order=fecha.desc&limit=7')
     ];
 
     var results = await Promise.all(promises);
     var proyeccion = results[0];
     var deuda = (results[1] && results[1].length > 0) ? results[1][0] : null;
-    var saldoHoy = (results[2] && results[2].length > 0) ? results[2][0] : null;
+    var _saldoRows = results[2] || [];
+    var saldoHoy = null;
+    for (var _si = 0; _si < _saldoRows.length; _si++) {
+      var _sr = _saldoRows[_si];
+      if (Number(_sr.galicia_tck || 0) + Number(_sr.bbva_tck || 0) + Number(_sr.mercado_pago || 0) > 0) { saldoHoy = _sr; break; }
+    }
+    if (!saldoHoy && _saldoRows.length > 0) saldoHoy = _saldoRows[0];
 
     _tesData = proyeccion;
     _tesDeudaData = deuda;
@@ -41755,7 +41767,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.115.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.116.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
