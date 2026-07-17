@@ -1,5 +1,13 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.117.0 — 17/07/2026
+     v13.117.0: FOODCONCIL — conciliación MP/QR. Toggle "Cierres de caja | MP/QR"
+        en el tab. Importador del reporte MP (xlsx, SheetJS): filtra QR/Aprobado/
+        Caja Tck Food y hace upsert idempotente a buffet_mp_qr por numero_operacion.
+        Cruce por DÍA (MP QR bruto vs débito Toteat) vía vw_buffet_mp_concil: 🔴 QR
+        sin cargar (MP>Toteat) / 🟡 transferencias a validar (Toteat>MP) / ✅ cuadra,
+        umbral ±$2.000. KPI de comisión real (~3,61%, no 4,5%). Import gateado a
+        dueño/operaciones/cobranzas/admin. Requiere crear vw_buffet_mp_concil (ver SQL).
      TCK ADMIN — v13.116.0 — 17/07/2026
      v13.116.0: FIX Disponible hoy — la query tomaba la fila de apertura de mañana
         (bancos en $0, solo efvo cargado) en vez del último cierre real, mostrando
@@ -14923,11 +14931,21 @@ input.canales-exp-input[type="date"] {
       #view-foodconcil .fc-tabla tbody td::before{content:attr(data-l);color:#6b5a52;font-size:12px;font-weight:700}
       #view-foodconcil .fc-tabla td.fc-ic{justify-content:flex-end}
     }
+    #view-foodconcil .fcmp-toggle{display:inline-flex;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+    #view-foodconcil .fcmp-tb{font-family:inherit;font-size:14px;font-weight:600;padding:8px 16px;border:none;background:#fff;color:#6b5a52;cursor:pointer}
+    #view-foodconcil .fcmp-tb.active{background:var(--red);color:#fff}
   </style>
   <div class="fc-head">
     <div class="fc-title">&#129525; Conciliaci&oacute;n TCK Food</div>
     <div class="fc-sub">Contado por la cajera vs esperado seg&uacute;n ventas, por caja y turno</div>
   </div>
+  <div class="fc-controls" style="margin-bottom:0">
+    <div class="fcmp-toggle">
+      <button type="button" id="fc-tab-cierres" class="fcmp-tb active" onclick="fcTab('cierres')">🧾 Cierres de caja</button>
+      <button type="button" id="fc-tab-mp" class="fcmp-tb" onclick="fcTab('mp')">💳 MP / QR</button>
+    </div>
+  </div>
+  <div id="fc-view-cierres">
   <div class="fc-controls">
     <select id="fc-per" onchange="fconcilRender()">
       <option value="7">&Uacute;ltimos 7 d&iacute;as</option>
@@ -14945,6 +14963,25 @@ input.canales-exp-input[type="date"] {
   </div>
   <div class="fc-det" id="fc-det"></div>
   <div class="fc-foot">El sem&aacute;foro mira el <b>peor descuadre por instrumento</b>, no solo el neto: una caja que cuadra en el total pero tiene la forma de pago mal cargada igual sale en rojo. Verde &le; $500 &middot; Amarillo &le; $20.000 &middot; Rojo &gt; $20.000. Toc&aacute; una fila para ver las ventas de esa caja.</div>
+  </div><!-- /fc-view-cierres -->
+  <div id="fc-view-mp" style="display:none">
+    <div class="fc-controls">
+      <select id="fcmp-per" onchange="fcmpRender()">
+        <option value="7">&Uacute;ltimos 7 d&iacute;as</option>
+        <option value="14" selected>&Uacute;ltimos 14 d&iacute;as</option>
+        <option value="30">&Uacute;ltimos 30 d&iacute;as</option>
+      </select>
+      <span id="fcmp-import-wrap"></span>
+    </div>
+    <div class="fc-kpis" id="fcmp-kpis"></div>
+    <div class="fc-wrap">
+      <table class="fc-tabla">
+        <thead><tr><th>Fecha</th><th class="num">QR MP</th><th class="num">D&eacute;bito Toteat</th><th class="num">&Delta;</th><th class="num">Ops</th><th></th></tr></thead>
+        <tbody id="fcmp-rows"><tr><td colspan="6" style="text-align:center;padding:20px;">Cargando&hellip;</td></tr></tbody>
+      </table>
+    </div>
+    <div class="fc-foot">Cruce por <b>d&iacute;a</b> del QR de Mercado Pago vs el d&eacute;bito registrado en Toteat. 🔴 <b>QR sin cargar</b>: entr&oacute; QR que Toteat no registr&oacute; (venta no cargada). 🟡 <b>Toteat de m&aacute;s</b>: transferencias a validar (van al mismo MP pero no se diferencian). Umbral &plusmn;$2.000. El amarillo se limpia cuando se separe "Transferencia" como m&eacute;todo en Toteat.</div>
+  </div>
 </div>
 <nav class="tab-nav" id="tab-nav">
   <button class="tab-btn" id="tab-btn-logistica" onclick="cambiarTab('logistica')">
@@ -21061,6 +21098,124 @@ async function fconcilMotivoGuardar(){
     _fcMotivosRender();
   }catch(e){ toast('No se pudo guardar: '+(e.message||e),'err'); }
   finally{ if(btn){ btn.disabled=false; btn.textContent='Asentar motivo'; } }
+}
+
+/* == v13.117.0 - CONCILIACION MP/QR (import xlsx + cruce por dia + comision) == */
+function _fcmpMoney(n){ return '$ '+_fcNum(n); }
+function _fcmpKpi(lab,val,color){ return '<div class="fc-kpi"><div class="lab">'+lab+'</div><div class="val"'+(color?(' style="color:'+color+'"'):'')+'>'+val+'</div></div>'; }
+function _fcmpMes(s){ var M={ene:0,feb:1,mar:2,abr:3,may:4,jun:5,jul:6,ago:7,sep:8,oct:9,nov:10,dic:11}; return M[String(s||'').slice(0,3).toLowerCase()]; }
+function _fcmpParseFecha(raw){
+  try{
+    var p=String(raw||'').trim().split(/\s+/);
+    var dia=parseInt(p[0],10), mes=_fcmpMes(p[1]);
+    var hm=(p[2]||'0:0').split(':'); var h=parseInt(hm[0],10)||0, mi=parseInt(hm[1],10)||0;
+    if(isNaN(dia)||mes==null) return null;
+    var now=new Date(), y=now.getFullYear();
+    var d=new Date(y,mes,dia,h,mi,0);
+    if(d.getTime()-now.getTime() > 40*86400000) d=new Date(y-1,mes,dia,h,mi,0);
+    return d;
+  }catch(e){ return null; }
+}
+function _fcmpISO(d){
+  if(!d) return null;
+  var p=function(n){return (n<10?'0':'')+n;};
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes())+':00';
+}
+function fcTab(which){
+  var vc=document.getElementById('fc-view-cierres'), vm=document.getElementById('fc-view-mp');
+  var tc=document.getElementById('fc-tab-cierres'), tm=document.getElementById('fc-tab-mp');
+  if(which==='mp'){ if(vc)vc.style.display='none'; if(vm)vm.style.display=''; if(tm)tm.classList.add('active'); if(tc)tc.classList.remove('active'); fcmpRender(); }
+  else { if(vm)vm.style.display='none'; if(vc)vc.style.display=''; if(tc)tc.classList.add('active'); if(tm)tm.classList.remove('active'); }
+}
+async function fcmpArchivo(input){
+  var file=input.files && input.files[0]; if(!file) return;
+  input.value='';
+  toast('Leyendo reporte MP\u2026','ok');
+  try{
+    var XLSXlib=await _cargarSheetJS();
+    var buf=await file.arrayBuffer();
+    var wb=XLSXlib.read(buf,{type:'array'});
+    var ws=wb.Sheets[wb.SheetNames[0]];
+    var aoa=XLSXlib.utils.sheet_to_json(ws,{header:1,raw:true,defval:null});
+    var hi=-1;
+    for(var i=0;i<aoa.length;i++){ if((aoa[i]||[]).indexOf('N\u00famero de operaci\u00f3n')>=0){ hi=i; break; } }
+    if(hi<0){ toast('No parece un reporte MP (falta encabezado)','err'); return; }
+    var H={}; (aoa[hi]||[]).forEach(function(name,idx){ if(name!=null) H[String(name).trim()]=idx; });
+    function col(row,name){ var i=H[name]; return (i==null)?null:row[i]; }
+    var rows=[], skipped=0;
+    for(var r=hi+1;r<aoa.length;r++){
+      var row=aoa[r]||[];
+      var op=col(row,'N\u00famero de operaci\u00f3n');
+      if(op==null||String(op).trim()==='') continue;
+      var est=col(row,'Estado'), herr=col(row,'Herramienta de cobro'), caja=col(row,'Caja');
+      if(est!=='Aprobado' || herr!=='QR' || caja!=='Caja Tck Food'){ skipped++; continue; }
+      var raw=col(row,'Fecha de la compra');
+      rows.push({
+        numero_operacion: Number(String(op).replace(/\D/g,'')),
+        fecha_compra: _fcmpISO(_fcmpParseFecha(raw)),
+        raw_fecha: (raw==null?null:String(raw)),
+        estado: est, herramienta_cobro: herr,
+        medio_pago: col(row,'Medio de pago'),
+        cobro: Number(col(row,'Cobro'))||0,
+        cargos: Number(col(row,'Cargos e impuestos'))||0,
+        total_recibir: Number(col(row,'Total a recibir'))||0,
+        caja: caja,
+        pedido: (function(v){return v==null?null:String(v);})(col(row,'Pedido')),
+        importado_por: (typeof usuarioActual!=='undefined'?usuarioActual:null)
+      });
+    }
+    if(!rows.length){ toast('No hay ops QR/Aprobado/Caja Tck Food en el archivo','err'); return; }
+    var ins=0;
+    for(var b=0;b<rows.length;b+=500){
+      var lote=rows.slice(b,b+500);
+      await sbFetch('buffet_mp_qr',{ method:'POST', prefer:'resolution=merge-duplicates,return=minimal', body:JSON.stringify(lote) });
+      ins+=lote.length;
+    }
+    toast('\u2705 '+ins+' ops MP importadas'+(skipped?(' ('+skipped+' descartadas)'):''),'ok');
+    fcmpRender();
+  }catch(e){ toast('Error al importar: '+(e.message||e),'err'); console.warn('[fcmp-import]',e); }
+}
+async function fcmpRender(){
+  var sel=document.getElementById('fcmp-per');
+  var per=parseInt((sel&&sel.value)||'14',10);
+  var desde=new Date(Date.now()-per*86400000);
+  var dd=desde.getFullYear()+'-'+('0'+(desde.getMonth()+1)).slice(-2)+'-'+('0'+desde.getDate()).slice(-2);
+  var bw=document.getElementById('fcmp-import-wrap');
+  if(bw){ bw.innerHTML = _fcPuedeMotivo()
+    ? '<button type="button" onclick="document.getElementById(\'fcmp-file\').click()" style="font-family:inherit;font-size:14px;font-weight:600;padding:9px 16px;border:none;border-radius:8px;background:var(--red);color:#fff;cursor:pointer">\u2b06\ufe0f Importar reporte MP</button><input type="file" id="fcmp-file" accept=".xlsx,.xls" style="display:none" onchange="fcmpArchivo(this)">'
+    : ''; }
+  var kp=document.getElementById('fcmp-kpis'), tb=document.getElementById('fcmp-rows');
+  if(tb) tb.innerHTML='<tr><td colspan="6" style="text-align:center;padding:20px;">Cargando\u2026</td></tr>';
+  try{
+    var data=await sbFetch('vw_buffet_mp_concil?fecha=gte.'+dd+'&order=fecha.desc')||[];
+    var qr=0,deb=0,carg=0,ops=0,sinCargar=0;
+    data.forEach(function(x){ qr+=(+x.mp_qr_bruto||0); deb+=(+x.toteat_debito||0); carg+=(+x.mp_cargos||0); ops+=(+x.mp_ops||0); if((+x.descuadre||0)>2000) sinCargar+=(+x.descuadre||0); });
+    var comPct = qr>0 ? (-carg/qr*100) : 0;
+    if(kp) kp.innerHTML=
+      _fcmpKpi('QR MP (bruto)', _fcmpMoney(qr)) +
+      _fcmpKpi('Comisi\u00f3n + imp.', _fcmpMoney(-carg)+' <span style="font-size:13px;color:#6b5a52">('+comPct.toFixed(2)+'%)</span>') +
+      _fcmpKpi('Ops QR', String(ops)) +
+      _fcmpKpi('QR sin cargar', _fcmpMoney(sinCargar), sinCargar>2000?'var(--red)':'var(--green)');
+    if(tb){
+      if(!data.length){ tb.innerHTML='<tr><td colspan="6" style="text-align:center;padding:20px;color:#6b5a52">Sin datos en el per\u00edodo. Import\u00e1 el reporte MP.</td></tr>'; }
+      else tb.innerHTML=data.map(function(x){
+        var q=(+x.mp_qr_bruto||0), t=(+x.toteat_debito||0), dsc=(+x.descuadre||0), o=(+x.mp_ops||0);
+        var cls='fc-ok', ic='\u2705', tip='Cuadra';
+        if(dsc>2000){ cls='fc-bad'; ic='\uD83D\uDD34'; tip='QR entr\u00f3 que Toteat no carg\u00f3'; }
+        else if(dsc< -2000){ cls='fc-warn'; ic='\uD83D\uDFE1'; tip='Toteat de m\u00e1s (transferencias a validar)'; }
+        return '<tr class="'+cls+'">'+
+          '<td data-l="Fecha">'+_fcEsc(x.fecha)+'</td>'+
+          '<td data-l="QR MP" class="num">'+_fcmpMoney(q)+'</td>'+
+          '<td data-l="D\u00e9bito Toteat" class="num">'+_fcmpMoney(t)+'</td>'+
+          '<td data-l="\u0394" class="num" style="font-weight:600">'+(dsc>0?'+':'')+_fcmpMoney(dsc)+'</td>'+
+          '<td data-l="Ops" class="num">'+(o||'\u2014')+'</td>'+
+          '<td class="fc-ic" title="'+_fcEsc(tip)+'">'+ic+'</td></tr>';
+      }).join('');
+    }
+  }catch(e){
+    if(tb) tb.innerHTML='<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--red)">Error: '+_fcEsc(e.message||e)+'</td></tr>';
+    console.warn('[fcmp-render]',e);
+  }
 }
 
 function cambiarTab(tab) {
@@ -41767,7 +41922,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.116.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.117.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
