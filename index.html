@@ -1,5 +1,13 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.115.0 — 17/07/2026
+     v13.115.0: FOODCONCIL — motivo estructurado del descuadre. Botón "Asentar
+        motivo" en el detalle de cada cierre (reemplaza el texto libre del grupo
+        de WhatsApp): select de 7 motivos + nota (obligatoria en "Otro"), guarda
+        en buffet_cierres_motivos con usuario+rol para auditoría. Solo
+        dueño/operaciones/cobranzas/admin ven el botón (gating app-layer). La
+        planilla marca con 📝 las cajas que ya tienen motivo asentado. Requiere
+        crear la tabla buffet_cierres_motivos + RLS permisiva + GRANT (ver SQL).
      TCK ADMIN — v13.114.0 — 16/07/2026
      v13.114.0: FIX descarga del proyectado — el botón Excel de Pulso ahora carga
         SheetJS con el loader lazy _cargarSheetJS() antes de generar, en vez de
@@ -20920,6 +20928,8 @@ async function fconcilRender(){
     if(desde<'2026-06-12') desde='2026-06-12';
     var path="vw_buffet_concil?estado=eq.cerrada&fecha=gte."+desde+"&order=fecha.desc,register_id.asc&limit=2000";
     var rows=await sbFetch(path)||[];
+    var _fcMotSet={};
+    try{ var _mo=await sbFetch("buffet_cierres_motivos?fecha=gte."+desde+"&select=fecha,register_id,opened_date")||[]; _mo.forEach(function(m){ _fcMotSet[m.fecha+'|'+m.register_id+'|'+_fcOpKey(m.opened_date)]=1; }); }catch(e){}
     var nBad=0,nWarn=0,nOk=0,sumDesc=0;
     var out=rows.map(function(r){
       var sem=_fcSem(r);
@@ -20931,7 +20941,7 @@ async function fconcilRender(){
       var op=(r.opened_date||'').replace(/'/g,'');
       return '<tr class="fc-r fc-'+sem+'" onclick="fconcilDetalle(\''+r.fecha+'\','+r.register_id+',\''+op+'\')">'+
         '<td data-l="Fecha">'+f+'</td>'+
-        '<td data-l="Caja">'+_fcEsc(r.register_name)+'</td>'+
+        '<td data-l="Caja">'+_fcEsc(r.register_name)+(_fcMotSet[r.fecha+'|'+r.register_id+'|'+_fcOpKey(r.opened_date)]?' <span title="Motivo asentado" style="font-size:12px">\uD83D\uDCDD</span>':'')+'</td>'+
         '<td data-l="Contado" class="num">'+_fcNum(r.contado_total)+'</td>'+
         '<td data-l="Esperado" class="num fc-muted">'+_fcNum(r.esp_total)+'</td>'+
         '<td data-l="\u0394 Efvo" class="num">'+_fcDelta(r.desc_efectivo)+'</td>'+
@@ -20970,8 +20980,81 @@ async function fconcilDetalle(fecha,regId,opened){
       '<th style="text-align:left;font-size:11px;color:#6b5a52;padding:4px 8px">Hora</th>'+
       '<th style="text-align:right;font-size:11px;color:#6b5a52;padding:4px 8px">Total</th>'+
       '<th style="text-align:left;font-size:11px;color:#6b5a52;padding:4px 8px">Forma de pago (Toteat)</th></tr></thead><tbody>'+
-      (body||'<tr><td colspan="3" style="padding:10px;color:#6b5a52">Sin ventas en la ventana.</td></tr>')+'</tbody></table>';
+      (body||'<tr><td colspan="3" style="padding:10px;color:#6b5a52">Sin ventas en la ventana.</td></tr>')+'</tbody></table>'+_fcMotSeccion();
+    _fcDetCtx={fecha:fecha,regId:regId,opened:opened,regName:(c.register_name||'')};
+    _fcMotivosRender();
   }catch(e){ box.innerHTML='<div style="color:var(--red)">Error: '+_fcEsc(e.message||e)+'</div>'; console.warn("[fconcil-det]",e); }
+}
+
+/* == v13.115.0 - MOTIVO ESTRUCTURADO DEL DESCUADRE (buffet_cierres_motivos) == */
+var _fcDetCtx = null;
+var _fcMOTIVOS = [
+  {v:'forma_pago_mal_cargada',        t:'Forma de pago mal cargada'},
+  {v:'venta_no_cargada',              t:'Venta no cargada en Toteat'},
+  {v:'consumo_personal_mal_asignado', t:'Consumo personal mal asignado'},
+  {v:'cobranza_mal_cargada',          t:'Cobranza mal cargada'},
+  {v:'falta_cobrar',                  t:'Falta cobrar'},
+  {v:'dif_hora_apertura',             t:'Diferencia por hora de apertura'},
+  {v:'otro',                          t:'Otro'}
+];
+function _fcMotLabel(v){ for(var i=0;i<_fcMOTIVOS.length;i++){ if(_fcMOTIVOS[i].v===v) return _fcMOTIVOS[i].t; } return v; }
+function _fcPuedeMotivo(){ return rolActual==='dueno'||rolActual==='operaciones'||rolActual==='cobranzas'||rolActual==='admin'; }
+function _fcOpKey(s){ return String(s==null?'':s).slice(0,19); } // normaliza opened_date (corta tz/millis)
+
+function _fcMotSeccion(){
+  var form = _fcPuedeMotivo() ? (
+    '<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border)">'+
+    '<select id="fc-mot-sel" style="font-size:14px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:#fff;width:100%;max-width:340px"><option value="">Eleg\u00ed un motivo\u2026</option>'+
+    _fcMOTIVOS.map(function(m){ return '<option value="'+m.v+'">'+_fcEsc(m.t)+'</option>'; }).join('')+'</select>'+
+    '<textarea id="fc-mot-nota" rows="2" placeholder="Nota (obligatoria si el motivo es Otro)" style="display:block;margin-top:8px;width:100%;max-width:340px;font-family:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;resize:vertical;box-sizing:border-box"></textarea>'+
+    '<button id="fc-mot-btn" onclick="fconcilMotivoGuardar()" style="margin-top:8px;font-family:inherit;font-size:14px;font-weight:600;padding:9px 16px;border:none;border-radius:8px;background:var(--red);color:#fff;cursor:pointer">Asentar motivo</button>'+
+    '</div>'
+  ) : '<div style="font-size:12px;color:#b9a99f;margin-top:4px">Solo cobranzas/operaciones/due\u00f1o pueden asentar el motivo.</div>';
+  return '<div id="fc-mot" style="margin-top:14px">'+
+    '<div style="font-weight:700;font-size:12px;color:#6b5a52;text-transform:uppercase;letter-spacing:.4px">Motivo del descuadre</div>'+
+    '<div id="fc-mot-list" style="margin-top:6px"></div>'+form+'</div>';
+}
+
+async function _fcMotivosRender(){
+  var ctx=_fcDetCtx; if(!ctx) return;
+  var wrap=document.getElementById('fc-mot-list'); if(!wrap) return;
+  wrap.innerHTML='<div style="color:#6b5a52;font-size:12px">Cargando motivos&hellip;</div>';
+  try{
+    var path="buffet_cierres_motivos?fecha=eq."+ctx.fecha+"&register_id=eq."+ctx.regId+"&opened_date=eq."+encodeURIComponent(ctx.opened)+"&order=creado_en.desc&select=motivo,nota,usuario,rol,creado_en";
+    var ms=await sbFetch(path)||[];
+    if(!ms.length){ wrap.innerHTML='<div style="color:#b9a99f;font-size:12px">Sin motivo asentado todav\u00eda.</div>'; return; }
+    wrap.innerHTML=ms.map(function(m){
+      var f=String(m.creado_en||'').slice(0,16).replace('T',' ');
+      var quien=[m.usuario,m.rol].filter(Boolean).join(' \u00b7 ');
+      return '<div style="border-top:1px solid var(--border);padding:8px 0">'+
+        '<div style="font-weight:600;font-size:13px">'+_fcEsc(_fcMotLabel(m.motivo))+'</div>'+
+        (m.nota?'<div style="font-size:13px;color:#4a3d36;margin-top:2px;white-space:pre-wrap">'+_fcEsc(m.nota)+'</div>':'')+
+        '<div style="font-size:11px;color:#b9a99f;margin-top:2px">'+_fcEsc(quien)+(quien?' \u00b7 ':'')+f+'</div></div>';
+    }).join('');
+  }catch(e){ wrap.innerHTML='<div style="color:var(--red);font-size:12px">Error al cargar motivos: '+_fcEsc(e.message||e)+'</div>'; }
+}
+
+async function fconcilMotivoGuardar(){
+  var ctx=_fcDetCtx; if(!ctx) return;
+  var sel=document.getElementById('fc-mot-sel');
+  var nota=document.getElementById('fc-mot-nota');
+  var btn=document.getElementById('fc-mot-btn');
+  if(!sel) return;
+  var motivo=sel.value, txt=((nota&&nota.value)||'').trim();
+  if(!motivo){ toast('Eleg\u00ed un motivo','err'); return; }
+  if(motivo==='otro' && !txt){ toast('El motivo "Otro" necesita una nota','err'); if(nota) nota.focus(); return; }
+  if(btn){ btn.disabled=true; btn.textContent='Guardando\u2026'; }
+  try{
+    await sbFetch('buffet_cierres_motivos',{ method:'POST', prefer:'return=minimal', body:JSON.stringify({
+      fecha: ctx.fecha, register_id: ctx.regId, opened_date: ctx.opened,
+      register_name: (ctx.regName||null), motivo: motivo, nota: (txt||null),
+      usuario: (usuarioActual||null), rol: (rolActual||null)
+    }) });
+    if(nota) nota.value=''; sel.value='';
+    toast('\u2705 Motivo asentado','ok');
+    _fcMotivosRender();
+  }catch(e){ toast('No se pudo guardar: '+(e.message||e),'err'); }
+  finally{ if(btn){ btn.disabled=false; btn.textContent='Asentar motivo'; } }
 }
 
 function cambiarTab(tab) {
@@ -41672,7 +41755,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.114.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.115.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
