@@ -1,5 +1,12 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.120.0 — 17/07/2026
+     v13.120.0: FOODCONCIL MP/QR — (1) umbral del cruce a ±$10.000 (los descuadres
+        chicos por timing quedan verdes, saltan los reales); (2) cada día es
+        clickeable -> detalle con las ops QR de esa jornada + formulario "Asentar
+        motivo" (tabla buffet_mp_motivos, enum de 5, gating dueño/oper/cobranzas);
+        (4) badge 📝 en los días con motivo asentado. Requiere crear
+        buffet_mp_motivos (ver SQL).
      TCK ADMIN — v13.119.0 — 17/07/2026
      v13.119.0: FOODCONCIL UX — (1) las cajas que cuadran colapsan en mobile
         (se ocultan los Δ en cero y el Esperado redundante) y las que descuadran
@@ -14946,7 +14953,8 @@ input.canales-exp-input[type="date"] {
         <tbody id="fcmp-rows"><tr><td colspan="6" style="text-align:center;padding:20px;">Cargando&hellip;</td></tr></tbody>
       </table>
     </div>
-    <div class="fc-foot">Cruce por <b>d&iacute;a</b> del QR de Mercado Pago vs el d&eacute;bito registrado en Toteat. 🔴 <b>QR sin cargar</b>: entr&oacute; QR que Toteat no registr&oacute; (venta no cargada). 🟡 <b>Toteat de m&aacute;s</b>: transferencias a validar (van al mismo MP pero no se diferencian). Umbral &plusmn;$2.000. El amarillo se limpia cuando se separe "Transferencia" como m&eacute;todo en Toteat.</div>
+    <div class="fc-det" id="fcmp-det"></div>
+    <div class="fc-foot">Cruce por <b>d&iacute;a</b> (jornada, corte 6am) del QR de Mercado Pago vs el d&eacute;bito de Toteat. Toc&aacute; un d&iacute;a para ver las ops QR y asentar el motivo. 🔴 <b>QR sin cargar</b> (MP &gt; Toteat). 🟡 <b>Toteat de m&aacute;s</b> (transferencias a validar). Verde hasta &plusmn;$10.000. El amarillo se limpia al separar "Transferencia" en Toteat.</div>
   </div>
 </div>
 </div>
@@ -21206,23 +21214,26 @@ async function fcmpRender(){
   if(tb) tb.innerHTML='<tr><td colspan="6" style="text-align:center;padding:20px;">Cargando\u2026</td></tr>';
   try{
     var data=await sbFetch('vw_buffet_mp_concil?fecha=gte.'+dd+'&order=fecha.desc')||[];
+    var _fcmpMotSet={};
+    try{ var _mm=await sbFetch('buffet_mp_motivos?fecha=gte.'+dd+'&select=fecha')||[]; _mm.forEach(function(m){ _fcmpMotSet[m.fecha]=1; }); }catch(e){}
     var qr=0,deb=0,carg=0,ops=0,sinCargar=0;
-    data.forEach(function(x){ qr+=(+x.mp_qr_bruto||0); deb+=(+x.toteat_debito||0); carg+=(+x.mp_cargos||0); ops+=(+x.mp_ops||0); if((+x.descuadre||0)>2000) sinCargar+=(+x.descuadre||0); });
+    data.forEach(function(x){ qr+=(+x.mp_qr_bruto||0); deb+=(+x.toteat_debito||0); carg+=(+x.mp_cargos||0); ops+=(+x.mp_ops||0); if((+x.descuadre||0)>_FCMP_UMBRAL) sinCargar+=(+x.descuadre||0); });
     var comPct = qr>0 ? (-carg/qr*100) : 0;
     if(kp) kp.innerHTML=
       _fcmpKpi('QR MP (bruto)', _fcmpMoney(qr)) +
       _fcmpKpi('Comisi\u00f3n + imp.', _fcmpMoney(-carg)+' <span style="font-size:13px;color:#6b5a52">('+comPct.toFixed(2)+'%)</span>') +
       _fcmpKpi('Ops QR', String(ops)) +
-      _fcmpKpi('QR sin cargar', _fcmpMoney(sinCargar), sinCargar>2000?'var(--red)':'var(--green)');
+      _fcmpKpi('QR sin cargar', _fcmpMoney(sinCargar), sinCargar>0?'var(--red)':'var(--green)');
     if(tb){
       if(!data.length){ tb.innerHTML='<tr><td colspan="6" style="text-align:center;padding:20px;color:#6b5a52">Sin datos en el per\u00edodo. Import\u00e1 el reporte MP.</td></tr>'; }
       else tb.innerHTML=data.map(function(x){
         var q=(+x.mp_qr_bruto||0), t=(+x.toteat_debito||0), dsc=(+x.descuadre||0), o=(+x.mp_ops||0);
-        var cls='fc-ok', ic='\u2705', tip='Cuadra';
-        if(dsc>2000){ cls='fc-bad'; ic='\uD83D\uDD34'; tip='QR entr\u00f3 que Toteat no carg\u00f3'; }
-        else if(dsc< -2000){ cls='fc-warn'; ic='\uD83D\uDFE1'; tip='Toteat de m\u00e1s (transferencias a validar)'; }
-        return '<tr class="'+cls+'">'+
-          '<td data-l="Fecha"><span class="fc-dot fc-dot-'+cls.replace('fc-','')+'" title="'+_fcEsc(tip)+'"></span>'+_fcEsc(x.fecha)+'</td>'+
+        var cls='fc-ok', tip='Cuadra';
+        if(dsc>_FCMP_UMBRAL){ cls='fc-bad'; tip='QR entr\u00f3 que Toteat no carg\u00f3'; }
+        else if(dsc< -_FCMP_UMBRAL){ cls='fc-warn'; tip='Toteat de m\u00e1s (transferencias a validar)'; }
+        var mot=_fcmpMotSet[x.fecha]?' <span title="Motivo asentado" style="font-size:12px">\uD83D\uDCDD</span>':'';
+        return '<tr class="fc-r '+cls+'" onclick="fcmpDetalle(\''+x.fecha+'\')">'+
+          '<td data-l="Fecha"><span class="fc-dot fc-dot-'+cls.replace('fc-','')+'" title="'+_fcEsc(tip)+'"></span>'+_fcEsc(x.fecha)+mot+'</td>'+
           '<td data-l="QR MP" class="num">'+_fcmpMoney(q)+'</td>'+
           '<td data-l="D\u00e9bito Toteat" class="num">'+_fcmpMoney(t)+'</td>'+
           '<td data-l="\u0394" class="num" style="font-weight:600">'+(dsc>0?'+':'')+_fcmpMoney(dsc)+'</td>'+
@@ -21233,6 +21244,94 @@ async function fcmpRender(){
     if(tb) tb.innerHTML='<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--red)">Error: '+_fcEsc(e.message||e)+'</td></tr>';
     console.warn('[fcmp-render]',e);
   }
+}
+
+/* == v13.120.0 - MP/QR: umbral + drill-down + motivo por dia == */
+var _FCMP_UMBRAL = 10000;   // ± tolerancia "cuadra" del cruce MP/QR
+var _fcmpDetCtx = null;
+var _FCMP_MOTIVOS = [
+  {v:'venta_qr_no_cargada', t:'Venta QR no cargada en Toteat'},
+  {v:'transferencia',       t:'Transferencia (no es QR)'},
+  {v:'debito_mal_cargado',  t:'D\u00e9bito mal cargado'},
+  {v:'timing',              t:'Diferencia de timing / borde de jornada'},
+  {v:'otro',                t:'Otro'}
+];
+function _fcmpMotLabel(v){ for(var i=0;i<_FCMP_MOTIVOS.length;i++){ if(_FCMP_MOTIVOS[i].v===v) return _FCMP_MOTIVOS[i].t; } return v; }
+
+async function fcmpDetalle(fecha){
+  var box=document.getElementById('fcmp-det'); if(!box) return;
+  _fcmpDetCtx={fecha:fecha};
+  box.style.display='block'; box.scrollIntoView({behavior:'smooth',block:'nearest'});
+  box.innerHTML='<div style="color:#6b5a52">Cargando ops del d\u00eda\u2026</div>';
+  try{
+    var d0=fecha+'T06:00:00';
+    var nd=new Date(new Date(fecha+'T00:00:00').getTime()+86400000);
+    var d1=nd.getFullYear()+'-'+('0'+(nd.getMonth()+1)).slice(-2)+'-'+('0'+nd.getDate()).slice(-2)+'T06:00:00';
+    var ops=await sbFetch('buffet_mp_qr?fecha_compra=gte.'+d0+'&fecha_compra=lt.'+d1+'&estado=eq.Aprobado&herramienta_cobro=eq.QR&order=fecha_compra.asc&select=fecha_compra,cobro,cargos,numero_operacion&limit=800')||[];
+    var tot=0; ops.forEach(function(o){ tot+=(+o.cobro||0); });
+    var lista = ops.length ? ops.map(function(o){
+      var h=String(o.fecha_compra||'').slice(11,16);
+      return '<tr><td data-l="Hora">'+h+'</td><td data-l="Cobro" class="num">'+_fcmpMoney(o.cobro)+'</td><td data-l="Comisi\u00f3n" class="num" style="color:#6b5a52">'+_fcmpMoney(o.cargos)+'</td></tr>';
+    }).join('') : '<tr><td colspan="3" style="padding:10px;color:#6b5a52">Sin ops QR en la jornada.</td></tr>';
+    box.innerHTML =
+      '<div style="font-weight:700;font-size:15px;margin-bottom:2px">Jornada '+_fcEsc(fecha)+'</div>'+
+      '<div style="font-size:12px;color:#6b5a52;margin-bottom:8px">'+ops.length+' ops QR \u00b7 total '+_fcmpMoney(tot)+'</div>'+
+      '<div class="fc-wrap"><table class="fc-tabla"><thead><tr><th>Hora</th><th class="num">Cobro</th><th class="num">Comisi\u00f3n</th></tr></thead><tbody>'+lista+'</tbody></table></div>'+
+      _fcmpMotSeccion();
+    _fcmpMotRender();
+  }catch(e){ box.innerHTML='<div style="color:var(--red)">Error: '+_fcEsc(e.message||e)+'</div>'; console.warn('[fcmp-det]',e); }
+}
+
+function _fcmpMotSeccion(){
+  var form = _fcPuedeMotivo() ? (
+    '<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border)">'+
+    '<select id="fcmp-mot-sel" style="font-size:14px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:#fff;width:100%;max-width:340px"><option value="">Eleg\u00ed un motivo\u2026</option>'+
+    _FCMP_MOTIVOS.map(function(m){ return '<option value="'+m.v+'">'+_fcEsc(m.t)+'</option>'; }).join('')+'</select>'+
+    '<textarea id="fcmp-mot-nota" rows="2" placeholder="Nota (obligatoria si es Otro)" style="display:block;margin-top:8px;width:100%;max-width:340px;font-family:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;resize:vertical;box-sizing:border-box"></textarea>'+
+    '<button id="fcmp-mot-btn" onclick="fcmpMotivoGuardar()" style="margin-top:8px;font-family:inherit;font-size:14px;font-weight:600;padding:9px 16px;border:none;border-radius:8px;background:var(--red);color:#fff;cursor:pointer">Asentar motivo</button>'+
+    '</div>'
+  ) : '<div style="font-size:12px;color:#b9a99f;margin-top:4px">Solo cobranzas/operaciones/due\u00f1o pueden asentar el motivo.</div>';
+  return '<div style="margin-top:14px"><div style="font-weight:700;font-size:12px;color:#6b5a52;text-transform:uppercase;letter-spacing:.4px">Motivo del descuadre</div><div id="fcmp-mot-list" style="margin-top:6px"></div>'+form+'</div>';
+}
+
+async function _fcmpMotRender(){
+  var ctx=_fcmpDetCtx; if(!ctx) return;
+  var wrap=document.getElementById('fcmp-mot-list'); if(!wrap) return;
+  wrap.innerHTML='<div style="color:#6b5a52;font-size:12px">Cargando\u2026</div>';
+  try{
+    var ms=await sbFetch('buffet_mp_motivos?fecha=eq.'+ctx.fecha+'&order=creado_en.desc&select=motivo,nota,usuario,rol,creado_en')||[];
+    if(!ms.length){ wrap.innerHTML='<div style="color:#b9a99f;font-size:12px">Sin motivo asentado todav\u00eda.</div>'; return; }
+    wrap.innerHTML=ms.map(function(m){
+      var f=String(m.creado_en||'').slice(0,16).replace('T',' ');
+      var quien=[m.usuario,m.rol].filter(Boolean).join(' \u00b7 ');
+      return '<div style="border-top:1px solid var(--border);padding:8px 0">'+
+        '<div style="font-weight:600;font-size:13px">'+_fcEsc(_fcmpMotLabel(m.motivo))+'</div>'+
+        (m.nota?'<div style="font-size:13px;color:#4a3d36;margin-top:2px;white-space:pre-wrap">'+_fcEsc(m.nota)+'</div>':'')+
+        '<div style="font-size:11px;color:#b9a99f;margin-top:2px">'+_fcEsc(quien)+(quien?' \u00b7 ':'')+f+'</div></div>';
+    }).join('');
+  }catch(e){ wrap.innerHTML='<div style="color:var(--red);font-size:12px">Error: '+_fcEsc(e.message||e)+'</div>'; }
+}
+
+async function fcmpMotivoGuardar(){
+  var ctx=_fcmpDetCtx; if(!ctx) return;
+  var sel=document.getElementById('fcmp-mot-sel'), nota=document.getElementById('fcmp-mot-nota'), btn=document.getElementById('fcmp-mot-btn');
+  if(!sel) return;
+  var motivo=sel.value, txt=((nota&&nota.value)||'').trim();
+  if(!motivo){ toast('Eleg\u00ed un motivo','err'); return; }
+  if(motivo==='otro' && !txt){ toast('El motivo "Otro" necesita una nota','err'); if(nota) nota.focus(); return; }
+  if(btn){ btn.disabled=true; btn.textContent='Guardando\u2026'; }
+  try{
+    await sbFetch('buffet_mp_motivos',{ method:'POST', prefer:'return=minimal', body:JSON.stringify({
+      fecha: ctx.fecha, motivo: motivo, nota: (txt||null),
+      usuario: (typeof usuarioActual!=='undefined'?usuarioActual:null),
+      rol: (typeof rolActual!=='undefined'?rolActual:null)
+    }) });
+    if(nota) nota.value=''; sel.value='';
+    toast('\u2705 Motivo asentado','ok');
+    _fcmpMotRender();
+    fcmpRender();
+  }catch(e){ toast('No se pudo guardar: '+(e.message||e),'err'); }
+  finally{ if(btn){ btn.disabled=false; btn.textContent='Asentar motivo'; } }
 }
 
 function cambiarTab(tab) {
@@ -41939,7 +42038,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.119.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.120.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
