@@ -1,5 +1,17 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.119.0 — 17/07/2026
+     v13.119.0: FOODCONCIL UX — (1) las cajas que cuadran colapsan en mobile
+        (se ocultan los Δ en cero y el Esperado redundante) y las que descuadran
+        muestran solo el Δ ≠ 0; (2) semáforo pasa a puntito de color pegado a la
+        fecha (se sacó la columna del ícono suelto). Aplica a Cierres y MP/QR.
+        Solo cambios de presentación; desktop mantiene la tabla completa.
+     TCK ADMIN — v13.118.0 — 17/07/2026
+     v13.118.0: FIX hueco blanco del tab TCK Food — #view-foodconcil estaba
+        FUERA del #panel (como le pasó a buffet en v13.101.0): el #panel vacío
+        rendía su min-height (~876px) = el hueco, y foodconcil renderizaba al
+        fondo. Fix: se movió el bloque ADENTRO del #panel. Sin cambios de lógica.
+        (view-ccprod tiene el mismo bug latente, no tocado aún.)
      TCK ADMIN — v13.117.0 — 17/07/2026
      v13.117.0: FOODCONCIL — conciliación MP/QR. Toggle "Cierres de caja | MP/QR"
         en el tab. Importador del reporte MP (xlsx, SheetJS): filtra QR/Aprobado/
@@ -14841,6 +14853,102 @@ input.canales-exp-input[type="date"] {
 
   <div class="bf-loading" id="bf-loading" style="display:none;">Cargando datos del buffet…</div>
 </div>
+<div class="view" id="view-foodconcil">
+  <style>
+    #view-foodconcil .fc-head{margin:4px 0 10px}
+    #view-foodconcil .fc-title{font-weight:700;font-size:20px;color:var(--red)}
+    #view-foodconcil .fc-sub{font-size:13px;color:#6b5a52}
+    #view-foodconcil .fc-controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:10px 0}
+    #view-foodconcil select{font-family:inherit;font-size:15px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--text)}
+    #view-foodconcil .fc-chk{display:flex;align-items:center;gap:6px;font-size:14px;color:#6b5a52}
+    #view-foodconcil .fc-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:8px 0 14px}
+    #view-foodconcil .fc-kpi{background:#fff;border:1px solid var(--border);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow)}
+    #view-foodconcil .fc-kpi .lab{font-size:11px;color:#6b5a52;text-transform:uppercase;letter-spacing:.4px;font-weight:700}
+    #view-foodconcil .fc-kpi .val{font-size:26px;font-weight:700;line-height:1.1;margin-top:3px}
+    #view-foodconcil .fc-wrap{background:#fff;border:1px solid var(--border);border-radius:12px;overflow:hidden;box-shadow:var(--shadow)}
+    #view-foodconcil table.fc-tabla{width:100%;border-collapse:collapse}
+    #view-foodconcil .fc-tabla thead th{background:#f3e7e2;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#6b5a52;padding:9px 12px;font-weight:700}
+    #view-foodconcil .fc-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;vertical-align:middle;flex-shrink:0}
+    #view-foodconcil .fc-dot-ok{background:var(--green)}
+    #view-foodconcil .fc-dot-warn{background:#b45309}
+    #view-foodconcil .fc-dot-bad{background:var(--red)}
+    #view-foodconcil .fc-dot-sinv{background:#c9bcb2}
+    #view-foodconcil .fc-tabla th.num,#view-foodconcil .fc-tabla td.num{text-align:right;font-variant-numeric:tabular-nums}
+    #view-foodconcil .fc-tabla tbody td{padding:9px 12px;border-top:1px solid var(--border);font-size:14px}
+    #view-foodconcil .fc-r{cursor:pointer}
+    #view-foodconcil .fc-r:hover{background:#faf4ec}
+    #view-foodconcil .fc-muted{color:#6b5a52}
+    #view-foodconcil .fc-z{color:#b9a99f}
+    #view-foodconcil .fc-ic{text-align:center;font-size:15px}
+    #view-foodconcil .fc-bad .fc-ic{color:var(--red)}
+    #view-foodconcil .fc-warn .fc-ic{color:#b45309}
+    #view-foodconcil .fc-ok .fc-ic{color:var(--green)}
+    #view-foodconcil .fc-sinv{opacity:.55}
+    #view-foodconcil .fc-det{display:none;margin-top:14px;background:#fff;border:1px solid var(--border);border-radius:12px;padding:14px;box-shadow:var(--shadow)}
+    #view-foodconcil .fc-foot{font-size:12px;color:#6b5a52;margin-top:12px;line-height:1.5}
+    @media(max-width:720px){
+      #view-foodconcil .fc-kpis{grid-template-columns:repeat(2,1fr)}
+      #view-foodconcil .fc-tabla thead{display:none}
+      #view-foodconcil .fc-tabla,#view-foodconcil .fc-tabla tbody,#view-foodconcil .fc-tabla tr,#view-foodconcil .fc-tabla td{display:block;width:auto}
+      #view-foodconcil .fc-tabla tr{border:1px solid var(--border);border-radius:12px;margin:10px;padding:6px 4px}
+      #view-foodconcil .fc-tabla tbody td{border:none;padding:5px 12px;display:flex;justify-content:space-between;font-size:14px}
+      #view-foodconcil .fc-tabla tbody td::before{content:attr(data-l);color:#6b5a52;font-size:12px;font-weight:700}
+      #view-foodconcil .fc-tabla td.fc-ic{justify-content:flex-end}
+      #view-foodconcil .fc-z0{display:none}
+      #view-foodconcil .fc-cuadra .fc-esp{display:none}
+    }
+    #view-foodconcil .fcmp-toggle{display:inline-flex;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+    #view-foodconcil .fcmp-tb{font-family:inherit;font-size:14px;font-weight:600;padding:8px 16px;border:none;background:#fff;color:#6b5a52;cursor:pointer}
+    #view-foodconcil .fcmp-tb.active{background:var(--red);color:#fff}
+  </style>
+  <div class="fc-head">
+    <div class="fc-title">&#129525; Conciliaci&oacute;n TCK Food</div>
+    <div class="fc-sub">Contado por la cajera vs esperado seg&uacute;n ventas, por caja y turno</div>
+  </div>
+  <div class="fc-controls" style="margin-bottom:0">
+    <div class="fcmp-toggle">
+      <button type="button" id="fc-tab-cierres" class="fcmp-tb active" onclick="fcTab('cierres')">🧾 Cierres de caja</button>
+      <button type="button" id="fc-tab-mp" class="fcmp-tb" onclick="fcTab('mp')">💳 MP / QR</button>
+    </div>
+  </div>
+  <div id="fc-view-cierres">
+  <div class="fc-controls">
+    <select id="fc-per" onchange="fconcilRender()">
+      <option value="7">&Uacute;ltimos 7 d&iacute;as</option>
+      <option value="14" selected>&Uacute;ltimos 14 d&iacute;as</option>
+      <option value="30">&Uacute;ltimos 30 d&iacute;as</option>
+    </select>
+    <label class="fc-chk"><input type="checkbox" id="fc-solo" onchange="fconcilRender()"> Solo descuadres</label>
+  </div>
+  <div class="fc-kpis" id="fc-kpis"></div>
+  <div class="fc-wrap">
+    <table class="fc-tabla">
+      <thead><tr><th>Fecha</th><th>Caja</th><th class="num">Contado</th><th class="num">Esperado</th><th class="num">&Delta; Efvo</th><th class="num">&Delta; D&eacute;bito</th><th class="num">&Delta; Cr&eacute;d</th></tr></thead>
+      <tbody id="fc-rows"><tr><td colspan="8" style="text-align:center;padding:20px;">Cargando&hellip;</td></tr></tbody>
+    </table>
+  </div>
+  <div class="fc-det" id="fc-det"></div>
+  <div class="fc-foot">El sem&aacute;foro mira el <b>peor descuadre por instrumento</b>, no solo el neto: una caja que cuadra en el total pero tiene la forma de pago mal cargada igual sale en rojo. Verde &le; $500 &middot; Amarillo &le; $20.000 &middot; Rojo &gt; $20.000. Toc&aacute; una fila para ver las ventas de esa caja.</div>
+  </div><!-- /fc-view-cierres -->
+  <div id="fc-view-mp" style="display:none">
+    <div class="fc-controls">
+      <select id="fcmp-per" onchange="fcmpRender()">
+        <option value="7">&Uacute;ltimos 7 d&iacute;as</option>
+        <option value="14" selected>&Uacute;ltimos 14 d&iacute;as</option>
+        <option value="30">&Uacute;ltimos 30 d&iacute;as</option>
+      </select>
+      <span id="fcmp-import-wrap"></span>
+    </div>
+    <div class="fc-kpis" id="fcmp-kpis"></div>
+    <div class="fc-wrap">
+      <table class="fc-tabla">
+        <thead><tr><th>Fecha</th><th class="num">QR MP</th><th class="num">D&eacute;bito Toteat</th><th class="num">&Delta;</th><th class="num">Ops</th></tr></thead>
+        <tbody id="fcmp-rows"><tr><td colspan="6" style="text-align:center;padding:20px;">Cargando&hellip;</td></tr></tbody>
+      </table>
+    </div>
+    <div class="fc-foot">Cruce por <b>d&iacute;a</b> del QR de Mercado Pago vs el d&eacute;bito registrado en Toteat. 🔴 <b>QR sin cargar</b>: entr&oacute; QR que Toteat no registr&oacute; (venta no cargada). 🟡 <b>Toteat de m&aacute;s</b>: transferencias a validar (van al mismo MP pero no se diferencian). Umbral &plusmn;$2.000. El amarillo se limpia cuando se separe "Transferencia" como m&eacute;todo en Toteat.</div>
+  </div>
+</div>
 </div>
 <div class="view" id="view-ccprod">
   <style>
@@ -14893,95 +15001,6 @@ input.canales-exp-input[type="date"] {
     </table>
   </div>
   <div class="ccp-foot">El <b>Saldo</b> es el acumulado de los movimientos del período. La <b>Diferencia</b> (solo en período "Todo") compara ese acumulado contra el stock real: si es grande, hay un movimiento sin registrar (devolución sin cargar, ajuste). Las devoluciones todavía no entran al detalle (se guardan como texto libre).</div>
-</div>
-<div class="view" id="view-foodconcil">
-  <style>
-    #view-foodconcil .fc-head{margin:4px 0 10px}
-    #view-foodconcil .fc-title{font-weight:700;font-size:20px;color:var(--red)}
-    #view-foodconcil .fc-sub{font-size:13px;color:#6b5a52}
-    #view-foodconcil .fc-controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:10px 0}
-    #view-foodconcil select{font-family:inherit;font-size:15px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--text)}
-    #view-foodconcil .fc-chk{display:flex;align-items:center;gap:6px;font-size:14px;color:#6b5a52}
-    #view-foodconcil .fc-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:8px 0 14px}
-    #view-foodconcil .fc-kpi{background:#fff;border:1px solid var(--border);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow)}
-    #view-foodconcil .fc-kpi .lab{font-size:11px;color:#6b5a52;text-transform:uppercase;letter-spacing:.4px;font-weight:700}
-    #view-foodconcil .fc-kpi .val{font-size:26px;font-weight:700;line-height:1.1;margin-top:3px}
-    #view-foodconcil .fc-wrap{background:#fff;border:1px solid var(--border);border-radius:12px;overflow:hidden;box-shadow:var(--shadow)}
-    #view-foodconcil table.fc-tabla{width:100%;border-collapse:collapse}
-    #view-foodconcil .fc-tabla thead th{background:#f3e7e2;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#6b5a52;padding:9px 12px;font-weight:700}
-    #view-foodconcil .fc-tabla th.num,#view-foodconcil .fc-tabla td.num{text-align:right;font-variant-numeric:tabular-nums}
-    #view-foodconcil .fc-tabla tbody td{padding:9px 12px;border-top:1px solid var(--border);font-size:14px}
-    #view-foodconcil .fc-r{cursor:pointer}
-    #view-foodconcil .fc-r:hover{background:#faf4ec}
-    #view-foodconcil .fc-muted{color:#6b5a52}
-    #view-foodconcil .fc-z{color:#b9a99f}
-    #view-foodconcil .fc-ic{text-align:center;font-size:15px}
-    #view-foodconcil .fc-bad .fc-ic{color:var(--red)}
-    #view-foodconcil .fc-warn .fc-ic{color:#b45309}
-    #view-foodconcil .fc-ok .fc-ic{color:var(--green)}
-    #view-foodconcil .fc-sinv{opacity:.55}
-    #view-foodconcil .fc-det{display:none;margin-top:14px;background:#fff;border:1px solid var(--border);border-radius:12px;padding:14px;box-shadow:var(--shadow)}
-    #view-foodconcil .fc-foot{font-size:12px;color:#6b5a52;margin-top:12px;line-height:1.5}
-    @media(max-width:720px){
-      #view-foodconcil .fc-kpis{grid-template-columns:repeat(2,1fr)}
-      #view-foodconcil .fc-tabla thead{display:none}
-      #view-foodconcil .fc-tabla,#view-foodconcil .fc-tabla tbody,#view-foodconcil .fc-tabla tr,#view-foodconcil .fc-tabla td{display:block;width:auto}
-      #view-foodconcil .fc-tabla tr{border:1px solid var(--border);border-radius:12px;margin:10px;padding:6px 4px}
-      #view-foodconcil .fc-tabla tbody td{border:none;padding:5px 12px;display:flex;justify-content:space-between;font-size:14px}
-      #view-foodconcil .fc-tabla tbody td::before{content:attr(data-l);color:#6b5a52;font-size:12px;font-weight:700}
-      #view-foodconcil .fc-tabla td.fc-ic{justify-content:flex-end}
-    }
-    #view-foodconcil .fcmp-toggle{display:inline-flex;border:1px solid var(--border);border-radius:10px;overflow:hidden}
-    #view-foodconcil .fcmp-tb{font-family:inherit;font-size:14px;font-weight:600;padding:8px 16px;border:none;background:#fff;color:#6b5a52;cursor:pointer}
-    #view-foodconcil .fcmp-tb.active{background:var(--red);color:#fff}
-  </style>
-  <div class="fc-head">
-    <div class="fc-title">&#129525; Conciliaci&oacute;n TCK Food</div>
-    <div class="fc-sub">Contado por la cajera vs esperado seg&uacute;n ventas, por caja y turno</div>
-  </div>
-  <div class="fc-controls" style="margin-bottom:0">
-    <div class="fcmp-toggle">
-      <button type="button" id="fc-tab-cierres" class="fcmp-tb active" onclick="fcTab('cierres')">🧾 Cierres de caja</button>
-      <button type="button" id="fc-tab-mp" class="fcmp-tb" onclick="fcTab('mp')">💳 MP / QR</button>
-    </div>
-  </div>
-  <div id="fc-view-cierres">
-  <div class="fc-controls">
-    <select id="fc-per" onchange="fconcilRender()">
-      <option value="7">&Uacute;ltimos 7 d&iacute;as</option>
-      <option value="14" selected>&Uacute;ltimos 14 d&iacute;as</option>
-      <option value="30">&Uacute;ltimos 30 d&iacute;as</option>
-    </select>
-    <label class="fc-chk"><input type="checkbox" id="fc-solo" onchange="fconcilRender()"> Solo descuadres</label>
-  </div>
-  <div class="fc-kpis" id="fc-kpis"></div>
-  <div class="fc-wrap">
-    <table class="fc-tabla">
-      <thead><tr><th>Fecha</th><th>Caja</th><th class="num">Contado</th><th class="num">Esperado</th><th class="num">&Delta; Efvo</th><th class="num">&Delta; D&eacute;bito</th><th class="num">&Delta; Cr&eacute;d</th><th></th></tr></thead>
-      <tbody id="fc-rows"><tr><td colspan="8" style="text-align:center;padding:20px;">Cargando&hellip;</td></tr></tbody>
-    </table>
-  </div>
-  <div class="fc-det" id="fc-det"></div>
-  <div class="fc-foot">El sem&aacute;foro mira el <b>peor descuadre por instrumento</b>, no solo el neto: una caja que cuadra en el total pero tiene la forma de pago mal cargada igual sale en rojo. Verde &le; $500 &middot; Amarillo &le; $20.000 &middot; Rojo &gt; $20.000. Toc&aacute; una fila para ver las ventas de esa caja.</div>
-  </div><!-- /fc-view-cierres -->
-  <div id="fc-view-mp" style="display:none">
-    <div class="fc-controls">
-      <select id="fcmp-per" onchange="fcmpRender()">
-        <option value="7">&Uacute;ltimos 7 d&iacute;as</option>
-        <option value="14" selected>&Uacute;ltimos 14 d&iacute;as</option>
-        <option value="30">&Uacute;ltimos 30 d&iacute;as</option>
-      </select>
-      <span id="fcmp-import-wrap"></span>
-    </div>
-    <div class="fc-kpis" id="fcmp-kpis"></div>
-    <div class="fc-wrap">
-      <table class="fc-tabla">
-        <thead><tr><th>Fecha</th><th class="num">QR MP</th><th class="num">D&eacute;bito Toteat</th><th class="num">&Delta;</th><th class="num">Ops</th><th></th></tr></thead>
-        <tbody id="fcmp-rows"><tr><td colspan="6" style="text-align:center;padding:20px;">Cargando&hellip;</td></tr></tbody>
-      </table>
-    </div>
-    <div class="fc-foot">Cruce por <b>d&iacute;a</b> del QR de Mercado Pago vs el d&eacute;bito registrado en Toteat. 🔴 <b>QR sin cargar</b>: entr&oacute; QR que Toteat no registr&oacute; (venta no cargada). 🟡 <b>Toteat de m&aacute;s</b>: transferencias a validar (van al mismo MP pero no se diferencian). Umbral &plusmn;$2.000. El amarillo se limpia cuando se separe "Transferencia" como m&eacute;todo en Toteat.</div>
-  </div>
 </div>
 <nav class="tab-nav" id="tab-nav">
   <button class="tab-btn" id="tab-btn-logistica" onclick="cambiarTab('logistica')">
@@ -20982,15 +21001,14 @@ async function fconcilRender(){
       var f=String(r.fecha||"").slice(0,10).split("-").reverse().slice(0,2).join("/");
       var ic={bad:'\u26A0',warn:'\u25CF',ok:'\u2714',sinv:'\u00B7'}[sem];
       var op=(r.opened_date||'').replace(/'/g,'');
-      return '<tr class="fc-r fc-'+sem+'" onclick="fconcilDetalle(\''+r.fecha+'\','+r.register_id+',\''+op+'\')">'+
-        '<td data-l="Fecha">'+f+'</td>'+
+      return '<tr class="fc-r fc-'+sem+((sem==='ok'||sem==='sinv')?' fc-cuadra':'')+'" onclick="fconcilDetalle(\''+r.fecha+'\','+r.register_id+',\''+op+'\')">'+
+        '<td data-l="Fecha"><span class="fc-dot fc-dot-'+sem+'"></span>'+f+'</td>'+
         '<td data-l="Caja">'+_fcEsc(r.register_name)+(_fcMotSet[r.fecha+'|'+r.register_id+'|'+_fcOpKey(r.opened_date)]?' <span title="Motivo asentado" style="font-size:12px">\uD83D\uDCDD</span>':'')+'</td>'+
         '<td data-l="Contado" class="num">'+_fcNum(r.contado_total)+'</td>'+
-        '<td data-l="Esperado" class="num fc-muted">'+_fcNum(r.esp_total)+'</td>'+
-        '<td data-l="\u0394 Efvo" class="num">'+_fcDelta(r.desc_efectivo)+'</td>'+
-        '<td data-l="\u0394 D\u00e9bito" class="num">'+_fcDelta(r.desc_debito)+'</td>'+
-        '<td data-l="\u0394 Cr\u00e9d" class="num">'+_fcDelta(r.desc_credito)+'</td>'+
-        '<td data-l="" class="fc-ic">'+ic+'</td></tr>';
+        '<td data-l="Esperado" class="num fc-muted fc-esp">'+_fcNum(r.esp_total)+'</td>'+
+        '<td data-l="\u0394 Efvo" class="num'+((Math.round(Number(r.desc_efectivo)||0)===0)?' fc-z0':'')+'">'+_fcDelta(r.desc_efectivo)+'</td>'+
+        '<td data-l="\u0394 D\u00e9bito" class="num'+((Math.round(Number(r.desc_debito)||0)===0)?' fc-z0':'')+'">'+_fcDelta(r.desc_debito)+'</td>'+
+        '<td data-l="\u0394 Cr\u00e9d" class="num'+((Math.round(Number(r.desc_credito)||0)===0)?' fc-z0':'')+'">'+_fcDelta(r.desc_credito)+'</td></tr>';
     }).join("");
     rowsEl.innerHTML=out||'<tr><td colspan="8" style="text-align:center;color:#6b5a52;padding:20px;">Sin cierres en el per\u00edodo'+(solo?' con descuadre':'')+'.</td></tr>';
     var kp=document.getElementById('fc-kpis');
@@ -21204,12 +21222,11 @@ async function fcmpRender(){
         if(dsc>2000){ cls='fc-bad'; ic='\uD83D\uDD34'; tip='QR entr\u00f3 que Toteat no carg\u00f3'; }
         else if(dsc< -2000){ cls='fc-warn'; ic='\uD83D\uDFE1'; tip='Toteat de m\u00e1s (transferencias a validar)'; }
         return '<tr class="'+cls+'">'+
-          '<td data-l="Fecha">'+_fcEsc(x.fecha)+'</td>'+
+          '<td data-l="Fecha"><span class="fc-dot fc-dot-'+cls.replace('fc-','')+'" title="'+_fcEsc(tip)+'"></span>'+_fcEsc(x.fecha)+'</td>'+
           '<td data-l="QR MP" class="num">'+_fcmpMoney(q)+'</td>'+
           '<td data-l="D\u00e9bito Toteat" class="num">'+_fcmpMoney(t)+'</td>'+
           '<td data-l="\u0394" class="num" style="font-weight:600">'+(dsc>0?'+':'')+_fcmpMoney(dsc)+'</td>'+
-          '<td data-l="Ops" class="num">'+(o||'\u2014')+'</td>'+
-          '<td class="fc-ic" title="'+_fcEsc(tip)+'">'+ic+'</td></tr>';
+          '<td data-l="Ops" class="num'+(o?'':' fc-z0')+'">'+(o||'\u2014')+'</td></tr>';
       }).join('');
     }
   }catch(e){
@@ -41922,7 +41939,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.117.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.119.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
