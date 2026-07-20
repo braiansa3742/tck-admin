@@ -1,6 +1,36 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.121.0 — 20/07/2026
+     TCK ADMIN — v13.124.0 — 20/07/2026
+     v13.124.0: DEPÓSITO MUESTRA MERCADERÍA POR VENCER (acompaña a ventas
+        v14.114.0 — recepción con vencimientos). El subtab Logística →
+        📦 Depósito suma un bloque rojo con los lotes vencidos o que
+        vencen en ≤14 días (tabla compras_recepciones, la cargan
+        Pancho/Chan desde tckventas). Solo lectura; si la tabla no
+        existe todavía, el bloque no aparece (catch → []).
+     v13.123.0: RENDICIÓN DESCUENTA DEVOLUCIONES (acompaña a ventas
+        v14.113.0 — fix del reclamo de Chan "las NC te hacen editar la
+        forma de pago al cerrar el viaje").
+        · El fetch de devoluciones de rvCargar ahora trae también
+          monto_devuelto (cualquier estado) → mapas _rvDevEnt/_rvDevPed.
+        · El esperado de cada factura pasa de e.monto a _rvTot(e) =
+          monto − devuelto, en: difF del panel y del refresh vivo, el
+          precargado de las SIN MARCAR (antes arrancaban con el efectivo
+          PLENO aunque hubiera devolución — mismo mecanismo de las
+          cobranzas fantasma), rvIncluirTodasSM y rendicion_diferencia
+          al cerrar.
+        · Fila de factura con devolución muestra "↩️ Devolución −$X ·
+          factura $Y → esperado $Z" (la NC sigue por circuito contadores).
+        · RETRO-SEGURO: el histórico tiene monto_devuelto=0 en el 100% de
+          las filas → nada cambia para viajes/conciliaciones en curso;
+          solo juega con devoluciones nuevas (ventas v14.113+ deployado).
+        · + chip de Alfredo en el filtro de chofer del subtab ↩️ Devoluciones
+          (acompaña al alta del perfil, ventas v14.112.0). El flujo de
+          registrar NC (devMarcarNC/devCompletarNC) YA existía y funciona
+          con JWT — el que 0/120 devoluciones tengan NC es un tema de
+          PROCESO (nadie tiene asignado ese paso), no de código.
+     v13.122.0: TEXTO RENDICIONES — "Confirmá lo que entregan Joan y Luis"
+        → "…los choferes" (ya son 3 + Alfredo que entra como 4º; el subtítulo
+        quedó de cuando eran 2).
      v13.121.0: EXPORT XUBIO DE TRANSFERENCIAS (reporte administración 14/07;
         rebaseado dos veces: nació como "13.106" local, después "13.116", y
         Braian usó ambos números — queda como 13.121 sobre la 13.120).
@@ -13666,7 +13696,7 @@ input.canales-exp-input[type="date"] {
       <div class="adm-rend-hdr">
         <div>
           <div class="adm-rend-hdr-tit">💰 Rendiciones</div>
-          <div class="adm-rend-hdr-sub">Confirmá lo que entregan Joan y Luis</div>
+          <div class="adm-rend-hdr-sub">Confirmá lo que entregan los choferes</div>
         </div>
         <button onclick="admRendCargar()" style="background:rgba(255,255,255,.2);border:none;border-radius:50%;width:34px;height:34px;color:#fff;cursor:pointer;font-size:16px;">🔄</button>
       </div>
@@ -16816,6 +16846,16 @@ function _rvParseDet(e){
 function _rvCobrado(c){ return _rvN(c.efectivo)+_rvN(c.transferencia)+_rvN(c.cheque); } // plata real (sin fiado)
 function _rvTotal(c){ return _rvCobrado(c)+_rvN(c.cuenta_corriente); }
 var _rvFactMap = {};   // v13.105: pedido_id → nº de factura (para ubicarla en Xubio)
+// v13.123: devoluciones valorizadas (monto_devuelto de tck-ventas v14.113+).
+// El esperado de una factura con devolución es (monto − devuelto): así la
+// rendición cierra sola sin que administración edite a mano. Las devoluciones
+// históricas tienen monto_devuelto=0 → cero cambio retroactivo.
+var _rvDevEnt = {}, _rvDevPed = {};   // entrega_id / pedido_id → $ devuelto
+function _rvDev(e){
+  if (_rvDevEnt[e.id] != null) return _rvN(_rvDevEnt[e.id]);
+  return _rvN(_rvDevPed[String(e.pedido_id||'')]);
+}
+function _rvTot(e){ return Math.max(0, _rvN(e.monto) - _rvDev(e)); }
 function _rvSumInc(instr){
   return _rvEnt.reduce(function(a,e){ return a+(_rvIncluir[e.id]?_rvN(_rvCobro[e.id][instr]):0); },0);
 }
@@ -16837,10 +16877,20 @@ async function rvCargar(){
       else { (porViaje[e.viaje_id]=porViaje[e.viaje_id]||[]).push(e); }
     });
     // R3: devoluciones pendientes de recepción en depósito (Pancho) — traban la rendición
+    // v13.123: el mismo fetch trae también monto_devuelto (cualquier estado) para
+    // descontar del esperado de cada factura (ver _rvDev/_rvTot).
     var pendPed={}, pendEnt={};
+    _rvDevEnt={}; _rvDevPed={};
     try {
-      var devs = await _tesFetch("devoluciones?estado=eq.registrada&select=entrega_id,pedido_id&limit=1000") || [];
-      devs.forEach(function(d){ if(d.pedido_id) pendPed[d.pedido_id]=true; if(d.entrega_id) pendEnt[d.entrega_id]=true; });
+      var devs = await _tesFetch("devoluciones?select=entrega_id,pedido_id,estado,monto_devuelto&order=fecha_devolucion.desc&limit=1000") || [];
+      devs.forEach(function(d){
+        if(d.estado==='registrada'){ if(d.pedido_id) pendPed[d.pedido_id]=true; if(d.entrega_id) pendEnt[d.entrega_id]=true; }
+        var md=_rvN(d.monto_devuelto);
+        if(md>0){
+          if(d.entrega_id) _rvDevEnt[d.entrega_id]=_rvN(_rvDevEnt[d.entrega_id])+md;
+          if(d.pedido_id)  _rvDevPed[String(d.pedido_id)]=_rvN(_rvDevPed[String(d.pedido_id)])+md;
+        }
+      });
     } catch(_e){ console.warn('[rv] devoluciones pend', _e); }
     // v13.105: nº de factura por pedido — administración lo pidió para ubicar la
     // factura en Xubio cuando la fecha del viaje no coincide con la de emisión.
@@ -16902,7 +16952,7 @@ function rvAbrir(id){
   _rvCobro={}; _rvIncluir={}; _rvEdit={}; _rvEfeContado=null;
   entMarc.forEach(function(e){ _rvCobro[e.id]=_rvParseDet(e); _rvIncluir[e.id]=true; });
   // sin marcar: arrancan en cero, NO incluidas (Valen decide), con el editor de formas abierto
-  entSM.forEach(function(e){ _rvCobro[e.id]={efectivo:_rvN(e.monto),transferencia:0,cheque:0,cuenta_corriente:0}; _rvIncluir[e.id]=false; _rvEdit[e.id]=true; });
+  entSM.forEach(function(e){ _rvCobro[e.id]={efectivo:_rvTot(e),transferencia:0,cheque:0,cuenta_corriente:0}; _rvIncluir[e.id]=false; _rvEdit[e.id]=true; });   // v13.123: efectivo precargado ya descuenta devolución
   var tit=document.getElementById('rv-vtit'); if(tit) tit.textContent=(_rvSel.chofer||'')+' · '+_rvFecha(_rvSel.fecha_salida);
   rvRenderPanel(); rvRenderLista();
 }
@@ -16940,7 +16990,7 @@ function rvActualizarVivo(){
   if(btn){ var listo=(dif===0)&&nInc>0&&!_rvCerrando; if(listo) btn.removeAttribute('disabled'); else btn.setAttribute('disabled','disabled'); btn.textContent=_rvCerrando?'Cerrando…':'Cerrar rendición → Xubio'; }
 
   _rvEnt.forEach(function(e){
-    var c=_rvCobro[e.id], cobr=_rvCobrado(c), tot=_rvN(e.monto);
+    var c=_rvCobro[e.id], cobr=_rvCobrado(c), tot=_rvTot(e);   // v13.123: esperado neto de devolución
     var difF=cobr+_rvN(c.cuenta_corriente)-tot;
     var chips=[];
     if(c.efectivo>0) chips.push('<span class="rv-chip efe">efe '+_rvFmt(c.efectivo)+'</span>');
@@ -16986,7 +17036,7 @@ function rvRenderPanel(){
         '<button onclick="rvIncluirTodasSM()" style="border:1px solid #B45309;background:#fff;color:#B45309;font-weight:800;font-size:11px;border-radius:6px;padding:5px 11px;cursor:pointer;white-space:nowrap;">✓ Incluir todas (efectivo)</button>'+
       '</div>';
     }
-    var c=_rvCobro[e.id], inc=!!_rvIncluir[e.id], cobr=_rvCobrado(c), tot=_rvN(e.monto), edit=!!_rvEdit[e.id];
+    var c=_rvCobro[e.id], inc=!!_rvIncluir[e.id], cobr=_rvCobrado(c), tot=_rvTot(e), edit=!!_rvEdit[e.id];   // v13.123: esperado neto de devolución
     var difF=cobr+_rvN(c.cuenta_corriente)-tot;
     var chips=[];
     if(c.efectivo>0) chips.push('<span class="rv-chip efe">efe '+_rvFmt(c.efectivo)+'</span>');
@@ -17000,6 +17050,7 @@ function rvRenderPanel(){
         (_rvFactMap[String(e.pedido_id||'')]
           ? '<div class="meta" style="font-weight:800;color:#283593;">🧾 FC '+_rvEsc(_rvFactMap[String(e.pedido_id||'')])+'</div>'
           : '<div class="meta" style="font-weight:700;color:#B71C1C;">🧾 sin factura</div>')+
+        (_rvDev(e)>0?'<div class="meta" style="font-weight:800;color:#8B0000;">↩️ Devolución −'+_rvFmt(_rvDev(e))+' · factura '+_rvFmt(e.monto)+' → esperado '+_rvFmt(tot)+' (NC por circuito contadores)</div>':'')+
         '<div class="rv-chips" id="rv-chips-'+e.id+'">'+chips.join('')+'</div>'+
         (edit?(
           '<div class="rv-editbox">'+_RV_INSTR.map(function(k){
@@ -17031,7 +17082,7 @@ function rvIncluirTodasSM(){
     if(!e._sm) return;
     _rvIncluir[e.id]=true;
     var c=_rvCobro[e.id];
-    if(_rvN(c.efectivo)+_rvN(c.transferencia)+_rvN(c.cheque)+_rvN(c.cuenta_corriente)===0){ c.efectivo=_rvN(e.monto); }
+    if(_rvN(c.efectivo)+_rvN(c.transferencia)+_rvN(c.cheque)+_rvN(c.cuenta_corriente)===0){ c.efectivo=_rvTot(e); }   // v13.123: neto de devolución
   });
   rvRenderPanel();
 }
@@ -17050,7 +17101,7 @@ async function rvCerrar(){
   for(var i=0;i<inc.length;i++){
     var e=inc[i], c=_rvCobro[e.id];
     var det={}; _RV_INSTR.forEach(function(k){ if(_rvN(c[k])>0) det[k]=Math.round(_rvN(c[k])); });
-    var cobr=_rvCobrado(c), tot=_rvN(e.monto);
+    var cobr=_rvCobrado(c), tot=_rvTot(e);   // v13.123: la diferencia se mide contra el esperado neto de devolución
     var payload={
       detalle_cobro: JSON.stringify(det),
       rendicion_estado:'confirmada',
@@ -33694,7 +33745,7 @@ async function renderLogisticaDevoluciones(el) {
     _devCache = devsRaw;
 
     // Contar devoluciones por chofer (sobre TODAS las del período, no filtradas)
-    var conteoPorChofer = { todos: devsRaw.length, Joan: 0, Luis: 0, 'Juan Pablo': 0 };
+    var conteoPorChofer = { todos: devsRaw.length, Joan: 0, Luis: 0, 'Juan Pablo': 0, Alfredo: 0 };
     devsRaw.forEach(function(d) {
       if (conteoPorChofer[d.chofer] !== undefined) conteoPorChofer[d.chofer]++;
     });
@@ -33774,6 +33825,7 @@ async function renderLogisticaDevoluciones(el) {
       + mkChoferChip('Joan',  '🚚 Joan',  conteoPorChofer.Joan,  '#2E7D32', '#E8F5E9')
       + mkChoferChip('Luis',  '🚚 Luis',  conteoPorChofer.Luis,  '#E65100', '#FFF3E0')
       + mkChoferChip('Juan Pablo', '🚚 Ian', conteoPorChofer['Juan Pablo'], '#1565C0', '#E3F2FD')
+      + mkChoferChip('Alfredo', '🚚 Alfredo', conteoPorChofer.Alfredo, '#6A1B9A', '#F3E5F5')
       + '</div>';
 
     // Chip toggle "Solo pendientes"
@@ -33974,11 +34026,14 @@ async function renderLogisticaDeposito(el) {
   var fmt = function(n) { return '$' + Math.round(Number(n) || 0).toLocaleString('es-AR'); };
   try {
     var desde7 = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
-    var [confs, recuentos, sinNC, ajustes] = await Promise.all([
+    // v13.124.0: lotes con vencimiento cercano (los carga depósito en tckventas)
+    var hasta14 = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
+    var [confs, recuentos, sinNC, ajustes, lotesVenc] = await Promise.all([
       sbFetch('cargas_conformidad?select=*&fecha=gte.' + desde7 + '&order=conformado_en.desc&limit=40').catch(function() { return []; }),
       sbFetch('deposito_recuentos?select=*&order=creado_at.desc&limit=10').catch(function() { return []; }),
       sbFetch('devoluciones?estado=eq.recibida_deposito&select=id').catch(function() { return []; }),
-      sbFetch('cargas_ajustes?select=*&order=creado_at.desc&limit=60').catch(function() { return []; })
+      sbFetch('cargas_ajustes?select=*&order=creado_at.desc&limit=60').catch(function() { return []; }),
+      sbFetch('compras_recepciones?select=producto,cantidad,proveedor,fecha_vencimiento,recibido_por&estado=eq.vigente&fecha_vencimiento=lte.' + hasta14 + '&order=fecha_vencimiento.asc&limit=60').catch(function() { return []; })
     ]);
     var ajPend = (ajustes || []).filter(function(a) { return a.estado === 'pendiente'; });
     var ajResueltos = (ajustes || []).filter(function(a) { return a.estado === 'resuelto'; });
@@ -33997,6 +34052,26 @@ async function renderLogisticaDeposito(el) {
       html += '<div style="background:#FFF3E0;border:1.5px solid #FFB74D;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px;font-weight:800;color:#E65100;">'
         + '🧾 ' + sinNC.length + ' devolución' + (sinNC.length === 1 ? '' : 'es') + ' recibida' + (sinNC.length === 1 ? '' : 's')
         + ' por Pancho esperando NC — están en el subtab ↩️ Devoluciones</div>';
+    }
+    // 🗓️ v13.124.0 — Mercadería vencida o por vencer (≤14 días)
+    if ((lotesVenc || []).length) {
+      var hoy0 = new Date(); hoy0.setHours(0, 0, 0, 0);
+      html += '<div style="background:#FDECEA;border:1.5px solid #F5B7B1;border-radius:12px;padding:12px;margin-bottom:14px;">';
+      html += '<div style="font-family:Barlow Condensed,sans-serif;font-size:16px;font-weight:900;color:#C62828;margin-bottom:4px;">🗓️ ' + lotesVenc.length + ' lote(s) vencido(s) o por vencer (≤14 días)</div>';
+      html += '<div style="font-size:12px;color:#7A4A45;margin-bottom:8px;">Lo carga depósito al recibir mercadería (tckventas → 🗓️ Venc.). Lo vencido se retira; lo por vencer, promo/remate.</div>';
+      lotesVenc.forEach(function(l) {
+        var p = String(l.fecha_vencimiento || '').slice(0, 10).split('-');
+        var dv = new Date(+p[0], +p[1] - 1, +p[2]);
+        var dias = Math.round((dv - hoy0) / 86400000);
+        var chip = dias < 0
+          ? '<span style="background:#C62828;color:#fff;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:900;">⛔ vencido hace ' + (-dias) + 'd</span>'
+          : '<span style="background:#FFF3E0;color:#E65100;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:900;border:1px solid #FFB74D;">' + (dias === 0 ? 'vence HOY' : 'vence en ' + dias + 'd') + '</span>';
+        html += '<div style="background:#fff;border:1px solid #F5B7B1;border-radius:9px;padding:7px 10px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;">'
+          + '<div style="font-size:12.5px;color:var(--text);"><b>' + esc(l.producto) + '</b>' + (l.cantidad ? ' × ' + esc(l.cantidad) : '') + (l.proveedor ? ' · ' + esc(l.proveedor) : '')
+          + ' <span style="color:var(--text3);">(' + esc(p[2] + '/' + p[1]) + ' · recibió ' + esc(l.recibido_por || '—') + ')</span></div>'
+          + chip + '</div>';
+      });
+      html += '</div>';
     }
 
     // Conformidades de carga (7 días)
