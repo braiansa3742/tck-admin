@@ -7,6 +7,24 @@
         vencen en ≤14 días (tabla compras_recepciones, la cargan
         Pancho/Chan desde tckventas). Solo lectura; si la tabla no
         existe todavía, el bloque no aparece (catch → []).
+     v13.125.0: FOODCONCIL ARQUEO DE FAJO (cierra el círculo declarado→recibido).
+        · Nueva sección "Fajo recibido" en el detalle de cada cierre: Roman/
+          Valentina cargan el efectivo que llegó físicamente (botón "Coincide
+          con lo declarado" lo autocompleta de un toque). Upsert en
+          buffet_caja_arqueo, clave (fecha, register_id, opened_date) — misma
+          identidad que el cierre. Nota obligatoria si difiere > $500.
+        · Columnas nuevas en la planilla: Δ Otros (método "Transferencia" id
+          50003 nuevo en Toteat desde 18/07) y Fajo (✓ verde / Δ rojo /
+          "s/arqueo" gris). El semáforo ahora incluye desc_otros y, si hay
+          arqueo, también el descuadre del fajo.
+        · Detalle de ventas: chip "otros" (transferencias) en forma de pago.
+        · Requiere SQL: recrear buffet_caja_arqueo (estaba vacía, grano viejo
+          jornada+cajero → pasa a cierre) + vw_buffet_concil v2 con desc_otros
+          y join al arqueo. Tolerante: sin el SQL, las columnas nuevas salen
+          en gris y el resto sigue igual.
+        · Fix: TCK_UPD_LOCAL estaba en 13.121.0 con changelog ya en 13.124
+          (depósito por vencer, bump olvidado) — corregido a 13.125.0.
+          OJO numeración: la 13.124 quedó tomada por el depósito.
      v13.123.0: RENDICIÓN DESCUENTA DEVOLUCIONES (acompaña a ventas
         v14.113.0 — fix del reclamo de Chan "las NC te hacen editar la
         forma de pago al cerrar el viaje").
@@ -14974,12 +14992,12 @@ input.canales-exp-input[type="date"] {
   <div class="fc-kpis" id="fc-kpis"></div>
   <div class="fc-wrap">
     <table class="fc-tabla">
-      <thead><tr><th>Fecha</th><th>Caja</th><th class="num">Contado</th><th class="num">Esperado</th><th class="num">&Delta; Efvo</th><th class="num">&Delta; D&eacute;bito</th><th class="num">&Delta; Cr&eacute;d</th></tr></thead>
-      <tbody id="fc-rows"><tr><td colspan="8" style="text-align:center;padding:20px;">Cargando&hellip;</td></tr></tbody>
+      <thead><tr><th>Fecha</th><th>Caja</th><th class="num">Contado</th><th class="num">Esperado</th><th class="num">&Delta; Efvo</th><th class="num">&Delta; D&eacute;bito</th><th class="num">&Delta; Cr&eacute;d</th><th class="num">&Delta; Otros</th><th class="num">Fajo</th></tr></thead>
+      <tbody id="fc-rows"><tr><td colspan="9" style="text-align:center;padding:20px;">Cargando&hellip;</td></tr></tbody>
     </table>
   </div>
   <div class="fc-det" id="fc-det"></div>
-  <div class="fc-foot">El sem&aacute;foro mira el <b>peor descuadre por instrumento</b>, no solo el neto: una caja que cuadra en el total pero tiene la forma de pago mal cargada igual sale en rojo. Verde &le; $500 &middot; Amarillo &le; $20.000 &middot; Rojo &gt; $20.000. Toc&aacute; una fila para ver las ventas de esa caja.</div>
+  <div class="fc-foot">El sem&aacute;foro mira el <b>peor descuadre por instrumento</b> (incluye Otros = transferencias, y el fajo si hay arqueo), no solo el neto. Verde &le; $500 &middot; Amarillo &le; $20.000 &middot; Rojo &gt; $20.000. <b>Fajo</b>: efectivo que lleg&oacute; a administraci&oacute;n vs lo declarado por la cajera &mdash; se carga tocando la fila, en &quot;Fajo recibido&quot;. &quot;s/arqueo&quot; = todav&iacute;a nadie lo cont&oacute;.</div>
   </div><!-- /fc-view-cierres -->
   <div id="fc-view-mp" style="display:none">
     <div class="fc-controls">
@@ -21047,8 +21065,17 @@ function _fcDelta(n){
 }
 function _fcSem(r){
   if(!r.n_ventas) return 'sinv';
-  var w=Math.max(Math.abs(r.desc_efectivo||0),Math.abs(r.desc_debito||0),Math.abs(r.desc_credito||0),Math.abs(r.desc_consumo||0));
+  var w=Math.max(Math.abs(r.desc_efectivo||0),Math.abs(r.desc_debito||0),Math.abs(r.desc_credito||0),Math.abs(r.desc_consumo||0),Math.abs(r.desc_otros||0));
+  // v13.125: si hay arqueo cargado, el faltante de fajo tambien pinta el semaforo
+  if(r.efectivo_recibido!=null) w=Math.max(w,Math.abs(r.desc_fajo||0));
   if(w<=500) return 'ok'; if(w<=20000) return 'warn'; return 'bad';
+}
+// v13.125: celda Fajo — recibido vs declarado
+function _fcFajo(r){
+  if(r.efectivo_recibido==null) return '<span class="fc-z" style="font-size:12px">s/arqueo</span>';
+  var d=Math.round(Number(r.desc_fajo)||0);
+  if(Math.abs(d)<=500) return '<span style="color:var(--green);font-weight:600">\u2714</span>';
+  return _fcDelta(d);
 }
 function fconcilCargar(){ fconcilRender(); }
 async function fconcilRender(){
@@ -21056,7 +21083,7 @@ async function fconcilRender(){
   var dias=parseInt(document.getElementById('fc-per').value,10);
   var solo=document.getElementById('fc-solo').checked;
   var detEl=document.getElementById('fc-det'); if(detEl) detEl.style.display='none';
-  rowsEl.innerHTML='<tr><td colspan="8" style="text-align:center;padding:20px;">Cargando&hellip;</td></tr>';
+  rowsEl.innerHTML='<tr><td colspan="9" style="text-align:center;padding:20px;">Cargando&hellip;</td></tr>';
   try{
     var d=new Date(Date.now()-dias*86400000);
     var desde=d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);
@@ -21081,31 +21108,33 @@ async function fconcilRender(){
         '<td data-l="Esperado" class="num fc-muted fc-esp">'+_fcNum(r.esp_total)+'</td>'+
         '<td data-l="\u0394 Efvo" class="num'+((Math.round(Number(r.desc_efectivo)||0)===0)?' fc-z0':'')+'">'+_fcDelta(r.desc_efectivo)+'</td>'+
         '<td data-l="\u0394 D\u00e9bito" class="num'+((Math.round(Number(r.desc_debito)||0)===0)?' fc-z0':'')+'">'+_fcDelta(r.desc_debito)+'</td>'+
-        '<td data-l="\u0394 Cr\u00e9d" class="num'+((Math.round(Number(r.desc_credito)||0)===0)?' fc-z0':'')+'">'+_fcDelta(r.desc_credito)+'</td></tr>';
+        '<td data-l="\u0394 Cr\u00e9d" class="num'+((Math.round(Number(r.desc_credito)||0)===0)?' fc-z0':'')+'">'+_fcDelta(r.desc_credito)+'</td>'+
+        '<td data-l="\u0394 Otros" class="num'+((Math.round(Number(r.desc_otros)||0)===0)?' fc-z0':'')+'">'+_fcDelta(r.desc_otros)+'</td>'+
+        '<td data-l="Fajo" class="num">'+_fcFajo(r)+'</td></tr>';
     }).join("");
-    rowsEl.innerHTML=out||'<tr><td colspan="8" style="text-align:center;color:#6b5a52;padding:20px;">Sin cierres en el per\u00edodo'+(solo?' con descuadre':'')+'.</td></tr>';
+    rowsEl.innerHTML=out||'<tr><td colspan="9" style="text-align:center;color:#6b5a52;padding:20px;">Sin cierres en el per\u00edodo'+(solo?' con descuadre':'')+'.</td></tr>';
     var kp=document.getElementById('fc-kpis');
     if(kp) kp.innerHTML=
       '<div class="fc-kpi"><div class="lab">Descuadran</div><div class="val" style="color:var(--red)">'+nBad+'</div></div>'+
       '<div class="fc-kpi"><div class="lab">Revisar</div><div class="val" style="color:#b45309">'+nWarn+'</div></div>'+
       '<div class="fc-kpi"><div class="lab">Cuadran</div><div class="val" style="color:var(--green)">'+nOk+'</div></div>'+
       '<div class="fc-kpi"><div class="lab">Neto per\u00edodo</div><div class="val">'+(sumDesc>0?"+":"")+_fcNum(sumDesc)+'</div></div>';
-  }catch(e){ rowsEl.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--red);padding:20px;">Error: '+_fcEsc(e.message||e)+'</td></tr>'; console.warn("[fconcil]",e); }
+  }catch(e){ rowsEl.innerHTML='<tr><td colspan="9" style="text-align:center;color:var(--red);padding:20px;">Error: '+_fcEsc(e.message||e)+'</td></tr>'; console.warn("[fconcil]",e); }
 }
 async function fconcilDetalle(fecha,regId,opened){
   var box=document.getElementById('fc-det'); if(!box) return;
   box.style.display='block'; box.scrollIntoView({behavior:'smooth',block:'nearest'});
   box.innerHTML='<div style="color:#6b5a52">Cargando detalle&hellip;</div>';
   try{
-    var ci=await sbFetch("buffet_cierres_caja?fecha=eq."+fecha+"&register_id=eq."+regId+"&opened_date=eq."+encodeURIComponent(opened)+"&select=closed_date,register_name")||[];
+    var ci=await sbFetch("buffet_cierres_caja?fecha=eq."+fecha+"&register_id=eq."+regId+"&opened_date=eq."+encodeURIComponent(opened)+"&select=closed_date,register_name,dec_efectivo")||[];
     var c=ci[0]||{}; var closed=c.closed_date||'2999-01-01T00:00:00';
-    var vs=await sbFetch("buffet_ventas?register_id=eq."+regId+"&date_closed=gte."+encodeURIComponent(opened)+"&date_closed=lte."+encodeURIComponent(closed)+"&select=date_closed,total,pago_efectivo,pago_debito,pago_credito,pago_consumo_personal&order=date_closed.asc&limit=800")||[];
+    var vs=await sbFetch("buffet_ventas?register_id=eq."+regId+"&date_closed=gte."+encodeURIComponent(opened)+"&date_closed=lte."+encodeURIComponent(closed)+"&select=date_closed,total,pago_efectivo,pago_debito,pago_credito,pago_consumo_personal,pago_otros&order=date_closed.asc&limit=800")||[];
     function chip(lab,val){ val=Math.round(Number(val)||0); if(!val)return''; return '<span style="font-size:11px;background:#f3e7e2;color:#6b5a52;border-radius:10px;padding:1px 7px;margin-right:4px">'+lab+' '+_fcNum(val)+'</span>'; }
     var body=vs.map(function(v){
       var h=String(v.date_closed||'').slice(11,16);
       return '<tr><td style="padding:6px 8px;border-top:1px solid var(--border)">'+h+'</td>'+
         '<td class="num" style="padding:6px 8px;border-top:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums">'+_fcNum(v.total)+'</td>'+
-        '<td style="padding:6px 8px;border-top:1px solid var(--border)">'+chip('efvo',v.pago_efectivo)+chip('d\u00e9b',v.pago_debito)+chip('cr\u00e9d',v.pago_credito)+chip('cp',v.pago_consumo_personal)+'</td></tr>';
+        '<td style="padding:6px 8px;border-top:1px solid var(--border)">'+chip('efvo',v.pago_efectivo)+chip('d\u00e9b',v.pago_debito)+chip('cr\u00e9d',v.pago_credito)+chip('cp',v.pago_consumo_personal)+chip('otros',v.pago_otros)+'</td></tr>';
     }).join("");
     box.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b>'+_fcEsc(c.register_name||'')+' &middot; '+String(fecha).slice(8,10)+'/'+String(fecha).slice(5,7)+'</b>'+
       '<span style="cursor:pointer;color:#6b5a52" onclick="document.getElementById(\'fc-det\').style.display=\'none\'">&times; cerrar</span></div>'+
@@ -21114,9 +21143,10 @@ async function fconcilDetalle(fecha,regId,opened){
       '<th style="text-align:left;font-size:11px;color:#6b5a52;padding:4px 8px">Hora</th>'+
       '<th style="text-align:right;font-size:11px;color:#6b5a52;padding:4px 8px">Total</th>'+
       '<th style="text-align:left;font-size:11px;color:#6b5a52;padding:4px 8px">Forma de pago (Toteat)</th></tr></thead><tbody>'+
-      (body||'<tr><td colspan="3" style="padding:10px;color:#6b5a52">Sin ventas en la ventana.</td></tr>')+'</tbody></table>'+_fcMotSeccion();
-    _fcDetCtx={fecha:fecha,regId:regId,opened:opened,regName:(c.register_name||'')};
+      (body||'<tr><td colspan="3" style="padding:10px;color:#6b5a52">Sin ventas en la ventana.</td></tr>')+'</tbody></table>'+_fcMotSeccion()+_fcArqSeccion();
+    _fcDetCtx={fecha:fecha,regId:regId,opened:opened,regName:(c.register_name||''),decEfectivo:Math.round(Number(c.dec_efectivo)||0)};
     _fcMotivosRender();
+    _fcArqRender();
   }catch(e){ box.innerHTML='<div style="color:var(--red)">Error: '+_fcEsc(e.message||e)+'</div>'; console.warn("[fconcil-det]",e); }
 }
 
@@ -21189,6 +21219,90 @@ async function fconcilMotivoGuardar(){
     _fcMotivosRender();
   }catch(e){ toast('No se pudo guardar: '+(e.message||e),'err'); }
   finally{ if(btn){ btn.disabled=false; btn.textContent='Asentar motivo'; } }
+}
+
+/* == v13.125.0 - ARQUEO DE FAJO (buffet_caja_arqueo: efectivo recibido vs declarado) == */
+var _FC_ARQ_TOL = 500; // tolerancia $ para exigir nota y pintar rojo
+
+function _fcArqSeccion(){
+  var form = _fcPuedeMotivo() ? (
+    '<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border)">'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
+    '<input id="fc-arq-monto" type="number" inputmode="numeric" min="0" step="1" placeholder="Efectivo recibido $" style="font-family:inherit;font-size:15px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;width:180px;box-sizing:border-box">'+
+    '<button type="button" onclick="fconcilArqueoCoincide()" style="font-family:inherit;font-size:13px;font-weight:600;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:#fff;color:#6b5a52;cursor:pointer">= declarado</button>'+
+    '</div>'+
+    '<textarea id="fc-arq-nota" rows="2" placeholder="Nota (obligatoria si difiere del declarado)" style="display:block;margin-top:8px;width:100%;max-width:340px;font-family:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;resize:vertical;box-sizing:border-box"></textarea>'+
+    '<button id="fc-arq-btn" onclick="fconcilArqueoGuardar()" style="margin-top:8px;font-family:inherit;font-size:14px;font-weight:600;padding:9px 16px;border:none;border-radius:8px;background:var(--red);color:#fff;cursor:pointer">Guardar arqueo</button>'+
+    '</div>'
+  ) : '<div style="font-size:12px;color:#b9a99f;margin-top:4px">Solo cobranzas/operaciones/due\u00f1o pueden cargar el arqueo.</div>';
+  return '<div id="fc-arq" style="margin-top:14px">'+
+    '<div style="font-weight:700;font-size:12px;color:#6b5a52;text-transform:uppercase;letter-spacing:.4px">Fajo recibido (arqueo)</div>'+
+    '<div id="fc-arq-cur" style="margin-top:6px"></div>'+form+'</div>';
+}
+
+function fconcilArqueoCoincide(){
+  var ctx=_fcDetCtx; if(!ctx) return;
+  var inp=document.getElementById('fc-arq-monto');
+  if(inp){ inp.value=ctx.decEfectivo||0; }
+}
+
+async function _fcArqRender(){
+  var ctx=_fcDetCtx; if(!ctx) return;
+  var wrap=document.getElementById('fc-arq-cur'); if(!wrap) return;
+  wrap.innerHTML='<div style="color:#6b5a52;font-size:12px">Cargando arqueo&hellip;</div>';
+  try{
+    var path="buffet_caja_arqueo?fecha=eq."+ctx.fecha+"&register_id=eq."+ctx.regId+"&opened_date=eq."+encodeURIComponent(ctx.opened)+"&select=efectivo_recibido,nota,usuario,rol,actualizado_en";
+    var rs=await sbFetch(path)||[];
+    var dec=ctx.decEfectivo||0;
+    if(!rs.length){
+      wrap.innerHTML='<div style="color:#b9a99f;font-size:12px">Sin arqueo cargado. Declarado por la cajera: <b style="color:#6b5a52">$ '+_fcNum(dec)+'</b></div>';
+      return;
+    }
+    var a=rs[0]; var rec=Math.round(Number(a.efectivo_recibido)||0); var d=rec-dec;
+    var col=Math.abs(d)<=_FC_ARQ_TOL?'var(--green)':'var(--red)';
+    var f=String(a.actualizado_en||'').slice(0,16).replace('T',' ');
+    var quien=[a.usuario,a.rol].filter(Boolean).join(' \u00b7 ');
+    wrap.innerHTML='<div style="border-top:1px solid var(--border);padding:8px 0">'+
+      '<div style="font-size:13px">Recibido <b>$ '+_fcNum(rec)+'</b> \u00b7 declarado $ '+_fcNum(dec)+' \u00b7 '+
+      '<span style="color:'+col+';font-weight:600">'+(Math.abs(d)<=_FC_ARQ_TOL?'\u2714 conciliado':(d>0?'+':'\u2212')+' $ '+_fcNum(Math.abs(d)))+'</span></div>'+
+      (a.nota?'<div style="font-size:13px;color:#4a3d36;margin-top:2px;white-space:pre-wrap">'+_fcEsc(a.nota)+'</div>':'')+
+      '<div style="font-size:11px;color:#b9a99f;margin-top:2px">'+_fcEsc(quien)+(quien?' \u00b7 ':'')+f+'</div></div>';
+  }catch(e){ wrap.innerHTML='<div style="color:var(--red);font-size:12px">Error al cargar arqueo: '+_fcEsc(e.message||e)+'</div>'; }
+}
+
+async function fconcilArqueoGuardar(){
+  var ctx=_fcDetCtx; if(!ctx) return;
+  var inp=document.getElementById('fc-arq-monto');
+  var nota=document.getElementById('fc-arq-nota');
+  var btn=document.getElementById('fc-arq-btn');
+  if(!inp) return;
+  var raw=(inp.value||'').trim();
+  if(raw===''){ toast('Cargá el efectivo recibido (poné 0 si no llegó nada)','err'); inp.focus(); return; }
+  var monto=Math.round(Number(raw));
+  if(!isFinite(monto)||monto<0){ toast('Monto inválido','err'); inp.focus(); return; }
+  var txt=((nota&&nota.value)||'').trim();
+  var dif=monto-(ctx.decEfectivo||0);
+  if(Math.abs(dif)>_FC_ARQ_TOL && !txt){
+    toast('Difiere $ '+_fcNum(Math.abs(dif))+' del declarado: la nota es obligatoria','err');
+    if(nota) nota.focus(); return;
+  }
+  if(btn){ btn.disabled=true; btn.textContent='Guardando\u2026'; }
+  try{
+    await sbFetch('buffet_caja_arqueo?on_conflict=fecha,register_id,opened_date',{
+      method:'POST', prefer:'resolution=merge-duplicates,return=minimal',
+      body:JSON.stringify({
+        fecha: ctx.fecha, register_id: ctx.regId, opened_date: ctx.opened,
+        register_name: (ctx.regName||null),
+        efectivo_recibido: monto, nota: (txt||null),
+        usuario: (usuarioActual||null), rol: (rolActual||null),
+        actualizado_en: new Date().toISOString()
+      })
+    });
+    inp.value=''; if(nota) nota.value='';
+    toast('\u2705 Arqueo guardado','ok');
+    _fcArqRender();
+  }catch(e){ toast('No se pudo guardar: '+(e.message||e),'err'); }
+  finally{ if(btn){ btn.disabled=false; btn.textContent='Guardar arqueo'; } }
 }
 
 /* == v13.117.0 - CONCILIACION MP/QR (import xlsx + cruce por dia + comision) == */
@@ -42143,7 +42257,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.121.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.125.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
