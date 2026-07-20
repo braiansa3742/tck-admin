@@ -1,6 +1,17 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.124.0 — 20/07/2026
+     TCK ADMIN — v13.126.0 — 20/07/2026
+     v13.126.0: TAB VISITAS (dueño) — FIX MOBILE/TABLET + KPIs HONESTOS.
+        · CSS: .av2-cellfr pierde aspect-ratio:.56 (celdas gigantes en
+          pantallas anchas) → min-height fijo. #admin-visitas-wrap max 560px
+          centrado + overflow-x hidden. Celdas con min-width:0 (el grid ya
+          no desborda y la columna D no se corta).
+        · KPIs semana: "Mañanas/Tardes cumplidas" y el objetivo diario ya
+          NO cuentan los días futuros de la semana (lunes mostraba 1/6 y
+          0/6 apenas arrancada la semana). Días futuros = punto punteado.
+        · Detalle del día: distingue pedido tomado por el tomador (📦) del
+          marcador PEDido EXTERNO cargado por WhatsApp/directo (🔗).
+        · Header del tab: sáb mín. corregido (16, según avMetaDia).
      v13.124.0: DEPÓSITO MUESTRA MERCADERÍA POR VENCER (acompaña a ventas
         v14.114.0 — recepción con vencimientos). El subtab Logística →
         📦 Depósito suma un bloque rojo con los lotes vencidos o que
@@ -12946,6 +12957,7 @@ input.canales-exp-input[type="date"] {
     <!-- ══ VISTA ADMIN: VISITAS ══ -->
     <style>
 /* ══ TAB VISITAS v2 (v12.27) — control de trabajo en campo ══ */
+#admin-visitas-wrap{max-width:560px;margin:0 auto;overflow-x:hidden;} /* v13.126.0: columna mobile-first en cualquier ancho */
 .av2-hdr{background:linear-gradient(135deg,#4A0000,#8B0000);padding:14px 16px 12px;}
 .av2-hdr-tit{font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:900;color:#fff;letter-spacing:.5px;}
 .av2-hdr-sub{font-size:11px;color:rgba(255,255,255,.7);margin:1px 0 12px;}
@@ -12973,7 +12985,7 @@ input.canales-exp-input[type="date"] {
 .av2-cal-mes{font-family:'Barlow Condensed',sans-serif;font-size:17px;font-weight:900;text-transform:capitalize;}
 .av2-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
 .av2-dow{text-align:center;font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;color:#9C7050;padding-bottom:2px;}
-.av2-cell{aspect-ratio:.92;border-radius:9px;padding:3px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:2px solid transparent;position:relative;cursor:pointer;}
+.av2-cell{aspect-ratio:.92;border-radius:9px;padding:3px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:2px solid transparent;position:relative;cursor:pointer;min-width:0;overflow:hidden;}
 .av2-cell.empty{background:transparent;cursor:default;}
 .av2-cell .d{font-size:9px;font-weight:700;position:absolute;top:3px;left:5px;opacity:.65;}
 .av2-cell .v{font-family:'Barlow Condensed',sans-serif;font-size:19px;font-weight:900;line-height:1;}
@@ -12996,7 +13008,7 @@ input.canales-exp-input[type="date"] {
 .av2-sindata{background:#EFEBE6;color:#BCB0A4;}
 .av2-dom{background:#F4F1ED;color:#cfc7bd;}
 /* v13.56 — celda por franja (manana/tarde) + monto */
-.av2-cellfr{aspect-ratio:.56;justify-content:flex-start;gap:3px;padding:4px 3px;background:#fff;}
+.av2-cellfr{aspect-ratio:auto;min-height:78px;justify-content:flex-start;gap:3px;padding:4px 3px;background:#fff;} /* v13.126.0: aspect-ratio .56 hacía celdas gigantes en tablet/desktop */
 .av2-cellfr.av2-sindata{background:#F7F4EF;}
 .av2-cellfr .avd{font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:12px;color:#3a2c22;width:19px;height:19px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:#F0EAE2;position:static;opacity:1;}
 .av2-cellfr.avhoy .avd{color:#fff;background:#8B0000;}
@@ -13030,7 +13042,7 @@ input.canales-exp-input[type="date"] {
     <div id="admin-visitas-wrap" style="display:none">
       <div class="av2-hdr">
         <div class="av2-hdr-tit">📋 VISITAS — TRABAJO EN CAMPO</div>
-        <div class="av2-hdr-sub">Meta: 30 visitas/día · mín. 25 (sáb 15) · Juan y Lisandro</div>
+        <div class="av2-hdr-sub">Meta: 30 visitas/día · mín. 25 (sáb 16) · 📦 tomador · 🔗 cargado por WA</div>
         <div class="av2-chips" id="av2-chips">
           <div class="av2-chip on" id="av2-chip-Lisandro" onclick="avSetVendedor('Lisandro')">
             <div class="av2-chip-nom">Lisandro</div><div class="av2-chip-meta">campo</div>
@@ -25455,11 +25467,13 @@ function avPorDia() {
     var dia = avDiaISOdeUTC(v.fecha);
     if (!mapa[dia]) mapa[dia] = { checkins: 0, visitas: [] };
     if (v.tipo === 'checkin') {
-      var nv = { cliente: v.nombre_cliente, entrada: new Date(v.fecha), salida: null, tuvo_pedido: false, motivo: null, montoCampo: 0 };
+      var nv = { cliente: v.nombre_cliente, entrada: new Date(v.fecha), salida: null, tuvo_pedido: false, motivo: null, montoCampo: 0, externo: false };
       mapa[dia].visitas.push(nv); mapa[dia].checkins++; abierta[dia] = nv;
     } else if (v.tipo === 'pedido_campo') {
       if (abierta[dia] && abierta[dia].cliente === v.nombre_cliente) {
         abierta[dia].tuvo_pedido = true;
+        // v13.126.0: marcador "PEDIDO EXTERNO" = el pedido se cargó por WA/directo, no por el tomador
+        if (/^PEDIDO EXTERNO/.test(v.observacion || '')) abierta[dia].externo = true;
         // primer pedido_campo de la visita: tomar el monto del texto (los duplicados repiten el mismo)
         if (!abierta[dia].montoCampo) abierta[dia].montoCampo = avParseMontoTexto(v.observacion);
       }
@@ -25509,20 +25523,26 @@ function avRenderResumen() {
   for (var i=0;i<7;i++) { var d=new Date(lunes); d.setDate(d.getDate()+i); dias.push(d); }   // L → D
   var totalVis=0, totalPed=0, diasCalle=0, dotsHtml='', cumplidos=0, posibles=0, manCump=0, tarCump=0, manPos=0, tarPos=0;
   var totalVend=0, totalPend=0, nPedVenta=0, diasVenta=0;
+  var _hoy0 = avHoyAR();   // v13.126.0: los días futuros de la semana no cuentan como "no cumplidos"
   dias.forEach(function(d) {
     var iso = avDiaISO(d);
     var info = mapa[iso];
     var meta = avMetaDia(d.getDay());
+    var esFuturo = d > _hoy0;
     var n = info ? info.checkins : 0;
     if (n>0) diasCalle++;
     totalVis += n;
     var manR = info ? (info.manana||0) : 0;
     var tarR = info ? (info.tarde||0) : 0;
-    if (meta.frMin>0) { manPos++; tarPos++; if (manR>=meta.frMin) manCump++; if (tarR>=meta.frMin) tarCump++; }
+    if (meta.frMin>0 && !esFuturo) { manPos++; tarPos++; if (manR>=meta.frMin) manCump++; if (tarR>=meta.frMin) tarCump++; }
     if (info) totalPed += info.visitas.filter(function(x){return x.tuvo_pedido;}).length;
     var vd = ventas[iso];
     if (vd) { totalVend += vd.total; totalPend += vd.pend; nPedVenta += vd.n; if (vd.total>0) diasVenta++; }
     if (meta.meta>0) {           // solo días laborables cuentan para el objetivo
+      if (esFuturo) {            // v13.126.0: día que todavía no llegó → punto punteado, fuera del conteo
+        dotsHtml += '<div class="av2-dot" style="background:transparent;border:1.5px dashed #D8CFC4;box-sizing:border-box;" title="' + iso + ': pendiente"></div>';
+        return;
+      }
       posibles++;
       var col;
       if (n===0) col = '#EFEBE6';
@@ -25757,8 +25777,8 @@ function avRenderDetalle(iso) {
   var timeline = vis.map(function(v) {
     var hora = v.entrada.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
     var dur = v.salida ? Math.round((v.salida-v.entrada)/60000) + 'm' : '(activo)';
-    var icono = v.tuvo_pedido ? '📦' : (v.motivo ? '🔴' : '🟢');
-    var res = v.tuvo_pedido ? (v.montoCampo ? avMontoCorto(v.montoCampo) : 'Pedido') : (v.motivo || 'Sin pedido');
+    var icono = v.tuvo_pedido ? (v.externo ? '🔗' : '📦') : (v.motivo ? '🔴' : '🟢');
+    var res = v.tuvo_pedido ? (v.montoCampo ? avMontoCorto(v.montoCampo) : (v.externo ? 'Pedido (WA/directo)' : 'Pedido')) : (v.motivo || 'Sin pedido');
     var col = v.tuvo_pedido ? '#2E7D32' : '#C62828';
     return '<div class="av2-tl"><div class="av2-tl-ic">' + icono + '</div>'
       + '<div style="flex:1;min-width:0;"><div class="av2-tl-nom">' + (v.cliente||'—') + '</div><div class="av2-tl-meta">' + hora + ' · ' + dur + '</div></div>'
