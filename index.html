@@ -1,6 +1,17 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.126.0 — 20/07/2026
+     TCK ADMIN — v13.127.0 — 21/07/2026
+     v13.127.0: TCK FOOD REORGANIZADO — pane HOY (Pulso Food, vw_buffet_pulso: hoy vs dia tipico,
+                fuegos accionables, margen 7d, top margen, semana tipo), subnav de 5 espacios
+                (Hoy/Ventas/Plata/Rentabilidad/Stock; Recetas/Sub/Ingredientes quedan como "Datos de
+                cocina" dentro de Rentabilidad). Pane CAJA ELIMINADO: escribia buffet_caja_arqueo con
+                el esquema viejo (fecha_jornada/cajero/efectivo_contado) y no guardaba nada desde que
+                la tabla se recreo en 13.125 — la caja vive en Conciliacion (bf-plata muestra resumen).
+                Food cost y margen del pane Rentabilidad ahora sobre PRECIO NETO (antes bruto, ~17%
+                menos FC que el real). Items del pane Ventas filtrados por rango en el server
+                (vw_buffet_items_fecha; antes bajaba TODO el historico). Plata: edad de pendientes,
+                huecos de numeracion PV 00010 en vivo y alerta de cola frenada (+3h).
+                Requiere correr sql_food_pulso_v13126.sql en Supabase ANTES del deploy.
      v13.126.0: TAB VISITAS (dueño) — FIX MOBILE/TABLET + KPIs HONESTOS.
         · CSS: .av2-cellfr pierde aspect-ratio:.56 (celdas gigantes en
           pantallas anchas) → min-height fijo. #admin-visitas-wrap max 560px
@@ -18,17 +29,6 @@
         vencen en ≤14 días (tabla compras_recepciones, la cargan
         Pancho/Chan desde tckventas). Solo lectura; si la tabla no
         existe todavía, el bloque no aparece (catch → []).
-     v13.126.0: TCK FOOD REORGANIZADO — pane HOY (Pulso Food, vw_buffet_pulso: hoy vs dia tipico,
-                fuegos accionables, margen 7d, top margen, semana tipo), subnav de 5 espacios
-                (Hoy/Ventas/Plata/Rentabilidad/Stock; Recetas/Sub/Ingredientes quedan como "Datos de
-                cocina" dentro de Rentabilidad). Pane CAJA ELIMINADO: escribia buffet_caja_arqueo con
-                el esquema viejo (fecha_jornada/cajero/efectivo_contado) y no guardaba nada desde que
-                la tabla se recreo en 13.125 — la caja vive en Conciliacion (bf-plata muestra resumen).
-                Food cost y margen del pane Rentabilidad ahora sobre PRECIO NETO (antes bruto, ~17%
-                menos FC que el real). Items del pane Ventas filtrados por rango en el server
-                (vw_buffet_items_fecha; antes bajaba TODO el historico). Plata: edad de pendientes,
-                huecos de numeracion PV 00010 en vivo y alerta de cola frenada (+3h).
-                Requiere correr sql_food_pulso_v13126.sql en Supabase ANTES del deploy.
      v13.125.0: FOODCONCIL ARQUEO DE FAJO (cierra el círculo declarado→recibido).
         · Nueva sección "Fajo recibido" en el detalle de cada cierre: Roman/
           Valentina cargan el efectivo que llegó físicamente (botón "Coincide
@@ -42390,7 +42390,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.126.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.127.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
