@@ -18,6 +18,17 @@
         vencen en ≤14 días (tabla compras_recepciones, la cargan
         Pancho/Chan desde tckventas). Solo lectura; si la tabla no
         existe todavía, el bloque no aparece (catch → []).
+     v13.126.0: TCK FOOD REORGANIZADO — pane HOY (Pulso Food, vw_buffet_pulso: hoy vs dia tipico,
+                fuegos accionables, margen 7d, top margen, semana tipo), subnav de 5 espacios
+                (Hoy/Ventas/Plata/Rentabilidad/Stock; Recetas/Sub/Ingredientes quedan como "Datos de
+                cocina" dentro de Rentabilidad). Pane CAJA ELIMINADO: escribia buffet_caja_arqueo con
+                el esquema viejo (fecha_jornada/cajero/efectivo_contado) y no guardaba nada desde que
+                la tabla se recreo en 13.125 — la caja vive en Conciliacion (bf-plata muestra resumen).
+                Food cost y margen del pane Rentabilidad ahora sobre PRECIO NETO (antes bruto, ~17%
+                menos FC que el real). Items del pane Ventas filtrados por rango en el server
+                (vw_buffet_items_fecha; antes bajaba TODO el historico). Plata: edad de pendientes,
+                huecos de numeracion PV 00010 en vivo y alerta de cola frenada (+3h).
+                Requiere correr sql_food_pulso_v13126.sql en Supabase ANTES del deploy.
      v13.125.0: FOODCONCIL ARQUEO DE FAJO (cierra el círculo declarado→recibido).
         · Nueva sección "Fajo recibido" en el detalle de cada cierre: Roman/
           Valentina cargan el efectivo que llegó físicamente (botón "Coincide
@@ -14649,9 +14660,9 @@ input.canales-exp-input[type="date"] {
   #view-buffet .bf-head{ background:linear-gradient(135deg,#9A3412,#C2410C); color:#fff; padding:14px 14px 12px; border-radius:0 0 14px 14px; box-shadow:0 2px 8px rgba(0,0,0,.12); }
   #view-buffet .bf-head h2{ font-size:19px; font-weight:900; text-transform:uppercase; letter-spacing:.5px; margin:0; display:flex; align-items:center; gap:7px; }
   #view-buffet .bf-head .bf-sub{ font-size:12px; opacity:.85; margin-top:2px; font-weight:500; }
-  #view-buffet .bf-rango{ display:flex; gap:6px; margin-top:11px; }
-  #view-buffet .bf-rango button{ flex:1; border:none; background:rgba(255,255,255,.18); color:#fff; padding:7px 0; border-radius:8px; font-family:inherit; font-size:12px; font-weight:800; cursor:pointer; letter-spacing:.3px; }
-  #view-buffet .bf-rango button.on{ background:#fff; color:#9A3412; }
+  #view-buffet .bf-rango{ display:flex; gap:6px; margin:0 0 10px; }
+  #view-buffet .bf-rango button{ flex:1; border:1px solid #EADFCB; background:#fff; color:#8A7B63; padding:7px 0; border-radius:8px; font-family:inherit; font-size:12px; font-weight:800; cursor:pointer; letter-spacing:.3px; }
+  #view-buffet .bf-rango button.on{ background:#9A3412; color:#fff; border-color:#9A3412; }
   #view-buffet .bf-kpis{ display:grid; grid-template-columns:repeat(4,1fr); gap:6px; padding:12px 12px 4px; }
   #view-buffet .bf-kpi{ background:#fff; border-radius:10px; padding:9px 5px; text-align:center; box-shadow:0 1px 4px rgba(0,0,0,.07); border-top:3px solid #EA580C; }
   #view-buffet .bf-kpi .v{ font-size:17px; font-weight:900; line-height:1; color:#2C2416; }
@@ -14803,55 +14814,82 @@ input.canales-exp-input[type="date"] {
   #view-buffet .bf-rec-row .nm{ flex:1; min-width:0; font-weight:600; color:#2C2416; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #view-buffet .bf-rec-row .ct{ font-size:10px; color:#8A7B63; flex-shrink:0; }
   #view-buffet .bf-rec-row .bad{ font-size:8px; font-weight:800; text-transform:uppercase; padding:2px 6px; border-radius:5px; background:#FCEBEB; color:#991B1B; flex-shrink:0; }
-  /* v13.107.0 — pane Caja */
-  #view-buffet .bf-caja-note{ font-size:10.5px; color:#8A7B63; background:#FBF7F0; border-radius:8px; padding:8px 10px; margin:0 0 10px; line-height:1.5; }
-  #view-buffet .bf-cajac{ background:#fff; border-radius:12px; padding:11px 12px 12px; margin:0 0 10px; box-shadow:0 1px 4px rgba(0,0,0,.07); }
-  #view-buffet .bf-cajac-h{ display:flex; justify-content:space-between; align-items:center; font-size:13px; font-weight:900; color:#2C2416; padding-bottom:8px; margin-bottom:8px; border-bottom:2px solid #F0E9DC; }
-  #view-buffet .bf-cj{ background:#FBF7F0; border-radius:9px; padding:8px 10px; margin-bottom:7px; }
-  #view-buffet .bf-cj-h{ display:flex; align-items:center; gap:7px; margin-bottom:6px; }
-  #view-buffet .bf-cj-t{ font-size:8px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; padding:2px 6px; border-radius:5px; }
-  #view-buffet .bf-cj-t.med{ background:#FEF3C7; color:#92400E; } #view-buffet .bf-cj-t.noc{ background:#E0E7F0; color:#3B4A66; }
-  #view-buffet .bf-cj-nm{ font-size:12px; font-weight:800; color:#2C2416; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  #view-buffet .bf-cj-hr{ font-size:10px; color:#8A7B63; font-weight:700; flex-shrink:0; }
-  #view-buffet .bf-cj-r{ display:flex; align-items:center; justify-content:space-between; padding:3px 0; }
-  #view-buffet .bf-cj-l{ font-size:11px; color:#6B5B4A; }
-  #view-buffet .bf-cj-v{ font-size:12.5px; font-weight:800; color:#2C2416; }
-  #view-buffet .bf-cj-in{ width:112px; text-align:right; border:1px solid #D9C9A8; border-radius:7px; padding:5px 8px; font-family:inherit; font-size:12.5px; font-weight:700; color:#2C2416; background:#fff; }
-  #view-buffet .bf-cj-in:focus{ outline:none; border-color:#C2410C; }
-  #view-buffet .bf-cj-inwrap{ display:flex; align-items:center; gap:5px; }
-  #view-buffet .bf-cj-sv{ font-size:11px; font-weight:800; min-width:14px; }
-  #view-buffet .bf-cj-sv.ok{ color:#15803D; } #view-buffet .bf-cj-sv.wait{ color:#8A7B63; } #view-buffet .bf-cj-sv.err{ color:#991B1B; font-size:9.5px; }
-  #view-buffet .bf-cj-pend{ color:#B4A88E; font-weight:600; font-size:11px; }
-  #view-buffet .bf-cj-falt{ font-size:12.5px; font-weight:900; }
-  #view-buffet .bf-cj-falt.none{ color:#B4A88E; } #view-buffet .bf-cj-falt.ok{ color:#15803D; }
-  #view-buffet .bf-cj-falt.bad{ color:#991B1B; } #view-buffet .bf-cj-falt.plus{ color:#B45309; }
-  #view-buffet .bf-cajac-mp{ margin-top:8px; padding-top:8px; border-top:1px dashed #E6DCC8; }
-  #view-buffet .bf-cj-flag{ font-size:10.5px; font-weight:800; border-radius:7px; padding:6px 9px; margin-top:6px; line-height:1.3; }
-  #view-buffet .bf-cj-flag.ok{ background:#E7F5EC; color:#166534; } #view-buffet .bf-cj-flag.warn{ background:#FEF3C7; color:#92400E; } #view-buffet .bf-cj-flag.bad{ background:#FCEBEB; color:#991B1B; }
+  /* v13.126.0 — pane HOY (Pulso Food) + Plata + nav cocina */
+  #view-buffet .bf-py-hero{ background:#fff; border-radius:14px; padding:15px 15px 13px; margin-bottom:12px; box-shadow:0 1px 5px rgba(0,0,0,.07); }
+  #view-buffet .bf-py-lab{ font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; color:#8A7B63; }
+  #view-buffet .bf-py-big{ font-family:'Barlow Condensed',sans-serif; font-weight:900; font-size:44px; line-height:1; margin-top:4px; color:#1A0800; font-variant-numeric:tabular-nums; }
+  #view-buffet .bf-py-prog{ margin-top:11px; height:10px; background:#F2EDE3; border-radius:5px; overflow:hidden; }
+  #view-buffet .bf-py-prog i{ display:block; height:100%; background:linear-gradient(90deg,#C2410C,#D4A574); border-radius:5px; }
+  #view-buffet .bf-py-progl{ display:flex; justify-content:space-between; font-size:11px; color:#8A7B63; margin-top:5px; }
+  #view-buffet .bf-py-progl b{ color:#1A0800; }
+  #view-buffet .bf-py-row{ display:flex; gap:10px; margin-top:12px; padding-top:11px; border-top:1px solid #F2EDE3; }
+  #view-buffet .bf-py-k{ flex:1; }
+  #view-buffet .bf-py-k .v{ font-family:'Barlow Condensed',sans-serif; font-weight:900; font-size:23px; line-height:1; font-variant-numeric:tabular-nums; color:#1A0800; }
+  #view-buffet .bf-py-k .l{ font-size:10px; color:#8A7B63; margin-top:2px; }
+  #view-buffet .bf-py-k .s{ font-size:10.5px; font-weight:700; color:#8A7B63; }
+  #view-buffet .bf-py-k .s.up{ color:#1E8449; } #view-buffet .bf-py-k .s.dn{ color:#C62828; }
+  #view-buffet .bf-py-sect{ font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; color:#8A7B63; margin:14px 2px 7px; }
+  #view-buffet .bf-py-ok{ background:#E7F5EC; color:#166534; font-size:13px; font-weight:700; border-radius:12px; padding:13px 14px; }
+  #view-buffet .bf-py-fuego{ display:flex; align-items:center; gap:10px; background:#fff; border-left:4px solid #C62828; border-radius:11px; padding:10px 12px; margin-bottom:7px; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+  #view-buffet .bf-py-fuego.warn{ border-left-color:#B45309; }
+  #view-buffet .bf-py-fuego .ic{ font-size:16px; flex-shrink:0; }
+  #view-buffet .bf-py-fuego .tx{ flex:1; font-size:12.5px; line-height:1.35; color:#2C2416; min-width:0; }
+  #view-buffet .bf-py-fuego .tx small{ display:block; color:#8A7B63; font-size:11px; margin-top:1px; }
+  #view-buffet .bf-py-fuego button{ flex-shrink:0; border:none; font-family:inherit; font-size:11px; font-weight:800; color:#fff; background:#C2410C; border-radius:8px; padding:7px 11px; cursor:pointer; }
+  #view-buffet .bf-py-fuego.warn button{ background:#B45309; }
+  #view-buffet .bf-py-util{ background:linear-gradient(135deg,#123B23,#1E8449); border-radius:14px; padding:14px 15px; margin-top:12px; }
+  #view-buffet .bf-py-cob{ margin-top:9px; height:6px; background:rgba(255,255,255,.22); border-radius:3px; overflow:hidden; }
+  #view-buffet .bf-py-cob i{ display:block; height:100%; background:#D4E9DB; border-radius:3px; }
+  #view-buffet .bf-py-note{ font-size:11px; color:rgba(255,255,255,.85); margin-top:6px; line-height:1.4; }
+  #view-buffet .bf-py-card{ background:#fff; border-radius:13px; padding:11px 13px; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+  #view-buffet .bf-py-tm{ display:flex; align-items:center; gap:9px; padding:7px 0; border-bottom:1px solid #F5F0E6; }
+  #view-buffet .bf-py-tm:last-of-type{ border-bottom:none; }
+  #view-buffet .bf-py-tm .rk{ width:20px; height:20px; border-radius:6px; background:#FBEADB; color:#9A3412; font-size:11px; font-weight:900; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  #view-buffet .bf-py-tm .nm{ flex:1; min-width:0; font-size:12.5px; font-weight:600; color:#2C2416; }
+  #view-buffet .bf-py-tm .bar{ height:4px; background:#F2EDE3; border-radius:2px; margin-top:3px; overflow:hidden; }
+  #view-buffet .bf-py-tm .bar i{ display:block; height:100%; background:#1E8449; border-radius:2px; }
+  #view-buffet .bf-py-tm .mg{ font-family:'Barlow Condensed',sans-serif; font-weight:900; font-size:17px; color:#1E8449; flex-shrink:0; font-variant-numeric:tabular-nums; }
+  #view-buffet .bf-py-foot{ font-size:10.5px; color:#8A7B63; margin-top:7px; line-height:1.4; }
+  #view-buffet .bf-py-week{ display:flex; align-items:flex-end; gap:6px; height:96px; padding-top:4px; }
+  #view-buffet .bf-py-wd{ flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; height:100%; justify-content:flex-end; }
+  #view-buffet .bf-py-wd .b{ width:100%; background:#EBDFC9; border-radius:5px 5px 2px 2px; position:relative; overflow:hidden; }
+  #view-buffet .bf-py-wd .b i{ position:absolute; bottom:0; left:0; right:0; background:#1E6B8C; opacity:.55; }
+  #view-buffet .bf-py-wd.hoy .b{ background:linear-gradient(180deg,#C2410C,#9A3412); }
+  #view-buffet .bf-py-wd .dn{ font-size:9.5px; font-weight:800; color:#8A7B63; }
+  #view-buffet .bf-py-wd.hoy .dn{ color:#9A3412; }
+  #view-buffet .bf-py-wd .mv{ font-size:9px; color:#8A7B63; font-variant-numeric:tabular-nums; }
+  #view-buffet .bf-py-leg{ display:flex; gap:12px; font-size:10px; color:#8A7B63; margin-top:7px; }
+  #view-buffet .bf-py-leg i{ display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:4px; }
+  #view-buffet .bf-py-link{ border:none; font-family:inherit; font-size:12px; font-weight:800; color:#fff; background:#9A3412; border-radius:9px; padding:9px 13px; cursor:pointer; }
+  #view-buffet .bf-cocina-nav{ background:#FBF7F0; border-radius:10px; padding:9px 11px; margin-bottom:10px; font-size:11.5px; font-weight:700; color:#8A7B63; display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+  #view-buffet .bf-cocina-nav button, #view-buffet .bf-crumb button{ border:1px solid #EADFCB; background:#fff; font-family:inherit; font-size:11.5px; font-weight:800; color:#9A3412; border-radius:8px; padding:6px 10px; cursor:pointer; }
+  #view-buffet .bf-crumb{ display:flex; align-items:center; gap:8px; margin-bottom:9px; font-size:12px; font-weight:800; color:#8A7B63; }
 </style>
   <div class="bf-head">
-    <h2>🍔 Buffet TCK Food</h2>
+    <h2>🍔 TCK Food</h2>
     <div class="bf-sub" id="bf-sub">Cargando…</div>
+  </div>
+  <div class="bf-subnav" id="bf-subnav">
+    <button class="on" data-p="hoy" onclick="bfSubtab('hoy',this)">🏠 Hoy</button>
+    <button data-p="resumen" onclick="bfSubtab('resumen',this)">Ventas</button>
+    <button data-p="fact" onclick="bfSubtab('fact',this)">Plata</button>
+    <button data-p="costos" onclick="bfSubtab('costos',this)">Rentabilidad</button>
+    <button data-p="stock" onclick="bfSubtab('stock',this)">Stock</button>
+  </div>
+
+  <!-- PANE: HOY (v13.126.0 — Pulso Food · vw_buffet_pulso) -->
+  <div class="bf-pane on" id="bfp-hoy">
+    <div id="bf-py-body"><div class="bf-fvacio">Cargando el pulso del día…</div></div>
+  </div>
+
+  <!-- PANE: RESUMEN / VENTAS -->
+  <div class="bf-pane" id="bfp-resumen">
     <div class="bf-rango" id="bf-rango">
       <button onclick="buffetSetRango('hoy',this)">Hoy</button>
       <button onclick="buffetSetRango('7d',this)">7 días</button>
       <button class="on" onclick="buffetSetRango('30d',this)">30 días</button>
       <button onclick="buffetSetRango('periodo',this)">Todo</button>
     </div>
-  </div>
-  <div class="bf-subnav" id="bf-subnav">
-    <button class="on" onclick="bfSubtab('resumen',this)">Resumen</button>
-    <button onclick="bfSubtab('caja',this)">Caja</button>
-    <button onclick="bfSubtab('fact',this)">Facturación</button>
-    <button onclick="bfSubtab('costos',this)">Costos</button>
-    <button onclick="bfSubtab('recetas',this)">Recetas</button>
-    <button onclick="bfSubtab('subrecetas',this)">Sub-recetas</button>
-    <button onclick="bfSubtab('ingr',this)">Ingredientes</button>
-    <button onclick="bfSubtab('stock',this)">Stock</button>
-  </div>
-
-  <!-- PANE: RESUMEN -->
-  <div class="bf-pane on" id="bfp-resumen">
     <div class="bf-kpis" id="bf-kpis"></div>
     <div class="bf-sec">
       <h3>Ventas por día
@@ -14864,8 +14902,13 @@ input.canales-exp-input[type="date"] {
     <div class="bf-cp" id="bf-cp" style="display:none;"></div>
   </div>
 
-  <!-- PANE: FACTURACIÓN -->
+  <!-- PANE: FACTURACIÓN / PLATA (v13.126.0) -->
   <div class="bf-pane" id="bfp-fact">
+    <div class="bf-sec" id="bf-plata-huecos" style="display:none;padding:0;background:transparent;box-shadow:none;"></div>
+    <div class="bf-sec" id="bf-plata-concil">
+      <h3>Caja conciliada <span class="leg" style="font-weight:700">últimos 14 días</span></h3>
+      <div id="bf-plata-concil-body" class="bf-fvacio">Cargando…</div>
+    </div>
     <div class="bf-sec" id="bf-fact-sec">
       <h3>Facturación <span class="leg" id="bf-fact-head" style="font-weight:700"></span></h3>
       <div class="bf-fact-resumen" id="bf-fact-resumen"></div>
@@ -14879,20 +14922,26 @@ input.canales-exp-input[type="date"] {
     </div>
   </div>
 
-  <!-- PANE: COSTOS -->
+  <!-- PANE: COSTOS / RENTABILIDAD (v13.126.0) -->
   <div class="bf-pane" id="bfp-costos">
+    <div class="bf-cocina-nav">📗 Datos de cocina:
+      <button onclick="_bfNav('recetas')">Recetas</button>
+      <button onclick="_bfNav('subrecetas')">Sub-recetas</button>
+      <button onclick="_bfNav('ingr')">Ingredientes</button>
+    </div>
     <div class="bf-sec" id="bf-prec-sec">
       <h3>Precios y márgenes <span class="leg" id="bf-prec-head" style="font-weight:700"></span></h3>
       <div class="bf-pc-resumen" id="bf-prec-resumen"></div>
       <div class="bf-pc-alerta" id="bf-prec-alerta" style="display:none;"></div>
       <div class="bf-pc-filtros" id="bf-prec-filtros"></div>
       <div class="bf-pc-scroll" id="bf-prec-lista"></div>
-      <div class="bf-pc-foot">El precio de venta se edita en Toteat — esta vista es solo para decidir qué precio revisar. Food cost: <b>verde ≤40%</b> · <b>amarillo 41-60%</b> · <b>rojo &gt;60% o negativo</b> · gris sin costo cargado.</div>
+      <div class="bf-pc-foot">Margen y food cost sobre <b>precio neto (s/IVA)</b> · “vendido”: últimos 30 días · el precio se edita en Toteat. Food cost: <b>verde ≤40%</b> · <b>amarillo 41-60%</b> · <b>rojo &gt;60% o negativo</b> · gris sin costo cargado.</div>
     </div>
   </div>
 
   <!-- PANE: RECETAS (v13.99.0) -->
   <div class="bf-pane" id="bfp-recetas">
+    <div class="bf-crumb"><button onclick="_bfNav('costos')">← Rentabilidad</button><span>Recetas</span></div>
     <div class="bf-pc-resumen" id="bf-rec-resumen"></div>
     <div class="bf-pc-filtros" id="bf-rec-filtros"></div>
     <input class="bf-stock-search" id="bf-rec-search" type="text" placeholder="Buscar plato…" oninput="_bfRecFiltrar(this.value)">
@@ -14902,6 +14951,7 @@ input.canales-exp-input[type="date"] {
 
   <!-- PANE: SUB-RECETAS (v13.100.0) -->
   <div class="bf-pane" id="bfp-subrecetas">
+    <div class="bf-crumb"><button onclick="_bfNav('costos')">← Rentabilidad</button><span>Sub-recetas</span></div>
     <div class="bf-pc-resumen" id="bf-sub-resumen"></div>
     <input class="bf-stock-search" id="bf-sub-search" type="text" placeholder="Buscar sub-receta…" oninput="_bfSubFiltrar(this.value)">
     <div class="bf-pc-scroll" id="bf-sub-lista" style="max-height:480px;"><div class="bf-fvacio">Tocá la pestaña para cargar las sub-recetas.</div></div>
@@ -14910,6 +14960,7 @@ input.canales-exp-input[type="date"] {
 
   <!-- PANE: INGREDIENTES (v13.98.0) -->
   <div class="bf-pane" id="bfp-ingr">
+    <div class="bf-crumb"><button onclick="_bfNav('costos')">← Rentabilidad</button><span>Ingredientes</span></div>
     <div class="bf-pc-resumen" id="bf-ingr-resumen"></div>
     <div class="bf-pc-filtros" id="bf-ingr-filtros"></div>
     <input class="bf-stock-search" id="bf-ingr-search" type="text" placeholder="Buscar ingrediente…" oninput="_bfIngrFiltrar(this.value)">
@@ -14923,13 +14974,6 @@ input.canales-exp-input[type="date"] {
     <input class="bf-stock-search" id="bf-stock-search" type="text" placeholder="Buscar producto…" oninput="_bfStockFiltrar(this.value)">
     <div class="bf-pc-scroll" id="bf-stock-lista" style="max-height:480px;"><div class="bf-fvacio">Tocá la pestaña para cargar el inventario.</div></div>
     <div class="bf-pc-foot" id="bf-stock-foot"></div>
-  </div>
-
-  <!-- PANE: CAJA (v13.107.0) -->
-  <div class="bf-pane" id="bfp-caja">
-    <div class="bf-pc-resumen" id="bf-caja-resumen"></div>
-    <div class="bf-caja-note">Efectivo: <b>declarado</b> (Toteat) vs <b>contado</b> (lo cargás al recibir la plata) &rarr; faltante. QR y transferencias se concilian solos contra MercadoPago. El efectivo contado por ahora no se guarda: es para controlar en el momento.</div>
-    <div id="bf-caja-lista"><div class="bf-fvacio">Tocá la pestaña para cargar los cierres.</div></div>
   </div>
 
   <div class="bf-loading" id="bf-loading" style="display:none;">Cargando datos del buffet…</div>
@@ -21671,24 +21715,26 @@ var _bfRango = '30d';
 function buffetSetRango(r, btn){
   _bfRango = r;
   if (btn && btn.parentNode){ [].forEach.call(btn.parentNode.children, function(c){ c.classList.remove('on'); }); btn.classList.add('on'); }
-  buffetCargar();
-  if (_bfCajaCargado){ _bfCajaCargado = false; var _cp = document.getElementById('bfp-caja'); if (_cp && _cp.classList.contains('on')){ _bfCajaCargado = true; _bfCaja(); } }
+  _bfVentas();   // v13.126.0 — el rango solo afecta el pane Ventas
 }
 // v13.96.0 — navegación entre sub-tabs internas del buffet
 function bfSubtab(p, btn){
   var nav = document.getElementById('bf-subnav');
-  if (nav) [].forEach.call(nav.children, function(b){ b.classList.remove('on'); });
-  if (btn) btn.classList.add('on');
-  ['resumen','fact','costos','recetas','subrecetas','ingr','stock','caja'].forEach(function(x){
+  var padre = ({recetas:'costos', subrecetas:'costos', ingr:'costos'})[p] || p;
+  if (nav) [].forEach.call(nav.children, function(b){ b.classList.toggle('on', b.getAttribute('data-p') === padre); });
+  ['hoy','resumen','fact','costos','recetas','subrecetas','ingr','stock'].forEach(function(x){
     var pane = document.getElementById('bfp-'+x);
     if (pane) pane.classList.toggle('on', x === p);
   });
-  // v13.97.0 — carga lazy por pane (solo la 1ª vez)
+  // v13.126.0 — carga lazy por pane (solo la 1ª vez)
+  if (p === 'hoy' && !_bfPulsoCargado){ _bfPulsoCargado = true; _bfPulso(); }
+  if (p === 'resumen' && !_bfVentasCargado){ _bfVentasCargado = true; _bfVentas(); }
+  if (p === 'fact' && !_bfPlataCargado){ _bfPlataCargado = true; _bfPlata(); }
+  if (p === 'costos' && !_bfRentCargado){ _bfRentCargado = true; _bfRentab(); }
   if (p === 'stock' && !_bfStockCargado){ _bfStockCargado = true; _bfStock(); }
   if (p === 'ingr'  && !_bfIngrCargado){  _bfIngrCargado  = true; _bfIngr();  }
   if (p === 'recetas' && !_bfRecCargado){ _bfRecCargado = true; _bfRec(); }
   if (p === 'subrecetas' && !_bfSubCargado){ _bfSubCargado = true; _bfSub(); }
-  if (p === 'caja' && !_bfCajaCargado){ _bfCajaCargado = true; _bfCaja(); }
   var v = document.getElementById('view-buffet'); if (v) v.scrollTop = 0;
 }
 
@@ -21984,163 +22030,232 @@ function _bfRangoFechas(){
   return { desde: _bfRestarDias(hoy,29), hasta: hoy };  // 30d
 }
 
-// ═══ v13.108.0 — Pane CAJA (cierre diario conciliado + arqueo · buffet_ventas + mp_movimientos + buffet_caja_arqueo) ═══
-// Oversight para todos. El efectivo contado lo cargan admin/cobranzas y persiste en
-// buffet_caja_arqueo (upsert directo con JWT, mismo patrón que el editor de precios).
-// El dueño lo ve read-only y le alimenta el faltante.
-var _bfCajaCargado = false;
-var _bfCajaRows = [];
-var _bfCajaTotNoReg = 0;
-var _bfCajaTotTransfDeb = 0;
-function _bfCajaPuedeContar(){ return rolActual === 'admin' || rolActual === 'cobranzas'; }
-function _bfCajaArt(iso){ var d = new Date(iso); return isNaN(d) ? null : new Date(d.getTime() - 10800000); }
-function _bfCajaArtDate(iso){ var a = _bfCajaArt(iso); return a ? a.toISOString().slice(0,10) : null; }
-function _bfCajaArtHM(iso){ var a = _bfCajaArt(iso); if (!a) return '--:--'; return String(a.getUTCHours()).padStart(2,'0') + ':' + String(a.getUTCMinutes()).padStart(2,'0'); }
-function _bfCajaArtH(iso){ var a = _bfCajaArt(iso); return a ? a.getUTCHours() : 12; }
-async function _bfCaja(){
-  var lst = document.getElementById('bf-caja-lista');
-  if (!lst) return;
-  lst.innerHTML = '<div class="bf-fvacio">Cargando cierres…</div>';
+// ═══ v13.126.0 — Pane HOY (Pulso Food) + Plata (facturación & caja) + Rentabilidad ═══
+// El pane Caja (v13.107-108) se ELIMINÓ: escribía buffet_caja_arqueo con el esquema
+// viejo (fecha_jornada/cajero/efectivo_contado) y no guardaba nada desde que la tabla
+// se recreó en v13.125. La caja vive en Conciliación; acá (Plata) se ve el resumen.
+var _bfPulsoCargado = false;
+var _bfVentasCargado = false;
+var _bfPlataCargado = false;
+var _bfRentCargado = false;
+var _bfPulsoData = null;
+
+function _bfNav(p){
+  var nav = document.getElementById('bf-subnav'), btn = null;
+  if (nav) [].forEach.call(nav.children, function(b){ if (b.getAttribute('data-p') === p) btn = b; });
+  bfSubtab(p, btn);
+}
+function _bfIrConcil(){
+  if (typeof rolActual !== 'undefined' && rolActual === 'tckfood'){ _bfNav('fact'); return; }
+  cambiarTab('foodconcil');
+}
+
+async function _bfPulso(){
+  var el = document.getElementById('bf-py-body');
+  if (!el) return;
+  el.innerHTML = '<div class="bf-fvacio">Cargando el pulso del día…</div>';
   try {
-    var rg = _bfRangoFechas();
-    var ventas = await sbFetchAll('buffet_ventas?select=fecha_jornada,date_closed,register_name,pago_efectivo,pago_debito,total&fecha_jornada=gte.' + rg.desde + '&fecha_jornada=lte.' + rg.hasta + '&order=date_closed.asc', 1000, 40);
-    ventas = Array.isArray(ventas) ? ventas : [];
-    var mp = await sbFetchAll('mp_movimientos?status=eq.approved&operation_type=eq.regular_payment&select=fecha,monto&fecha=gte.' + rg.desde + '&fecha=lte.' + rg.hasta + 'T23:59:59&order=fecha.asc', 1000, 40);
-    mp = Array.isArray(mp) ? mp : [];
-    var arq = {};
-    try {
-      var arqRows = await sbFetch('buffet_caja_arqueo?select=fecha_jornada,cajero,efectivo_contado&fecha_jornada=gte.' + rg.desde + '&fecha_jornada=lte.' + rg.hasta);
-      (Array.isArray(arqRows) ? arqRows : []).forEach(function(a){ arq[a.fecha_jornada + '|' + a.cajero] = (a.efectivo_contado == null ? null : Number(a.efectivo_contado)); });
-    } catch(e){ console.warn('[buffet] arqueo (tabla nueva?):', e); }
-    var qrDia = {};
-    mp.forEach(function(m){ var d = _bfCajaArtDate(m.fecha); if (d) qrDia[d] = (qrDia[d] || 0) + (Number(m.monto) || 0); });
-    var jor = {};
-    ventas.forEach(function(v){
-      var d = v.fecha_jornada; if (!d) return;
-      if (!jor[d]) jor[d] = { total:0, deb:0, caj:{} };
-      var t = Number(v.total) || 0, efe = Number(v.pago_efectivo) || 0, deb = Number(v.pago_debito) || 0;
-      jor[d].total += t; jor[d].deb += deb;
-      var cj = v.register_name || '(sin cajero)';
-      if (!jor[d].caj[cj]) jor[d].caj[cj] = { efe:0, min:null, max:null, hs:0, n:0 };
-      var c = jor[d].caj[cj]; c.efe += efe; c.n++;
-      if (v.date_closed){ if (!c.min || v.date_closed < c.min) c.min = v.date_closed; if (!c.max || v.date_closed > c.max) c.max = v.date_closed; c.hs += _bfCajaArtH(v.date_closed); }
-    });
-    _bfCajaRows = []; _bfCajaTotNoReg = 0; _bfCajaTotTransfDeb = 0;
-    var puede = _bfCajaPuedeContar();
-    var dias = Object.keys(jor).sort().reverse();
-    var resEl = document.getElementById('bf-caja-resumen');
-    if (!dias.length){ lst.innerHTML = '<div class="bf-fvacio">Sin cierres en el rango.</div>'; if (resEl) resEl.innerHTML = ''; return; }
-    var out = dias.map(function(d){
-      var J = jor[d], qr = qrDia[d] || 0, difQR = qr - J.deb, com = Math.round(qr * 0.0433);
-      var cajHtml = Object.keys(J.caj).map(function(cj){
-        var c = J.caj[cj];
-        var turno = (c.n ? c.hs / c.n : 12) < 17 ? 'Mediodía' : 'Noche';
-        var saved = arq[d + '|' + cj];
-        var ri = _bfCajaRows.length; _bfCajaRows.push({ efe:c.efe, contado:(saved != null ? saved : null), fj:d, cj:cj });
-        var contadoCell;
-        if (puede){
-          contadoCell = '<span class="bf-cj-inwrap"><input class="bf-cj-in" inputmode="numeric" placeholder="contar…" value="' + (saved != null ? saved : '') + '" onchange="_bfCajaContar(' + ri + ',this.value)"><span class="bf-cj-sv" id="bfcj-s' + ri + '"></span></span>';
-        } else {
-          contadoCell = '<span class="bf-cj-v">' + (saved != null ? _bfMoney(saved) : '<span class="bf-cj-pend">pendiente</span>') + '</span>';
-        }
-        return '<div class="bf-cj">' +
-          '<div class="bf-cj-h"><span class="bf-cj-t ' + (turno === 'Noche' ? 'noc' : 'med') + '">' + turno + '</span>' +
-          '<span class="bf-cj-nm">' + _bfEsc(cj) + '</span>' +
-          '<span class="bf-cj-hr">' + _bfCajaArtHM(c.min) + '–' + _bfCajaArtHM(c.max) + '</span></div>' +
-          '<div class="bf-cj-r"><span class="bf-cj-l">Efectivo declarado</span><span class="bf-cj-v">' + _bfMoney(c.efe) + '</span></div>' +
-          '<div class="bf-cj-r"><span class="bf-cj-l">Efectivo contado</span>' + contadoCell + '</div>' +
-          '<div class="bf-cj-r"><span class="bf-cj-l">Diferencia</span><span class="bf-cj-falt none" id="bfcj-f' + ri + '">—</span></div>' +
-        '</div>';
+    var rows = await sbFetch('vw_buffet_pulso?select=*');
+    var d = (rows && rows[0]) || null;
+    if (!d){ el.innerHTML = '<div class="bf-fvacio">Sin datos. ¿Corriste la vista <b>vw_buffet_pulso</b> en Supabase?</div>'; return; }
+    _bfPulsoData = d;
+    var html = '';
+
+    // ── Hero: hoy vs día típico ──
+    var vh = Number(d.venta_hoy)||0, vr = Number(d.venta_ref)||0;
+    var pct = vr > 0 ? Math.round(vh/vr*100) : 0;
+    var dias = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+    var dsem = dias[new Date(_bfHoy()+'T12:00:00Z').getUTCDay()];
+    var th = Number(d.ticket_hoy)||0, tr = Number(d.ticket_ref)||0;
+    var dT = (th && tr) ? Math.round((th/tr-1)*100) : null;
+    html += '<div class="bf-py-hero">' +
+      '<div class="bf-py-lab">Venta de hoy · ' + dsem + '</div>' +
+      '<div class="bf-py-big">' + _bfMoney(vh) + '</div>' +
+      (vr > 0 ? ('<div class="bf-py-prog"><i style="width:' + Math.min(pct,100) + '%"></i></div>' +
+        '<div class="bf-py-progl"><span><b>' + pct + '%</b> de un ' + dsem + ' típico</span><span>ref. ' + _bfMoney(vr) + '</span></div>') : '') +
+      '<div class="bf-py-row">' +
+        '<div class="bf-py-k"><div class="v">' + (Number(d.ordenes_hoy)||0) + '</div><div class="l">Órdenes</div><div class="s">típico: ' + (Number(d.ordenes_ref)||0) + '</div></div>' +
+        '<div class="bf-py-k"><div class="v">' + _bfMoney(th) + '</div><div class="l">Ticket</div><div class="s' + (dT == null ? '' : (dT >= 0 ? ' up' : ' dn')) + '">' + (dT == null ? '—' : ((dT >= 0 ? '+' : '') + dT + '% vs típico')) + '</div></div>' +
+      '</div></div>';
+
+    // ── Fuegos ──
+    var fuegos = [];
+    var sfN = Number(d.sinfact_n)||0, sfV = Number(d.sinfact_viejos)||0, frN = Number(d.frenadas_n)||0;
+    if (sfV > 0) fuegos.push({ c:'bad', ic:'🧾', t:'<b>' + sfV + ' venta' + (sfV > 1 ? 's' : '') + ' sin facturar hace +2 días</b>', s:sfN + ' en total · ' + _bfMoney(Number(d.sinfact_monto)||0) + ' trabados en ARCA', go:'fact' });
+    else if (frN > 0) fuegos.push({ c:'bad', ic:'⏳', t:'<b>Cola de facturación frenada</b>', s:frN + ' venta' + (frN > 1 ? 's esperan' : ' espera') + ' factura hace +3 h', go:'fact' });
+    var roN = Number(d.rotas_n)||0;
+    if (roN > 0) fuegos.push({ c:'bad', ic:'🍳', t:'<b>' + roN + ' receta' + (roN > 1 ? 's rotas' : ' rota') + '</b> (FC&gt;100% o margen negativo)', s:_bfEsc((d.rotas_lista||[]).slice(0,3).join(' · ')), go:'costos' });
+    var rjN = Number(d.rojos_14d)||0;
+    if (rjN > 0) fuegos.push({ c:'bad', ic:'⚠', t:'<b>' + rjN + ' cierre' + (rjN > 1 ? 's' : '') + ' con descuadre &gt;$20.000</b>', s:'últimos 14 días · neto ' + _bfMoney(Number(d.concil_neto_14d)||0), concil:1 });
+    var fjN = Number(d.sinfajo_14d)||0;
+    if (fjN > 0) fuegos.push({ c:'warn', ic:'💵', t:'<b>' + fjN + ' de ' + (Number(d.cierres_14d)||0) + ' cierres sin fajo cargado</b>', s:'admin no confirmó la recepción del efectivo (14 días)', concil:1 });
+    var scN = Number(d.sincosto_n)||0;
+    if (scN > 0) fuegos.push({ c:'warn', ic:'🏷', t:'<b>' + scN + ' top-venta' + (scN > 1 ? 's' : '') + ' sin costo cargado</b>', s:_bfEsc((d.sincosto_lista||[]).slice(0,3).join(' · ')), go:'costos' });
+
+    html += '<div class="bf-py-sect">Requiere atención' + (fuegos.length ? ' · ' + fuegos.length : '') + '</div>';
+    if (!fuegos.length){
+      html += '<div class="bf-py-ok">✓ Sin fuegos: facturación al día, caja cuadrada, recetas sanas.</div>';
+    } else {
+      html += fuegos.map(function(f){
+        var go = f.concil ? '_bfIrConcil()' : ("_bfNav('" + f.go + "')");
+        return '<div class="bf-py-fuego ' + f.c + '"><span class="ic">' + f.ic + '</span><div class="tx">' + f.t + (f.s ? '<small>' + f.s + '</small>' : '') + '</div><button onclick="' + go + '">Ver</button></div>';
       }).join('');
-      var flag;
-      if (difQR > 3000){ _bfCajaTotNoReg += difQR; flag = '<div class="bf-cj-flag bad">⚠ $' + _bfMoney(difQR) + ' cobrado por QR que Toteat NO registró como venta</div>'; }
-      else if (difQR < -3000){ _bfCajaTotTransfDeb += -difQR; flag = '<div class="bf-cj-flag warn">↔ $' + _bfMoney(-difQR) + ' del "débito" fue transferencia, no QR</div>'; }
-      else { flag = '<div class="bf-cj-flag ok">✓ QR cuadra con Toteat</div>'; }
-      var dt = new Date(d + 'T12:00:00Z');
-      var ds = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][dt.getUTCDay()];
-      return '<div class="bf-cajac">' +
-        '<div class="bf-cajac-h"><span>' + ds + ' ' + _bfDDMM(d) + '</span><span>' + _bfMoney(J.total) + '</span></div>' +
-        cajHtml +
-        '<div class="bf-cajac-mp">' +
-          '<div class="bf-cj-r"><span class="bf-cj-l">"Débito" Toteat</span><span class="bf-cj-v">' + _bfMoney(J.deb) + '</span></div>' +
-          '<div class="bf-cj-r"><span class="bf-cj-l">QR real (MercadoPago)</span><span class="bf-cj-v">' + _bfMoney(qr) + '</span></div>' +
-          '<div class="bf-cj-r"><span class="bf-cj-l">Comisión QR estimada</span><span class="bf-cj-v" style="color:#B45309">−' + _bfMoney(com) + '</span></div>' +
-          flag +
-        '</div>' +
-      '</div>';
-    }).join('');
-    lst.innerHTML = out;
-    _bfCajaRows.forEach(function(_, ri){ _bfCajaPintarFila(ri); });
-    _bfCajaResumen();
+    }
+
+    // ── Margen estimado 7 días ──
+    var mg = Number(d.margen_7d)||0, vc = Number(d.venta_costeada_7d)||0, vt = Number(d.venta_total_7d)||0;
+    var cob = vt > 0 ? Math.round(vc/vt*100) : 0;
+    html += '<div class="bf-py-util"><div class="bf-py-lab" style="color:rgba(255,255,255,.75)">Margen bruto estimado · últimos 7 días · solo buffet</div>' +
+      '<div class="bf-py-big" style="color:#fff;font-size:38px">≈ ' + _bfMoney(mg) + '</div>' +
+      '<div class="bf-py-cob"><i style="width:' + cob + '%"></i></div>' +
+      '<div class="bf-py-note">Sobre el <b>' + cob + '% de la venta</b> con receta costeada (' + _bfMoney(vc) + ' de ' + _bfMoney(vt) + '). Cargar los costos que faltan sube el número y su precisión.</div></div>';
+
+    // ── Top margen 7d ──
+    var top = d.top_margen || [];
+    if (top.length){
+      var maxm = Number(top[0].margen) || 1;
+      html += '<div class="bf-py-sect">Los que más dejan · 7 días</div><div class="bf-py-card">' +
+        top.map(function(t, i){
+          var w = Math.max(6, Math.round((Number(t.margen)||0)/maxm*100));
+          return '<div class="bf-py-tm"><div class="rk">' + (i+1) + '</div><div class="nm">' + _bfEsc(t.nombre) +
+            '<div class="bar"><i style="width:' + w + '%"></i></div></div><div class="mg">' + _bfMoney(Number(t.margen)||0) + '</div></div>';
+        }).join('') +
+        '<div class="bf-py-foot">Ranking por <b>margen total</b> (margen neto × unidades), no por facturación.</div></div>';
+    }
+
+    // ── Semana tipo ──
+    var sem = d.semana_tipo || [];
+    if (sem.length){
+      var hoyDow = new Date(_bfHoy()+'T12:00:00Z').getUTCDay();
+      var orden = [1,2,3,4,5,6,0], lbl = { 0:'Dom', 1:'Lun', 2:'Mar', 3:'Mié', 4:'Jue', 5:'Vie', 6:'Sáb' };
+      var byDow = {}; sem.forEach(function(x){ byDow[Number(x.dow)] = x; });
+      var mx = 1; sem.forEach(function(x){ if (Number(x.venta) > mx) mx = Number(x.venta); });
+      html += '<div class="bf-py-sect">La semana típica · promedio 28 días</div><div class="bf-py-card"><div class="bf-py-week">' +
+        orden.map(function(dw){
+          var x = byDow[dw] || { venta:0, v_play:0 };
+          var h = Math.round(Number(x.venta)/mx*100);
+          var plp = Number(x.venta) > 0 ? Math.round(Number(x.v_play)/Number(x.venta)*100) : 0;
+          return '<div class="bf-py-wd' + (dw === hoyDow ? ' hoy' : '') + '"><div class="b" style="height:' + Math.max(h,4) + '%"><i style="height:' + plp + '%"></i></div>' +
+            '<div class="dn">' + lbl[dw] + '</div><div class="mv">' + (Number(x.venta) > 0 ? ('$' + (Number(x.venta)/1e6).toFixed(1).replace('.', ',') + 'M') : '—') + '</div></div>';
+        }).join('') +
+        '</div><div class="bf-py-leg"><span><i style="background:#EBDFC9"></i>Buffet</span><span><i style="background:#1E6B8C;opacity:.55"></i>Playmatch</span><span><i style="background:#C2410C"></i>Hoy</span></div></div>';
+    }
+
+    el.innerHTML = html;
   } catch(e){
-    console.error('[buffet] caja:', e);
-    lst.innerHTML = '<div class="bf-fvacio">No se pudo cargar la caja.</div>';
+    console.error('[buffet] pulso:', e);
+    el.innerHTML = '<div class="bf-fvacio" style="color:#9A3412">No pude cargar el pulso: ' + _bfEsc(e.message||e) + '<br><br>¿Corriste <b>vw_buffet_pulso</b> y <b>vw_buffet_items_fecha</b> en Supabase?</div>';
   }
 }
-function _bfCajaPintarFila(ri){
-  var row = _bfCajaRows[ri]; var span = document.getElementById('bfcj-f' + ri);
-  if (!span || !row) return;
-  if (row.contado == null || isNaN(row.contado)){ span.className = 'bf-cj-falt none'; span.textContent = '—'; }
-  else { var f = row.contado - row.efe; span.className = 'bf-cj-falt ' + (f === 0 ? 'ok' : (f < 0 ? 'bad' : 'plus')); span.textContent = (f >= 0 ? '+' : '') + _bfMoney(f); }
-}
-function _bfCajaContar(ri, val){
-  var row = _bfCajaRows[ri]; if (!row) return;
-  row.contado = (val == null || val === '') ? null : Number(String(val).replace(/[^\d.-]/g, ''));
-  _bfCajaPintarFila(ri);
-  _bfCajaResumen();
-  _bfCajaGuardar(ri);
-}
-async function _bfCajaGuardar(ri){
-  var row = _bfCajaRows[ri]; if (!row) return;
-  var sv = document.getElementById('bfcj-s' + ri); if (sv){ sv.textContent = '…'; sv.className = 'bf-cj-sv wait'; }
+
+// ── Plata: facturación fiscal + resumen de conciliación + numeración ──
+async function _bfPlata(){
   try {
-    await sbFetch('buffet_caja_arqueo', {
-      method: 'POST',
-      headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-      body: JSON.stringify({
-        fecha_jornada: row.fj,
-        cajero: row.cj,
-        efectivo_contado: (row.contado == null || isNaN(row.contado)) ? null : row.contado,
-        cargado_por: (usuarioActual || 'admin'),
-        actualizado_at: new Date().toISOString()
-      })
-    });
-    if (sv){ sv.textContent = '✓'; sv.className = 'bf-cj-sv ok'; setTimeout(function(){ if (sv){ sv.textContent = ''; } }, 1600); }
+    var vs = await sbFetchAll('buffet_ventas?select=order_id,fecha_jornada,date_closed,total,unidad_negocio,es_consumo_personal,xubio_estado,xubio_nro_comprobante,xubio_cae&fecha_jornada=gte.2026-06-27&order=order_id.asc', 1000, 40);
+    vs = Array.isArray(vs) ? vs : [];
+    _bfFacturacion(vs);
+    var trabIds = [];
+    vs.forEach(function(v){ if (!v.es_consumo_personal && (v.xubio_estado === 'error' || v.xubio_estado === 'sin_mapear')) trabIds.push(v.order_id); });
+    var items = [];
+    if (trabIds.length){
+      try { items = await sbFetch('buffet_ventas_items?select=order_id,producto_id,producto_nombre,unidad_negocio,cantidad,total_linea&order_id=in.(' + trabIds.slice(0,100).join(',') + ')') || []; } catch(e2){}
+    }
+    _bfTraban(vs, items);
   } catch(e){
-    console.error('[buffet] arqueo guardar:', e);
-    if (sv){ sv.textContent = '⚠ no guardó'; sv.className = 'bf-cj-sv err'; }
+    console.error('[buffet] plata:', e);
+    var lst = document.getElementById('bf-fact-lista');
+    if (lst) lst.innerHTML = '<div class="bf-fvacio">No se pudo cargar la facturación.</div>';
+  }
+  _bfPlataConcil();
+  _bfPlataHuecos();
+}
+
+async function _bfPlataConcil(){
+  var el = document.getElementById('bf-plata-concil-body');
+  if (!el) return;
+  try {
+    var desde = _bfRestarDias(_bfHoy(), 14);
+    var rows = await sbFetch('vw_buffet_concil?estado=eq.cerrada&fecha=gte.' + desde + '&select=desc_efectivo,desc_debito,desc_credito,desc_consumo,desc_otros,desc_total,efectivo_recibido') || [];
+    var rojos = 0, sinFajo = 0, neto = 0;
+    rows.forEach(function(r){
+      var w = Math.max(Math.abs(Number(r.desc_efectivo)||0), Math.abs(Number(r.desc_debito)||0), Math.abs(Number(r.desc_credito)||0), Math.abs(Number(r.desc_consumo)||0), Math.abs(Number(r.desc_otros)||0));
+      if (w > 20000) rojos++;
+      if (r.efectivo_recibido == null) sinFajo++;
+      neto += Number(r.desc_total)||0;
+    });
+    var btn = (typeof rolActual !== 'undefined' && rolActual === 'tckfood') ? '' :
+      '<button class="bf-py-link" onclick="_bfIrConcil()">Abrir conciliación completa →</button>';
+    el.className = '';
+    el.innerHTML = '<div class="bf-pc-resumen" style="margin-bottom:8px">' +
+      '<div class="bf-pch ' + (rojos > 0 ? 'gr' : 'ok') + '"><div class="n" style="font-size:13px">' + rojos + '</div><div class="l">Descuadran</div></div>' +
+      '<div class="bf-pch ' + (sinFajo > 0 ? 'gr' : 'ok') + '"><div class="n" style="font-size:13px">' + sinFajo + '</div><div class="l">Sin fajo</div></div>' +
+      '<div class="bf-pch"><div class="n" style="font-size:13px">' + (neto > 0 ? '+' : '') + _bfMoney(neto) + '</div><div class="l">Neto 14d</div></div>' +
+      '</div>' + btn +
+      '<div class="bf-py-foot" style="margin-top:6px">Contado vs esperado por cierre y turno · el detalle, los motivos y el fajo se cargan en Conciliación.</div>';
+  } catch(e){
+    el.innerHTML = '<div class="bf-fvacio">No se pudo leer la conciliación.</div>';
   }
 }
-function _bfCajaResumen(){
-  var res = document.getElementById('bf-caja-resumen'); if (!res) return;
-  var falt = 0;
-  _bfCajaRows.forEach(function(r){ if (r.contado != null && !isNaN(r.contado)){ var f = r.contado - r.efe; if (f < 0) falt += f; } });
-  res.innerHTML =
-    '<div class="bf-pch ' + (falt < 0 ? 'gr' : 'ok') + '"><div class="n" style="font-size:13px">' + _bfMoney(falt) + '</div><div class="l">Faltante efvo</div></div>' +
-    '<div class="bf-pch ' + (_bfCajaTotNoReg > 0 ? 'gr' : 'ok') + '"><div class="n" style="font-size:13px">' + _bfMoney(_bfCajaTotNoReg) + '</div><div class="l">QR sin registrar</div></div>' +
-    '<div class="bf-pch gr"><div class="n" style="font-size:13px">' + _bfMoney(_bfCajaTotTransfDeb) + '</div><div class="l">Transf. como débito</div></div>';
+
+async function _bfPlataHuecos(){
+  var el = document.getElementById('bf-plata-huecos');
+  if (!el) return;
+  try {
+    var d = _bfPulsoData;
+    if (!d){ var rows = await sbFetch('vw_buffet_pulso?select=huecos_n,huecos_max,huecos_lista,frenadas_n'); d = (rows && rows[0]) || null; }
+    if (!d){ el.style.display = 'none'; return; }
+    var hn = Number(d.huecos_n)||0, fr = Number(d.frenadas_n)||0;
+    if (!hn && !fr){ el.style.display = 'none'; return; }
+    var lista = (d.huecos_lista||[]).slice(0,8).map(function(x){ return '#' + x; }).join(' · ');
+    var rojo = fr > 0;
+    el.style.display = '';
+    el.innerHTML = '<div style="background:' + (rojo ? '#FCEBEB' : '#FBF7F0') + ';border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.5;color:' + (rojo ? '#991B1B' : '#5C5044') + '">' +
+      (rojo ? ('<b>⛔ ' + fr + ' factura' + (fr > 1 ? 's' : '') + ' frenada' + (fr > 1 ? 's' : '') + ' hace +3 h.</b> Si hay un comprobante huérfano nuevo, autorizalo en Xubio (Ventas → Comprobantes → PV 00010) para destrabar la cola. ') : '') +
+      'Numeración PV 00010: <b>' + hn + ' hueco' + (hn !== 1 ? 's' : '') + '</b>' + (hn ? (' (' + lista + (hn > 8 ? '…' : '') + ')') : '') + ' · último emitido #' + (Number(d.huecos_max)||0) + '.' +
+      '</div>';
+  } catch(e){ el.style.display = 'none'; }
+}
+
+// ── Rentabilidad: "vendido" fijo a 30 días + precios/food cost ──
+async function _bfRentab(){
+  var vendId = {};
+  try {
+    var desde = _bfRestarDias(_bfHoy(), 30);
+    var it = await sbFetchAll('vw_buffet_items_fecha?select=producto_id,cantidad&es_cp=eq.false&fecha_jornada=gte.' + desde, 1000, 40);
+    (Array.isArray(it) ? it : []).forEach(function(x){
+      if (x.producto_id != null) vendId[x.producto_id] = (vendId[x.producto_id]||0) + (Number(x.cantidad)||0);
+    });
+  } catch(e){ console.warn('[buffet] rentab vendId:', e); }
+  await _bfPrecios(vendId);
 }
 
 async function buffetCargar(){
+  // v13.126.0 — al abrir el tab: HOY se refresca siempre; el resto solo si ya estaba abierto
   var sub = document.getElementById('bf-sub');
+  if (sub) sub.textContent = 'Panel del buffet y Playmatch · Toteat sync cada 15 min';
+  _bfPulsoCargado = true; _bfPulso();
+  if (_bfVentasCargado) _bfVentas();
+  if (_bfPlataCargado) _bfPlata();
+}
+
+// ═══ v13.126.0 — Pane VENTAS (ex Resumen; items por rango vía vw_buffet_items_fecha) ═══
+async function _bfVentas(){
   var load = document.getElementById('bf-loading');
   if (load) load.style.display = 'block';
   try {
     var rg = _bfRangoFechas();
-    var ventas = await sbFetchAll('buffet_ventas?select=order_id,fecha_jornada,date_closed,total,unidad_negocio,es_consumo_personal,pago_efectivo,pago_debito,pago_credito,pago_consumo_personal,pago_otros,xubio_estado,xubio_nro_comprobante,xubio_cae&fecha_jornada=gte.' + rg.desde + '&fecha_jornada=lte.' + rg.hasta + '&order=order_id.asc', 1000, 40);
+    var ventas = await sbFetchAll('buffet_ventas?select=order_id,fecha_jornada,date_closed,total,unidad_negocio,es_consumo_personal,pago_efectivo,pago_debito,pago_credito,pago_consumo_personal,pago_otros&fecha_jornada=gte.' + rg.desde + '&fecha_jornada=lte.' + rg.hasta + '&order=order_id.asc', 1000, 40);
     ventas = Array.isArray(ventas) ? ventas : [];
-    if (sub) sub.textContent = 'Ventas del buffet y Playmatch · ' + rg.desde + ' → ' + rg.hasta;
 
     // KPIs + medios de pago + por día + consumo personal
     var total=0, efe=0, deb=0, cred=0, cp=0, otros=0, cpOrd=0, cpMonto=0;
-    var porDia = {}, ids = {};
+    var porDia = {};
     ventas.forEach(function(v){
       var t = Number(v.total)||0; total += t;
       efe += Number(v.pago_efectivo)||0; deb += Number(v.pago_debito)||0;
       cred += Number(v.pago_credito)||0; cp += Number(v.pago_consumo_personal)||0;
       otros += Number(v.pago_otros)||0;
       if (v.es_consumo_personal){ cpOrd++; cpMonto += t; }
-      ids[v.order_id] = true;
       var d = v.fecha_jornada || '—';
       if (!porDia[d]) porDia[d] = { t:0, bf:0, pl:0 };
       porDia[d].t += t;
@@ -22155,9 +22270,6 @@ async function buffetCargar(){
       '<div class="bf-kpi"><div class="v">' + nOrd + '</div><div class="l">Órdenes</div></div>' +
       '<div class="bf-kpi"><div class="v">' + _bfMoney(ticket) + '</div><div class="l">Ticket prom</div></div>' +
       '<div class="bf-kpi cp"><div class="v">' + cpPct + '%</div><div class="l">Cons. pers.</div></div>';
-
-    // v13.89.0 — sección Facturación (estado Xubio)
-    _bfFacturacion(ventas);
 
     // por día
     var dias = Object.keys(porDia).sort();
@@ -22193,18 +22305,15 @@ async function buffetCargar(){
         _bfMoney(cpMonto) + ' · ' + cpPct + '% del total <span style="opacity:.7">(autofactura)</span></div>';
     } else { cpEl.style.display = 'none'; }
 
-    // top productos — filtrar items por las órdenes del rango (no hay FK, se filtra en cliente)
-    var items = await sbFetchAll('buffet_ventas_items?select=order_id,producto_id,producto_nombre,unidad_negocio,cantidad,total_linea&order=order_id.asc', 1000, 60);
+    // top productos — v13.126.0: items filtrados por rango en el server
+    var items = await sbFetchAll('vw_buffet_items_fecha?select=producto_id,producto_nombre,unidad_negocio,cantidad,total_linea&fecha_jornada=gte.' + rg.desde + '&fecha_jornada=lte.' + rg.hasta, 1000, 40);
     items = Array.isArray(items) ? items : [];
     var agg = {};
-    var vendId = {};   // v13.92.0 — veces vendido por producto_id (para panel Precios)
     items.forEach(function(it){
-      if (!ids[it.order_id]) return;
       var k = it.producto_nombre || '(sin nombre)';
       if (!agg[k]) agg[k] = { u:it.unidad_negocio, un:0, a:0 };
       agg[k].un += Number(it.cantidad)||0;
       agg[k].a  += Number(it.total_linea)||0;
-      if (it.producto_id != null) vendId[it.producto_id] = (vendId[it.producto_id]||0) + (Number(it.cantidad)||0);
     });
     var top = Object.keys(agg).map(function(k){ return { n:k, u:agg[k].u, un:agg[k].un, a:agg[k].a }; })
       .sort(function(a,b){ return b.a - a.a; }).slice(0,12);
@@ -22215,17 +22324,11 @@ async function buffetCargar(){
         '<div class="amt">' + _bfMoney(x.a) + '</div></div>';
     }).join('') : '<div class="bf-loading">Sin datos</div>';
 
-    // v13.93.0 — Productos que traban facturación (señal exacta)
-    _bfTraban(ventas, items);
-    // v13.92.0 — Precios y márgenes (catálogo + food cost, independiente del rango salvo "veces vendido")
-    await _bfPrecios(vendId);
-
   } catch(e){
-    console.error('[buffet] cargar:', e);
+    console.error('[buffet] ventas:', e);
     var msg = (e && e.message) ? e.message : String(e);
-    if (sub) sub.textContent = 'Error: ' + msg;
     var k = document.getElementById('bf-kpis');
-    if (k) k.innerHTML = '<div style="grid-column:1/-1;padding:14px;color:#9A3412;font-size:12px;text-align:center;background:#FBEADB;border-radius:10px">No se pudieron cargar los datos del buffet.<br>' + msg + '</div>';
+    if (k) k.innerHTML = '<div style="grid-column:1/-1;padding:14px;color:#9A3412;font-size:12px;text-align:center;background:#FBEADB;border-radius:10px">No se pudieron cargar los datos de ventas.<br>' + msg + '</div>';
   } finally {
     if (load) load.style.display = 'none';
   }
@@ -22264,9 +22367,15 @@ function _bfRowNoFact(v){
   var e = v.xubio_estado, fall = (e === 'sin_mapear' || e === 'error');
   var bg = fall ? 'er' : 'pe';
   var lbl = fall ? (e === 'sin_mapear' ? 'Sin mapear' : 'Error') : 'Pendiente';
+  // v13.126.0 — edad del pendiente (días desde la jornada)
+  var edad = '';
+  try {
+    var dd = Math.round((new Date(_bfHoy() + 'T00:00:00Z') - new Date(String(v.fecha_jornada||'') + 'T00:00:00Z')) / 86400000);
+    if (isFinite(dd) && dd >= 2) edad = ' <span class="bg er">hace ' + dd + 'd</span>';
+  } catch(e2){}
   return '<div class="bf-frow"><span class="h">'+_bfHora(v.date_closed)+'</span>'+_bfUnid(v)+
     '<span class="mo">'+_bfMoney(Number(v.total)||0)+'</span>'+
-    '<span class="bg '+bg+'">'+lbl+'</span></div>';
+    '<span class="bg '+bg+'">'+lbl+'</span>'+edad+'</div>';
 }
 function _bfRowFact(v){
   var cae = v.xubio_cae ? ('…' + String(v.xubio_cae).slice(-6)) : 's/CAE';
@@ -22405,7 +22514,7 @@ async function _bfPrecios(vendId){
   try {
     var prods = await sbFetchAll('buffet_productos?select=toteat_id,nombre,categoria,unidad_negocio,precio_venta,activo&activo=eq.true&order=nombre.asc', 1000, 5);
     prods = Array.isArray(prods) ? prods : [];
-    var costos = await sbFetchAll('vw_buffet_food_cost_plato?select=producto_id,costo_receta,estado&order=producto_id.asc', 1000, 5);
+    var costos = await sbFetchAll('vw_buffet_food_cost_plato?select=producto_id,precio_neto,costo_receta,estado&order=producto_id.asc', 1000, 5);
     costos = Array.isArray(costos) ? costos : [];
     var cmap = {};
     costos.forEach(function(c){ cmap[c.producto_id] = c; });
@@ -22425,9 +22534,13 @@ async function _bfPrecios(vendId){
       var precio = Number(p.precio_venta)||0;
       var cr = cmap[p.toteat_id];
       var costo = cr ? (Number(cr.costo_receta)||0) : 0;
-      var tieneCosto = costo > 0 && precio > 0;
-      var margen = tieneCosto ? (precio - costo) : null;
-      var fc = tieneCosto ? (costo / precio * 100) : null;
+      // v13.126.0 — margen y FC sobre precio NETO (regla TCK: todo margen es s/IVA).
+      // Usa precio_neto de la vista; si el producto no está en la vista, aproxima /1.21.
+      var neto = cr ? (Number(cr.precio_neto)||0) : 0;
+      if (!neto && precio) neto = precio / 1.21;
+      var tieneCosto = costo > 0 && neto > 0;
+      var margen = tieneCosto ? (neto - costo) : null;
+      var fc = tieneCosto ? (costo / neto * 100) : null;
       return {
         id: p.toteat_id,
         nombre: p.nombre || '(sin nombre)',
@@ -42277,7 +42390,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.125.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.126.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
