@@ -1,5 +1,16 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.128.0 — 23/07/2026
+     v13.128.0: FASE 1b — MOTIVO DE OVERRIDE ESTRUCTURADO. El candado de
+                planilla pedía motivo libre y se degradó a "zona 3"/"z"/"c"
+                (99 casos julio, todos inútiles). Ahora: opciones cerradas 1-5
+                (Xubio caído / se factura al volver / salida urgente / pedidos
+                de último momento / otro con detalle obligatorio ≥5 chars).
+                Además el motivo se escribe en la COLUMNA pedido_acciones.motivo
+                (antes solo iba en metadata.motivo → la columna quedaba NULL y
+                cualquier query/vista lo daba por perdido). metadata conserva
+                motivo + opcion elegida. Backfill del histórico por SQL aparte.
+
      TCK ADMIN — v13.127.0 — 21/07/2026
      v13.127.0: TCK FOOD REORGANIZADO — pane HOY (Pulso Food, vw_buffet_pulso: hoy vs dia tipico,
                 fuegos accionables, margen 7d, top margen, semana tipo), subnav de 5 espacios
@@ -42347,9 +42358,31 @@ async function fcCandadoPlanilla(pedidos, ctx) {
       '\n\nLo correcto: facturar en Xubio → 🔄 Sincronizar (tab Facturación) → reintentar.\n\n¿FORZAR la planilla igual? (queda logueado con tu motivo)');
     if (!seguir) { toast('Planilla bloqueada: faltan ' + sin.length + ' facturas', 'err'); return { ok: false }; }
 
-    var motivo = prompt('Motivo del override (obligatorio):');
-    motivo = (motivo || '').trim();
-    if (!motivo) { toast('Override cancelado: falta el motivo', 'err'); return { ok: false }; }
+    // v13.128.0 FASE 1b — motivo ESTRUCTURADO: el texto libre se degradó a
+    // "zona 3"/"z"/"c" (99 casos en julio — el dónde en vez del porqué).
+    // Opciones de un dígito: más rápido a las 6AM y datos que sirven.
+    var motivoOpciones = {
+      '1': 'Xubio caído o con errores',
+      '2': 'Se factura al volver (cobra el chofer)',
+      '3': 'Salida urgente: sin tiempo de facturar',
+      '4': 'Pedidos agregados a último momento'
+    };
+    var eleccionOv = prompt(
+      '⚠️ MOTIVO DEL OVERRIDE (obligatorio)\n\n' +
+      '1 = Xubio caído o con errores\n' +
+      '2 = Se factura al volver (cobra el chofer)\n' +
+      '3 = Salida urgente: sin tiempo de facturar\n' +
+      '4 = Pedidos agregados a último momento\n' +
+      '5 = Otro (detalle en el paso siguiente)\n\n' +
+      'Escribí el número (1-5):');
+    eleccionOv = (eleccionOv || '').trim();
+    var motivo = motivoOpciones[eleccionOv] || '';
+    if (eleccionOv === '5') {
+      var detalleOtroOv = (prompt('Detalle del motivo (obligatorio):') || '').trim();
+      if (detalleOtroOv.length < 5) { toast('Override cancelado: el motivo tiene que ser descriptivo', 'err'); return { ok: false }; }
+      motivo = 'Otro: ' + detalleOtroOv;
+    }
+    if (!motivo) { toast('Override cancelado: falta el motivo (1-5)', 'err'); return { ok: false }; }
 
     try {
       await sbFetch('pedido_acciones', {
@@ -42359,9 +42392,10 @@ async function fcCandadoPlanilla(pedidos, ctx) {
           return {
             pedido_id: r.pedido_id,
             accion: 'override_candado_planilla',
+            motivo: motivo,   // v13.128.0 — a la COLUMNA (antes solo metadata → NULL en queries)
             vendedor_que_actuo: 'ADMIN',
             fecha_hora: new Date().toISOString(),
-            metadata: { motivo: motivo, chofer: (ctx && ctx.chofer) || null, viaje_id: (ctx && ctx.viajeId) || null }
+            metadata: { motivo: motivo, opcion: eleccionOv, chofer: (ctx && ctx.chofer) || null, viaje_id: (ctx && ctx.viajeId) || null }
           };
         }))
       });
@@ -42390,7 +42424,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.127.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.128.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
