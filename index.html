@@ -1,5 +1,24 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.129.0 — 24/07/2026
+     v13.129.0: IMPORTADOR EXPORT XUBIO (tope 100/día). La API de listado de
+                Xubio devuelve máx 100 comprobantes/día (parámetros ignorados,
+                diag 23/7): las facturas manuales de días-tope son invisibles
+                para el espejo → pedidos "sin factura" que NO lo están (87 de
+                junio, Anexo D). Nueva sección en Facturación → "Export Xubio":
+                importa el XLSX oficial de Xubio (multi-archivo, SheetJS,
+                deduplica solape entre archivos, upsert por número a
+                xubio_export_comprobantes), lista los FALTANTES del espejo
+                (vw_xubio_export_faltantes) en 3 grupos — directos por
+                referencia "Pedido TCK ..." preseleccionados, heurísticos
+                cliente+monto±$1+fecha±7d a confirmar, sin candidato — y
+                adopta vía Apps Script (accion=adoptarFacturasExport, lotes
+                de 25): vínculo por NÚMERO (xubio_factura_id queda NULL, el
+                export no trae transaccionid) + Sheet col 18. Chips de días
+                tope (vw_tope_dias) en la sección + aviso rojo en PULSO cuando
+                hay días tope sin export importado. Requiere: migración
+                SQL_IMPORTADOR_EXPORT_XUBIO_v1.sql + AS v25.100.0.
+
      TCK ADMIN — v13.128.0 — 23/07/2026
      v13.128.0: FASE 1b — MOTIVO DE OVERRIDE ESTRUCTURADO. El candado de
                 planilla pedía motivo libre y se degradó a "zona 3"/"z"/"c"
@@ -14619,6 +14638,21 @@ input.canales-exp-input[type="date"] {
       <summary class="fc-sec-tit">🟡 Facturas sueltas (sin pedido) <span class="fc-sec-sub" id="fc-sueltas-n"></span></summary>
       <div id="fc-sueltas" class="fc-list" style="margin-top:6px;"></div>
     </details>
+    <!-- ═══ v13.129.0 — EXPORT XUBIO (tope 100) ═══ -->
+    <details class="fc-sec fc-details" id="fc-xec-sec">
+      <summary class="fc-sec-tit">📄 Export Xubio (tope 100) <span class="fc-sec-sub" id="fc-xec-sub">facturas invisibles para el sync — importar y adoptar</span></summary>
+      <div style="margin-top:8px;">
+        <div id="fc-xec-tope" style="margin-bottom:8px;"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+          <button type="button" class="fc-fact-btn" style="background:#B45309;" onclick="document.getElementById('fc-xec-file').click()">⬆️ Importar export (.xlsx)</button>
+          <input type="file" id="fc-xec-file" accept=".xlsx,.xls" multiple style="display:none" onchange="xecImportar(this)">
+          <button type="button" class="fc-fact-btn" style="background:#37474F;" onclick="xecCargarFaltantes()">🔍 Buscar faltantes</button>
+          <button type="button" class="fc-fact-btn" id="fc-xec-adoptar" style="display:none;background:#1B5E20;" onclick="xecAdoptar()">✅ Adoptar seleccionadas (0)</button>
+        </div>
+        <div id="fc-xec-res" style="font-size:12px;color:#5C4F3A;margin-bottom:8px;"></div>
+        <div id="fc-xec-list" class="fc-list"></div>
+      </div>
+    </details>
     <div style="height:90px;"></div>
   </div>
 
@@ -21077,6 +21111,7 @@ async function pulsoCargar() {
     html += '</div>';
 
     cont.innerHTML = html;
+    xecAvisoPulso();   // v13.129.0 — aviso días tope sin export
   } catch (e) {
     console.error('[PULSO]', e);
     cont.innerHTML = '<div style="padding:24px;color:#C62828;font-size:14px;">No pude cargar el Pulso: ' + (e && e.message ? e.message : e) + '<br><br>\u00bfCorriste las vistas <b>vw_pulso_cierre</b> y <b>vw_pulso_salud</b> en Supabase?</div>';
@@ -30161,6 +30196,289 @@ const LZ_COB_HEADERS = [
 
 // ── SheetJS lazy-load por CDN (clona el patrón de _cargarJsPDF) ──
 var _lzCobJsPromise = null;
+// ═══════════════════════════════════════════════════════════════
+// v13.129.0 — EXPORT XUBIO (tope 100): importador + adopción
+// El export XLSX de Xubio es la única fuente completa de los días
+// donde la API pegó el tope de 100 comprobantes. Se importa acá,
+// se detectan los que faltan en el espejo (facturas invisibles) y
+// se adoptan vía Apps Script (vínculo por número).
+// ═══════════════════════════════════════════════════════════════
+var _xecFaltantes = [];
+var _xecPedidosSF = null;   // cache pedidos sin factura (para heurística)
+
+function _xecNorm(s){
+  return String(s||'').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^a-z0-9]+/g,' ').trim();
+}
+function _xecFechaISO(v){
+  // El export trae Date (cellDates) o serial Excel o string dd/mm/yyyy
+  if (v instanceof Date && !isNaN(v)) {
+    return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0');
+  }
+  if (typeof v === 'number') {
+    var d = new Date(Math.round((v - 25569) * 86400000));
+    return d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0');
+  }
+  var m = String(v||'').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
+  return null;
+}
+
+async function xecCargarTope(){
+  var box = document.getElementById('fc-xec-tope');
+  if (!box) return;
+  try{
+    var dias = await sbFetch('vw_tope_dias?select=fecha,comprobantes,export_filas,sin_cubrir&order=fecha.desc&limit=60');
+    if (!dias || !dias.length){ box.innerHTML='<span style="font-size:12px;color:#8A7B63;">Sin días con tope registrados.</span>'; return; }
+    var sin = dias.filter(function(d){ return d.sin_cubrir; });
+    box.innerHTML = '<div style="font-size:11px;font-weight:800;color:#5C4F3A;margin-bottom:3px;">Días con tope 100 en la API:</div>' +
+      dias.map(function(d){
+        return '<span style="display:inline-block;margin:2px 4px 2px 0;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;' +
+          (d.sin_cubrir ? 'background:#FFEBEE;color:#B71C1C;border:1px solid #EF9A9A' : 'background:#E8F5E9;color:#1B5E20;border:1px solid #A5D6A7') + '">' +
+          d.fecha + (d.sin_cubrir ? ' ⚠️ sin export' : ' ✓ ' + d.export_filas) + '</span>';
+      }).join('');
+    var sub = document.getElementById('fc-xec-sub');
+    if (sub) sub.textContent = sin.length
+      ? ('⚠️ ' + sin.length + ' día' + (sin.length>1?'s':'') + ' con tope SIN export importado')
+      : 'días con tope cubiertos ✓';
+  }catch(e){ console.warn('[XEC] tope:', e); box.innerHTML=''; }
+}
+
+async function xecImportar(input){
+  var files = Array.prototype.slice.call(input.files || []);
+  input.value = '';
+  if (!files.length) return;
+  var res = document.getElementById('fc-xec-res');
+  if (res) res.textContent = 'Leyendo ' + files.length + ' archivo(s)…';
+  var XLSXlib;
+  try { XLSXlib = await _cargarSheetJS(); }
+  catch(e){ toast('No se pudo cargar SheetJS: ' + e.message, 'err'); return; }
+
+  var porNumero = {};   // dedupe global (los archivos se solapan en los bordes)
+  var stats = { filas:0, nc:0, buffet:0, conRef:0, sinFecha:0 };
+  try{
+    for (var fi = 0; fi < files.length; fi++){
+      var buf = await files[fi].arrayBuffer();
+      var wb = XLSXlib.read(buf, { type:'array', cellDates:true });
+      var ws = wb.Sheets[wb.SheetNames[0]];
+      var rows = XLSXlib.utils.sheet_to_json(ws, { header:1, raw:true, defval:null });
+      // encabezado: fila que contiene 'Comprobante' y 'Fecha'
+      var hi = -1, hmap = {};
+      for (var r = 0; r < Math.min(rows.length, 10); r++){
+        var vals = (rows[r]||[]).map(function(c){ return String(c||'').trim(); });
+        if (vals.indexOf('Comprobante') >= 0 && vals.indexOf('Fecha') >= 0){
+          hi = r;
+          vals.forEach(function(h, i){ if (h) hmap[h] = i; });
+          break;
+        }
+      }
+      if (hi < 0){ toast(files[fi].name + ': no parece un export de Xubio (falta encabezado)', 'err'); continue; }
+      function col(row, nombre){ var i = hmap[nombre]; return (i === undefined) ? null : row[i]; }
+
+      for (var r = hi + 1; r < rows.length; r++){
+        var row = rows[r] || [];
+        var numero = String(col(row,'Comprobante') || '').trim();
+        if (!numero || numero.indexOf('-') < 0) continue;
+        stats.filas++;
+        var partes = numero.split('-');
+        var fecha = _xecFechaISO(col(row,'Fecha'));
+        if (!fecha) stats.sinFecha++;
+        var obs = String(col(row,'Observaciones') || '');
+        var refM = obs.match(/TCK-\d{8}-\d{3,4}-[A-Z]{2,4}-[A-Z0-9]+/i);
+        var tipo = String(col(row,'Tipo') || '').trim();
+        if (tipo !== 'Factura') stats.nc++;
+        if (partes[1] === '00010') stats.buffet++;
+        if (refM) stats.conRef++;
+        porNumero[numero] = {
+          numero: numero,
+          letra: partes[0] || null,
+          punto_venta: partes[1] || null,
+          tipo: tipo || null,
+          fecha: fecha,
+          cliente_nombre: String(col(row,'Cliente') || '').trim() || null,
+          importe_bruto: Number(col(row,'Importe Bruto')) || null,
+          impuestos: Number(col(row,'Impuestos')) || null,
+          total: Number(col(row,'Total')) || null,
+          observaciones: obs.substring(0, 500) || null,
+          pedido_ref: refM ? refM[0].toUpperCase() : null,
+          cae: String(col(row,'CAE') || '').trim() || null,
+          cae_nro: String(col(row,'CAE N°') || '').trim() || null,
+          vendedor: String(col(row,'Vendedor') || '').trim() || null,
+          lista_precios: String(col(row,'Lista de Precios') || '').trim() || null,
+          import_batch: files[fi].name,
+          importado_por: (typeof usuarioActual !== 'undefined' && usuarioActual) ? usuarioActual : 'admin'
+        };
+      }
+    }
+  }catch(e){ toast('Error leyendo el archivo: ' + e.message, 'err'); return; }
+
+  var lista = Object.keys(porNumero).map(function(k){ return porNumero[k]; });
+  if (!lista.length){ toast('No se encontraron comprobantes en los archivos', 'err'); return; }
+  if (res) res.textContent = 'Subiendo ' + lista.length + ' comprobantes únicos…';
+
+  // Upsert por lotes (PK numero → resolution=merge-duplicates re-importa sin duplicar)
+  var subidos = 0;
+  try{
+    for (var i = 0; i < lista.length; i += 400){
+      var lote = lista.slice(i, i + 400);
+      await sbFetch('xubio_export_comprobantes?on_conflict=numero', {
+        method: 'POST',
+        body: JSON.stringify(lote),
+        prefer: 'resolution=merge-duplicates,return=minimal'
+      });
+      subidos += lote.length;
+      if (res) res.textContent = 'Subiendo… ' + subidos + '/' + lista.length;
+    }
+  }catch(e){ toast('Error subiendo a Supabase: ' + e.message, 'err'); return; }
+
+  if (res) res.innerHTML = '✅ Importados <b>' + lista.length + '</b> comprobantes únicos (' +
+    stats.filas + ' filas leídas, solape deduplicado) · con referencia a pedido: <b>' + stats.conRef +
+    '</b> · NC: ' + stats.nc + ' · buffet (PV10, se ignoran): ' + stats.buffet +
+    (stats.sinFecha ? ' · ⚠️ sin fecha: ' + stats.sinFecha : '');
+  toast('Export importado: ' + lista.length + ' comprobantes', 'ok');
+  xecCargarTope();
+  xecCargarFaltantes();
+}
+
+async function xecCargarFaltantes(){
+  var list = document.getElementById('fc-xec-list');
+  if (!list) return;
+  list.innerHTML = '<div class="fc-vacio">Buscando faltantes…</div>';
+  try{
+    _xecFaltantes = await sbFetch('vw_xubio_export_faltantes?select=*&order=fecha.asc&limit=1000') || [];
+    // pedidos sin factura, para la heurística de los que no traen referencia
+    _xecPedidosSF = await sbFetchAll('pedidos_zona?xubio_factura_id=is.null&xubio_factura_nro=is.null' +
+      '&estado=in.(Entregado,Confirmado)&salida_planificada=gte.2026-06-01' +
+      '&select=pedido_id,cliente,total,estado,salida_planificada&order=pedido_id.asc') || [];
+  }catch(e){ list.innerHTML = '<div class="fc-vacio">Error: ' + e.message + '</div>'; return; }
+
+  if (!_xecFaltantes.length){
+    list.innerHTML = '<div class="fc-vacio">✅ Sin faltantes: todo lo importado ya está en el espejo o adoptado.</div>';
+    var btn0 = document.getElementById('fc-xec-adoptar'); if (btn0) btn0.style.display = 'none';
+    return;
+  }
+
+  var idxSF = {};
+  _xecPedidosSF.forEach(function(p){
+    var k = _xecNorm(p.cliente);
+    (idxSF[k] = idxSF[k] || []).push(p);
+  });
+
+  var directos = [], heur = [], yaFact = [], sinCand = [];
+  _xecFaltantes.forEach(function(f){
+    if (f.pedido_directo){
+      if (f.pedido_directo_ya_facturado) { yaFact.push(f); return; }
+      f._match = { pedido_id: f.pedido_directo, cliente: f.pedido_directo_cliente,
+                   total: f.pedido_directo_total, estado: f.pedido_directo_estado, via: 'ref' };
+      directos.push(f); return;
+    }
+    var cands = (idxSF[_xecNorm(f.cliente_nombre)] || []).filter(function(p){
+      if (Math.abs(Number(p.total||0) - Number(f.total||0)) > 1) return false;
+      if (!p.salida_planificada || !f.fecha) return true;
+      return Math.abs(new Date(p.salida_planificada) - new Date(f.fecha)) <= 7*86400000;
+    });
+    if (cands.length === 1){ f._match = { pedido_id: cands[0].pedido_id, cliente: cands[0].cliente, total: cands[0].total, estado: cands[0].estado, via: 'heur' }; heur.push(f); }
+    else if (cands.length > 1){ f._match = null; f._multi = cands.length; sinCand.push(f); }
+    else sinCand.push(f);
+  });
+
+  function fila(f, checked, extra){
+    var difTotal = f._match && Math.abs(Number(f._match.total||0) - Number(f.total||0)) > 1;
+    return '<div style="display:flex;gap:8px;align-items:flex-start;padding:7px 10px;border-bottom:1px solid #EFE6D8;font-size:12.5px;">' +
+      (f._match
+        ? '<input type="checkbox" class="fc-xec-chk" data-numero="' + f.numero + '" data-pedido="' + f._match.pedido_id + '"' + (checked ? ' checked' : '') + ' onchange="xecActualizarBoton()" style="margin-top:2px;">'
+        : '<span style="width:13px;"></span>') +
+      '<div style="flex:1;min-width:0;">' +
+        '<b>' + f.numero + '</b> · ' + (f.fecha||'') + ' · ' + (f.cliente_nombre||'') + ' · $' + Number(f.total||0).toLocaleString('es-AR') +
+        (f._match
+          ? '<div style="color:#5C4F3A;">→ ' + f._match.pedido_id + ' (' + f._match.estado + ', $' + Number(f._match.total||0).toLocaleString('es-AR') + ')' +
+            (f._match.via === 'heur' ? ' <span style="color:#B45309;font-weight:700;">heurístico: confirmar</span>' : '') +
+            (difTotal ? ' <span style="color:#B71C1C;font-weight:700;">⚠️ montos distintos</span>' : '') + '</div>'
+          : (extra || '')) +
+      '</div></div>';
+  }
+
+  var html = '';
+  if (yaFact.length){
+    html += '<div style="background:#FFEBEE;border:1.5px solid #EF9A9A;border-radius:10px;padding:8px 10px;margin-bottom:8px;font-size:12px;color:#B71C1C;">' +
+      '<b>🔴 ' + yaFact.length + ' con POSIBLE DOBLE FACTURA</b> — el pedido referenciado YA tiene otra factura. NO adoptar: revisar en Xubio (¿NC?).<br>' +
+      yaFact.map(function(f){ return '• ' + f.numero + ' → ' + f.pedido_directo + ' (' + (f.cliente_nombre||'') + ', $' + Number(f.total||0).toLocaleString('es-AR') + ')'; }).join('<br>') +
+      '</div>';
+  }
+  if (directos.length){
+    html += '<div style="font-weight:800;font-size:12px;color:#1B5E20;padding:4px 0;">✅ Directos por referencia (' + directos.length + ') — preseleccionados</div>' +
+      directos.map(function(f){ return fila(f, true); }).join('');
+  }
+  if (heur.length){
+    html += '<div style="font-weight:800;font-size:12px;color:#B45309;padding:8px 0 4px;">🟠 Heurísticos cliente+monto (' + heur.length + ') — tildar tras confirmar</div>' +
+      heur.map(function(f){ return fila(f, false); }).join('');
+  }
+  if (sinCand.length){
+    html += '<div style="font-weight:800;font-size:12px;color:#8A7B63;padding:8px 0 4px;">⚪ Sin candidato (' + sinCand.length + ') — facturas manuales sin pedido en la app (o ambiguas)</div>' +
+      sinCand.map(function(f){ return fila(f, false, f._multi ? '<div style="color:#B45309;">' + f._multi + ' pedidos candidatos — resolver a mano</div>' : ''); }).join('');
+  }
+  list.innerHTML = html;
+  xecActualizarBoton();
+}
+
+function xecActualizarBoton(){
+  var chks = document.querySelectorAll('.fc-xec-chk:checked');
+  var btn = document.getElementById('fc-xec-adoptar');
+  if (!btn) return;
+  btn.style.display = chks.length ? '' : 'none';
+  btn.textContent = '✅ Adoptar seleccionadas (' + chks.length + ')';
+}
+
+async function xecAdoptar(){
+  var chks = Array.prototype.slice.call(document.querySelectorAll('.fc-xec-chk:checked'));
+  if (!chks.length) return;
+  var items = chks.map(function(c){ return { pedido_id: c.dataset.pedido, numero: c.dataset.numero }; });
+  if (!confirm('Adoptar ' + items.length + ' factura(s) del export como vínculo de sus pedidos?\n\nEscribe xubio_factura_nro + facturado_via=export en pedidos_zona y marca el Sheet. NO toca Xubio.')) return;
+  var btn = document.getElementById('fc-xec-adoptar');
+  if (btn){ btn.disabled = true; btn.textContent = 'Adoptando…'; }
+  var quien = (typeof usuarioActual !== 'undefined' && usuarioActual) ? usuarioActual : 'admin';
+  var okN = 0, errores = [];
+  try{
+    for (var i = 0; i < items.length; i += 25){
+      var lote = items.slice(i, i + 25);
+      var params = new URLSearchParams({ accion: 'adoptarFacturasExport', items: JSON.stringify(lote), quien: quien });
+      var r = await fetch(APPS_SCRIPT_URL + '?' + params.toString());
+      var j = await r.json();
+      if (j && j.detalle){
+        j.detalle.forEach(function(d){ if (d.ok) okN++; else errores.push(d.numero + ': ' + d.error); });
+      } else if (j && j.error){ errores.push('lote ' + (i/25+1) + ': ' + j.error); }
+      if (btn) btn.textContent = 'Adoptando… ' + Math.min(i + 25, items.length) + '/' + items.length;
+    }
+  }catch(e){ errores.push('red/AS: ' + e.message); }
+  if (btn){ btn.disabled = false; }
+  var res = document.getElementById('fc-xec-res');
+  if (res) res.innerHTML = '✅ Adoptadas <b>' + okN + '/' + items.length + '</b>' +
+    (errores.length ? '<br>⚠️ Errores:<br>' + errores.map(function(e){ return '• ' + e; }).join('<br>') : '');
+  toast('Adoptadas ' + okN + '/' + items.length, errores.length ? 'err' : 'ok');
+  xecCargarFaltantes();
+  xecCargarTope();
+}
+
+// Aviso en PULSO: días con tope sin export (se inyecta arriba del body)
+async function xecAvisoPulso(){
+  try{
+    var dias = await sbFetch('vw_tope_dias?sin_cubrir=eq.true&select=fecha&order=fecha.asc&limit=40');
+    if (!dias || !dias.length) return;
+    var cont = document.getElementById('pulso-body');
+    if (!cont) return;
+    var aviso = document.createElement('div');
+    aviso.id = 'pulso-xec-aviso';
+    aviso.style.cssText = 'background:#FFEBEE;border:1.5px solid #EF9A9A;border-radius:12px;padding:10px 12px;margin-bottom:10px;font-size:12.5px;color:#B71C1C;';
+    aviso.innerHTML = '<b>📄 ' + dias.length + ' día' + (dias.length>1?'s':'') + ' con tope 100 sin export importado</b> — ' +
+      'puede haber facturas manuales invisibles para el sistema. Facturación → Export Xubio.<br>' +
+      '<span style="font-size:11.5px;">' + dias.map(function(d){ return d.fecha; }).join(' · ') + '</span>';
+    var prev = document.getElementById('pulso-xec-aviso');
+    if (prev) prev.remove();
+    cont.insertBefore(aviso, cont.firstChild);
+  }catch(e){ console.warn('[XEC] aviso pulso:', e); }
+}
+
 function _cargarSheetJS() {
   if (_lzCobJsPromise) return _lzCobJsPromise;
   _lzCobJsPromise = new Promise(function(resolve, reject) {
@@ -41191,6 +41509,7 @@ function _fcEsc(s) {
 async function fcCargar() {
   if (_fcCargando) return;
   _fcCargando = true;
+  try { xecCargarTope(); } catch(e) {}   // v13.129.0 — chips días tope (no bloquea)
   try {
     var hoy = _fcFechaActiva(); // v13.43.0 — fecha elegida en el selector (default hoy)
     var res = await Promise.all([
