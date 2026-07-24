@@ -1,6 +1,22 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.129.0 — 24/07/2026
+     TCK ADMIN — v13.130.0 — 24/07/2026
+     v13.130.0: TAB MÁRGENES — PANEL "COSTOS QUE SE MOVIERON" CÓMODO.
+       (a) Botón 👁 Visto en cada alerta pendiente: la descarta a mano
+           (decisión "absorbo el costo") escribiendo en la tabla nueva
+           margenes_alertas_visto (requiere SQL capa 1 del 24/7; si la
+           tabla no existe, fail-soft: el botón avisa y no rompe nada).
+       (b) Alertas pendientes ordenadas por IMPACTO EN PLATA (Δcosto x
+           venta 30d de vw_margen_producto) en vez de por fecha, con
+           chip "$X/mes en juego" en cada fila. Lo que más margen quema
+           queda arriba.
+       (c) Cambio de precio INLINE en la fila (chau modal en este panel):
+           input precargado con el sugerido + margen % calculado en vivo
+           mientras tipeás + Aplicar. Usa el mismo pipeline tier-aware
+           (aplicarPrecioTierAware → Sheet + canónicos + Xubio).
+       Nota: correr también el trigger trg_precio_actualizado (capa 1)
+       para que los cambios por Sheet/SQL apaguen alertas solos.
+     ── v13.129.0 — 24/07/2026 ──
      v13.129.0: IMPORTADOR EXPORT XUBIO (tope 100/día). La API de listado de
                 Xubio devuelve máx 100 comprobantes/día (parámetros ignorados,
                 diag 23/7): las facturas manuales de días-tope son invisibles
@@ -14573,6 +14589,14 @@ input.canales-exp-input[type="date"] {
     #view-margenes .mg-var-sug.dn{ background:#E8F5E9; color:#1B5E20; }
     #view-margenes .mg-var-btn{ border:1.5px solid #EF6C00; background:#fff; color:#E65100; font-family:inherit; font-size:11px; font-weight:900; border-radius:8px; padding:5px 10px; cursor:pointer; white-space:nowrap; }
     #view-margenes .mg-var-btn:active{ background:#FFF3E0; }
+    /* v13.130.0 — impacto, visto, editor inline */
+    #view-margenes .mg-var-imp{ margin-top:4px; display:inline-block; font-size:11px; font-weight:900; background:#FDECEA; color:#B71C1C; border-radius:7px; padding:4px 9px; }
+    #view-margenes .mg-var-btn.vis{ border-color:#8A7B63; color:#5C4F3A; }
+    #view-margenes .mg-var-btn.go{ background:#2E7D32; border-color:#2E7D32; color:#fff; }
+    #view-margenes .mg-var-inline{ display:flex; align-items:center; gap:7px; margin-top:7px; flex-wrap:wrap; }
+    #view-margenes .mg-var-inp{ width:110px; font-family:inherit; font-size:14px; font-weight:800; color:#2C2416; border:1.5px solid #D9CDB8; border-radius:8px; padding:6px 8px; }
+    #view-margenes .mg-var-mgn{ font-size:11.5px; font-weight:900; }
+    #view-margenes .mg-var-mgn.ok{ color:#2E7D32; } #view-margenes .mg-var-mgn.mid{ color:#E65100; } #view-margenes .mg-var-mgn.bad{ color:#C62828; }
     /* v13.25 — celda Venta tocable en la lista de márgenes */
     #view-margenes .mg-cell-edit{ cursor:pointer; border-radius:8px; }
     #view-margenes .mg-cell-edit:active{ background:#FFF3E0; }
@@ -39438,6 +39462,7 @@ var _mgData = null;          // cache de la vista
 var _mgSug = [];             // v13.52.0 — precios sugeridos pendientes
 var _mgTramoIds = {};        // v13.52.0 — { canonico_id: true } productos con tramos
 var _mgVarData = null;       // v13.23 — cache vw_variacion_costos (30 días)
+var _mgVistos = {};          // v13.130.0 — alertas descartadas a mano (margenes_alertas_visto)
 var _mgVarExpand = false;    // v13.23 — expansor de la lista de variaciones
 var _mgUnidad = 'caja';      // caja | kg
 // v13.28 — defaults: margen % + precios c/IVA. La elección persiste.
@@ -39951,7 +39976,9 @@ async function margenesInit() {
         .catch(function(e){ console.warn('[margenes] vw_variacion_costos:', e.message || e); return []; }),
       // v13.52.0 — precios sugeridos pendientes + set de productos con tramos
       sbFetch('precios_sugerencias?estado=eq.pendiente&order=margen_actual.asc&select=*').catch(function(){ return []; }),
-      sbFetch('producto_tramos?activo=eq.true&zona=eq.todas&select=producto_id').catch(function(){ return []; })
+      sbFetch('producto_tramos?activo=eq.true&zona=eq.todas&select=producto_id').catch(function(){ return []; }),
+      // v13.130.0 — alertas marcadas como vistas (fail-soft si la tabla no existe)
+      sbFetch('margenes_alertas_visto?select=producto,proveedor,fecha_cambio').catch(function(){ return []; })
     ]);
     _mgData = Array.isArray(res[0]) ? res[0] : [];
     _mgAcuSalud = Array.isArray(res[1]) ? res[1] : [];     // v13.34.0
@@ -39961,6 +39988,8 @@ async function margenesInit() {
     _mgSug = Array.isArray(res[5]) ? res[5] : [];                                   // v13.52.0
     _mgTramoIds = {};                                                               // v13.52.0
     (Array.isArray(res[6]) ? res[6] : []).forEach(function(t){ if (t && t.producto_id != null) _mgTramoIds[t.producto_id] = true; });
+    _mgVistos = {};                                                                 // v13.130.0
+    (Array.isArray(res[7]) ? res[7] : []).forEach(function(v){ if(v) _mgVistos[(v.producto||'')+'|'+(v.proveedor||'')+'|'+(v.fecha_cambio||'')] = true; });
     mgInitFiltro();
     _mgSyncCtrlUI();   // v13.28 — toggles según default/preferencia guardada
     mgRenderVariaciones();
@@ -40080,16 +40109,25 @@ function mgRenderVariaciones(){
   // precio actual. Los ya ajustados y las bajas no son trabajo pendiente: van al
   // grupo "al día", oculto salvo que se expanda. Antes mostraba TODO arriba
   // (incluido lo ya ajustado), dando sensación de cosas para hacer que no había.
+  // v13.130.0 — impacto mensual: Δcosto por caja x cajas vendidas en 30d (vw_margen_producto)
+  var _u30 = {};
+  (_mgData || []).forEach(function(p){ if(p && p.producto) _u30[p.producto] = mgN(p.unid_30d) || 0; });
+  rows.forEach(function(d){
+    d._visto = _mgVistos[(d.producto||'')+'|'+(d.proveedor||'')+'|'+(d.fecha_cambio||'')] === true;
+    var ca = mgN(d.costo_anterior), cn = mgN(d.costo_nuevo), u = _u30[d.producto] || 0;
+    d._impacto = (ca !== null && cn !== null && cn > ca && u > 0) ? Math.round((cn - ca) * u) : 0;
+  });
   function _mgEsPend(d){
     var v = mgN(d.var_pct) || 0;
     var sug = mgN(d.precio_sugerido_civa), pAct = mgN(d.precio_venta_civa);
-    return d.precio_ya_ajustado !== true && v > 0 && sug !== null && pAct !== null && sug > pAct;
+    return d._visto !== true && d.precio_ya_ajustado !== true && v > 0 && sug !== null && pAct !== null && sug > pAct;
   }
   var pend = [], resto = [];
   rows.forEach(function(d){ (_mgEsPend(d) ? pend : resto).push(d); });
 
   var _mgPorFecha = function(a,b){ return String(b.fecha_cambio||'').localeCompare(String(a.fecha_cambio||'')); };
-  pend.sort(_mgPorFecha);
+  // v13.130.0 — lo que más plata quema, arriba (empata → más reciente primero)
+  pend.sort(function(a,b){ return (b._impacto - a._impacto) || _mgPorFecha(a,b); });
   resto.sort(function(a,b){
     var sa = (mgN(a.var_pct)||0) > 0 ? 0 : 1;
     var sb = (mgN(b.var_pct)||0) > 0 ? 0 : 1;
@@ -40148,9 +40186,13 @@ function mgVarFila(d){
   if(mAnt !== null && mNue !== null){
     l2 += ' · Margen ' + mAnt.toFixed(1).replace('.',',') + '% → <b>' + mNue.toFixed(1).replace('.',',') + '%</b>';
   }
+  // v13.130.0 — chip de impacto mensual
+  var impHtml = (d._impacto > 0 && d._visto !== true && d.precio_ya_ajustado !== true)
+    ? '<div class="mg-var-imp">≈ ' + mgFmt(d._impacto) + '/mes en juego</div>' : '';
   var sugHtml = '';
-  if(d.precio_ya_ajustado === true){
-    // v13.26 — el precio se tocó después de la factura: no perseguir con sugerencias
+  if(d._visto === true){
+    sugHtml = '<div class="mg-var-sug ok">👁 Marcada como vista (costo absorbido)</div>';
+  } else if(d.precio_ya_ajustado === true){
     var fAj = '';
     if(d.precio_ajustado_at){
       try { var dAj = new Date(d.precio_ajustado_at); fAj = ' el ' + String(dAj.getDate()).padStart(2,'0') + '/' + String(dAj.getMonth()+1).padStart(2,'0'); } catch(e){}
@@ -40159,13 +40201,31 @@ function mgVarFila(d){
   } else if(up && sug !== null && pAct !== null && sug > pAct){
     sugHtml = '<div class="mg-var-sug">Para sostener margen: ' + mgFmt(sug) + ' <span style="font-weight:600;">(hoy ' + mgFmt(pAct) + ')</span></div>';
   } else if(!up && sug !== null && pAct !== null && sug < pAct){
-    // v13.24 — bajas: mantener precio = ganar margen; trasladar = sostener el de antes
     sugHtml = '<div class="mg-var-sug dn">Mantenés ' + mgFmt(pAct) + ' = más margen · trasladar la baja: ' + mgFmt(sug) + '</div>';
   }
-  // v13.24 — botón de cambio de precio (AS actualizarPrecioVenta)
-  var accion = (pAct !== null && pAct > 0)
-    ? '<button class="mg-var-btn" data-prod="' + encodeURIComponent(d.producto||'') + '" data-pact="' + (pAct||0) + '" data-sug="' + (sug||0) + '" onclick="mgPrecioAbrir(this)">💲 Cambiar precio</button>'
-    : '';
+  // v13.130.0 — acciones: editor inline + visto (solo pendientes)
+  var esPendiente = (d._visto !== true && d.precio_ya_ajustado !== true && up && sug !== null && pAct !== null && sug > pAct);
+  var rid = 'mgv-' + encodeURIComponent((d.producto||'') + '|' + (d.proveedor||'')).replace(/[^a-zA-Z0-9]/g,'_');
+  var accion = '';
+  if(pAct !== null && pAct > 0 && d._visto !== true){
+    accion += '<button class="mg-var-btn" onclick="mgVarInlineToggle(\'' + rid + '\')">💲 Cambiar precio</button>';
+  }
+  if(esPendiente){
+    accion += '<button class="mg-var-btn vis" data-prod="' + encodeURIComponent(d.producto||'') + '" data-prov="' + encodeURIComponent(d.proveedor||'') + '" data-fc="' + (d.fecha_cambio||'') + '" onclick="mgVarVisto(this)">👁 Visto</button>';
+  }
+  // v13.130.0 — editor inline (oculto hasta tocar 💲)
+  var inlineHtml = '';
+  if(pAct !== null && pAct > 0 && d._visto !== true){
+    var iva = mgN(d.alicuota_iva); if(iva === null) iva = 21;
+    inlineHtml = '<div class="mg-var-inline" id="' + rid + '" style="display:none;">'
+      + '<input type="number" inputmode="numeric" class="mg-var-inp" id="' + rid + '-inp" value="' + Math.round(sug || pAct) + '"'
+      + ' data-costo="' + (mgN(d.costo_nuevo) || 0) + '" data-iva="' + iva + '" data-pact="' + pAct + '"'
+      + ' oninput="mgVarInlineCalc(\'' + rid + '\')">' 
+      + '<span class="mg-var-mgn" id="' + rid + '-mgn"></span>'
+      + '<button class="mg-var-btn go" data-prod="' + encodeURIComponent(d.producto||'') + '" onclick="mgVarInlineAplicar(this,\'' + rid + '\')">✓ Aplicar</button>'
+      + '<button class="mg-var-btn" onclick="mgVarInlineToggle(\'' + rid + '\')">✕</button>'
+      + '</div>';
+  }
   return '<div class="mg-var-row">' +
     '<div class="mg-var-l1">' +
       '<div><div class="mg-var-nom">' + (d.producto||'') + '</div>' +
@@ -40173,8 +40233,73 @@ function mgVarFila(d){
       '<div class="mg-var-pct ' + (up?'up':'dn') + '">' + (up?'▲ +':'▼ ') + v.toFixed(1).replace('.',',') + '%</div>' +
     '</div>' +
     '<div class="mg-var-l2">' + l2 + '</div>' +
+    impHtml +
     ((sugHtml || accion) ? '<div class="mg-var-acc">' + sugHtml + accion + '</div>' : '') +
+    inlineHtml +
   '</div>';
+}
+
+// ── v13.130.0 — editor inline y descarte de alertas ──
+function mgVarInlineToggle(rid){
+  var el = document.getElementById(rid);
+  if(!el) return;
+  var abierto = el.style.display !== 'none';
+  el.style.display = abierto ? 'none' : 'flex';
+  if(!abierto){ mgVarInlineCalc(rid); try{ var i = document.getElementById(rid+'-inp'); i.focus(); i.select(); }catch(e){} }
+}
+function mgVarInlineCalc(rid){
+  var inp = document.getElementById(rid+'-inp'), out = document.getElementById(rid+'-mgn');
+  if(!inp || !out) return;
+  var p = Number(inp.value) || 0;
+  var costo = Number(inp.getAttribute('data-costo')) || 0;
+  var iva = Number(inp.getAttribute('data-iva')) || 21;
+  if(p <= 0 || costo <= 0){ out.textContent = ''; return; }
+  var neto = p / (1 + iva/100);
+  var m = (neto - costo) / neto * 100;
+  out.textContent = 'margen ' + m.toFixed(1).replace('.',',') + '%';
+  out.className = 'mg-var-mgn ' + (m < 15 ? 'bad' : (m < 22 ? 'mid' : 'ok'));
+}
+async function mgVarInlineAplicar(btn, rid){
+  var prod = decodeURIComponent(btn.getAttribute('data-prod') || '');
+  var inp = document.getElementById(rid+'-inp');
+  var precio = Math.round(Number(inp && inp.value) || 0);
+  if(!prod || !(precio > 0 && precio <= 5000000)){ if (typeof toast==='function') toast('⚠️ Precio inválido','err'); return; }
+  var pAct = Number(inp.getAttribute('data-pact')) || 0;
+  if(!confirm('Cambiar "' + prod + '" de ' + mgFmt(pAct) + ' a ' + mgFmt(precio) + '?\nSe aplica en Sheet, catálogo, ventas, Márgenes y lista Xubio.')) return;
+  btn.disabled = true; btn.textContent = '⏳…';
+  try {
+    var _cid = null;
+    try { var _d = (_mgData||[]).find(function(x){ return x.producto === prod; }); if (_d) _cid = _d.canonico_id; } catch(eC){}
+    var j = await aplicarPrecioTierAware(_cid, prod, precio);
+    if(j && j.status === 'ok'){
+      if (typeof toast==='function') toast('✅ ' + (j.producto || prod) + ': ' + mgFmt(j.precioAnterior) + ' → ' + mgFmt(j.precioNuevo), 'ok');
+      mgRecargar();
+    } else {
+      if (typeof toast==='function') toast('❌ ' + ((j && j.message) || 'No se pudo aplicar'), 'err');
+      btn.disabled = false; btn.textContent = '✓ Aplicar';
+    }
+  } catch(e){
+    if (typeof toast==='function') toast('❌ ' + (e.message || e), 'err');
+    btn.disabled = false; btn.textContent = '✓ Aplicar';
+  }
+}
+async function mgVarVisto(btn){
+  var prod = decodeURIComponent(btn.getAttribute('data-prod') || '');
+  var prov = decodeURIComponent(btn.getAttribute('data-prov') || '');
+  var fc   = btn.getAttribute('data-fc') || '';
+  if(!prod || !fc) return;
+  if(!confirm('Marcar "' + prod + '" como vista?\nDeja de aparecer como pendiente (decisión: absorber el costo). El costo real sigue impactando en márgenes.')) return;
+  btn.disabled = true; btn.textContent = '⏳';
+  try {
+    await sbFetch('margenes_alertas_visto', { method:'POST', prefer:'resolution=merge-duplicates,return=minimal',
+      body: JSON.stringify({ producto: prod, proveedor: prov, fecha_cambio: fc, motivo: 'absorbido desde admin' }) });
+    _mgVistos[prod + '|' + prov + '|' + fc] = true;
+    if (typeof toast==='function') toast('👁 ' + prod + ': alerta descartada', 'ok');
+    mgRenderVariaciones();
+  } catch(e){
+    btn.disabled = false; btn.textContent = '👁 Visto';
+    if (typeof toast==='function') toast('❌ No se pudo guardar (¿falta la tabla margenes_alertas_visto? Corré la capa 1): ' + (e.message||e), 'err');
+  }
 }
 
 // ── v13.24 — Cambio de precio desde el panel (AS actualizarPrecioVenta) ──
