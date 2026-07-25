@@ -1,6 +1,26 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.132.0 — 25/07/2026
+     TCK ADMIN — v13.133.0 — 25/07/2026
+     v13.133.0: EL PANEL DEL TAB MÁRGENES PASA DE "COSTOS QUE SE MOVIERON" A
+       "MARGEN BAJO OBJETIVO". Son conjuntos distintos y el viejo se perdía plata.
+       (a) El panel filtraba vw_variacion_costos por dias_desde_cambio<=30: un
+           producto podía estar abajo del objetivo y ser INVISIBLE si su costo no
+           se había movido en el último mes. Caso real medido el 25/07: Maple N° 2,
+           1,5 puntos abajo, $207.818/mes en juego (38% del total), costo cambiado
+           hace 39 días -> no aparecía. Ahora la fuente es _mgData
+           (vw_margen_producto v3) y vw_variacion_costos solo aporta el MOTIVO.
+       (b) Cada fila dice POR QUÉ está abajo: qué proveedor facturó, cuánto subió,
+           qué día y hace cuántos días; o "el precio nunca se ajustó a este costo"
+           cuando no hay movimiento reciente que lo explique.
+       (c) Orden por PLATA (brecha al objetivo x cajas/mes) + total arriba del panel.
+       (d) BLOQUE NUEVO "💰 Oportunidades": los costos que BAJARON, con el margen
+           extra mensual que estás ganando. Antes caían en el cajón "ya al día" y
+           no se veían. Hoy: MDM $461.550/mes, Alita $199.553, Pollo B $108.600.
+       (e) El editor inline arranca precargado con el precio al objetivo y pasa por
+           el candado de v13.132.0 (nada sale abajo del costo por accidente).
+       NO requiere SQL nuevo: vw_margen_producto v3 ya trae margen_neto_pct,
+       margen_objetivo_pct y brecha_objetivo_pts.
+     ── v13.132.0 — 25/07/2026 ──
      v13.132.0: CANDADO DE PRECIO + TRAZABILIDAD + KPIs POST-IIBB (tab Márgenes).
        Acompaña a la auditoría del 25/07 y a los SQL de capa 0/1/2.
        (a) CANDADO. Antes mgVarInlineAplicar y mgPrecioConfirmar validaban solo
@@ -40249,158 +40269,180 @@ function mgRender(){
 // v13.23 — Costos que se movieron (vw_variacion_costos, ventana 30 días)
 function mgVarToggle(){ _mgVarExpand = !_mgVarExpand; mgRenderVariaciones(); }
 
+// ══════════════════════════════════════════════════════════════
+// v13.133.0 — EL PANEL PASA DE 'COSTOS QUE SE MOVIERON' A 'MARGEN BAJO OBJETIVO'.
+// Son conjuntos distintos. El panel viejo filtraba vw_variacion_costos por
+// dias_desde_cambio<=30, asi que un producto podia estar abajo del objetivo y ser
+// invisible si su costo no se habia movido en el ultimo mes. Caso real: Maple N° 2,
+// 1,5 puntos abajo, $207.818/mes en juego, costo cambiado hace 39 dias -> no salia.
+// Ahora la fuente es _mgData (vw_margen_producto v3, que ya trae margen_neto_pct y
+// margen_objetivo_pct) y _mgVarData solo aporta el MOTIVO cuando existe.
+// Segundo bloque nuevo: las BAJAS de costo, que antes iban al cajon 'ya al dia'.
+// ══════════════════════════════════════════════════════════════
+function mgFDDMM(x){ if(!x) return ''; try{ var q = String(x).slice(0,10).split('-'); return q[2]+'/'+q[1]; }catch(e){ return ''; } }
+
+function mgAlertasArmar(){
+  // motivo por producto: el movimiento de costo mas reciente que conozcamos
+  var byProd = {};
+  (_mgVarData || []).forEach(function(v){
+    if(!v || !v.producto) return;
+    var prev = byProd[v.producto];
+    if(!prev || String(v.fecha_cambio||'') > String(prev.fecha_cambio||'')) byProd[v.producto] = v;
+  });
+  var pend = [], vistos = [], opor = [];
+  (_mgData || []).forEach(function(d){
+    if(!d || d.cobertura !== 'ok') return;
+    var m   = mgN(d.margen_neto_pct);
+    var obj = mgN(d.margen_objetivo_pct);
+    var u30 = mgN(d.unid_30d) || 0;
+    var v   = byProd[d.producto] || null;
+    var fk  = (v && v.fecha_cambio) ? v.fecha_cambio : (d.costo_fecha || '');
+    var key = (d.producto||'') + '|' + ((v && v.proveedor) || d.proveedor_ultima || '') + '|' + fk;
+    var visto = (_mgVistos[key] === true);
+    if(m !== null && obj !== null && m < obj - 1){
+      var iva  = mgN(d.alicuota_iva) || 21;
+      var pAct = mgN(d.precio_venta_civa) || 0;
+      var pObj = mgPrecioAObjetivo(mgN(d.costo_neto_caja), iva, obj);
+      var plata = (pObj && u30 > 0 && pObj > pAct) ? Math.round((pObj - pAct)/(1 + iva/100)*u30) : 0;
+      var fila = { d:d, v:v, m:m, obj:obj, u30:u30, pAct:pAct, pObj:pObj, iva:iva, plata:plata, fk:fk, visto:visto };
+      (visto ? vistos : pend).push(fila);
+      return;
+    }
+    // oportunidad: bajo el costo y el margen quedo por encima del objetivo
+    if(v && mgN(v.var_pct) !== null && mgN(v.var_pct) < 0 && u30 > 0){
+      var ca = mgN(v.costo_anterior), cn = mgN(v.costo_nuevo);
+      if(ca !== null && cn !== null && ca > cn){
+        opor.push({ d:d, v:v, m:m, obj:obj, u30:u30, extra: Math.round((ca - cn) * u30), fk:fk });
+      }
+    }
+  });
+  pend.sort(function(a,b){ return (b.plata - a.plata) || (a.m - a.obj) - (b.m - b.obj); });
+  vistos.sort(function(a,b){ return b.plata - a.plata; });
+  opor.sort(function(a,b){ return b.extra - a.extra; });
+  return { pend:pend, vistos:vistos, opor:opor };
+}
+
 function mgRenderVariaciones(){
   var wrap = document.getElementById('mg-var-wrap');
   var list = document.getElementById('mg-var-list');
   var more = document.getElementById('mg-var-more');
   if(!wrap || !list) return;
-  var data = _mgVarData || [];
+  if(!_mgData){ wrap.style.display = 'none'; return; }
 
-  // Dedupe por producto+proveedor: hay vínculos duplicados en
-  // productos_proveedores (ej. 3 filas SoyChu de Pollo B por SKU/calibre).
-  // La data viene order=fecha_cambio.desc → queda el cambio más reciente.
-  var seen = {}, rows = [];
-  data.forEach(function(d){
-    var k = (d.producto||'') + '|' + (d.proveedor||'');
-    if(seen[k]) return;
-    seen[k] = 1; rows.push(d);
-  });
-  if(!rows.length){ wrap.style.display = 'none'; return; }
-
-  // v13.54 — separar lo que REQUIERE ACCIÓN de lo que ya está al día.
-  // Pendiente = suba de costo, todavía NO ajustada, con sugerido por encima del
-  // precio actual. Los ya ajustados y las bajas no son trabajo pendiente: van al
-  // grupo "al día", oculto salvo que se expanda. Antes mostraba TODO arriba
-  // (incluido lo ya ajustado), dando sensación de cosas para hacer que no había.
-  // v13.130.0 — impacto mensual: Δcosto por caja x cajas vendidas en 30d (vw_margen_producto)
-  var _u30 = {};
-  (_mgData || []).forEach(function(p){ if(p && p.producto) _u30[p.producto] = mgN(p.unid_30d) || 0; });
-  rows.forEach(function(d){
-    d._visto = _mgVistos[(d.producto||'')+'|'+(d.proveedor||'')+'|'+(d.fecha_cambio||'')] === true;
-    var ca = mgN(d.costo_anterior), cn = mgN(d.costo_nuevo), u = _u30[d.producto] || 0;
-    d._impacto = (ca !== null && cn !== null && cn > ca && u > 0) ? Math.round((cn - ca) * u) : 0;
-  });
-  function _mgEsPend(d){
-    var v = mgN(d.var_pct) || 0;
-    var sug = mgN(d.precio_sugerido_civa), pAct = mgN(d.precio_venta_civa);
-    return d._visto !== true && d.precio_ya_ajustado !== true && v > 0 && sug !== null && pAct !== null && sug > pAct;
-  }
-  var pend = [], resto = [];
-  rows.forEach(function(d){ (_mgEsPend(d) ? pend : resto).push(d); });
-
-  var _mgPorFecha = function(a,b){ return String(b.fecha_cambio||'').localeCompare(String(a.fecha_cambio||'')); };
-  // v13.130.0 — lo que más plata quema, arriba (empata → más reciente primero)
-  pend.sort(function(a,b){ return (b._impacto - a._impacto) || _mgPorFecha(a,b); });
-  resto.sort(function(a,b){
-    var sa = (mgN(a.var_pct)||0) > 0 ? 0 : 1;
-    var sb = (mgN(b.var_pct)||0) > 0 ? 0 : 1;
-    if(sa !== sb) return sa - sb;
-    return _mgPorFecha(a,b);
-  });
+  var A = mgAlertasArmar();
+  var totalPlata = A.pend.reduce(function(a,x){ return a + (x.plata||0); }, 0);
+  var totalExtra = A.opor.reduce(function(a,x){ return a + (x.extra||0); }, 0);
 
   var tit = document.getElementById('mg-var-tit');
-  if(tit) tit.textContent = (pend.length > 0)
-    ? '⚠️ Costos que se movieron (' + pend.length + ' para revisar)'
-    : '✅ Costos al día';
+  if(tit) tit.textContent = A.pend.length
+    ? '\u26A0\uFE0F Margen bajo objetivo (' + A.pend.length + ')'
+    : '\u2705 Todo en objetivo';
 
   var VISIBLES = 4;
   var html = '';
-  if(pend.length){
-    (_mgVarExpand ? pend : pend.slice(0, VISIBLES)).forEach(function(d){ html += mgVarFila(d); });
+
+  if(A.pend.length){
+    if(totalPlata > 0){
+      html += '<div style="margin:0 0 8px;font-size:12px;font-weight:800;color:#B71C1C;background:#FDECEA;border-radius:8px;padding:7px 10px;">'
+           +  '\uD83D\uDCB8 ' + mgFmt(totalPlata) + '/mes en juego si los llev\u00E1s al objetivo</div>';
+    }
+    (_mgVarExpand ? A.pend : A.pend.slice(0, VISIBLES)).forEach(function(x){ html += mgAlertaFila(x); });
   } else {
-    html += '<div style="padding:14px;text-align:center;color:#1B5E20;background:#E8F5E9;border-radius:10px;font-weight:700;font-size:13px;">✅ Todo al día'
-      + (resto.length ? ' · ' + resto.length + ' con costo movido, ya ajustados' : '') + '</div>';
+    html += '<div style="padding:14px;text-align:center;color:#1B5E20;background:#E8F5E9;border-radius:10px;font-weight:700;font-size:13px;">\u2705 Ning\u00FAn producto abajo de su objetivo</div>';
   }
-  if(_mgVarExpand && resto.length){
-    html += '<div style="margin:10px 2px 4px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;color:#8A7B63;">✓ Ya al día (' + resto.length + ')</div>';
-    resto.forEach(function(d){ html += mgVarFila(d); });
+
+  // Oportunidades: costos que bajaron (antes quedaban escondidas en 'ya al dia')
+  if(A.opor.length){
+    html += '<div style="margin:14px 2px 6px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;color:#1B5E20;">'
+         +  '\uD83D\uDCB0 Oportunidades \u2014 bajaron el costo (' + A.opor.length + ')'
+         +  (totalExtra > 0 ? ' \u00B7 ' + mgFmt(totalExtra) + '/mes de margen extra' : '') + '</div>';
+    (_mgVarExpand ? A.opor : A.opor.slice(0, 3)).forEach(function(x){ html += mgOporFila(x); });
   }
+
+  if(_mgVarExpand && A.vistos.length){
+    html += '<div style="margin:14px 2px 6px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;color:#8A7B63;">\uD83D\uDC41 Marcadas como vistas (' + A.vistos.length + ')</div>';
+    A.vistos.forEach(function(x){ html += mgAlertaFila(x); });
+  }
+
   list.innerHTML = html;
 
   if(more){
-    var pendOcultos = (pend.length > VISIBLES) ? (pend.length - VISIBLES) : 0;
-    if(pendOcultos > 0 || resto.length > 0){
+    var ocultos = Math.max(0, A.pend.length - VISIBLES) + Math.max(0, A.opor.length - 3) + A.vistos.length;
+    if(ocultos > 0){
       more.style.display = 'block';
-      if(_mgVarExpand){
-        more.textContent = '▲ Ver menos';
-      } else if(pendOcultos > 0 && resto.length > 0){
-        more.textContent = '▼ Ver ' + pendOcultos + ' más y los ya ajustados (' + resto.length + ')';
-      } else if(pendOcultos > 0){
-        more.textContent = '▼ Ver los ' + pendOcultos + ' restantes';
-      } else {
-        more.textContent = '▼ Ver los ya ajustados (' + resto.length + ')';
-      }
-    } else {
-      more.style.display = 'none';
-    }
+      more.textContent = _mgVarExpand ? '\u25B2 Ver menos' : '\u25BC Ver ' + ocultos + ' m\u00E1s';
+    } else { more.style.display = 'none'; }
   }
   wrap.style.display = 'block';
 }
 
-function mgVarFila(d){
-  var v = mgN(d.var_pct) || 0;
-  var up = v > 0;
-  var dias = mgN(d.dias_desde_cambio);
-  var cuando = (dias===null) ? '' : (dias<=0 ? 'hoy' : (dias===1 ? 'ayer' : 'hace '+dias+' días'));
-  var mAnt = mgN(d.margen_anterior_pct), mNue = mgN(d.margen_nuevo_pct);
-  var sug = mgN(d.precio_sugerido_civa), pAct = mgN(d.precio_venta_civa);
+// Fila de producto BAJO OBJETIVO
+function mgAlertaFila(x){
+  var d = x.d, v = x.v;
+  var rid = 'mgv-' + encodeURIComponent(d.producto || '').replace(/[^a-zA-Z0-9]/g, '_');
+  var brecha = (x.m - x.obj);
 
-  var l2 = 'Costo ' + mgFmt(mgN(d.costo_anterior)) + ' → <b>' + mgFmt(mgN(d.costo_nuevo)) + '</b>';
-  if(mAnt !== null && mNue !== null){
-    l2 += ' · Margen ' + mAnt.toFixed(1).replace('.',',') + '% → <b>' + mNue.toFixed(1).replace('.',',') + '%</b>';
+  // por que esta abajo del objetivo
+  var motivo = '';
+  if(v && mgN(v.var_pct) !== null && mgN(v.var_pct) > 0){
+    motivo = '<b>' + (v.proveedor || 'El proveedor') + '</b> factur\u00F3 <b>+' + mgN(v.var_pct).toFixed(1).replace('.',',') + '%</b>'
+           + (v.fecha_cambio ? ' el <b>' + mgFDDMM(v.fecha_cambio) + '</b>' : '')
+           + ' \u00B7 costo ' + mgFmt(mgN(v.costo_anterior)) + ' \u2192 <b>' + mgFmt(mgN(v.costo_nuevo)) + '</b>'
+           + (mgN(v.dias_desde_cambio) !== null ? ' (hace ' + mgN(v.dias_desde_cambio) + ' d\u00EDas)' : '');
+  } else {
+    motivo = 'Costo vigente ' + mgFmt(mgN(d.costo_neto_caja))
+           + (d.proveedor_ultima ? ' de <b>' + d.proveedor_ultima + '</b>' : '')
+           + (d.costo_fecha ? ' (' + mgFDDMM(d.costo_fecha) + ')' : '')
+           + '. El precio nunca se ajust\u00F3 a este costo.';
   }
-  // v13.130.0 — chip de impacto mensual
-  var impHtml = (d._impacto > 0 && d._visto !== true && d.precio_ya_ajustado !== true)
-    ? '<div class="mg-var-imp">≈ ' + mgFmt(d._impacto) + '/mes en juego</div>' : '';
-  var sugHtml = '';
-  if(d._visto === true){
-    sugHtml = '<div class="mg-var-sug ok">👁 Marcada como vista (costo absorbido)</div>';
-  } else if(d.precio_ya_ajustado === true){
-    var fAj = '';
-    if(d.precio_ajustado_at){
-      try { var dAj = new Date(d.precio_ajustado_at); fAj = ' el ' + String(dAj.getDate()).padStart(2,'0') + '/' + String(dAj.getMonth()+1).padStart(2,'0'); } catch(e){}
-    }
-    sugHtml = '<div class="mg-var-sug ok">✓ Precio ya ajustado' + fAj + ' (hoy ' + mgFmt(pAct) + ')</div>';
-  } else if(up && sug !== null && pAct !== null && sug > pAct){
-    sugHtml = '<div class="mg-var-sug">Para sostener margen: ' + mgFmt(sug) + ' <span style="font-weight:600;">(hoy ' + mgFmt(pAct) + ')</span></div>';
-  } else if(!up && sug !== null && pAct !== null && sug < pAct){
-    sugHtml = '<div class="mg-var-sug dn">Mantenés ' + mgFmt(pAct) + ' = más margen · trasladar la baja: ' + mgFmt(sug) + '</div>';
+
+  var accion = '<button class="mg-var-btn" onclick="mgVarInlineToggle(\'' + rid + '\')">\uD83D\uDCB2 Cambiar precio</button>';
+  if(x.visto !== true){
+    accion += '<button class="mg-var-btn vis" data-prod="' + encodeURIComponent(d.producto||'') + '"'
+           +  ' data-prov="' + encodeURIComponent((v && v.proveedor) || d.proveedor_ultima || '') + '"'
+           +  ' data-fc="' + (x.fk || '') + '" onclick="mgVarVisto(this)">\uD83D\uDC41 Visto</button>';
   }
-  // v13.130.0 — acciones: editor inline + visto (solo pendientes)
-  var esPendiente = (d._visto !== true && d.precio_ya_ajustado !== true && up && sug !== null && pAct !== null && sug > pAct);
-  var rid = 'mgv-' + encodeURIComponent((d.producto||'') + '|' + (d.proveedor||'')).replace(/[^a-zA-Z0-9]/g,'_');
-  var accion = '';
-  if(pAct !== null && pAct > 0 && d._visto !== true){
-    accion += '<button class="mg-var-btn" onclick="mgVarInlineToggle(\'' + rid + '\')">💲 Cambiar precio</button>';
-  }
-  if(esPendiente){
-    accion += '<button class="mg-var-btn vis" data-prod="' + encodeURIComponent(d.producto||'') + '" data-prov="' + encodeURIComponent(d.proveedor||'') + '" data-fc="' + (d.fecha_cambio||'') + '" onclick="mgVarVisto(this)">👁 Visto</button>';
-  }
-  // v13.130.0 — editor inline (oculto hasta tocar 💲)
-  var inlineHtml = '';
-  if(pAct !== null && pAct > 0 && d._visto !== true){
-    var iva = mgN(d.alicuota_iva); if(iva === null) iva = 21;
-    inlineHtml = '<div class="mg-var-inline" id="' + rid + '" style="display:none;">'
-      + '<input type="number" inputmode="numeric" class="mg-var-inp" id="' + rid + '-inp" value="' + Math.round(sug || pAct) + '"'
-      + ' data-costo="' + (mgN(d.costo_nuevo) || 0) + '" data-iva="' + iva + '" data-pact="' + pAct + '"'
-      + ' data-obj="' + (mgN(d.margen_objetivo_pct) === null ? '' : mgN(d.margen_objetivo_pct)) + '"'   // v13.132.0
-      + ' oninput="mgVarInlineCalc(\'' + rid + '\')">' 
-      + '<span class="mg-var-mgn" id="' + rid + '-mgn"></span>'
-      + '<button class="mg-var-btn go" data-prod="' + encodeURIComponent(d.producto||'') + '" onclick="mgVarInlineAplicar(this,\'' + rid + '\')">✓ Aplicar</button>'
-      + '<button class="mg-var-btn" onclick="mgVarInlineToggle(\'' + rid + '\')">✕</button>'
-      + '</div>';
-  }
-  return '<div class="mg-var-row">' +
-    '<div class="mg-var-l1">' +
-      '<div><div class="mg-var-nom">' + (d.producto||'') + '</div>' +
-      '<div class="mg-var-prov">' + (d.proveedor||'') + (cuando ? ' · ' + cuando : '') + '</div></div>' +
-      '<div class="mg-var-pct ' + (up?'up':'dn') + '">' + (up?'▲ +':'▼ ') + v.toFixed(1).replace('.',',') + '%</div>' +
-    '</div>' +
-    '<div class="mg-var-l2">' + l2 + '</div>' +
-    impHtml +
-    ((sugHtml || accion) ? '<div class="mg-var-acc">' + sugHtml + accion + '</div>' : '') +
-    inlineHtml +
-  '</div>';
+
+  var inline = '<div class="mg-var-inline" id="' + rid + '" style="display:none;">'
+    + '<input type="number" inputmode="numeric" class="mg-var-inp" id="' + rid + '-inp" value="' + Math.round(x.pObj || x.pAct) + '"'
+    + ' data-costo="' + (mgN(d.costo_neto_caja) || 0) + '" data-iva="' + x.iva + '" data-pact="' + x.pAct + '" data-obj="' + x.obj + '"'
+    + ' oninput="mgVarInlineCalc(\'' + rid + '\')">'
+    + '<span class="mg-var-mgn" id="' + rid + '-mgn"></span>'
+    + '<button class="mg-var-btn go" data-prod="' + encodeURIComponent(d.producto||'') + '" onclick="mgVarInlineAplicar(this,\'' + rid + '\')">\u2713 Aplicar</button>'
+    + '<button class="mg-var-btn" onclick="mgVarInlineToggle(\'' + rid + '\')">\u2715</button>'
+    + '</div>';
+
+  return '<div class="mg-var-row">'
+    + '<div class="mg-var-l1">'
+      + '<div><div class="mg-var-nom">' + (d.producto||'') + (x.visto ? ' \uD83D\uDC41' : '') + '</div>'
+      + '<div class="mg-var-prov">' + (d.categoria||'') + ' \u00B7 ' + x.u30 + ' cajas/mes</div></div>'
+      + '<div class="mg-var-pct up">' + brecha.toFixed(1).replace('.',',') + ' pts</div>'
+    + '</div>'
+    + '<div class="mg-var-l2">Margen <b>' + x.m.toFixed(1).replace('.',',') + '%</b> \u00B7 objetivo <b>' + x.obj.toFixed(1).replace('.',',') + '%</b>'
+      + (x.pObj ? ' \u00B7 precio ' + mgFmt(x.pAct) + ' \u2192 <b>' + mgFmt(x.pObj) + '</b>' : '') + '</div>'
+    + '<div style="font-size:11px;color:#5C4F3A;margin-top:5px;background:#FBF6EC;border-radius:7px;padding:5px 8px;line-height:1.35;">\uD83D\uDCC4 ' + motivo + '</div>'
+    + (x.plata > 0 ? '<div class="mg-var-imp">\u2248 ' + mgFmt(x.plata) + '/mes en juego</div>' : '')
+    + '<div class="mg-var-acc">' + accion + '</div>'
+    + inline
+  + '</div>';
+}
+
+// Fila de OPORTUNIDAD (bajo el costo)
+function mgOporFila(x){
+  var d = x.d, v = x.v;
+  var pct = mgN(v.var_pct);
+  return '<div class="mg-var-row">'
+    + '<div class="mg-var-l1">'
+      + '<div><div class="mg-var-nom">' + (d.producto||'') + '</div>'
+      + '<div class="mg-var-prov">' + (v.proveedor||'') + ' \u00B7 ' + x.u30 + ' cajas/mes</div></div>'
+      + '<div class="mg-var-pct dn">\u25BC ' + (pct===null?'':pct.toFixed(1).replace('.',',')) + '%</div>'
+    + '</div>'
+    + '<div class="mg-var-l2">Costo ' + mgFmt(mgN(v.costo_anterior)) + ' \u2192 <b>' + mgFmt(mgN(v.costo_nuevo)) + '</b>'
+      + (x.m !== null ? ' \u00B7 margen <b>' + x.m.toFixed(1).replace('.',',') + '%</b>' : '')
+      + (x.obj !== null ? ' (obj ' + x.obj.toFixed(1).replace('.',',') + '%)' : '') + '</div>'
+    + '<div style="margin-top:4px;display:inline-block;font-size:11px;font-weight:900;background:#E8F5E9;color:#1B5E20;border-radius:7px;padding:4px 9px;">'
+      + '+' + mgFmt(x.extra) + '/mes de margen extra \u00B7 pod\u00E9s sostener el precio o usarlo para competir</div>'
+  + '</div>';
 }
 
 // ── v13.130.0 — editor inline y descarte de alertas ──
@@ -43069,7 +43111,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.132.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.133.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
