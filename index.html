@@ -1,6 +1,46 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.130.0 — 24/07/2026
+     TCK ADMIN — v13.132.0 — 25/07/2026
+     v13.132.0: CANDADO DE PRECIO + TRAZABILIDAD + KPIs POST-IIBB (tab Márgenes).
+       Acompaña a la auditoría del 25/07 y a los SQL de capa 0/1/2.
+       (a) CANDADO. Antes mgVarInlineAplicar y mgPrecioConfirmar validaban solo
+           (precio>0 && precio<=5.000.000): con un dedo gordo el precio salía
+           ABAJO DEL COSTO al catálogo, ventas, Sheet y lista Xubio con un solo
+           confirm() genérico y sin deshacer. Ahora todo pasa por
+           mgConfirmarPrecio(): calcula el margen POST-IIBB resultante y
+             · margen <= 0  -> DOBLE confirmación, muestra el piso de costo
+             · margen < objetivo-1 -> aviso explícito con el precio al objetivo
+             · sin costo cargado -> avisa que no puede verificar nada
+           El editor inline muestra el margen contra el objetivo mientras tipeás
+           (antes mostraba margen BRUTO con umbrales fijos 15/22).
+       (b) TRAZABILIDAD. aplicarPrecioTierAware ahora manda precio_motivo y
+           precio_origen en el MISMO PATCH que precio_actual, para que el trigger
+           trg_precio_historial (capa 0) los guarde en precios_historial. Orígenes:
+           alerta_costo / manual / sugerencia. Fail-soft: si todavía no corriste el
+           PASO 9 del SQL, reintenta sin esas columnas y el precio se aplica igual.
+       (c) KPIs POST-IIBB. El header decía "Ganás/mes neto $40,4M · Margen 23,7%"
+           usando la ganancia BRUTA. Real: $31,9M y 18,9%. Ahora usa
+           ganancia_mes_neta. El KPI "Bajo 15%" (que daba 0 SIEMPRE porque el
+           umbral estaba sobre el margen bruto) pasa a "Bajo objetivo".
+       (d) FILAS. El número grande es el margen post-IIBB, con el objetivo debajo,
+           y el color se decide por la brecha contra el objetivo (rojo si está más
+           de 1 punto abajo) en vez de umbrales fijos. "Ganás neto /caja" descuenta
+           IIBB para cerrar con el encabezado y con vw_pedido_margen.
+       REQUIERE: SQL_MARGENES_CAPA0_CAPA1_v2.sql (pasos 1-8) y
+                 SQL_MARGENES_CAPA1b_CAPA2_v1.sql (pasos 9-14) ya corridos.
+                 Sin ellos el tab funciona igual pero cae a los valores viejos
+                 (margen bruto, sin objetivo) por los fallbacks.
+       OJO: TCK_UPD_LOCAL venía atrasado en 13.128.0 con el changelog ya en
+            13.131.0. Corregido a 13.132.0.
+     ── v13.131.0 — 24/07/2026 ──
+     v13.131.0: PRECIOS SUGERIDOS CON CONTEXTO ("por qué aumentar").
+       Cada card de sugerencia muestra ahora el motivo del aumento:
+       proveedor, fecha de la factura que subió el costo, costo
+       anterior → nuevo y % de suba (cruce por producto contra
+       vw_variacion_costos ya cargada en el tab; fallback: última
+       factura de vw_margen_producto). También muestra desde cuándo
+       está pendiente la sugerencia (creado_at).
+     ── v13.130.0 — 24/07/2026 ──
      v13.130.0: TAB MÁRGENES — PANEL "COSTOS QUE SE MOVIERON" CÓMODO.
        (a) Botón 👁 Visto en cada alerta pendiente: la descarta a mano
            (decisión "absorbo el costo") escribiendo en la tabla nueva
@@ -14683,7 +14723,7 @@ input.canales-exp-input[type="date"] {
   <div class="view" id="view-margenes">
     <div class="mg-head">
       <h2>📊 Márgenes por producto</h2>
-      <div class="mg-sub">Costo de reposición · margen neto · volumen 7/30 días</div>
+      <div class="mg-sub">Costo de reposición · margen POST-IIBB vs objetivo · volumen 7/30 días</div>
     </div>
     <div class="mg-kpis" id="mg-kpis"></div>
     <!-- 📈 PRECIOS SUGERIDOS (aprobación) — v13.52.0 -->
@@ -39707,6 +39747,12 @@ function mgSugRender(){
   if (!_mgSug.length){ wrap.style.display = 'none'; return; }
   wrap.style.display = 'block';
   if (cnt) cnt.textContent = _mgSug.length + (_mgSug.length===1 ? ' pendiente' : ' pendientes');
+  // v13.131.0 — contexto del aumento: variación de costo por producto (30d) + fecha de sugerencia
+  var _vxp = {};
+  (_mgVarData || []).forEach(function(v){ if(v && v.producto && !_vxp[v.producto]) _vxp[v.producto] = v; });
+  var _mxp = {};
+  (_mgData || []).forEach(function(p){ if(p && p.producto) _mxp[p.producto] = p; });
+  function _fDDMM(x){ if(!x) return ''; try{ var p = String(x).slice(0,10).split('-'); return p[2]+'/'+p[1]; }catch(e){ return ''; } }
   list.innerHTML = _mgSug.map(function(s){
     var sube = mgSugFmt(s.precio_actual) + ' \u2192 <b style="color:#1B5E20;">' + mgSugFmt(s.precio_sugerido) + '</b>';
     var marg = 'Margen ' + mgSugPct(s.margen_actual) + ' \u2192 ' + mgSugPct(s.margen_resultante) +
@@ -39717,6 +39763,22 @@ function mgSugRender(){
         '<div style="font-weight:800;font-size:14px;color:#2C2416;">' + (s.producto||'') + badge + '</div>' +
         '<div style="font-size:13px;margin-top:3px;">' + sube + '</div>' +
         '<div style="font-size:11.5px;color:#5C4F3A;margin-top:2px;">' + marg + '</div>' +
+        (function(){
+          // v13.131.0 — por qué hay que aumentar
+          var v = _vxp[s.producto], m = _mxp[s.producto], motivo = '';
+          if(v && mgN(v.var_pct) > 0){
+            var pct = (mgN(v.var_pct)||0).toFixed(1).replace('.',',');
+            motivo = '<b>' + (v.proveedor||'Proveedor') + '</b> facturó <b>+' + pct + '%</b>' +
+                     (v.fecha_cambio ? ' el <b>' + _fDDMM(v.fecha_cambio) + '</b>' : '') +
+                     ' · costo ' + mgFmt(mgN(v.costo_anterior)) + ' \u2192 <b>' + mgFmt(mgN(v.costo_nuevo)) + '</b>';
+          } else if(m && (m.proveedor_ultima || m.costo_fecha)){
+            motivo = 'Costo según última factura' + (m.proveedor_ultima ? ' de <b>' + m.proveedor_ultima + '</b>' : '') +
+                     (m.costo_fecha ? ' (' + _fDDMM(m.costo_fecha) + ')' : '');
+          }
+          var desde = s.creado_at ? '<span style="color:#8A7B63;"> · sugerido desde el ' + _fDDMM(s.creado_at) + '</span>' : '';
+          if(!motivo && !desde) return '';
+          return '<div style="font-size:11px;color:#5C4F3A;margin-top:5px;background:#FBF6EC;border-radius:7px;padding:5px 8px;line-height:1.35;">\uD83D\uDCC4 ' + (motivo||'') + desde + '</div>';
+        })() +
         '<div style="display:flex;gap:8px;margin-top:9px;">' +
           '<button onclick="mgSugAprobar(' + s.id + ')" style="flex:1;background:#1E8449;color:#fff;border:none;border-radius:8px;padding:9px;font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:13px;cursor:pointer;">\u2713 Aprobar</button>' +
           '<button onclick="mgSugRechazar(' + s.id + ')" style="background:#fff;color:#C62828;border:1px solid #E0B4B4;border-radius:8px;padding:9px 14px;font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:13px;cursor:pointer;">Rechazar</button>' +
@@ -39730,7 +39792,7 @@ function mgSugRender(){
 // DE VERDAD (productos_canonicos.precio_actual) por PATCH directo a Supabase; el
 // Sheet + lista Xubio quedan best-effort via actualizarPrecioVenta. Devuelve un
 // objeto {status, producto, precioAnterior, precioNuevo, xubio_lista}.
-async function aplicarPrecioTierAware(canonicoId, producto, precioNuevo){
+async function aplicarPrecioTierAware(canonicoId, producto, precioNuevo, motivo, origen){
   precioNuevo = Math.round(Number(precioNuevo) || 0);
 
   // 1) Tramos (front directo, sin cambios): sube todos manteniendo el gap suelto/caja
@@ -39773,8 +39835,19 @@ async function aplicarPrecioTierAware(canonicoId, producto, precioNuevo){
              producto:producto, precioAnterior:precioAnterior, precioNuevo:precioNuevo };
   }
 
-  await sbFetch('productos_canonicos?id=eq.' + _cidReal,
-    { method:'PATCH', body: JSON.stringify({ precio_actual: precioNuevo, precio_actualizado_at: new Date().toISOString() }) });
+  // v13.132.0 — motivo/origen viajan en el MISMO patch: el trigger trg_precio_historial
+  // los copia a precios_historial. Sin esto el historial queda como 'no declarado'.
+  try {
+    await sbFetch('productos_canonicos?id=eq.' + _cidReal, { method:'PATCH', body: JSON.stringify({
+      precio_actual: precioNuevo, precio_actualizado_at: new Date().toISOString(),
+      precio_motivo: (String(motivo || '').slice(0,200) || 'no declarado'),
+      precio_origen: String(origen || 'manual') }) });
+  } catch(ePM){
+    // fail-soft: si todavia no corrio el PASO 9 (columnas precio_motivo/precio_origen)
+    // reintenta sin ellas para no bloquear el cambio de precio.
+    await sbFetch('productos_canonicos?id=eq.' + _cidReal,
+      { method:'PATCH', body: JSON.stringify({ precio_actual: precioNuevo, precio_actualizado_at: new Date().toISOString() }) });
+  }
 
   // 3) BEST-EFFORT: hoja Productos del Sheet + lista de precios Xubio via Apps
   //    Script. Si el producto no tiene fila en el Sheet, el Apps Script aborta:
@@ -39802,7 +39875,7 @@ async function mgSugAprobar(id){
   msg += '\nSe aplica en Sheet, catálogo, ventas, Márgenes y lista Xubio.';
   if (!confirm(msg)) return;
   try {
-    var j = await aplicarPrecioTierAware(s.canonico_id, s.producto, s.precio_sugerido);
+    var j = await aplicarPrecioTierAware(s.canonico_id, s.producto, s.precio_sugerido, 'sugerencia aprobada (objetivo ' + mgSugPct(s.margen_objetivo) + ')', 'sugerencia');
     if (j && (j.status === 'ok' || j.status === 'sin_cambio')){
       await sbFetch('precios_sugerencias?id=eq.' + id,
         { method:'PATCH', body: JSON.stringify({ estado:'aprobado', resuelto_at: new Date().toISOString() }) });
@@ -40018,7 +40091,93 @@ function mgClase(m){
   if(m < 30) return 'lima';
   return 'ok';
 }
-function mgGanMes(d){ var g = mgN(d.ganancia_mes_est); return (g===null) ? 0 : g; }   // SIEMPRE neta
+// ═══════════════════════════════════════════════════════════════
+// v13.132.0 — CANDADO DE PRECIO
+// Antes: mgVarInlineAplicar y mgPrecioConfirmar validaban solo (precio>0 && <=5M).
+// Un dedo gordo mandaba el precio ABAJO DEL COSTO al catalogo, ventas, Sheet y
+// lista Xubio con un solo confirm() generico y sin deshacer. Ahora todo cambio de
+// precio del tab Margenes pasa por mgConfirmarPrecio().
+// ═══════════════════════════════════════════════════════════════
+function mgPisoCosto(costo, iva){            // precio c/IVA con margen neto 0
+  costo = Number(costo)||0; iva = Number(iva); if(!(iva>0)) iva = 21;
+  if(!(costo>0)) return null;
+  return Math.ceil(costo/0.95*(1+iva/100));
+}
+function mgPrecioAObjetivo(costo, iva, obj){ // precio c/IVA que deja el margen objetivo
+  costo = Number(costo)||0; iva = Number(iva); if(!(iva>0)) iva = 21; obj = Number(obj);
+  if(!(costo>0) || !isFinite(obj) || !(obj>0) || obj>=90) return null;
+  return Math.ceil(costo/(0.95-obj/100)*(1+iva/100)/100)*100;
+}
+function mgMargenNeto(precio, costo, iva){   // margen % POST-IIBB (5% sobre el neto)
+  precio = Number(precio)||0; costo = Number(costo)||0;
+  iva = Number(iva); if(!(iva>0)) iva = 21;
+  if(!(precio>0)) return null;
+  var neto = precio/(1+iva/100);
+  if(!(neto>0)) return null;
+  return (neto - costo - 0.05*neto)/neto*100;
+}
+// Devuelve true solo si el usuario confirmo con pleno conocimiento del margen.
+function mgConfirmarPrecio(producto, precioNuevo, precioActual, costo, iva, objetivo){
+  var p = Math.round(Number(precioNuevo)||0);
+  if(!(p > 0 && p <= 5000000)){
+    alert('\u26A0\uFE0F Precio invalido.\nTiene que ser un numero entre 1 y 5.000.000.');
+    return false;
+  }
+  var c = Number(costo)||0;
+  var linea = '"' + producto + '": ' + mgFmt(precioActual) + ' \u2192 ' + mgFmt(p);
+  var cola  = '\n\nSe aplica en Sheet, catalogo, ventas, Margenes y lista Xubio.';
+
+  if(!(c > 0)){
+    return confirm('\u26A0\uFE0F SIN COSTO CARGADO\n\n' + linea +
+      '\n\nNo puedo verificar el margen: este producto no tiene costo de reposicion.' + cola);
+  }
+
+  var m    = mgMargenNeto(p, c, iva);
+  var piso = mgPisoCosto(c, iva);
+  var pObj = mgPrecioAObjetivo(c, iva, objetivo);
+  var obj  = Number(objetivo);
+  var det  = '\nCosto: ' + mgFmt(c) + ' (neto)  \u00B7  Margen resultante: ' +
+             (m===null ? '\u2014' : m.toFixed(1).replace('.',',') + '%') + ' post-IIBB';
+
+  // 1) abajo del costo -> doble barrera
+  if(m !== null && m <= 0){
+    if(!confirm('\uD83D\uDED1 ESTE PRECIO PIERDE PLATA\n\n' + linea + det +
+        '\n\nPara no perder necesitas al menos ' + mgFmt(piso) + '.' +
+        '\n\nSeguro que queres vender abajo del costo?')) return false;
+    return confirm('\uD83D\uDED1 ULTIMA CONFIRMACION\n\n' + producto + ' a ' + mgFmt(p) +
+      ' deja un margen de ' + m.toFixed(1).replace('.',',') + '%.' +
+      '\n\nCada caja que vendas a este precio te saca plata del bolsillo.' + cola);
+  }
+
+  // 2) abajo del objetivo -> aviso explicito
+  if(m !== null && isFinite(obj) && obj > 0 && m < obj - 1){
+    return confirm('\u26A0\uFE0F QUEDA ABAJO DEL OBJETIVO\n\n' + linea + det +
+      '\nObjetivo de este producto: ' + obj.toFixed(1).replace('.',',') + '%' +
+      (pObj ? '\nPara llegar al objetivo: ' + mgFmt(pObj) : '') +
+      '\n\nAplicar igual?' + cola);
+  }
+
+  // 3) todo en orden
+  return confirm(linea + det + cola);
+}
+// v13.132.0 — color por brecha contra el objetivo; sin objetivo, umbrales post-IIBB
+function mgClaseObj(m, obj){
+  if(m===null||m===undefined) return 'sin';
+  if(m <= 0) return 'rojo';
+  var o = Number(obj);
+  if(obj!==null && obj!==undefined && isFinite(o) && o>0){
+    var b = m - o;
+    if(b < -1) return 'rojo';
+    if(b <  1) return 'lima';
+    return 'ok';
+  }
+  if(m < 10) return 'rojo';
+  if(m < 18) return 'nar';
+  if(m < 25) return 'lima';
+  return 'ok';
+}
+// v13.132.0 — POST-IIBB. Fallback a la bruta si todavia corre la vista vieja.
+function mgGanMes(d){ var g = mgN(d.ganancia_mes_neta); if(g===null) g = mgN(d.ganancia_mes_est); return (g===null) ? 0 : g; }
 
 function mgSetUnidad(u){ _mgUnidad=u; var a=document.getElementById('mg-t-caja'),b=document.getElementById('mg-t-kg'); if(a)a.className=(u==='caja')?'on':''; if(b)b.className=(u==='kg')?'on':''; mgRender(); }
 function mgSetOrden(o){ _mgOrden=o; try{ localStorage.setItem('tck_mg_orden', o); }catch(e){} _mgSyncCtrlUI(); mgRender(); }
@@ -40057,13 +40216,17 @@ function mgRender(){
   var ganTotal  = conC.reduce(function(a,d){ return a + mgGanMes(d); }, 0);
   var ventaNeta = conC.reduce(function(a,d){ return a + (mgN(d.precio_neto_caja)||0)*(mgN(d.unid_30d)||0); }, 0);
   var margenPond = ventaNeta>0 ? (ganTotal/ventaNeta*100) : 0;
-  var rojos = conC.filter(function(d){ var m=mgN(d.margen_pct); return m!==null && m<15; }).length;
+  // v13.132.0 — KPIs POST-IIBB. Antes mostraba la ganancia BRUTA rotulada 'neto'
+  // ($40,4M / 23,7%) cuando la real es $31,9M / 18,9%. Y 'Bajo 15%' daba 0 siempre
+  // porque el umbral estaba puesto sobre el margen bruto.
+  var bajoObj = conC.filter(function(d){ var b = mgN(d.brecha_objetivo_pts); return b!==null && b < -1; }).length;
+  var sinObj  = conC.filter(function(d){ return mgN(d.margen_objetivo_pct) === null; }).length;
   var kp = document.getElementById('mg-kpis');
   if(kp) kp.innerHTML =
-    '<div class="mg-kpi big"><div class="v">'+mgFmtC(ganTotal)+'</div><div class="l">Ganás/mes neto</div></div>' +
-    '<div class="mg-kpi"><div class="v">'+margenPond.toFixed(1)+'%</div><div class="l">Margen pond.</div></div>' +
-    '<div class="mg-kpi rojo"><div class="v">'+rojos+'</div><div class="l">Bajo 15%</div></div>' +
-    '<div class="mg-kpi gris"><div class="v">'+sinCRows.length+'</div><div class="l">Sin costo</div></div>';
+    '<div class="mg-kpi big"><div class="v">'+mgFmtC(ganTotal)+'</div><div class="l">Ganás/mes post-IIBB</div></div>' +
+    '<div class="mg-kpi"><div class="v">'+margenPond.toFixed(1)+'%</div><div class="l">Margen pond. neto</div></div>' +
+    '<div class="mg-kpi rojo"><div class="v">'+bajoObj+'</div><div class="l">Bajo objetivo</div></div>' +
+    '<div class="mg-kpi gris"><div class="v">'+(sinCRows.length+sinObj)+'</div><div class="l">Sin costo / sin obj.</div></div>';
 
   // orden
   conC.sort(function(a,b){
@@ -40220,6 +40383,7 @@ function mgVarFila(d){
     inlineHtml = '<div class="mg-var-inline" id="' + rid + '" style="display:none;">'
       + '<input type="number" inputmode="numeric" class="mg-var-inp" id="' + rid + '-inp" value="' + Math.round(sug || pAct) + '"'
       + ' data-costo="' + (mgN(d.costo_nuevo) || 0) + '" data-iva="' + iva + '" data-pact="' + pAct + '"'
+      + ' data-obj="' + (mgN(d.margen_objetivo_pct) === null ? '' : mgN(d.margen_objetivo_pct)) + '"'   // v13.132.0
       + ' oninput="mgVarInlineCalc(\'' + rid + '\')">' 
       + '<span class="mg-var-mgn" id="' + rid + '-mgn"></span>'
       + '<button class="mg-var-btn go" data-prod="' + encodeURIComponent(d.producto||'') + '" onclick="mgVarInlineAplicar(this,\'' + rid + '\')">✓ Aplicar</button>'
@@ -40253,24 +40417,39 @@ function mgVarInlineCalc(rid){
   var p = Number(inp.value) || 0;
   var costo = Number(inp.getAttribute('data-costo')) || 0;
   var iva = Number(inp.getAttribute('data-iva')) || 21;
+  var obj = Number(inp.getAttribute('data-obj'));
   if(p <= 0 || costo <= 0){ out.textContent = ''; return; }
-  var neto = p / (1 + iva/100);
-  var m = (neto - costo) / neto * 100;
-  out.textContent = 'margen ' + m.toFixed(1).replace('.',',') + '%';
-  out.className = 'mg-var-mgn ' + (m < 15 ? 'bad' : (m < 22 ? 'mid' : 'ok'));
+  // v13.132.0 — margen POST-IIBB (el mismo del resto del sistema) contra el objetivo
+  var m = mgMargenNeto(p, costo, iva);
+  if(m === null){ out.textContent = ''; return; }
+  var txt = 'margen ' + m.toFixed(1).replace('.',',') + '%';
+  var cls;
+  if(m <= 0){ cls = 'bad'; txt = '\uD83D\uDED1 ' + txt + ' \u2014 PIERDE PLATA'; }
+  else if(isFinite(obj) && obj > 0){
+    txt += ' (obj ' + obj.toFixed(1).replace('.',',') + '%)';
+    cls = (m < obj - 1) ? 'bad' : (m < obj + 1 ? 'mid' : 'ok');
+  } else {
+    cls = (m < 10 ? 'bad' : (m < 18 ? 'mid' : 'ok'));
+  }
+  out.textContent = txt;
+  out.className = 'mg-var-mgn ' + cls;
 }
 async function mgVarInlineAplicar(btn, rid){
   var prod = decodeURIComponent(btn.getAttribute('data-prod') || '');
   var inp = document.getElementById(rid+'-inp');
   var precio = Math.round(Number(inp && inp.value) || 0);
-  if(!prod || !(precio > 0 && precio <= 5000000)){ if (typeof toast==='function') toast('⚠️ Precio inválido','err'); return; }
-  var pAct = Number(inp.getAttribute('data-pact')) || 0;
-  if(!confirm('Cambiar "' + prod + '" de ' + mgFmt(pAct) + ' a ' + mgFmt(precio) + '?\nSe aplica en Sheet, catálogo, ventas, Márgenes y lista Xubio.')) return;
+  if(!prod || !inp){ if (typeof toast==='function') toast('⚠️ Precio inválido','err'); return; }
+  var pAct  = Number(inp.getAttribute('data-pact'))  || 0;
+  var costoI= Number(inp.getAttribute('data-costo')) || 0;
+  var ivaI  = Number(inp.getAttribute('data-iva'))   || 21;
+  var objI  = Number(inp.getAttribute('data-obj'));
+  // v13.132.0 — candado: nada sale abajo del costo por accidente
+  if(!mgConfirmarPrecio(prod, precio, pAct, costoI, ivaI, objI)) return;
   btn.disabled = true; btn.textContent = '⏳…';
   try {
     var _cid = null;
     try { var _d = (_mgData||[]).find(function(x){ return x.producto === prod; }); if (_d) _cid = _d.canonico_id; } catch(eC){}
-    var j = await aplicarPrecioTierAware(_cid, prod, precio);
+    var j = await aplicarPrecioTierAware(_cid, prod, precio, 'alerta de costo movido', 'alerta_costo');
     if(j && j.status === 'ok'){
       if (typeof toast==='function') toast('✅ ' + (j.producto || prod) + ': ' + mgFmt(j.precioAnterior) + ' → ' + mgFmt(j.precioNuevo), 'ok');
       mgRecargar();
@@ -40304,14 +40483,28 @@ async function mgVarVisto(btn){
 
 // ── v13.24 — Cambio de precio desde el panel (AS actualizarPrecioVenta) ──
 var _mgpProd = null;
+var _mgpCtx  = null;   // v13.132.0 — costo/IVA/objetivo del producto abierto (para el candado)
 function mgPrecioAbrir(el){
   _mgpProd = decodeURIComponent(el.getAttribute('data-prod') || '');
   var pAct = Number(el.getAttribute('data-pact')) || 0;
   var sug  = Number(el.getAttribute('data-sug')) || 0;
   if(!_mgpProd) return;
+  // v13.132.0 — contexto del candado: sale de _mgData (vw_margen_producto)
+  _mgpCtx = { pact: pAct, costo: 0, iva: 21, obj: NaN };
+  try {
+    var _dCtx = (_mgData||[]).find(function(x){ return x.producto === _mgpProd; });
+    if(_dCtx){
+      _mgpCtx.costo = mgN(_dCtx.costo_neto_caja) || 0;
+      var _iv = mgN(_dCtx.alicuota_iva); if(_iv) _mgpCtx.iva = _iv;
+      var _ob = mgN(_dCtx.margen_objetivo_pct); if(_ob !== null) _mgpCtx.obj = _ob;
+    }
+  } catch(eCtx){}
   document.getElementById('mgp-titulo').textContent = _mgpProd;
   document.getElementById('mgp-info').textContent =
-    'Hoy: ' + mgFmt(pAct) + (sug > 0 ? ' · Sugerido: ' + mgFmt(sug) : ' · precio caja/bolsa c/IVA');
+    'Hoy: ' + mgFmt(pAct) +
+    (_mgpCtx.costo > 0 ? ' · Costo ' + mgFmt(_mgpCtx.costo) : '') +
+    (isFinite(_mgpCtx.obj) ? ' · Objetivo ' + _mgpCtx.obj.toFixed(1).replace('.',',') + '%' : '') +
+    (sug > 0 ? ' · Sugerido: ' + mgFmt(sug) : '');
   var inp = document.getElementById('mgp-input');
   inp.value = sug > 0 ? sug : (pAct || '');
   document.getElementById('mgp-status').textContent = '';
@@ -40325,8 +40518,9 @@ async function mgPrecioConfirmar(){
   var inp = document.getElementById('mgp-input');
   var precio = Math.round(Number(inp.value) || 0);
   var st = document.getElementById('mgp-status');
-  if(!(precio > 0 && precio <= 5000000)){ st.textContent = '⚠️ Precio inválido'; return; }
-  if(!confirm('Cambiar "' + _mgpProd + '" a ' + mgFmt(precio) + '?\nSe aplica en Sheet, catálogo, ventas, Márgenes y lista Xubio.')) return;
+  // v13.132.0 — candado (reemplaza la validacion de solo rango)
+  var _cCtx = _mgpCtx || { pact:0, costo:0, iva:21, obj:NaN };
+  if(!mgConfirmarPrecio(_mgpProd, precio, _cCtx.pact, _cCtx.costo, _cCtx.iva, _cCtx.obj)) return;
   var ok = document.getElementById('mgp-ok');
   ok.disabled = true; ok.textContent = '⏳ Aplicando…';
   st.textContent = 'Escribiendo Sheet + Márgenes + Xubio (tarda unos segundos)…';
@@ -40334,7 +40528,7 @@ async function mgPrecioConfirmar(){
     // v13.52.0 — tier-aware: si el producto tiene tramos, sube todos manteniendo el gap
     var _cid = null;
     try { var _d = (_mgData||[]).find(function(x){ return x.producto === _mgpProd; }); if (_d) _cid = _d.canonico_id; } catch(eC){}
-    var j = await aplicarPrecioTierAware(_cid, _mgpProd, precio);
+    var j = await aplicarPrecioTierAware(_cid, _mgpProd, precio, 'cambio manual desde Margenes', 'manual');
     if(j && j.status === 'ok'){
       var xl = String(j.xubio_lista || '');
       var extra = (xl.indexOf('actualizado') === 0) ? ' · Xubio ✓'
@@ -40367,8 +40561,11 @@ function mgRecargar(){
 }
 
 function mgFila(d){
-  var m = mgN(d.margen_pct);
-  var cls = mgClase(m);
+  // v13.132.0 — el numero grande pasa a ser el margen POST-IIBB y el color se decide
+  // contra el objetivo del producto (si lo tiene), no contra umbrales fijos.
+  var m = mgN(d.margen_neto_pct); if(m === null) m = mgN(d.margen_pct);
+  var obj = mgN(d.margen_objetivo_pct);
+  var cls = mgClaseObj(m, obj);
   var u30 = mgN(d.unid_30d)||0;
   var u7  = mgN(d.unid_7d)||0;
 
@@ -40389,19 +40586,23 @@ function mgFila(d){
   var precioBase = (_mgUnidad==='caja') ? pc : ((ck!==null && cc) ? pc*ck/cc : null);
   var costo  = (costoBase!==null)  ? costoBase*fac  : null;
   var precio = (precioBase!==null) ? precioBase*fac : null;
-  var gan    = (precio!==null && costo!==null) ? (precio-costo) : null;
+  // v13.132.0 — la ganancia por caja tambien descuenta IIBB (5% sobre el neto), para
+  // que cierre con el margen del encabezado y con vw_pedido_margen.
+  var iibb   = (precioBase!==null) ? 0.05*precioBase*fac : 0;
+  var gan    = (precio!==null && costo!==null) ? (precio-costo-iibb) : null;
   var uLbl = (_mgUnidad==='caja') ? '/caja' : '/kg';
   var ivaTag = (_mgIva==='con') ? ' <span class="mg-iva-tag">c/IVA '+(mgN(d.alicuota_iva)||0)+'%</span>' : '';
 
   return '<div class="mg-row r-'+cls+'">' +
     '<div class="mg-rtop">' +
       '<div><div class="mg-rname">'+d.producto+'</div><div class="mg-rcat">'+(d.categoria||'')+'</div><div class="mg-rprov">📦 '+(d.proveedor_ultima||'')+'</div></div>' +
-      '<div class="mg-rmarg"><div class="mv m-'+cls+'">'+(m!==null?m.toFixed(1):'—')+'%</div><div class="ml">margen neto</div></div>' +
+      '<div class="mg-rmarg"><div class="mv m-'+cls+'">'+(m!==null?m.toFixed(1):'—')+'%</div><div class="ml">'+
+        (obj!==null ? 'obj '+obj.toFixed(1).replace('.',',')+'%' : 'sin objetivo')+'</div></div>' +
     '</div>' +
     '<div class="mg-rmid">' +
       '<div class="mg-cell"><div class="cl">Costo '+uLbl+ivaTag+'</div><div class="cv">'+mgFmt(costo)+'</div></div>' +
       '<div class="mg-cell mg-cell-edit" data-prod="'+encodeURIComponent(d.producto||'')+'" data-pact="'+(mgN(d.precio_venta_civa)||0)+'" data-sug="0" onclick="mgPrecioAbrir(this)"><div class="cl">Venta '+uLbl+ivaTag+'</div><div class="cv">'+mgFmt(precio)+' <span class="edit-ic">✏️</span></div></div>' +
-      '<div class="mg-cell"><div class="cl">Ganás '+uLbl+'</div><div class="cv gan">'+mgFmt(gan)+'</div></div>' +
+      '<div class="mg-cell"><div class="cl">Ganás neto '+uLbl+'</div><div class="cv gan">'+mgFmt(gan)+'</div></div>' +
     '</div>' +
     '<div class="mg-rbot">' +
       '<div class="vol">📦 <b>'+u7+'</b> cajas/sem · <b>'+u30+'</b> /mes</div>' +
@@ -42868,7 +43069,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.128.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.132.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
