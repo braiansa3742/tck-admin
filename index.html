@@ -1,6 +1,22 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.133.0 — 25/07/2026
+     TCK ADMIN — v13.134.0 — 28/07/2026
+     v13.134.0: ALFREDO ASIGNABLE COMO CHOFER EN EL ADMIN. Alfredo existe
+       desde el 20/07 (app_usuarios rol chofer + perfil en ventas v14.112.0
+       + chip en el filtro de Devoluciones), pero los selectores de
+       asignación del admin seguían con 3 choferes hardcodeados: no se le
+       podía asignar un viaje ni un pedido. Agregado en:
+         · "⚙️ Configurar viaje" del detalle de viaje (v-chofer-sel) → 🟣 Alfredo
+         · Picker de chofer por pedido (mostrarPickerChofer) → 🚚 Alfredo
+         · Selector de la planilla/remito veterinario (vet-chofer-sel)
+         · Card de "En Curso": avatar/borde/barra en violeta #6A1B9A
+           (mismo color que ya usa en Devoluciones). De paso, avatar de
+           Ian pasa a azul (la clase .juampi no existía en CSS y caía al
+           verde de Joan).
+         · lzGetStatsZona: conteo alfredo junto a joan/luis/juampi.
+       Sin cambios de backend ni de DB. Vehículo se elige aparte (los 4
+       de VEHICULOS_DISPONIBLES, no hay mapeo chofer→vehículo).
+     ── v13.133.0 — 25/07/2026 ──
      v13.133.0: EL PANEL DEL TAB MÁRGENES PASA DE "COSTOS QUE SE MOVIERON" A
        "MARGEN BAJO OBJETIVO". Son conjuntos distintos y el viejo se perdía plata.
        (a) El panel filtraba vw_variacion_costos por dias_desde_cambio<=30: un
@@ -9215,6 +9231,8 @@ input[type="date"] {
   font-weight: 900;
 }
 .lz-encurso-avatar.luis { background: var(--orange); }
+.lz-encurso-avatar.juampi { background: #1565C0; }
+.lz-encurso-avatar.alfredo { background: #6A1B9A; }   /* v13.134.0 */
 .lz-encurso-info { flex: 1; }
 .lz-encurso-chofer {
   font-family: 'Barlow Condensed', sans-serif;
@@ -13811,6 +13829,7 @@ input.canales-exp-input[type="date"] {
               <option value="Joan">🚚 Joan</option>
               <option value="Luis">🚚 Luis</option>
               <option value="Juan Pablo">🚚 Ian</option>
+              <option value="Alfredo">🚚 Alfredo</option>
             </select>
           </div>
           <div style="flex:1;">
@@ -28790,6 +28809,7 @@ function lzGetStatsZona(zonaKey) {
   const joan = ps.filter(p => lzGetChofer(p) === 'Joan');
   const luis = ps.filter(p => lzGetChofer(p) === 'Luis');
   const juampi = ps.filter(p => lzGetChofer(p) === 'Juan Pablo');   // v12.4.0
+  const alfredo = ps.filter(p => lzGetChofer(p) === 'Alfredo');     // v13.134.0
   const montoConfirmado = confirmados.reduce((s, p) => s + lzParseMonto(p), 0);
   const montoPendiente  = pendientes.reduce((s, p) => s + lzParseMonto(p), 0);
 
@@ -28805,6 +28825,7 @@ function lzGetStatsZona(zonaKey) {
     joan: joan.length,
     luis: luis.length,
     juampi: juampi.length,   // v12.4.0
+    alfredo: alfredo.length, // v13.134.0
     montoConfirmado: montoConfirmado,
     montoPendiente: montoPendiente,
     lista: ps.length > 0 && confirmados.length > 0 && sinAsignar.length === 0 && pendientes.length === 0,
@@ -29374,13 +29395,16 @@ async function lzRenderEnCurso(el) {
     const isJuampi = choferKey.indexOf('juan pablo') >= 0;
     const isJoan = !isJuampi && choferKey.indexOf('joan') >= 0;
     const isLuis = choferKey.indexOf('luis') >= 0;
+    const isAlfredo = choferKey.indexOf('alfredo') >= 0;   // v13.134.0
     const avatar = (v.chofer || '?').charAt(0).toUpperCase();
-    const colorClase = isJoan ? '' : (isLuis ? ' luis' : (isJuampi ? ' juampi' : ''));
+    const colorClase = isJoan ? '' : (isLuis ? ' luis' : (isJuampi ? ' juampi' : (isAlfredo ? ' alfredo' : '')));
     const cardStyle = isLuis
       ? 'border-left-color:var(--luis);background:linear-gradient(135deg,#fff,#FFF3E0);'
       : (isJuampi
           ? 'border-left-color:#1565C0;background:linear-gradient(135deg,#fff,#E3F2FD);'
-          : '');
+          : (isAlfredo
+              ? 'border-left-color:#6A1B9A;background:linear-gradient(135deg,#fff,#F3E5F5);'
+              : ''));
 
     // FIX N42-C: usar entregas reales de Supabase en vez de viajes.monto_cobrado
     // (que está roto porque Apps Script no lo recalcula al confirmar entrega).
@@ -29426,12 +29450,15 @@ async function lzRenderEnCurso(el) {
 
     const fillStyle = isLuis
       ? 'background:linear-gradient(90deg,var(--luis),#F57C00);'
-      : (isJuampi ? 'background:linear-gradient(90deg,#1565C0,#1976D2);' : '');
+      : (isJuampi ? 'background:linear-gradient(90deg,#1565C0,#1976D2);'
+                  : (isAlfredo ? 'background:linear-gradient(90deg,#6A1B9A,#8E24AA);' : ''));
     html += '  <div class="lz-encurso-progreso-bar">';
     html += '    <div class="lz-encurso-progreso-fill" style="width:' + pct + '%;' + fillStyle + '"></div>';
     html += '  </div>';
     html += '  <div class="lz-encurso-progreso-txt"' +
-            (isLuis ? ' style="color:var(--luis);"' : (isJuampi ? ' style="color:#1565C0;"' : '')) + '>' +
+            (isLuis ? ' style="color:var(--luis);"'
+                    : (isJuampi ? ' style="color:#1565C0;"'
+                                : (isAlfredo ? ' style="color:#6A1B9A;"' : ''))) + '>' +
             pct + '% del viaje completo</div>';
     html += '</div>';
   });
@@ -29828,6 +29855,7 @@ function lzRenderDetalleViaje() {
     html += '          <option value="Joan"' + (v.chofer === 'Joan' ? ' selected' : '') + '>🟢 Joan</option>';
     html += '          <option value="Luis"' + (v.chofer === 'Luis' ? ' selected' : '') + '>🟠 Luis</option>';
     html += '          <option value="Juan Pablo"' + (v.chofer === 'Juan Pablo' ? ' selected' : '') + '>🔵 Ian</option>';
+    html += '          <option value="Alfredo"' + (v.chofer === 'Alfredo' ? ' selected' : '') + '>🟣 Alfredo</option>';
     html += '        </select>';
   } else {
     html += '        <div class="v-detalle-static">' + lzEsc(tieneChofer ? v.chofer : '—') + '</div>';
@@ -31790,6 +31818,7 @@ function mostrarPickerChofer(btn, event) {
       '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Joan" onclick="asignarChoferBtn(this,event)">🚚 Joan</button>' +
       '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Luis" onclick="asignarChoferBtn(this,event)">🚚 Luis</button>' +
       '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Juan Pablo" onclick="asignarChoferBtn(this,event)">🚚 Ian</button>' +
+      '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Alfredo" onclick="asignarChoferBtn(this,event)">🚚 Alfredo</button>' +
     '</div>' +
     '<button class="chofer-picker-cancel" data-pid="' + pedidoId + '" onclick="cancelarPickerChoferBtn(this,event)">Cancelar</button>';
 }
