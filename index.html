@@ -1,6 +1,52 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.135.0 — 28/07/2026
+     TCK ADMIN — v13.137.0 — 28/07/2026
+     v13.137.0: CHIP "SIN FACTURAR" EN LOS FILTROS DE PEDIDOS (pedido de Fran).
+       Fran usa la lista de pedidos para coordinar con los choferes y no tenía
+       forma de aislar los que todavía no tienen factura: había que ir card por
+       card mirando si estaba el badge 🧾 FC. Ahora es un chip más en la barra
+       de estado, con contador en vivo.
+         · setFiltro('sinfacturar') → no cancelados y sin entrada en
+           _factNroMap (el mapa pedido→nro de factura que ya se cargaba para
+           pintar el badge; sale de pedidos_zona.xubio_factura_nro).
+         · El contador del chip se recalcula en actualizarStats() sobre la
+           misma base de fecha/vendedor/origen/búsqueda que la vista, pero
+           ignorando el filtro de estado — si no, al pararse en el chip el
+           número se contaba a sí mismo.
+       OJO: _factNroMap trae 45 días para atrás. Con el filtro de fecha
+       "personalizado" apuntando a algo más viejo que eso, los pedidos van a
+       figurar como sin facturar aunque tengan factura. Para el uso real
+       (hoy / ayer / semana) no molesta.
+       Sin cambios de backend ni de DB.
+     ─────────────────────────────────────────────────────────────────────
+     v13.136.0: TRABADOS POR XUBIO + CAMBIAR PRODUCTO (para Fran).
+       Xubio rechaza la factura ENTERA con "El producto X no acepta stock
+       negativo" cuando el SKU quedó en 0. El 28/07 eso dejó 4 pedidos ya
+       ENTREGADOS sin facturar por "Pollo B X 7 congelado" (-5) mientras
+       "Pollo B x 7 Fresco" tenía 24 — el mismo pollo, otro SKU. Otros 3
+       trabados igual por muzzarella, huevos y merluza.
+
+       (a) Sección nueva "⛔ Trabados por Xubio", arriba de todo. Lista los
+           pedidos con facturacion_estado='requiere_accion' SIN filtro de
+           fecha — a propósito: el Centro solo mostraba la fecha activa, y
+           por eso el pedido de merluza del 01/07 estuvo un mes colgado sin
+           que nadie lo viera. Muestra el producto culpable parseado del
+           error, los días colgado y los intentos.
+       (b) Botón "🔄 Cambiar producto" en los trabados por stock: abre el
+           presupuesto de Xubio, muestra las líneas que tienen equivalente
+           declarado y el stock disponible de cada opción, y deja marcar
+           con qué SKU sale. Después "Facturar ahora" reintenta el pedido.
+           El presupuesto en Xubio NO se toca: el cambio se aplica al armar
+           el payload de la factura (Apps Script v25.101.0).
+       (c) Gating: solo rol 'operaciones' (Fran) y 'admin'. Cobranzas
+           (Valentina) y dueño no lo ven. Es gating de UI — la validación
+           real (IVA igual, par declarado equivalente, pedido sin facturar)
+           vive en el Apps Script, que es quien escribe.
+
+       REQUIERE Apps Script v25.101.0 + las tablas de
+       tools/sustituciones-facturador.sql. Sin eso, la sección de trabados
+       se ve igual pero el botón devuelve error del backend.
+     ─────────────────────────────────────────────────────────────────────
      v13.135.0: EL AUTO-REFRESH DEJA DE CERRARLE EL PEDIDO ABIERTO A FRANCISCO.
        El tick de 20s llamaba cargarPedidos(true) -> renderPedidos(), que pisa
        todo el innerHTML de #lista-pedidos: la card expandida se cerraba y la
@@ -12899,6 +12945,7 @@ input.canales-exp-input[type="date"] {
         <button class="filtro-btn" onclick="setFiltro('Pendiente',this)">⏳ Pendientes</button>
         <button class="filtro-btn" onclick="setFiltro('Confirmado',this)">✅ Confirmados</button>
         <button class="filtro-btn" onclick="setFiltro('Entregado',this)">📦 Entregados</button>
+        <button class="filtro-btn" id="chip-sinfacturar" onclick="setFiltro('sinfacturar',this)" title="Pedidos sin factura emitida (excluye cancelados). El dato cubre los últimos 45 días.">🧾 Sin facturar</button>
         <button class="filtro-btn" onclick="setFiltro('duplicado',this)">⚠️ Duplicados</button>
         <button class="filtro-btn" onclick="setFiltro('Cancelado',this)">❌ Cancelados</button>
       </div>
@@ -14722,6 +14769,13 @@ input.canales-exp-input[type="date"] {
       <button class="fc-sync-btn" id="fc-sync-btn" onclick="fcSync()">🔄 Sincronizar</button>
     </div>
     <div class="fc-kpis" id="fc-kpis"></div>
+    <!-- ═══ v13.136.0 — Trabados por Xubio (stock negativo y otros rechazos) ═══
+         No filtra por fecha a propósito: el pedido de merluza del 01/07 estuvo
+         un mes colgado porque el Centro solo mostraba la fecha activa. -->
+    <div class="fc-sec" id="fc-trabados-sec" style="display:none;">
+      <div class="fc-sec-tit">⛔ Trabados por Xubio <span class="fc-sec-sub">la factura fue rechazada — hay que destrabarlos a mano</span></div>
+      <div id="fc-trabados" class="fc-list"></div>
+    </div>
     <div class="fc-sec">
       <div class="fc-sec-tit" style="display:block;">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
@@ -18770,6 +18824,7 @@ function actualizarStats() {
   document.getElementById('stat-pend').textContent = activos.filter(function(p){return p.estado==='Pendiente';}).length + (enRevision ? ' (+' + enRevision + ' rev.)' : '');
   document.getElementById('stat-conf').textContent = activos.filter(function(p){return p.estado==='Confirmado';}).length;
   document.getElementById('stat-entregado').textContent = activos.filter(function(p){return p.estado==='Entregado';}).length;
+  actualizarChipSinFacturar();   // v13.137.0
   // Actualizar el banner de alertas cada vez que se refrescan stats
   renderAlertasBanner();
 }
@@ -19987,6 +20042,24 @@ function setFiltroVendedor(v, btn) {
   btn.classList.add('on'); filtrar();
 }
 
+// v13.137.0 — contador del chip "Sin facturar".
+// Se cuenta sobre la MISMA base que ve el usuario (fecha, vendedor, origen,
+// búsqueda) pero forzando filtroActual='todos': si no, parado en el propio
+// chip el número se contaba a sí mismo y siempre daba igual al listado.
+// 'todos' ya excluye cancelados, que es justo lo que queremos.
+function actualizarChipSinFacturar() {
+  var chip = document.getElementById('chip-sinfacturar');
+  if (!chip) return;
+  var n = 0;
+  var prev = filtroActual;
+  try {
+    filtroActual = 'todos';
+    n = pedidosFiltrados().filter(function(p){ return !_factNroMap[p.pedidoId]; }).length;
+  } catch(e) { return; }
+  finally { filtroActual = prev; }
+  chip.textContent = n > 0 ? ('🧾 Sin facturar (' + n + ')') : '🧾 Sin facturar';
+}
+
 function setFiltro(f, btn) {
   filtroActual = f;
   document.querySelectorAll('#filtros-estado .filtro-btn').forEach(function(b){b.classList.remove('on');});
@@ -20085,6 +20158,10 @@ function pedidosFiltrados() {
     lista = lista.filter(function(p){ return p.vendedor.toLowerCase().includes(filtroVendedor.toLowerCase()); });
 
   if (filtroActual === 'duplicado') lista = lista.filter(function(p){return p.esDuplicado;});
+  // v13.137.0 — sin factura emitida. Los cancelados quedan afuera: no se facturan.
+  else if (filtroActual === 'sinfacturar') lista = lista.filter(function(p){
+    return p.estado !== 'Cancelado' && !_factNroMap[p.pedidoId];
+  });
   else if (filtroActual === 'Cancelado') lista = lista.filter(function(p){return p.estado==='Cancelado';});
   else if (filtroActual !== 'todos') lista = lista.filter(function(p){return p.estado===filtroActual;});
   else lista = lista.filter(function(p){return p.estado !== 'Cancelado';}); // "Todos" oculta cancelados
@@ -41894,7 +41971,7 @@ async function comprasDetailCargarFecha() {
 //  Flag de facturado: pedidos_zona.xubio_factura_id.
 // ═══════════════════════════════════════════════════════════════════════════
 
-var _fcCache = { porFacturar: [], soloXubio: [], sueltas: [], salidas: [], presupMap: {}, ultimaSync: null, sinFactura: [] };
+var _fcCache = { porFacturar: [], soloXubio: [], sueltas: [], salidas: [], presupMap: {}, ultimaSync: null, sinFactura: [], trabados: [], pendientes: [] };
 var _fcCargando = false;
 
 function _fcHoyISO() {
@@ -42004,6 +42081,30 @@ async function fcCargar() {
         '&order=creado_at.desc&limit=600') || [];
     } catch (e) { _fcCache.sinFactura = []; console.warn('[FC] sinFactura', e); }
 
+    // v13.136.0 — pedidos que Xubio rechazó (requiere_accion). SIN filtro de
+    // fecha: si no, un trabado de hace semanas no se ve nunca (pasó con el
+    // pedido de merluza del 01/07, un mes colgado).
+    try {
+      _fcCache.trabados = await sbFetch('pedidos_zona?facturacion_estado=eq.requiere_accion' +
+        '&facturado_at=is.null' +
+        '&estado=not.in.(Cancelado,%22Cancelado%20por%20admin%22)' +
+        '&select=pedido_id,cliente,vendedor,zona,localidad_canonica,total,estado,salida_planificada,xubio_presupuesto_id,facturacion_error,facturacion_intentos' +
+        '&order=salida_planificada.asc&limit=100') || [];
+    } catch (e) { _fcCache.trabados = []; console.warn('[FC] trabados', e); }
+
+    // v13.136.0 — casos ya anotados. Va por Apps Script, no por sbFetch: la
+    // tabla tiene RLS sin políticas (solo escribe/lee el backend con
+    // service_role), justamente para que nadie la toque desde el front.
+    try {
+      if (_fcCache.trabados.length && _fcPuedeSustituir()) {
+        var rp = await fetch(APPS_SCRIPT_URL + '?accion=pendienteFactListar&soloAbiertos=0');
+        var dp = await rp.json();
+        _fcCache.pendientes = (dp && dp.status === 'ok' && dp.pendientes) || [];
+      } else {
+        _fcCache.pendientes = [];
+      }
+    } catch (e) { _fcCache.pendientes = []; console.warn('[FC] pendientes', e); }
+
     // Números de presupuesto para las salidas (lookup por chunks)
     var tids = [];
     _fcCache.salidas.forEach(function (s) {
@@ -42101,6 +42202,9 @@ function fcRender() {
     btnTodo.style.display = (vendedorActual === 'ADMIN' && pendTot > 0) ? 'inline-block' : 'none';
     btnTodo.textContent = '🧾 Facturar todo (' + pendTot + ')';
   }
+
+  // ── v13.136.0 — Trabados por Xubio ──
+  _fcRenderTrabados();
 
   // ── Salidas de hoy, agrupadas por zona ──
   var contS = document.getElementById('fc-salidas');
@@ -42273,6 +42377,294 @@ function _fcFechaCorta(iso) {
   if (dif === 1) return 'mañana';
   var dias = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
   return dias[d.getDay()] + ' ' + p[2] + '/' + p[1];
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// v13.136.0 — TRABADOS POR XUBIO + SUSTITUCIÓN DE PRODUCTO
+//
+// Xubio rechaza la factura ENTERA con "El producto X no acepta stock
+// negativo" cuando el SKU está en 0. El 28/07 eso dejó 4 pedidos ya
+// entregados sin facturar por "Pollo B X 7 congelado" (-5) mientras
+// "Pollo B x 7 Fresco" tenía 24 — el mismo pollo, otro SKU.
+//
+// Fran marca que esa línea sale con el equivalente y el facturador
+// (Apps Script v25.101.0) cambia el producto al emitir. El presupuesto
+// en Xubio no se toca.
+// ═══════════════════════════════════════════════════════════════════
+
+// Solo operaciones (Fran) y admin. Cobranzas (Valentina) y dueño no lo ven.
+// Es gating de UI, no de seguridad: la validación real (IVA igual, par
+// declarado equivalente, pedido sin facturar) vive en el Apps Script.
+function _fcPuedeSustituir() {
+  return rolActual === 'operaciones' || rolActual === 'admin';
+}
+
+function _fcEsErrorStock(err) {
+  return /no acepta stock negativo/i.test(String(err || ''));
+}
+
+function _fcProductoDelError(err) {
+  var m = String(err || '').match(/El producto\s+(.+?)\s+no acepta stock negativo/i);
+  return m ? m[1].trim() : '';
+}
+
+function _fcRenderTrabados() {
+  var sec  = document.getElementById('fc-trabados-sec');
+  var cont = document.getElementById('fc-trabados');
+  if (!sec || !cont) return;
+  var arr = _fcCache.trabados || [];
+  if (!arr.length) { sec.style.display = 'none'; return; }
+  sec.style.display = '';
+
+  cont.innerHTML = arr.map(function (r) {
+    var esStock  = _fcEsErrorStock(r.facturacion_error);
+    var prodMal  = _fcProductoDelError(r.facturacion_error);
+    var diasCol  = r.salida_planificada
+      ? Math.floor((Date.now() - new Date(r.salida_planificada + 'T12:00:00').getTime()) / 86400000)
+      : 0;
+    var chipDias = diasCol > 1
+      ? '<span class="fc-chip rojo">' + diasCol + 'd colgado</span>'
+      : '<span class="fc-chip rojo">HOY</span>';
+    var motivo = esStock
+      ? '⛔ Sin stock en Xubio: <strong>' + _fcEsc(prodMal) + '</strong>'
+      : '⛔ ' + _fcEsc(String(r.facturacion_error || 'Rechazado por Xubio').substring(0, 160));
+
+    return '<div class="fc-row" style="flex-wrap:wrap;">' +
+      '<div class="fc-dot no"></div>' +
+      '<div class="fc-main"><div class="fc-cli">' + _fcEsc(r.cliente) + '</div>' +
+      '<div class="fc-meta">' + _fcEsc(r.localidad_canonica || '') + ' · ' + _fcEsc(r.vendedor || '') +
+        ' · sale ' + (r.salida_planificada ? _fcFechaCorta(r.salida_planificada) : '—') +
+        ' · ' + Number(r.facturacion_intentos || 0) + ' intentos</div>' +
+      '<div class="fc-meta" style="color:#C62828;margin-top:2px;">' + motivo + '</div></div>' +
+      '<div class="fc-monto">' + _fcMoneda(r.total) + '</div>' +
+      chipDias +
+      (esStock && _fcPuedeSustituir()
+        ? '<button class="fc-fbtn" style="background:#0D47A1;color:#fff;" title="Facturar esta línea con el producto equivalente" ' +
+          'onclick="fcSustAbrir(\'' + _fcEsc(r.pedido_id) + '\')">🔄 Cambiar producto</button>'
+        : '') +
+      // v13.136.0 — el "anotar" va SIEMPRE, no solo en los de stock: es la
+      // salida para los trabados que no se resuelven cambiando el producto
+      // (IVA distinto, sin equivalente, falta cargar la compra).
+      (_fcPuedeSustituir()
+        ? '<button class="fc-fbtn" style="background:#5D4037;color:#fff;" title="Dejar asentado el caso" ' +
+          'onclick="fcPendAbrir(\'' + _fcEsc(r.pedido_id) + '\',\'' + _fcEsc(prodMal) + '\')">📝 Anotar</button>'
+        : '') +
+      _fcChipPendiente(r.pedido_id) +
+      '</div>';
+  }).join('');
+}
+
+// Chip del caso ya anotado, para que se vea de un vistazo qué se hizo con él
+function _fcChipPendiente(pedidoId) {
+  var p = (_fcCache.pendientes || []).find(function (x) { return x.pedido_id === pedidoId; });
+  if (!p) return '';
+  var VIA_LBL = {
+    ajuste_inventario: 'ajuste de inventario',
+    revincular_xubio:  'revincular en Xubio',
+    nota_credito:      'nota de crédito',
+    ya_resuelto:       'ya resuelto',
+    otro:              'otro'
+  };
+  var lbl = VIA_LBL[p.via_resolucion] || p.via_resolucion || '';
+  return '<span class="fc-chip ' + (p.estado === 'pendiente' ? 'gris' : 'verde') + '" ' +
+    'title="' + _fcEsc((p.nota || '') + ' — ' + (p.creado_por || '')) + '">' +
+    (p.estado === 'pendiente' ? '📝 ' : '✓ ') + _fcEsc(lbl) + '</span>';
+}
+
+// ── Modal de "anotar caso" ──────────────────────────────────────────
+function _fcPendHost() {
+  var h = document.getElementById('fc-pend-host');
+  if (!h) { h = document.createElement('div'); h.id = 'fc-pend-host'; document.body.appendChild(h); }
+  return h;
+}
+function fcPendCerrar() { var h = document.getElementById('fc-pend-host'); if (h) h.innerHTML = ''; }
+
+function fcPendAbrir(pedidoId, producto) {
+  var r = (_fcCache.trabados || []).find(function (x) { return x.pedido_id === pedidoId; }) || {};
+  var prev = (_fcCache.pendientes || []).find(function (x) { return x.pedido_id === pedidoId; });
+  var VIAS = [
+    ['ajuste_inventario', 'Ajuste de inventario', 'el stock de Xubio está mal, hay que cuadrarlo'],
+    ['revincular_xubio',  'Revincular en Xubio',  'el producto correcto es otro ítem de Xubio'],
+    ['nota_credito',      'Nota de crédito',      'va por NC, no por factura'],
+    ['ya_resuelto',       'Ya está resuelto',     'no hay nada que hacer, solo dejar constancia'],
+    ['otro',              'Otro',                 'explicalo en la nota']
+  ];
+  var opts = VIAS.map(function (v) {
+    var sel = prev && prev.via_resolucion === v[0] ? ' selected' : '';
+    return '<option value="' + v[0] + '"' + sel + '>' + v[1] + ' — ' + v[2] + '</option>';
+  }).join('');
+
+  _fcPendHost().innerHTML =
+    '<div class="fc-rc-overlay" onclick="if(event.target===this)fcPendCerrar()"><div class="fc-rc">' +
+    '<div class="fc-rc-tit">📝 Anotar el caso</div>' +
+    '<div class="fc-rc-fac">' + _fcEsc(r.cliente || pedidoId) +
+      '<span>' + _fcEsc(pedidoId) + (producto ? ' · ' + _fcEsc(producto) : '') + '</span></div>' +
+    '<div style="padding:10px 12px;background:#EFEBE9;border-radius:10px;font-size:12px;color:#4E342E;line-height:1.45;margin-bottom:12px;">' +
+      'Esto <strong>no factura ni destraba</strong> el pedido: deja constancia de qué pasa con él, para que no se pierda de vista.' +
+    '</div>' +
+    '<label class="fc-rc-lbl">¿Por dónde se resuelve?</label>' +
+    '<select id="fc-pend-via" class="fc-rc-sel">' + opts + '</select>' +
+    '<label class="fc-rc-lbl">Nota</label>' +
+    '<input id="fc-pend-nota" class="fc-rc-inp" type="text" maxlength="300" ' +
+      'placeholder="Ej: falta ingresar la compra del 24/07" value="' + _fcEsc((prev && prev.nota) || '') + '">' +
+    '<div class="fc-rc-acc" style="flex-wrap:wrap;gap:6px;">' +
+      '<button class="fc-rc-btn cancel" onclick="fcPendCerrar()">Cancelar</button>' +
+      '<button class="fc-rc-btn" style="background:#5D4037;color:#fff;" ' +
+        'onclick="fcPendGuardar(\'' + _fcEsc(pedidoId) + '\',\'' + _fcEsc(producto || '') + '\',\'pendiente\')">📝 Pendiente de resolver</button>' +
+      '<button class="fc-rc-btn ok" ' +
+        'onclick="fcPendGuardar(\'' + _fcEsc(pedidoId) + '\',\'' + _fcEsc(producto || '') + '\',\'anotado\')">✓ Anotado y listo</button>' +
+    '</div></div></div>';
+}
+
+async function fcPendGuardar(pedidoId, producto, estado) {
+  var via  = (document.getElementById('fc-pend-via')  || {}).value || 'otro';
+  var nota = (document.getElementById('fc-pend-nota') || {}).value || '';
+  try {
+    var url = APPS_SCRIPT_URL + '?accion=pendienteFactGuardar' +
+      '&pedidoId=' + encodeURIComponent(pedidoId) +
+      '&producto=' + encodeURIComponent(producto || '') +
+      '&via=' + encodeURIComponent(via) +
+      '&estado=' + encodeURIComponent(estado) +
+      '&nota=' + encodeURIComponent(nota) +
+      '&porQuien=' + encodeURIComponent(usuarioActual || 'admin');
+    var resp = await fetch(url);
+    var data = await resp.json();
+    if (data.status !== 'ok') { toast(data.message || 'No se pudo guardar', 'err'); return; }
+    fcPendCerrar();
+    toast(data.message, 'ok');
+    fcCargar();
+  } catch (e) { toast('Error de conexión: ' + e.message, 'err'); }
+}
+
+// ── Modal de sustitución ────────────────────────────────────────────
+function _fcSustHost() {
+  var h = document.getElementById('fc-sust-host');
+  if (!h) { h = document.createElement('div'); h.id = 'fc-sust-host'; document.body.appendChild(h); }
+  return h;
+}
+function fcSustCerrar() { var h = document.getElementById('fc-sust-host'); if (h) h.innerHTML = ''; }
+
+async function fcSustAbrir(pedidoId) {
+  _fcSustHost().innerHTML =
+    '<div class="fc-rc-overlay"><div class="fc-rc">' +
+    '<div class="fc-rc-tit">🔄 Cambiar producto</div>' +
+    '<div class="fc-rc-fac">Consultando el presupuesto en Xubio…</div></div></div>';
+  try {
+    var resp = await fetch(APPS_SCRIPT_URL + '?accion=sustitucionOpciones&pedidoId=' + encodeURIComponent(pedidoId));
+    var data = await resp.json();
+    if (data.status !== 'ok') { fcSustCerrar(); toast(data.message || 'No pude leer el pedido', 'err'); return; }
+    _fcSustPintar(data);
+  } catch (e) {
+    fcSustCerrar();
+    toast('Error de conexión: ' + e.message, 'err');
+  }
+}
+
+function _fcSustPintar(d) {
+  if (!d.lineas || !d.lineas.length) {
+    _fcSustHost().innerHTML =
+      '<div class="fc-rc-overlay" onclick="if(event.target===this)fcSustCerrar()"><div class="fc-rc">' +
+      '<div class="fc-rc-tit">🔄 Cambiar producto</div>' +
+      '<div class="fc-rc-fac">' + _fcEsc(d.cliente) + '<span>' + _fcEsc(d.pedido_id) + '</span></div>' +
+      '<div style="padding:12px;background:#FFF3E0;border-radius:10px;font-size:13px;color:#5D4037;line-height:1.5;">' +
+      'Ninguna línea de este pedido tiene un equivalente configurado.<br><br>' +
+      'Si el producto trabado se puede reemplazar por otro, primero hay que declarar el par como equivalente en <strong>productos_equivalentes</strong>. Avisale a Julián.' +
+      '</div>' +
+      '<div class="fc-rc-acc"><button class="fc-rc-btn cancel" onclick="fcSustCerrar()">Cerrar</button></div>' +
+      '</div></div>';
+    return;
+  }
+
+  var html = d.lineas.map(function (L) {
+    var opts = L.opciones.map(function (o) {
+      var hay  = Number(o.stock_visible) > 0;
+      var elegida = L.sustitucion_activa && Number(L.sustitucion_activa.destino_id) === Number(o.xubio_producto_id);
+      var alcanza = Number(o.stock_visible) >= Number(L.cantidad);
+      return '<button type="button" ' +
+        'onclick="fcSustElegir(\'' + _fcEsc(d.pedido_id) + '\',' + L.xubio_producto_id + ',' + o.xubio_producto_id + ')" ' +
+        'style="display:flex;justify-content:space-between;align-items:center;width:100%;gap:8px;padding:10px 12px;margin-bottom:6px;' +
+        'border:2px solid ' + (elegida ? '#2E7D32' : (hay ? '#CFD8DC' : '#FFCDD2')) + ';' +
+        'background:' + (elegida ? '#E8F5E9' : '#fff') + ';border-radius:10px;cursor:pointer;text-align:left;font-family:inherit;">' +
+        '<span style="font-weight:700;font-size:13px;color:#37474F;">' + (elegida ? '✓ ' : '') + _fcEsc(o.xubio_nombre) + '</span>' +
+        '<span style="font-size:12px;font-weight:900;white-space:nowrap;color:' +
+          (alcanza ? '#2E7D32' : (hay ? '#EF6C00' : '#C62828')) + ';">' +
+          o.stock_visible + ' disp.' + (hay && !alcanza ? ' ⚠️' : '') + '</span>' +
+        '</button>';
+    }).join('');
+
+    return '<div style="margin-bottom:14px;">' +
+      '<div style="font-size:12px;font-weight:800;color:#8B0000;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px;">' +
+        'Sale ahora: ' + _fcEsc(L.xubio_nombre) + ' × ' + L.cantidad +
+        ' <span style="color:' + (Number(L.stock_visible) > 0 ? '#EF6C00' : '#C62828') + ';">(' + L.stock_visible + ' disp.)</span>' +
+      '</div>' +
+      '<div style="font-size:11px;color:#78909C;margin-bottom:6px;">Cambiar por:</div>' +
+      opts +
+      (L.sustitucion_activa
+        ? '<button type="button" onclick="fcSustAnular(' + L.sustitucion_activa.id + ',\'' + _fcEsc(d.pedido_id) + '\')" ' +
+          'style="background:none;border:none;color:#C62828;font-size:12px;text-decoration:underline;cursor:pointer;padding:2px 0;">' +
+          'Deshacer — dejar ' + _fcEsc(L.xubio_nombre) + '</button>'
+        : '') +
+      '</div>';
+  }).join('');
+
+  _fcSustHost().innerHTML =
+    '<div class="fc-rc-overlay" onclick="if(event.target===this)fcSustCerrar()"><div class="fc-rc" style="max-height:88vh;overflow-y:auto;">' +
+    '<div class="fc-rc-tit">🔄 Cambiar producto</div>' +
+    '<div class="fc-rc-fac">' + _fcEsc(d.cliente) + '<span>' + _fcEsc(d.pedido_id) + ' · Presup #' + _fcEsc(String(d.presupuesto_id || '—')) + '</span></div>' +
+    '<div style="padding:10px 12px;background:#FFF8E1;border-radius:10px;font-size:12px;color:#5D4037;line-height:1.45;margin-bottom:12px;">' +
+      'Cambiá el producto solo si <strong>eso fue lo que se entregó</strong>. El precio y el IVA no se mueven — solo cambia qué descuenta Xubio.' +
+      '<br>Si en realidad salió el original y falta cargar la compra, esto no se toca: avisá al depósito.' +
+    '</div>' +
+    html +
+    '<div class="fc-rc-acc"><button class="fc-rc-btn cancel" onclick="fcSustCerrar()">Cerrar</button>' +
+    '<button class="fc-rc-btn ok" onclick="fcSustFacturar(\'' + _fcEsc(d.pedido_id) + '\')">🧾 Facturar ahora</button></div>' +
+    '</div></div>';
+}
+
+async function fcSustElegir(pedidoId, origenId, destinoId) {
+  try {
+    var url = APPS_SCRIPT_URL + '?accion=sustitucionGuardar' +
+      '&pedidoId=' + encodeURIComponent(pedidoId) +
+      '&origenId=' + origenId + '&destinoId=' + destinoId +
+      '&porQuien=' + encodeURIComponent(usuarioActual || 'admin') +
+      '&motivo=' + encodeURIComponent('sin stock en Xubio');
+    var resp = await fetch(url);
+    var data = await resp.json();
+    if (data.status !== 'ok') { toast(data.message || 'No se pudo guardar', 'err'); return; }
+    toast(data.message || 'Producto cambiado', 'ok');
+    fcSustAbrir(pedidoId); // repintar con la elección marcada
+  } catch (e) { toast('Error de conexión: ' + e.message, 'err'); }
+}
+
+async function fcSustAnular(id, pedidoId) {
+  try {
+    var resp = await fetch(APPS_SCRIPT_URL + '?accion=sustitucionAnular&id=' + id +
+      '&porQuien=' + encodeURIComponent(usuarioActual || 'admin'));
+    var data = await resp.json();
+    if (data.status !== 'ok') { toast(data.message || 'No se pudo deshacer', 'err'); return; }
+    toast('Deshecho', 'ok');
+    fcSustAbrir(pedidoId);
+  } catch (e) { toast('Error de conexión: ' + e.message, 'err'); }
+}
+
+async function fcSustFacturar(pedidoId) {
+  fcSustCerrar();
+  toast('Facturando ' + pedidoId + '…'); // sin tipo: solo existen .toast.ok y .toast.err
+  try {
+    var resp = await fetch(APPS_SCRIPT_URL + '?accion=facturarLote&ids=' + encodeURIComponent(pedidoId));
+    var data = await resp.json();
+    var r = (data.resultados && data.resultados[0]) || {};
+    if (r.status === 'facturada' || r.status === 'ya_facturada') {
+      toast('✅ Facturado: FC ' + (r.factura_nro || r.factura_id || ''), 'ok');
+    } else if (r.status === 'sin_cae') {
+      toast('⚠️ Comprobante creado SIN CAE — revisalo en Xubio', 'err');
+    } else {
+      toast('Sigue trabado: ' + (r.error || data.message || 'error desconocido'), 'err');
+    }
+  } catch (e) {
+    toast('Error de conexión: ' + e.message, 'err');
+  }
+  fcCargar();
 }
 
 function _fcRenderSueltas() {
