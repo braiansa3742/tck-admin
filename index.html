@@ -1,6 +1,21 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.134.0 — 28/07/2026
+     TCK ADMIN — v13.135.0 — 28/07/2026
+     v13.135.0: EL AUTO-REFRESH DEJA DE CERRARLE EL PEDIDO ABIERTO A FRANCISCO.
+       El tick de 20s llamaba cargarPedidos(true) -> renderPedidos(), que pisa
+       todo el innerHTML de #lista-pedidos: la card expandida se cerraba y la
+       vista saltaba al tope. Ventas tenía el guard hayAlgoAbierto() desde
+       v14.5.0; el admin nunca lo tuvo. Dos capas de fix:
+         (a) renderPedidos() ahora toma snapshot de las cards con .pedido-body.on
+             y del scroll, y las reabre después de reconstruir la lista. Cubre
+             TODOS los re-render (filtro, cambiarEstado, callbacks de acuerdos
+             y de costos), no solo el auto-refresh.
+         (b) adminHayAlgoAbierto(): si hay una card expandida, el modal de
+             duplicados o el picker de chofer, el tick de 20s no recarga nada y
+             marca _refreshPendiente. Al cerrar la card / el modal se dispara
+             adminRefrescarSiQuedoPendiente() y la lista se pone al día sola.
+       Sin cambios de backend ni de DB.
+     ── v13.134.0 — 28/07/2026 ──
      v13.134.0: ALFREDO ASIGNABLE COMO CHOFER EN EL ADMIN. Alfredo existe
        desde el 20/07 (app_usuarios rol chofer + perfil en ventas v14.112.0
        + chip en el filtro de Devoluciones), pero los selectores de
@@ -18190,7 +18205,30 @@ var _modoCampo = new URLSearchParams(window.location.search).get('modo') === 'ca
   }
 })();
 
-// ── AUTO-REFRESH 30s ─────────────────────────────────────────────
+// ── AUTO-REFRESH 20s ─────────────────────────────────────────────
+// v13.135.0 — hay UN pedido/modal abierto = pausa. El refresh cada 20s le
+// cerraba el detalle en la cara a Francisco mientras revisaba un pedido
+// (ventas ya tenía este guard desde v14.5.0; el admin no). Al cerrar la
+// última card se dispara el refresh que quedó pendiente, así no queda viejo.
+var _refreshPendiente = false;
+
+function adminHayAlgoAbierto() {
+  // Card de pedido expandida
+  if (document.querySelector('#lista-pedidos .pedido-body.on') !== null) return true;
+  // Modal de duplicados / "ver otros pedidos del cliente"
+  var dupBd = document.getElementById('dup-modal-backdrop');
+  if (dupBd && dupBd.classList.contains('on')) return true;
+  // Picker de chofer desplegado
+  if (document.querySelector('.chofer-picker') !== null) return true;
+  return false;
+}
+
+function adminRefrescarSiQuedoPendiente() {
+  if (!_refreshPendiente || adminHayAlgoAbierto()) return;
+  _refreshPendiente = false;
+  cargarPedidos(true);
+}
+
 setInterval(function() {
   if (!vendedorActual) return;
   // No refrescar si hay algún panel Xubio activo o el tomador está abierto
@@ -18202,6 +18240,8 @@ setInterval(function() {
   var sheetAbierto = document.querySelector('.export-backdrop.on') !== null
     || document.querySelector('#bot-cli-sheet-backdrop.on') !== null;
   if (xubioEnUso || tomadorEnUso || sheetAbierto) return;
+  // v13.135.0 — pedido abierto: no tocamos nada, queda anotado para después
+  if (adminHayAlgoAbierto()) { _refreshPendiente = true; return; }
   const antes = todosLosPedidos.length;
   const dupAntes = new Set(todosLosPedidos.filter(p => p.esDuplicado).map(p => p.pedidoId));
   cargarPedidos(true).then(function() {
@@ -19090,6 +19130,8 @@ function dupModalCerrar() {
   document.getElementById('dup-modal-backdrop').classList.remove('on');
   document.body.style.overflow = '';
   _dupModalState = null;
+  // v13.135.0: destrabar el refresh que el guard dejó pendiente
+  if (typeof adminRefrescarSiQuedoPendiente === 'function') adminRefrescarSiQuedoPendiente();
 }
 
 function dupModalCerrarFondo(event) {
@@ -20067,6 +20109,18 @@ function renderPedidos() {
   actualizarStats();
   actualizarTitle();
   actualizarBadgePendientes();
+  // v13.135.0 — snapshot de las cards expandidas + scroll ANTES de reconstruir
+  // la lista. renderPedidos() pisa todo el innerHTML de #lista-pedidos, así que
+  // cualquier re-render (auto-refresh, filtro, cambio de estado, callback de
+  // acuerdos/costos) cerraba el pedido que el admin tenía abierto y lo mandaba
+  // al tope de la lista. Ahora se reabren las mismas cards y se repone el scroll.
+  var _cardsAbiertas = [];
+  try {
+    document.querySelectorAll('#lista-pedidos .pedido-body.on').forEach(function(b) {
+      if (b.id) _cardsAbiertas.push(b.id);
+    });
+  } catch(e) {}
+  var _scrollPrev = window.pageYOffset || document.documentElement.scrollTop || 0;
   var lista = pedidosFiltrados();
   var cont = document.getElementById('lista-pedidos');
   if (!lista.length) {
@@ -20085,6 +20139,18 @@ function renderPedidos() {
     return;
   }
   cont.innerHTML = acuResumenBannerHtml(lista) + lista.map(function(p){ return renderCard(p); }).join('');
+  // v13.135.0 — reabrir las cards que estaban expandidas y reponer el scroll.
+  // acuCargarMargen es idempotente (cachea por pedidoId), así que reabrir no
+  // dispara fetches nuevos.
+  if (_cardsAbiertas.length) {
+    _cardsAbiertas.forEach(function(bid) {
+      var b = document.getElementById(bid);
+      if (!b) return;
+      b.classList.add('on');
+      try { acuCargarMargen(bid.replace(/^body-/, '')); } catch(e) {}
+    });
+    try { window.scrollTo(0, _scrollPrev); } catch(e) {}
+  }
   // v11 admin: actualizar barras de sync Xubio recién insertadas en el DOM
   if (typeof xubioActualizarBarrasSync === 'function') xubioActualizarBarrasSync();
 }
@@ -20581,6 +20647,9 @@ function toggleCard(id) {
   var b = document.getElementById('body-'+id);
   if (b) b.classList.toggle('on');
   if (b && b.classList.contains('on')) acuCargarMargen(id);   // v13.31.0: margen lazy
+  // v13.135.0: si al cerrar no queda nada abierto, corremos el refresh que el
+  // guard del auto-refresh dejó pendiente (así no se ve una lista vieja).
+  else if (typeof adminRefrescarSiQuedoPendiente === 'function') adminRefrescarSiQuedoPendiente();
 }
 
 // ── NOTAS ─────────────────────────────────────────────────────────
