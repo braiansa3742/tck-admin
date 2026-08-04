@@ -1,6 +1,31 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.139.0 — 30/07/2026
+     TCK ADMIN — v13.140.0 — 04/08/2026
+     v13.140.0: MOVER UN PEDIDO ENTRE VIAJES (pedido de Fran, 30/07).
+        Un pedido que entra a la tarde y sale temprano al otro día con el
+        viaje ya cerrado, o un producto que vuelve de la mañana y se pasa
+        al reparto de la tarde: hasta ahora Fran lo resolvía a mano.
+        La mecánica ya existía en el Apps Script (_viajeAsociarPedido
+        escribe pedidos_zona + entregas y recalcula totales, sin mirar el
+        estado del viaje). La única UI que la usaba era la bandeja
+        "Pedidos sin viaje", que solo ofrecía viajes planificado/preparando
+        con salida futura. Lo que faltaba era exponerla con guardas.
+          · Botón "🔀 Mover" en cada pedido del detalle de viaje.
+          · Modal con los viajes de la ventana (7 días atrás / 14 adelante),
+            misma zona primero, con estado, chofer y cantidad de pedidos.
+            Los que NO pueden recibir el pedido se muestran igual pero
+            deshabilitados y con el motivo — si Fran no ve el viaje que
+            busca, tiene que saber por qué no está.
+          · Motivo obligatorio a nivel UI; queda en pedido_acciones.
+        LA GUARDA QUE IMPORTA (la aplica el backend, no esta UI): una
+        entrega con rendicion_estado='confirmada' es plata que Valentina ya
+        concilió. Ni se puede mover ese pedido, ni sumarle pedidos a un
+        viaje que ya rindió. Se bloquea, no se avisa.
+        Gating de UI: rol 'operaciones' (Fran) y 'admin'.
+        REQUIERE Apps Script v25.102.0. Al chofer le aparece actualizado en
+        su app con tck-ventas v14.124.0.
+     ─────────────────────────────────────────────────────────────────────
+     v13.139.0 — 30/07/2026
      v13.139.0: TAB COMISIONES (liquidación de vendedores) + FIX del banner
         de actualización que quedó colgado.
         · Tab nuevo "Comisiones" en el menú Más. Lee rpc/admin_comisiones,
@@ -9681,6 +9706,22 @@ input[type="date"] {
   text-align: right;
   flex-shrink: 0;
 }
+/* v13.140.0 — botón "mover a otro viaje" en la fila del pedido */
+.v-mv-btn {
+  margin-top: 4px;
+  background: #0D47A1;
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  padding: 3px 8px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .3px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.v-mv-btn:active { transform: scale(.96); }
 .v-pedido-monto {
   font-family: 'Barlow Condensed', sans-serif;
   font-size: 14px;
@@ -30821,9 +30862,121 @@ function lzRenderPedidoEnViaje(p) {
   const estadoTxt = isPend ? 'Pendiente' : p.estado;
   const estadoCls = isPend ? 'estado-mini-pend' : 'estado-mini-conf';
   html += '    <div class="v-pedido-estado-mini ' + estadoCls + '">' + estadoTxt + '</div>';
+  // v13.140.0 — mover el pedido a otro viaje (Fran). El backend valida rendición
+  // confirmada y ventana de días; acá solo mostramos el botón a quien opera.
+  if (lzPuedeMoverViaje()) {
+    html += '    <button class="v-mv-btn" title="Mover este pedido a otro viaje" ' +
+            'onclick="event.stopPropagation();mvpAbrir(\'' + lzEsc(p.pedido_id) + '\')">🔀 Mover</button>';
+  }
   html += '  </div>';
   html += '</div>';
   return html;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// v13.140.0 — MOVER UN PEDIDO ENTRE VIAJES (pedido de Fran, 30/07)
+//
+// Un pedido que entra a la tarde y sale temprano al otro día con el viaje
+// ya cerrado, o un producto que vuelve de la mañana y se pasa al reparto
+// de la tarde: hasta ahora Fran lo hacía a mano. La mecánica ya existía en
+// el Apps Script; lo que faltaba era exponerla.
+//
+// El backend (v25.102.0) es el que valida de verdad: rendición confirmada
+// (del pedido o del viaje destino) y ventana de días. Acá el gating es solo
+// de UI, para que el botón no le aparezca a quien no opera logística.
+// ═══════════════════════════════════════════════════════════════════
+function lzPuedeMoverViaje() {
+  return rolActual === 'operaciones' || rolActual === 'admin';
+}
+
+function _mvpHost() {
+  var h = document.getElementById('mvp-host');
+  if (!h) { h = document.createElement('div'); h.id = 'mvp-host'; document.body.appendChild(h); }
+  return h;
+}
+function mvpCerrar() { var h = document.getElementById('mvp-host'); if (h) h.innerHTML = ''; }
+
+async function mvpAbrir(pedidoId) {
+  _mvpHost().innerHTML =
+    '<div class="fc-rc-overlay"><div class="fc-rc">' +
+    '<div class="fc-rc-tit">🔀 Mover a otro viaje</div>' +
+    '<div class="fc-rc-fac">Buscando viajes disponibles…</div></div></div>';
+  try {
+    const resp = await fetch(APPS_SCRIPT_URL + '?accion=viajesCandidatosMover&pedido_id=' + encodeURIComponent(pedidoId));
+    const d = await resp.json();
+    if (d.status === 'bloqueado') { mvpCerrar(); toast(d.message, 'err'); return; }
+    if (d.status !== 'ok')        { mvpCerrar(); toast(d.message || 'No se pudo consultar', 'err'); return; }
+    _mvpPintar(d);
+  } catch (e) { mvpCerrar(); toast('Error de conexión: ' + e.message, 'err'); }
+}
+
+function _mvpPintar(d) {
+  const EST_LBL = {
+    planificado: '📋 Planificado', preparando: '📦 Preparando', en_ruta: '🚚 En ruta',
+    rindiendo: '💰 Rindiendo', cerrado: '🔒 Cerrado'
+  };
+  // Los de la misma zona primero: es lo que Fran busca el 95% de las veces.
+  const orden = (d.viajes || []).slice().sort(function (a, b) {
+    if (a.puede_recibir !== b.puede_recibir) return a.puede_recibir ? -1 : 1;
+    if (a.misma_zona !== b.misma_zona) return a.misma_zona ? -1 : 1;
+    return a.fecha_salida < b.fecha_salida ? 1 : -1;
+  });
+
+  let filas = orden.map(function (v) {
+    const dis = !v.puede_recibir;
+    return '<button type="button" ' + (dis ? 'disabled' : 'onclick="mvpConfirmar(\'' + lzEsc(d.pedido_id) + '\',\'' + v.id + '\')"') + ' ' +
+      'style="display:block;width:100%;text-align:left;padding:10px 12px;margin-bottom:6px;border-radius:10px;font-family:inherit;' +
+      'border:2px solid ' + (dis ? '#ECEFF1' : (v.misma_zona ? '#8B0000' : '#CFD8DC')) + ';' +
+      'background:' + (dis ? '#FAFAFA' : '#fff') + ';opacity:' + (dis ? '.55' : '1') + ';' +
+      'cursor:' + (dis ? 'not-allowed' : 'pointer') + ';">' +
+      '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">' +
+        '<span style="font-weight:800;font-size:13px;color:#37474F;">' +
+          lzEsc(_fcFechaCorta ? _fcFechaCorta(v.fecha_salida) : v.fecha_salida) +
+          ' · ' + lzEsc(String(v.zona || '').toUpperCase()) +
+          (v.misma_zona ? '' : ' <span style="color:#EF6C00;font-size:10px;">(otra zona)</span>') +
+        '</span>' +
+        '<span style="font-size:11px;white-space:nowrap;color:#607D8B;">' + (EST_LBL[v.estado] || v.estado) + '</span>' +
+      '</div>' +
+      '<div style="font-size:11px;color:#78909C;margin-top:2px;">' +
+        (v.chofer ? '👤 ' + lzEsc(v.chofer) : 'sin chofer') + ' · ' + v.total_pedidos + ' pedidos' +
+        (v.es_especial ? ' · ⭐ especial' : '') +
+      '</div>' +
+      (dis ? '<div style="font-size:11px;color:#C62828;margin-top:3px;">⛔ ' + lzEsc(v.motivo_bloqueo) + '</div>' : '') +
+      '</button>';
+  }).join('');
+
+  if (!filas) filas = '<div style="padding:14px;color:#78909C;font-size:13px;">No hay viajes en la ventana de días.</div>';
+
+  _mvpHost().innerHTML =
+    '<div class="fc-rc-overlay" onclick="if(event.target===this)mvpCerrar()"><div class="fc-rc" style="max-height:88vh;overflow-y:auto;">' +
+    '<div class="fc-rc-tit">🔀 Mover a otro viaje</div>' +
+    '<div class="fc-rc-fac">' + lzEsc(d.cliente) + '<span>' + lzEsc(d.pedido_id) + ' · zona ' + lzEsc(d.zona_pedido || '—') + '</span></div>' +
+    '<div style="padding:10px 12px;background:#E3F2FD;border-radius:10px;font-size:12px;color:#0D47A1;line-height:1.45;margin-bottom:12px;">' +
+      'Al mover el pedido, <strong>al chofer le aparece actualizado en su app</strong> — va a ver en su camión lo que realmente lleva.' +
+    '</div>' +
+    '<label class="fc-rc-lbl">Motivo (queda registrado)</label>' +
+    '<input id="mvp-motivo" class="fc-rc-inp" type="text" maxlength="200" placeholder="Ej: entró a la tarde, sale mañana temprano">' +
+    '<label class="fc-rc-lbl" style="margin-top:10px;">Elegí el viaje de destino</label>' +
+    filas +
+    '<div class="fc-rc-acc"><button class="fc-rc-btn cancel" onclick="mvpCerrar()">Cancelar</button></div>' +
+    '</div></div>';
+}
+
+async function mvpConfirmar(pedidoId, viajeDestino) {
+  const motivo = (document.getElementById('mvp-motivo') || {}).value || '';
+  try {
+    const url = APPS_SCRIPT_URL + '?accion=viajeMoverPedido' +
+      '&pedido_id=' + encodeURIComponent(pedidoId) +
+      '&viaje_destino=' + encodeURIComponent(viajeDestino) +
+      '&porQuien=' + encodeURIComponent(usuarioActual || 'admin') +
+      '&motivo=' + encodeURIComponent(motivo);
+    const resp = await fetch(url);
+    const d = await resp.json();
+    if (d.status !== 'ok') { toast('❌ ' + (d.message || 'No se pudo mover'), 'err'); return; }
+    mvpCerrar();
+    toast('✅ ' + d.message, 'ok');
+    if (typeof lzCargar === 'function') lzCargar();
+  } catch (e) { toast('Error de conexión: ' + e.message, 'err'); }
 }
 
 // ───────────────────────────────────────────────────────────────
