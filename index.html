@@ -1,5 +1,22 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.142.0 — 06/08/2026
+     v13.142.0: COMISIONES — EL BONO DE CLIENTE NUEVO CAE EN EL MES EN QUE
+        SE APRUEBA (pedido de Braian 06/08).
+        CASO: el 06/08 aprobó 7 clientes que se habían dado de alta en
+        julio y recompraron en agosto. Los $8.000 de cada uno se sumaban a
+        JULIO (la liquidación enganchaba la cartera por mes_alta) — mes ya
+        pagado, así que la plata se pasaba de largo.
+        (A) Backend: cartera_verificacion.mes_bono sella el mes al apretar
+            ✓ y la liquidación agrupa por ahí. Lo histórico se backfilleó
+            con el mes de la recompra, así junio y julio quedan como se
+            pagaron y los 7 de hoy se mueven a agosto.
+        (B) Los pendientes se listan SIEMPRE, del mes que sean. Antes se
+            filtraban por mes_alta: un alta de julio que recompraba en
+            agosto quedaba invisible si estabas parado en agosto.
+        (C) Cada candidato avisa a qué mes va a caer el bono si lo aprobás.
+        Requiere tck-comisiones-v2-mes-bono.sql corrido en Supabase.
+
      TCK ADMIN — v13.141.0 — 04/08/2026
      v13.141.0: TAB EMBUDO DE CAPTACIÓN (menú "Más").
         Cierra el frente que arrancó el 04/08 con el circuito de Meta:
@@ -15127,7 +15144,7 @@ input.canales-exp-input[type="date"] {
   </style>
     <div class="cm-head">
       <h2>💵 Comisiones de vendedores</h2>
-      <div class="cm-sub">Producción · crecimiento sobre piso · cartera. Margen POST-IIBB, sin pedidos no entregados.</div>
+      <div class="cm-sub">Producción · crecimiento sobre piso · cartera. Margen POST-IIBB, sin pedidos no entregados.<br>Los $8.000 del cliente nuevo caen en el mes en que lo aprobás.</div>
     </div>
     <div class="cm-ctrl">
       <select class="cm-sel" id="cm-mes" onchange="comSetMes(this.value)"></select>
@@ -15138,7 +15155,7 @@ input.canales-exp-input[type="date"] {
     <div class="cm-vlist" id="cm-vlist"><div class="cm-estado">Cargando comisiones…</div></div>
     <div id="cm-cartera-wrap" style="display:none;">
       <div class="cm-sec">👥 Clientes nuevos a verificar</div>
-      <div class="cm-sub" style="padding:0 14px 10px;">Solo suman al bono los aprobados. La decisión queda guardada: no se revisa de nuevo el mes que viene.</div>
+      <div class="cm-sub" style="padding:0 14px 10px;" id="cm-cartera-sub">Solo suman al bono los aprobados. La decisión queda guardada: no se revisa de nuevo el mes que viene.</div>
       <div id="cm-cartera"></div>
     </div>
   </div>
@@ -22302,17 +22319,18 @@ function cmRenderKpis() {
     '<div class="cm-kpi"><div class="cm-k-n">' + cmCorto(tCart) + '</div><div class="cm-k-l">Cartera</div></div>';
 
   // Aviso: candidatos sin verificar + margen excluido por no entregados
-  var pend = 0, excl = 0;
-  _cmData.forEach(function (r) {
-    pend += Number(r.cartera_pendientes || 0);
-    excl += Number(r.margen_excluido || 0);
-  });
+  // v13.142.0 — los pendientes se cuentan sobre la lista real (que ahora
+  // trae los de todos los meses), no sobre el mes seleccionado.
+  var excl = 0;
+  _cmData.forEach(function (r) { excl += Number(r.margen_excluido || 0); });
+  var pend = _cmCand.filter(function (c) { return c.estado_verif === 'pendiente'; }).length;
   var av = document.getElementById('cm-aviso');
   if (!av) return;
   var partes = [];
   if (pend > 0) {
     partes.push('Hay <b>' + pend + ' cliente' + (pend === 1 ? '' : 's') +
-      ' nuevo' + (pend === 1 ? '' : 's') + ' sin verificar</b> — hasta que los apruebes no suman al bono de cartera.');
+      ' nuevo' + (pend === 1 ? '' : 's') + ' sin verificar</b> — hasta que los apruebes no suman al bono de cartera. ' +
+      'Lo que apruebes hoy suma a <b>' + cmMesLabel(cmMesHoy()) + '</b>.');
   }
   if (excl > 0) {
     partes.push('Se descontaron <b>' + cmPesos(excl) + '</b> de margen de pedidos que no se entregaron.');
@@ -22410,18 +22428,34 @@ function cmRenderCartera() {
   var pend = _cmCand.filter(function (c) { return c.estado_verif === 'pendiente'; });
   if (!pend.length) { wrap.style.display = 'none'; return; }
   wrap.style.display = '';
+
+  // v13.142.0 — los pendientes se listan siempre (sin importar el mes que
+  // estés mirando) y el bono cae en el mes en que apretás ✓, no en el mes
+  // de alta del cliente.
+  var mesHoy = cmMesHoy();
+  var sub = document.getElementById('cm-cartera-sub');
+  if (sub) {
+    sub.innerHTML = 'Solo suman al bono los aprobados. La decisión queda guardada: no se revisa de nuevo el mes que viene.<br>' +
+      'Se listan <b>todos los pendientes</b>, del mes que sean. Lo que apruebes hoy suma a <b>' +
+      cmMesLabel(mesHoy) + '</b>.';
+  }
+
   cont.innerHTML = pend.map(function (c) {
     var id = cmEsc(c.cliente_xubio_id);
     var sinFactura = !c.primera_factura;
+    var mesRec = c.fecha_recompra ? String(c.fecha_recompra).slice(0, 7) : null;
+    var atrasado = mesRec && mesRec !== mesHoy;
     return '' +
       '<div class="cm-cand" id="cm-c-' + id + '">' +
         '<div class="cm-cand-i">' +
           '<div class="cm-cand-n">' + cmEsc(c.cliente) +
-            (sinFactura ? '<span class="cm-badge no">sin facturar</span>' : '') + '</div>' +
+            (sinFactura ? '<span class="cm-badge no">sin facturar</span>' : '') +
+            (atrasado ? '<span class="cm-badge no">recompró en ' + cmMesLabel(mesRec).split(' ')[0] + '</span>' : '') + '</div>' +
           '<div class="cm-cand-s">' + cmEsc(c.vendedor) + ' · ' + cmEsc(c.localidad || 's/localidad') +
             ' · ' + cmEsc(c.origen) + '<br>Alta ' + cmFecha(c.fecha_alta) +
             ' · recompró ' + cmFecha(c.fecha_recompra) +
-            ' · 1ª factura ' + (c.primera_factura ? cmFecha(c.primera_factura) : 'nunca') + '</div>' +
+            ' · 1ª factura ' + (c.primera_factura ? cmFecha(c.primera_factura) : 'nunca') +
+            '<br>Si lo aprobás, los $8.000 caen en <b>' + cmMesLabel(mesHoy) + '</b>.</div>' +
         '</div>' +
         '<div class="cm-cand-b">' +
           '<button class="cm-ok" title="Es alta nueva" onclick="comVerificar(\'' + id + '\',true)">✓</button>' +
