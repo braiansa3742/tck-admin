@@ -1,6 +1,21 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.144.0 — 11/08/2026
+     TCK ADMIN — v13.145.0 — 11/08/2026
+       DEDUPE DE PEDIDOS DUPLICADOS EN EL SHEET.
+       El Sheet puede tener DOS filas con el mismo pedido_id: la funcion de
+       unir pedidos agrega una fila nueva con el total consolidado en vez de
+       editar la original. Caso real: TCK-20260809-1623-TCK-7L1X (Morena,
+       Gral Villegas) se dibujaba dos veces, $262.955 y $182.000, y el
+       vendedor no sabia cual confirmar. Riesgo: confirmar las dos genera
+       DOS presupuestos en Xubio del mismo pedido (el changelog del AS ya
+       registra 68 pedidos con 2+ presupuestos).
+       Ahora se deduplica por pedidoId al parsear el CSV, priorizando la
+       fila mas completa (fecha de entrega > turno > estado avanzado y, a
+       igualdad, mayor total: la unida siempre suma). En Supabase hay una
+       sola fila, asi que esto realinea la vista con la fuente de verdad.
+       No toca el Sheet ni el backend: es solo la capa de lectura.
+
+       v13.144.0 — 11/08/2026
      v13.144.0: FASE 1 TAB PRECIOS v2 — ANCLA DE TRAMOS + COMPRAS SIN VINCULAR.
        (1) FIX aplicarPrecioTierAware: el delta de la escalera se anclaba
        SIEMPRE en el tramo de mayor cantidad (convención Suprema, donde
@@ -18941,6 +18956,40 @@ async function cargarPedidos(silencioso) {
         fila:           i + 1
       });
     }
+    // ── v13.145.0 — DEDUPE POR pedidoId ──────────────────────────────
+    // El Sheet puede tener DOS filas con el mismo pedido_id: la funcion de
+    // unir pedidos agrega una fila nueva con el total consolidado en vez de
+    // editar la original. Caso real: TCK-20260809-1623-TCK-7L1X (Morena,
+    // Gral Villegas) aparecia dos veces, $262.955 y $182.000, y el vendedor
+    // no sabia cual confirmar. Riesgo concreto: confirmar las dos genera
+    // DOS presupuestos en Xubio para el mismo pedido.
+    // Se prioriza la fila mas completa (mas datos de logistica cargados y,
+    // a igualdad, mayor total: la unida siempre suma). En Supabase hay una
+    // sola fila, asi que esto realinea la vista con la fuente de verdad.
+    pedidos = (function _dedupPedidos(arr){
+      function _puntaje(p){
+        var n = 0;
+        if (p.fechaEntrega) n += 4;
+        if (p.turnoEntrega) n += 2;
+        if (p.estado && p.estado !== 'Pendiente') n += 1;
+        return n;
+      }
+      var porId = {}, orden = [];
+      arr.forEach(function(p){
+        var id = p.pedidoId;
+        if (!porId[id]) { porId[id] = p; orden.push(id); return; }
+        var a = porId[id], pa = _puntaje(a), pb = _puntaje(p);
+        var ta = parseInt(String(a.total||'0').replace(/[^\d]/g,''),10) || 0;
+        var tb = parseInt(String(p.total||'0').replace(/[^\d]/g,''),10) || 0;
+        if (pb > pa || (pb === pa && tb > ta)) porId[id] = p;
+      });
+      if (orden.length !== arr.length) {
+        console.log('[TCK dedupe] ' + arr.length + ' filas -> ' + orden.length +
+                    ' pedidos unicos (' + (arr.length - orden.length) + ' duplicadas en el Sheet)');
+      }
+      return orden.map(function(id){ return porId[id]; });
+    })(pedidos);
+
     sortPedidos(pedidos);
 
     // Actualizar timestamp de última carga
