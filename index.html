@@ -1,21 +1,42 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.145.0 — 11/08/2026
-       DEDUPE DE PEDIDOS DUPLICADOS EN EL SHEET.
-       El Sheet puede tener DOS filas con el mismo pedido_id: la funcion de
-       unir pedidos agrega una fila nueva con el total consolidado en vez de
-       editar la original. Caso real: TCK-20260809-1623-TCK-7L1X (Morena,
-       Gral Villegas) se dibujaba dos veces, $262.955 y $182.000, y el
-       vendedor no sabia cual confirmar. Riesgo: confirmar las dos genera
-       DOS presupuestos en Xubio del mismo pedido (el changelog del AS ya
-       registra 68 pedidos con 2+ presupuestos).
-       Ahora se deduplica por pedidoId al parsear el CSV, priorizando la
-       fila mas completa (fecha de entrega > turno > estado avanzado y, a
-       igualdad, mayor total: la unida siempre suma). En Supabase hay una
-       sola fila, asi que esto realinea la vista con la fuente de verdad.
-       No toca el Sheet ni el backend: es solo la capa de lectura.
+     TCK ADMIN — v13.146.0 — 11/08/2026
+     v13.146.0: COMPRAS SIN VINCULAR v2 (feedback Braian: "171 me arruina la
+       vista"). El Xubio factura DOS negocios: la vista mostraba también las
+       compras del buffet TCK Food y los gastos, que nunca se vinculan.
+       · SQL tck_compras_ignorar_v1: tabla compras_map_ignorar (por
+         proveedor o producto) sembrada con 11 proveedores del buffet →
+         el panel baja de 171 a lo que importa.
+       · Botón "🚫" por fila: ignorar SIEMPRE el proveedor entero o solo
+         ese producto (dos confirmaciones, se guarda en la tabla — el
+         panel se autolimpia con el uso, escritura verificada anti-RLS).
+       · Colapsado por defecto: muestra las 6 más grandes (orden por
+         NETO desc — lo gordo es lo que puede ser mercadería) + "Ver
+         las N restantes".
+       · El circuito "costo nuevo → comparar → fijar precio" sigue siendo
+         PRECIOS SUGERIDOS (panel verde) + Margen bajo objetivo: este
+         panel rojo solo caza facturas cuyo costo NO entra al sistema.
 
-       v13.144.0 — 11/08/2026
+     TCK ADMIN — v13.145.0 — 11/08/2026
+     v13.145.0: EDITOR DE TRAMOS INLINE (Fase 2 tab Precios, mockup aprobado).
+       Cada producto con tramos muestra un chip "🏷️ N tramos" en su fila del
+       tab Márgenes → expande la escalera EDITABLE ahí mismo:
+       · Precio por tramo con margen POST-IIBB vivo por tramo (neto/1+IVA,
+         −5% IIBB, − costo de reposición) y % vs lista.
+       · "Mover todo ±$": delta parejo a toda la escalera (regla costo sube).
+       · Validaciones al guardar: MONOTONICIDAD (más cantidad nunca paga más
+         caro, bloquea), A>B>C entre Pollo A/B/C en todo corte (bloquea),
+         CANDADO si un tramo queda con margen <10% post-IIBB (confirmación
+         explícita) y BLOQUEO duro si queda ≤0 (a pérdida no, ni con motivo:
+         eso va por SQL con Braian). Motivo obligatorio al guardar.
+       · Si se toca el tramo lista (min=1), precio_actual del canónico se
+         actualiza junto (motivo/origen 'tramos_editor', patrón fail-soft de
+         aplicarPrecioTierAware) → catálogo y ventas lo ven en su refresh.
+       · Los CORTES (1-4/5-9/10+) no se editan acá: estructura por SQL.
+       · Escrituras con return=representation verificado (0 filas = aviso,
+         nunca falso éxito por RLS).
+
+     TCK ADMIN — v13.144.0 — 11/08/2026
      v13.144.0: FASE 1 TAB PRECIOS v2 — ANCLA DE TRAMOS + COMPRAS SIN VINCULAR.
        (1) FIX aplicarPrecioTierAware: el delta de la escalera se anclaba
        SIEMPRE en el tramo de mayor cantidad (convención Suprema, donde
@@ -14881,6 +14902,25 @@ input.canales-exp-input[type="date"] {
     #view-margenes .mg-iva-tag{ font-size:9px; font-weight:800; color:#EF6C00; }
     #view-margenes .mg-badge-sin{ display:inline-block; background:#EEE; color:#8A7B63; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; padding:3px 8px; border-radius:20px; margin-top:6px; }
     #view-margenes .mg-sec-sin{ text-align:center; font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; color:#8A7B63; margin:14px 0 8px; }
+    /* v13.145.0 — editor de tramos inline */
+    .mg-esc-chip{ display:inline-block; margin-top:8px; background:#EAF3DE; border:1px solid #97C459; color:#27500A; font-size:10.5px; font-weight:800; border-radius:8px; padding:3px 9px; cursor:pointer; }
+    .mg-esc-wrap{ display:none; margin-top:8px; border-top:1.5px dashed #E8DCC8; padding-top:8px; }
+    .mg-esc-wrap.on{ display:block; }
+    .mg-esc-head{ display:grid; grid-template-columns:54px 1fr 94px 66px; gap:6px; font-size:9px; color:#8A7A66; text-transform:uppercase; letter-spacing:.5px; font-weight:800; padding-bottom:4px; border-bottom:1.5px solid #E8DCC8; }
+    .mg-esc-row{ display:grid; grid-template-columns:54px 1fr 94px 66px; gap:6px; align-items:center; padding:4px 0; border-bottom:1px solid #F3EADD; }
+    .mg-esc-row .r-l{ font-size:12px; font-weight:800; color:#5C4F3A; }
+    .mg-esc-row input{ width:100%; padding:6px 8px; border:1.5px solid #E8DCC8; border-radius:8px; font-size:14px; font-weight:800; color:#1A0800; text-align:right; background:#fff; }
+    .mg-esc-row input.err{ border-color:#C62828; background:#FFEBEE; color:#C62828; }
+    .mg-esc-row .r-m{ font-size:12px; font-weight:800; text-align:right; }
+    .mg-esc-row .r-d{ font-size:10.5px; color:#8A7A66; text-align:right; }
+    .mg-esc-err{ font-size:10.5px; color:#C62828; font-weight:700; padding:6px 0 0; }
+    .mg-esc-acc{ display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
+    .mg-esc-acc button{ border:none; border-radius:9px; padding:8px 12px; font-size:12px; font-weight:800; cursor:pointer; }
+    .mg-esc-b-mover{ background:#F3EADD; border:1.5px solid #D4A574 !important; color:#7a4b00; }
+    .mg-esc-b-des{ background:#fff; border:1.5px solid #E8DCC8 !important; color:#8A7A66; }
+    .mg-esc-b-save{ background:#1E8449; color:#fff; flex:1; }
+    .mg-esc-b-save:disabled{ background:#aaa; cursor:not-allowed; }
+    .mg-esc-nota{ font-size:9.5px; color:#8A7A66; margin-top:6px; }
     #view-margenes .mg-estado{ text-align:center; padding:30px 16px; color:#8A7B63; font-style:italic; font-size:13px; }
     /* v13.23 — Costos que se movieron */
     #view-margenes .mg-var-wrap{ margin:10px 12px 0; background:#fff; border-radius:11px; box-shadow:0 1px 4px rgba(0,0,0,.07); border-left:5px solid #EF6C00; overflow:hidden; }
@@ -18956,40 +18996,6 @@ async function cargarPedidos(silencioso) {
         fila:           i + 1
       });
     }
-    // ── v13.145.0 — DEDUPE POR pedidoId ──────────────────────────────
-    // El Sheet puede tener DOS filas con el mismo pedido_id: la funcion de
-    // unir pedidos agrega una fila nueva con el total consolidado en vez de
-    // editar la original. Caso real: TCK-20260809-1623-TCK-7L1X (Morena,
-    // Gral Villegas) aparecia dos veces, $262.955 y $182.000, y el vendedor
-    // no sabia cual confirmar. Riesgo concreto: confirmar las dos genera
-    // DOS presupuestos en Xubio para el mismo pedido.
-    // Se prioriza la fila mas completa (mas datos de logistica cargados y,
-    // a igualdad, mayor total: la unida siempre suma). En Supabase hay una
-    // sola fila, asi que esto realinea la vista con la fuente de verdad.
-    pedidos = (function _dedupPedidos(arr){
-      function _puntaje(p){
-        var n = 0;
-        if (p.fechaEntrega) n += 4;
-        if (p.turnoEntrega) n += 2;
-        if (p.estado && p.estado !== 'Pendiente') n += 1;
-        return n;
-      }
-      var porId = {}, orden = [];
-      arr.forEach(function(p){
-        var id = p.pedidoId;
-        if (!porId[id]) { porId[id] = p; orden.push(id); return; }
-        var a = porId[id], pa = _puntaje(a), pb = _puntaje(p);
-        var ta = parseInt(String(a.total||'0').replace(/[^\d]/g,''),10) || 0;
-        var tb = parseInt(String(p.total||'0').replace(/[^\d]/g,''),10) || 0;
-        if (pb > pa || (pb === pa && tb > ta)) porId[id] = p;
-      });
-      if (orden.length !== arr.length) {
-        console.log('[TCK dedupe] ' + arr.length + ' filas -> ' + orden.length +
-                    ' pedidos unicos (' + (arr.length - orden.length) + ' duplicadas en el Sheet)');
-      }
-      return orden.map(function(id){ return porId[id]; });
-    })(pedidos);
-
     sortPedidos(pedidos);
 
     // Actualizar timestamp de última carga
@@ -41874,6 +41880,8 @@ var _mgSmPP = null;   // cache productos_proveedores para el selector
 
 function mgSmEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+var _mgSmExpand = false;   // v13.146.0 — colapsado por defecto
+
 function mgRenderSinMapear(){
   var wrap = document.getElementById('mg-sm-wrap');
   var list = document.getElementById('mg-sm-list');
@@ -41883,18 +41891,54 @@ function mgRenderSinMapear(){
   if (!rows.length){ wrap.style.display = 'none'; return; }
   wrap.style.display = 'block';
   if (count) count.textContent = rows.length + (rows.length === 1 ? ' compra' : ' compras');
+  // v13.146.0 — lo gordo primero: lo que puede ser mercadería de reventa
+  var orden = rows.slice().sort(function(a, b){ return (Number(b.ultimo_neto) || 0) - (Number(a.ultimo_neto) || 0); });
+  var TOPE = 6;
+  var visibles = _mgSmExpand ? orden : orden.slice(0, TOPE);
   var html = '';
-  rows.forEach(function(r, idx){
+  visibles.forEach(function(r){
+    var idx = rows.indexOf(r);
     var neto = Math.round(Number(r.ultimo_neto) || 0).toLocaleString('es-AR');
-    html += '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #FFE4E1;font-size:12px;">'
+    html += '<div style="display:flex;align-items:center;gap:6px;padding:7px 0;border-bottom:1px solid #FFE4E1;font-size:12px;">'
       + '<div style="flex:1;min-width:0;">'
       + '<div style="font-weight:800;color:#3E2723;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + mgSmEsc(r.producto_xubio_nombre || ('Xubio #' + r.producto_xubio_id)) + '</div>'
       + '<div style="font-size:10.5px;color:#8A7A66;">' + mgSmEsc(r.proveedor_xubio_nombre || '') + ' · últ. ' + mgSmEsc(r.ultima_factura || '') + ' · ' + (r.lineas || 1) + ' líneas · neto $' + neto + '</div>'
       + '</div>'
+      + '<button class="fc-fact-btn" style="background:#8A7A66;flex-shrink:0;padding:6px 8px;" title="Ignorar (no es mercadería de reventa)" onclick="mgSmIgnorar(' + idx + ')">🚫</button>'
       + '<button class="fc-fact-btn" style="background:#B71C1C;flex-shrink:0;" onclick="mgSmAbrirVincular(' + idx + ')">Vincular →</button>'
       + '</div>';
   });
+  if (!_mgSmExpand && orden.length > TOPE){
+    html += '<button class="fc-fact-btn" style="background:#fff;color:#B71C1C;border:1.5px solid #E57373;width:100%;margin-top:8px;" onclick="_mgSmExpand=true;mgRenderSinMapear();">Ver las ' + (orden.length - TOPE) + ' restantes ▾</button>';
+  } else if (_mgSmExpand && orden.length > TOPE){
+    html += '<button class="fc-fact-btn" style="background:#fff;color:#8A7A66;border:1.5px solid #E8DCC8;width:100%;margin-top:8px;" onclick="_mgSmExpand=false;mgRenderSinMapear();">Mostrar solo las ' + TOPE + ' más grandes ▴</button>';
+  }
   list.innerHTML = html;
+}
+
+// v13.146.0 — Ignorar: proveedor entero (Aceptar) o solo el producto.
+// Escribe en compras_map_ignorar (verificado: 0 filas = aviso, no falso ok).
+async function mgSmIgnorar(idx){
+  var r = (_mgSinMapear || [])[idx];
+  if (!r) return;
+  var prov = r.proveedor_xubio_nombre || '';
+  var body = null, quita = null;
+  if (prov && confirm('¿Ignorar SIEMPRE al proveedor completo?\n\n"' + prov + '"\n\nTodas sus compras dejan de aparecer en este panel (buffet, gastos, etc.).')){
+    body = { proveedor_nombre: prov, nota: 'ignorado desde admin' };
+    quita = function(x){ return (x.proveedor_xubio_nombre || '') !== prov; };
+  } else {
+    if (!confirm('¿Ignorar solo este producto?\n\n"' + (r.producto_xubio_nombre || ('Xubio #' + r.producto_xubio_id)) + '"')) return;
+    body = { producto_xubio_id: r.producto_xubio_id, nota: 'ignorado desde admin: ' + (r.producto_xubio_nombre || '') };
+    quita = function(x){ return x.producto_xubio_id !== r.producto_xubio_id; };
+  }
+  var resp = await sbFetch('compras_map_ignorar', { method: 'POST', body: JSON.stringify(body) }).catch(function(){ return null; });
+  if (!Array.isArray(resp) || !resp.length){
+    toast('NO se pudo guardar la exclusión (¿sesión vencida? Reingresá con PIN)', 'err');
+    return;
+  }
+  _mgSinMapear = (_mgSinMapear || []).filter(quita);
+  mgRenderSinMapear();
+  toast('Ignorado ✓ — no vuelve a aparecer', 'ok');
 }
 
 async function mgSmAbrirVincular(idx){
@@ -42288,7 +42332,213 @@ function mgFila(d){
       '<div class="vol">📦 <b>'+u7+'</b> cajas/sem · <b>'+u30+'</b> /mes</div>' +
       '<div class="plata">Te deja (neto)<b>'+mgFmtC(mgGanMes(d))+'/mes</b></div>' +
     '</div>' +
+    mgEscChipHTML(d) +
   '</div>';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// v13.145.0 — EDITOR DE TRAMOS INLINE (Fase 2)
+// Chip en la fila del producto → expande la escalera editable.
+// Cortes NO editables (estructura por SQL). Solo precios.
+// ═══════════════════════════════════════════════════════════════
+var _mgEsc = {};       // cid -> { base:[{id,min,precio}], edit:[...], costo, iva, prod, pact }
+var _mgEscFam = null;  // cache tramos familia aves (62/63/69) para validar A>B>C
+var MG_ESC_WARN_PCT = 10;   // margen post-IIBB < 10% → candado (confirmación)
+var MG_ESC_FAMILIA = [ { id:62, n:'Pollo A' }, { id:63, n:'Pollo B' }, { id:69, n:'Pollo C' } ];
+
+function mgEscChipHTML(d){
+  if (!d || d.canonico_id == null || !_mgTramoIds[d.canonico_id]) return '';
+  var iva = mgN(d.alicuota_iva); if (iva === null) iva = 21;
+  return '<span class="mg-esc-chip" onclick="mgEscToggle(' + d.canonico_id + ', this)"' +
+    ' data-costo="' + (mgN(d.costo_neto_caja) || 0) + '" data-iva="' + iva + '"' +
+    ' data-prod="' + encodeURIComponent(d.producto || '') + '" data-pact="' + (mgN(d.precio_venta_civa) || 0) + '">🏷️ Tramos ▾</span>' +
+    '<div class="mg-esc-wrap" id="mgesc-' + d.canonico_id + '"></div>';
+}
+
+function mgEscMargen(precioCiva, iva, costoNeto){
+  var neto = precioCiva / (1 + (iva || 0) / 100);
+  return { m: Math.round(neto * 0.95 - costoNeto), pct: (neto > 0 ? ((neto * 0.95 - costoNeto) / neto * 100) : 0) };
+}
+function mgEscRango(t, i){
+  var sig = t[i + 1];
+  if (t[i].min === 1) return sig ? ('1-' + (sig.min - 1)) : '1+';
+  return sig ? (t[i].min + '-' + (sig.min - 1)) : (t[i].min + '+');
+}
+
+async function mgEscToggle(cid, chipEl){
+  var wrap = document.getElementById('mgesc-' + cid);
+  if (!wrap) return;
+  if (wrap.classList.contains('on')){ wrap.classList.remove('on'); return; }
+  if (!_mgEsc[cid]){
+    var rows = await sbFetch('producto_tramos?producto_id=eq.' + cid +
+      '&activo=eq.true&zona=eq.todas&select=id,cantidad_min,precio&order=cantidad_min.asc').catch(function(){ return null; });
+    if (!Array.isArray(rows) || !rows.length){ toast('No pude leer los tramos', 'err'); return; }
+    var base = rows.map(function(r){ return { id: r.id, min: Number(r.cantidad_min), precio: Math.round(Number(r.precio)) }; });
+    _mgEsc[cid] = {
+      base: base,
+      edit: JSON.parse(JSON.stringify(base)),
+      costo: Number(chipEl.getAttribute('data-costo')) || 0,
+      iva: Number(chipEl.getAttribute('data-iva')) || 21,
+      prod: decodeURIComponent(chipEl.getAttribute('data-prod') || ''),
+      pact: Number(chipEl.getAttribute('data-pact')) || 0
+    };
+  }
+  mgEscRender(cid);
+  wrap.classList.add('on');
+}
+
+function mgEscHayError(cid){
+  var e = _mgEsc[cid]; if (!e) return null;
+  var t = e.edit;
+  for (var i = 1; i < t.length; i++){
+    if (t[i].precio > t[i - 1].precio)
+      return 'Monotonicidad rota: ' + mgEscRango(t, i) + ' ($' + t[i].precio.toLocaleString('es-AR') +
+             ') no puede ser más caro que ' + mgEscRango(t, i - 1) + ' ($' + t[i - 1].precio.toLocaleString('es-AR') + ').';
+  }
+  for (var k = 0; k < t.length; k++){
+    if (mgEscMargen(t[k].precio, e.iva, e.costo).m <= 0)
+      return 'El tramo ' + mgEscRango(t, k) + ' queda A PÉRDIDA (margen ≤ $0 post-IIBB). Eso no se guarda desde acá.';
+  }
+  return null;
+}
+
+function mgEscRender(cid){
+  var e = _mgEsc[cid]; var wrap = document.getElementById('mgesc-' + cid);
+  if (!e || !wrap) return;
+  var t = e.edit;
+  var html = '<div class="mg-esc-head"><span>Rango</span><span style="text-align:right">Precio c/IVA</span><span style="text-align:right">Margen/caja*</span><span style="text-align:right">vs lista</span></div>';
+  for (var i = 0; i < t.length; i++){
+    var mg = mgEscMargen(t[i].precio, e.iva, e.costo);
+    var mCls = mg.m <= 0 ? '#C62828' : (mg.pct < MG_ESC_WARN_PCT ? '#E65100' : '#1E8449');
+    var dto = i === 0 ? '—' : ('-' + (100 * (1 - t[i].precio / t[0].precio)).toFixed(1) + '%');
+    var err = (i > 0 && t[i].precio > t[i - 1].precio) || (i < t.length - 1 && t[i].precio < t[i + 1].precio);
+    html += '<div class="mg-esc-row">' +
+      '<span class="r-l">' + mgEscRango(t, i) + '</span>' +
+      '<span><input class="' + (err ? 'err' : '') + '" type="tel" value="' + t[i].precio + '" onchange="mgEscSet(' + cid + ',' + i + ', this.value)"></span>' +
+      '<span class="r-m" style="color:' + mCls + '">$' + mg.m.toLocaleString('es-AR') + ' <span style="font-weight:600;font-size:10px">(' + mg.pct.toFixed(1) + '%)</span></span>' +
+      '<span class="r-d">' + dto + '</span>' +
+      '</div>';
+  }
+  var errG = mgEscHayError(cid);
+  if (errG) html += '<div class="mg-esc-err">⛔ ' + errG + '</div>';
+  html += '<div class="mg-esc-acc">' +
+    '<button class="mg-esc-b-mover" onclick="mgEscMover(' + cid + ')">↕ Mover todo ±$</button>' +
+    '<button class="mg-esc-b-des" onclick="mgEscReset(' + cid + ')">Deshacer</button>' +
+    '<button class="mg-esc-b-save" onclick="mgEscGuardar(' + cid + ')"' + (errG ? ' disabled' : '') + '>Guardar cambios</button>' +
+    '</div>' +
+    '<div class="mg-esc-nota">* Post-IIBB (5% s/neto) contra costo de reposición $' + Math.round(e.costo).toLocaleString('es-AR') + ' · IVA ' + e.iva + '%. Los cortes no se editan acá (estructura por SQL). Tocar la lista (min=1) actualiza precio_actual del producto.</div>';
+  wrap.innerHTML = html;
+}
+
+function mgEscSet(cid, i, v){
+  var e = _mgEsc[cid]; if (!e) return;
+  var n = parseInt(String(v).replace(/[^\d]/g, ''), 10);
+  if (!isNaN(n) && n > 0) e.edit[i].precio = n;
+  mgEscRender(cid);
+}
+function mgEscMover(cid){
+  var e = _mgEsc[cid]; if (!e) return;
+  var d = prompt('Delta parejo para TODA la escalera de ' + e.prod + ' (ej: 2000 o -1500):', '2000');
+  if (d === null) return;
+  var n = parseInt(d, 10);
+  if (isNaN(n) || n === 0) return;
+  for (var i = 0; i < e.edit.length; i++) e.edit[i].precio += n;
+  mgEscRender(cid);
+}
+function mgEscReset(cid){
+  var e = _mgEsc[cid]; if (!e) return;
+  e.edit = JSON.parse(JSON.stringify(e.base));
+  mgEscRender(cid);
+}
+
+function mgEscPrecioEn(tramos, q){
+  var p = null;
+  for (var i = 0; i < tramos.length; i++){ if (q >= tramos[i].min) p = tramos[i].precio; }
+  return p;
+}
+async function mgEscValidarFamilia(cid){
+  var esFam = MG_ESC_FAMILIA.some(function(f){ return f.id === cid; });
+  if (!esFam) return null;
+  if (!_mgEscFam){
+    var ids = MG_ESC_FAMILIA.map(function(f){ return f.id; }).join(',');
+    var rows = await sbFetch('producto_tramos?producto_id=in.(' + ids + ')&activo=eq.true&zona=eq.todas&select=producto_id,cantidad_min,precio&order=producto_id.asc,cantidad_min.asc').catch(function(){ return null; });
+    if (!Array.isArray(rows)) return null;  // sin data no bloqueo, aviso suave
+    _mgEscFam = {};
+    rows.forEach(function(r){
+      var pid = Number(r.producto_id);
+      if (!_mgEscFam[pid]) _mgEscFam[pid] = [];
+      _mgEscFam[pid].push({ min: Number(r.cantidad_min), precio: Math.round(Number(r.precio)) });
+    });
+  }
+  var mapa = {};
+  MG_ESC_FAMILIA.forEach(function(f){ mapa[f.id] = (_mgEsc[f.id] && f.id === cid) ? _mgEsc[cid].edit : (_mgEscFam[f.id] || null); });
+  mapa[cid] = _mgEsc[cid].edit;  // el editado manda
+  var cortes = {};
+  MG_ESC_FAMILIA.forEach(function(f){ (mapa[f.id] || []).forEach(function(t){ cortes[t.min] = true; }); });
+  var qs = Object.keys(cortes).map(Number).sort(function(a, b){ return a - b; });
+  for (var qi = 0; qi < qs.length; qi++){
+    var q = qs[qi];
+    for (var fi = 0; fi < MG_ESC_FAMILIA.length - 1; fi++){
+      var alto = mapa[MG_ESC_FAMILIA[fi].id], bajo = mapa[MG_ESC_FAMILIA[fi + 1].id];
+      if (!alto || !bajo) continue;
+      var pa = mgEscPrecioEn(alto, q), pb = mgEscPrecioEn(bajo, q);
+      if (pa !== null && pb !== null && pa <= pb){
+        return MG_ESC_FAMILIA[fi].n + ' ($' + pa.toLocaleString('es-AR') + ') queda igual o más barato que ' +
+               MG_ESC_FAMILIA[fi + 1].n + ' ($' + pb.toLocaleString('es-AR') + ') llevando ' + q + ' cajas. A > B > C siempre.';
+      }
+    }
+  }
+  return null;
+}
+
+async function mgEscGuardar(cid){
+  var e = _mgEsc[cid]; if (!e) return;
+  var errG = mgEscHayError(cid);
+  if (errG){ toast(errG, 'err'); return; }
+  var errF = await mgEscValidarFamilia(cid);
+  if (errF){ toast('⛔ ' + errF, 'err'); return; }
+  var cambiados = e.edit.filter(function(t, i){ return t.precio !== e.base[i].precio; });
+  if (!cambiados.length){ toast('Sin cambios', 'info'); return; }
+  // Candado: margen bajo el piso → confirmación explícita
+  var flojos = e.edit.filter(function(t){ return mgEscMargen(t.precio, e.iva, e.costo).pct < MG_ESC_WARN_PCT; });
+  if (flojos.length){
+    var f0 = flojos[0]; var mf = mgEscMargen(f0.precio, e.iva, e.costo);
+    if (!confirm('🔒 CANDADO: el tramo ' + mgEscRango(e.edit, e.edit.indexOf(f0)) + ' queda con ' + mf.pct.toFixed(1) +
+        '% post-IIBB ($' + mf.m.toLocaleString('es-AR') + '/caja), abajo del piso de ' + MG_ESC_WARN_PCT + '%.\n¿Guardar igual?')) return;
+  }
+  var motivo = prompt('Motivo del cambio (obligatorio):', '');
+  if (motivo === null) return;
+  motivo = String(motivo).trim();
+  if (!motivo){ toast('El motivo es obligatorio', 'err'); return; }
+  var okN = 0;
+  for (var i = 0; i < e.edit.length; i++){
+    if (e.edit[i].precio === e.base[i].precio) continue;
+    var r = await sbFetch('producto_tramos?id=eq.' + e.edit[i].id,
+      { method: 'PATCH', body: JSON.stringify({ precio: e.edit[i].precio }) }).catch(function(){ return null; });
+    if (!Array.isArray(r) || !r.length){
+      toast('El tramo ' + mgEscRango(e.edit, i) + ' NO se guardó (0 filas: RLS o id). Frené acá.', 'err');
+      return;
+    }
+    okN++;
+  }
+  // Si cambió la LISTA (min=1): precio_actual del canónico viaja junto
+  var lista = e.edit.filter(function(t){ return t.min === 1; })[0];
+  var listaBase = e.base.filter(function(t){ return t.min === 1; })[0];
+  if (lista && listaBase && lista.precio !== listaBase.precio){
+    try {
+      await sbFetch('productos_canonicos?id=eq.' + cid, { method: 'PATCH', body: JSON.stringify({
+        precio_actual: lista.precio, precio_actualizado_at: new Date().toISOString(),
+        precio_motivo: motivo.slice(0, 200), precio_origen: 'tramos_editor' }) });
+    } catch (ePM){
+      await sbFetch('productos_canonicos?id=eq.' + cid,
+        { method: 'PATCH', body: JSON.stringify({ precio_actual: lista.precio, precio_actualizado_at: new Date().toISOString() }) }).catch(function(){});
+    }
+  }
+  toast('✓ ' + okN + ' tramo(s) de ' + e.prod + ' guardados — catálogo y ventas lo ven en su próximo refresh', 'ok');
+  delete _mgEsc[cid];
+  _mgEscFam = null;
+  _mgData = null;
+  margenesInit();
 }
 
 async function comprasInit() {
