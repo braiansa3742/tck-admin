@@ -1,5 +1,15 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.147.0 — 11/08/2026
+     v13.147.0: SEMÁFORO DE FRESCURA DE COSTOS (hallazgo: "no tengo nada
+       nuevo en el tab" = Xubio sin facturas de compra cargadas desde el
+       3/8; SoyChu 10 días, Finca Balcarce 28). El tab solo puede avisar
+       de costos que Xubio tiene. Banner arriba del tab Márgenes leyendo
+       vw_costos_frescura: verde ≤4 días, amarillo 5-9, rojo ≥10, con
+       chips por proveedor y el texto accionable ("primero se cargan
+       facturas — Gastón —, después se miran precios"). Fail-soft: si la
+       vista no existe, el banner no aparece y el tab sigue igual.
+
      TCK ADMIN — v13.146.0 — 11/08/2026
      v13.146.0: COMPRAS SIN VINCULAR v2 (feedback Braian: "171 me arruina la
        vista"). El Xubio factura DOS negocios: la vista mostraba también las
@@ -15046,6 +15056,14 @@ input.canales-exp-input[type="date"] {
       <div class="mg-sub">Costo de reposición · margen POST-IIBB vs objetivo · volumen 7/30 días</div>
     </div>
     <div class="mg-kpis" id="mg-kpis"></div>
+    <!-- 📥 FRESCURA DE COSTOS — v13.147.0 (vw_costos_frescura) -->
+    <div id="mg-fresh-wrap" style="display:none;border-radius:14px;padding:10px 14px;margin:8px 12px 6px;border:1.5px solid #E8DCC8;background:#FFFDF9;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+        <span id="mg-fresh-tit" style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:15px;"></span>
+        <button class="fc-fact-btn" id="mg-fresh-btn" style="background:#fff;color:#8A7A66;border:1.5px solid #E8DCC8;padding:5px 9px;font-size:11px;" onclick="_mgFreshExpand=!_mgFreshExpand;mgRenderFrescura();">detalle ▾</button>
+      </div>
+      <div id="mg-fresh-body"></div>
+    </div>
     <!-- 🔴 COMPRAS SIN VINCULAR — v13.144.0 (vw_compras_sin_mapear) -->
     <div id="mg-sm-wrap" style="display:none;background:#FFF8F7;border:1.5px solid #E57373;border-radius:14px;padding:12px 14px;margin:8px 12px 6px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
@@ -41614,7 +41632,9 @@ async function margenesInit() {
       // v13.130.0 — alertas marcadas como vistas (fail-soft si la tabla no existe)
       sbFetch('margenes_alertas_visto?select=producto,proveedor,fecha_cambio').catch(function(){ return []; }),
       // v13.144.0 — compras Xubio sin producto vinculado (bug "ni me entero")
-      sbFetch('vw_compras_sin_mapear?select=*&order=ultima_factura.desc').catch(function(){ return []; })
+      sbFetch('vw_compras_sin_mapear?select=*&order=ultima_factura.desc').catch(function(){ return []; }),
+      // v13.147.0 — frescura de costos: última factura de mercadería por proveedor
+      sbFetch('vw_costos_frescura?select=*').catch(function(){ return []; })
     ]);
     _mgData = Array.isArray(res[0]) ? res[0] : [];
     _mgAcuSalud = Array.isArray(res[1]) ? res[1] : [];     // v13.34.0
@@ -41627,10 +41647,12 @@ async function margenesInit() {
     _mgVistos = {};                                                                 // v13.130.0
     (Array.isArray(res[7]) ? res[7] : []).forEach(function(v){ if(v) _mgVistos[(v.producto||'')+'|'+(v.proveedor||'')+'|'+(v.fecha_cambio||'')] = true; });
     _mgSinMapear = Array.isArray(res[8]) ? res[8] : [];   // v13.144.0
+    _mgFrescura  = Array.isArray(res[9]) ? res[9] : [];   // v13.147.0
     mgInitFiltro();
     _mgSyncCtrlUI();   // v13.28 — toggles según default/preferencia guardada
     mgRenderVariaciones();
     mgRenderSinMapear();  // v13.144.0
+    mgRenderFrescura();   // v13.147.0
     mgSugRender();        // v13.52.0
     mgRenderAcuerdos();   // v13.34.0
     mgRender();
@@ -41879,6 +41901,55 @@ var _mgSinMapear = [];
 var _mgSmPP = null;   // cache productos_proveedores para el selector
 
 function mgSmEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ═══════════════════════════════════════════════════════════════
+// v13.147.0 — FRESCURA DE COSTOS (vw_costos_frescura)
+// El tab solo avisa con lo que Xubio tiene: este semáforo muestra si
+// la carga de facturas de compra está al día. Rojo = primero facturas
+// (Gastón), después precios.
+// ═══════════════════════════════════════════════════════════════
+var _mgFrescura = [];
+var _mgFreshExpand = false;
+
+function mgRenderFrescura(){
+  var wrap = document.getElementById('mg-fresh-wrap');
+  var tit  = document.getElementById('mg-fresh-tit');
+  var body = document.getElementById('mg-fresh-body');
+  if (!wrap || !tit || !body) return;
+  var rows = _mgFrescura || [];
+  if (!rows.length){ wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  var peor = 0, masFresca = 999;
+  rows.forEach(function(r){
+    var d = Number(r.dias) || 0;
+    if (d > peor) peor = d;
+    if (d < masFresca) masFresca = d;
+  });
+  var atrasados = rows.filter(function(r){ return (Number(r.dias) || 0) >= 10; });
+  var col = peor >= 10 ? '#C62828' : (peor >= 5 ? '#E65100' : '#1E8449');
+  wrap.style.borderColor = peor >= 10 ? '#E57373' : (peor >= 5 ? '#FFB74D' : '#97C459');
+  tit.style.color = col;
+  tit.textContent = (peor >= 10 ? '📥 COSTOS DESACTUALIZADOS — ' + atrasados.length + ' proveedor(es) con 10+ días sin factura'
+                   : peor >= 5 ? '📥 Costos: carga con demora (peor: ' + peor + ' días)'
+                   : '📥 Costos al día (última carga hace ' + masFresca + ' día' + (masFresca === 1 ? '' : 's') + ')');
+  if (!_mgFreshExpand){
+    body.innerHTML = (peor >= 10
+      ? '<div style="font-size:11px;color:#5C4F3A;margin-top:4px;">El tab avisa con lo que Xubio tiene: <b>primero se cargan las facturas (Gastón), después se miran precios.</b></div>'
+      : '');
+    return;
+  }
+  var html = '<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:8px;">';
+  rows.slice().sort(function(a, b){ return (Number(b.dias) || 0) - (Number(a.dias) || 0); }).forEach(function(r){
+    var d = Number(r.dias) || 0;
+    var c = d >= 10 ? '#C62828' : (d >= 5 ? '#E65100' : '#1E8449');
+    var bg = d >= 10 ? '#FFEBEE' : (d >= 5 ? '#FFF3E0' : '#E8F5E9');
+    var nom = String(r.proveedor || '').split(' ').slice(0, 3).join(' ');
+    html += '<span style="font-size:10.5px;font-weight:800;color:' + c + ';background:' + bg +
+      ';border:1px solid ' + c + '33;border-radius:8px;padding:3px 8px;">' + nom + ' · ' + d + 'd</span>';
+  });
+  html += '</div><div style="font-size:10px;color:#8A7A66;margin-top:6px;">Días desde la última factura de mercadería vinculada cargada en Xubio. Verde ≤4 · amarillo 5-9 · rojo 10+.</div>';
+  body.innerHTML = html;
+}
 
 var _mgSmExpand = false;   // v13.146.0 — colapsado por defecto
 
