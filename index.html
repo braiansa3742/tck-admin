@@ -1,5 +1,24 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.144.0 — 11/08/2026
+     v13.144.0: FASE 1 TAB PRECIOS v2 — ANCLA DE TRAMOS + COMPRAS SIN VINCULAR.
+       (1) FIX aplicarPrecioTierAware: el delta de la escalera se anclaba
+       SIEMPRE en el tramo de mayor cantidad (convención Suprema, donde
+       precio_actual = precio de caja). Las aves A/B/C usan la convención
+       opuesta (precio_actual = LISTA, tramo min=1): aplicar una "nueva
+       lista" al Pollo B corría toda la escalera para arriba (+$5.000 si
+       la lista nueva era 76.900 contra el 10+ 69.900). Ahora el ancla es
+       el tramo cuyo precio coincide con precio_actual (tolerancia $1);
+       sin coincidencia, ancla en la LISTA (menor cantidad_min).
+       (2) Panel "COMPRAS SIN VINCULAR" en el tab Márgenes: lee
+       vw_compras_sin_mapear (compras Xubio 45d cuyo producto no está
+       vinculado a ningún producto TCK → el costo de reposición queda
+       congelado; así pasó el bug del Pollo C, 2,5 meses sin costo real).
+       Botón "Vincular": elegís la fila de productos_proveedores y se
+       escribe xubio_producto_compra_id (PATCH verificado: si RLS devuelve
+       0 filas, avisa en vez de fallar en silencio). Tras vincular se
+       recarga el tab para ver el costo fresco.
+
      TCK ADMIN — v13.143.0 — 10/08/2026
      v13.143.0: BOTÓN 🪪 DATOS DEL CLIENTE en la card del pedido.
         Espejo de ventas v14.137.0. PROBLEMA (bitácora 703): quien
@@ -14972,6 +14991,15 @@ input.canales-exp-input[type="date"] {
       <div class="mg-sub">Costo de reposición · margen POST-IIBB vs objetivo · volumen 7/30 días</div>
     </div>
     <div class="mg-kpis" id="mg-kpis"></div>
+    <!-- 🔴 COMPRAS SIN VINCULAR — v13.144.0 (vw_compras_sin_mapear) -->
+    <div id="mg-sm-wrap" style="display:none;background:#FFF8F7;border:1.5px solid #E57373;border-radius:14px;padding:12px 14px;margin:8px 12px 6px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+        <span style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:16px;color:#B71C1C;">🔴 COMPRAS SIN VINCULAR</span>
+        <span id="mg-sm-count" style="font-size:11px;font-weight:800;color:#B71C1C;background:#FFEBEE;border-radius:10px;padding:2px 8px;"></span>
+      </div>
+      <div style="font-size:11px;color:#5C4F3A;margin-bottom:8px;">Compras de Xubio cuyo producto no está vinculado a ningún producto TCK: el <b>costo de reposición no se actualiza</b> (así se congeló el Pollo C 2,5 meses). Vinculá cada uno; lo que sea gasto, ignoralo.</div>
+      <div id="mg-sm-list"></div>
+    </div>
     <!-- 📈 PRECIOS SUGERIDOS (aprobación) — v13.52.0 -->
     <div id="mg-sug-wrap" style="display:none;background:#FFFDF9;border:1.5px solid #66BB6A;border-radius:14px;padding:12px 14px;margin:8px 12px 6px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
@@ -41256,14 +41284,31 @@ function mgSugRender(){
 async function aplicarPrecioTierAware(canonicoId, producto, precioNuevo, motivo, origen){
   precioNuevo = Math.round(Number(precioNuevo) || 0);
 
-  // 1) Tramos (front directo, sin cambios): sube todos manteniendo el gap suelto/caja
+  // 1) Tramos — v13.144.0: el ANCLA del delta es el tramo cuyo precio coincide
+  //    con precio_actual del canónico. Conviven dos convenciones:
+  //    · Suprema (2 tramos, era vieja): precio_actual = precio de CAJA.
+  //    · Aves A/B/C (tramos v4): precio_actual = LISTA (cantidad_min=1).
+  //    Antes se anclaba SIEMPRE en el mayor min: aplicar "nueva lista" a un
+  //    ave corría la escalera ENTERA hacia arriba. Ahora: match por precio
+  //    (tolerancia $1); sin match, ancla en la lista (menor cantidad_min).
+  //    El delta parejo conserva el margen $ por escalón (regla en bitácora).
   if (canonicoId != null){
     var tramos = await sbFetch('producto_tramos?producto_id=eq.' + canonicoId +
       '&activo=eq.true&zona=eq.todas&select=id,cantidad_min,precio');
     if (Array.isArray(tramos) && tramos.length){
-      var caja = tramos[0];   // caja = mayor cantidad_min (lo que ancla la sugerencia)
-      for (var i=1;i<tramos.length;i++){ if (Number(tramos[i].cantidad_min) > Number(caja.cantidad_min)) caja = tramos[i]; }
-      var delta = Math.round(precioNuevo - Number(caja.precio));
+      var _pcA = await sbFetch('productos_canonicos?id=eq.' + canonicoId + '&select=precio_actual');
+      var _paN = (Array.isArray(_pcA) && _pcA.length) ? Math.round(Number(_pcA[0].precio_actual)) : null;
+      var ancla = null;
+      if (_paN !== null){
+        for (var a=0;a<tramos.length;a++){
+          if (Math.abs(Math.round(Number(tramos[a].precio)) - _paN) <= 1){ ancla = tramos[a]; break; }
+        }
+      }
+      if (!ancla){
+        ancla = tramos[0];  // fallback: LISTA (menor cantidad_min)
+        for (var i=1;i<tramos.length;i++){ if (Number(tramos[i].cantidad_min) < Number(ancla.cantidad_min)) ancla = tramos[i]; }
+      }
+      var delta = Math.round(precioNuevo - Number(ancla.precio));
       if (delta !== 0){
         for (var k=0;k<tramos.length;k++){
           await sbFetch('producto_tramos?id=eq.' + tramos[k].id,
@@ -41512,7 +41557,9 @@ async function margenesInit() {
       sbFetch('precios_sugerencias?estado=eq.pendiente&order=margen_actual.asc&select=*').catch(function(){ return []; }),
       sbFetch('producto_tramos?activo=eq.true&zona=eq.todas&select=producto_id').catch(function(){ return []; }),
       // v13.130.0 — alertas marcadas como vistas (fail-soft si la tabla no existe)
-      sbFetch('margenes_alertas_visto?select=producto,proveedor,fecha_cambio').catch(function(){ return []; })
+      sbFetch('margenes_alertas_visto?select=producto,proveedor,fecha_cambio').catch(function(){ return []; }),
+      // v13.144.0 — compras Xubio sin producto vinculado (bug "ni me entero")
+      sbFetch('vw_compras_sin_mapear?select=*&order=ultima_factura.desc').catch(function(){ return []; })
     ]);
     _mgData = Array.isArray(res[0]) ? res[0] : [];
     _mgAcuSalud = Array.isArray(res[1]) ? res[1] : [];     // v13.34.0
@@ -41524,9 +41571,11 @@ async function margenesInit() {
     (Array.isArray(res[6]) ? res[6] : []).forEach(function(t){ if (t && t.producto_id != null) _mgTramoIds[t.producto_id] = true; });
     _mgVistos = {};                                                                 // v13.130.0
     (Array.isArray(res[7]) ? res[7] : []).forEach(function(v){ if(v) _mgVistos[(v.producto||'')+'|'+(v.proveedor||'')+'|'+(v.fecha_cambio||'')] = true; });
+    _mgSinMapear = Array.isArray(res[8]) ? res[8] : [];   // v13.144.0
     mgInitFiltro();
     _mgSyncCtrlUI();   // v13.28 — toggles según default/preferencia guardada
     mgRenderVariaciones();
+    mgRenderSinMapear();  // v13.144.0
     mgSugRender();        // v13.52.0
     mgRenderAcuerdos();   // v13.34.0
     mgRender();
@@ -41761,6 +41810,105 @@ function mgAlertasArmar(){
   vistos.sort(function(a,b){ return b.plata - a.plata; });
   opor.sort(function(a,b){ return b.extra - a.extra; });
   return { pend:pend, vistos:vistos, opor:opor };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// v13.144.0 — COMPRAS SIN VINCULAR (vw_compras_sin_mapear)
+// Facturas de compra cuyo producto Xubio no está vinculado a ningún
+// producto TCK: el costo de reposición no se mueve (bug Pollo C 31/7).
+// "Vincular" = PATCH productos_proveedores.xubio_producto_compra_id.
+// PostgREST con RLS sin policy devuelve 200 con 0 filas: se verifica la
+// respuesta (return=representation, default de sbFetch) y se avisa.
+// ═══════════════════════════════════════════════════════════════
+var _mgSinMapear = [];
+var _mgSmPP = null;   // cache productos_proveedores para el selector
+
+function mgSmEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function mgRenderSinMapear(){
+  var wrap = document.getElementById('mg-sm-wrap');
+  var list = document.getElementById('mg-sm-list');
+  var count = document.getElementById('mg-sm-count');
+  if (!wrap || !list) return;
+  var rows = _mgSinMapear || [];
+  if (!rows.length){ wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  if (count) count.textContent = rows.length + (rows.length === 1 ? ' compra' : ' compras');
+  var html = '';
+  rows.forEach(function(r, idx){
+    var neto = Math.round(Number(r.ultimo_neto) || 0).toLocaleString('es-AR');
+    html += '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #FFE4E1;font-size:12px;">'
+      + '<div style="flex:1;min-width:0;">'
+      + '<div style="font-weight:800;color:#3E2723;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + mgSmEsc(r.producto_xubio_nombre || ('Xubio #' + r.producto_xubio_id)) + '</div>'
+      + '<div style="font-size:10.5px;color:#8A7A66;">' + mgSmEsc(r.proveedor_xubio_nombre || '') + ' · últ. ' + mgSmEsc(r.ultima_factura || '') + ' · ' + (r.lineas || 1) + ' líneas · neto $' + neto + '</div>'
+      + '</div>'
+      + '<button class="fc-fact-btn" style="background:#B71C1C;flex-shrink:0;" onclick="mgSmAbrirVincular(' + idx + ')">Vincular →</button>'
+      + '</div>';
+  });
+  list.innerHTML = html;
+}
+
+async function mgSmAbrirVincular(idx){
+  var r = (_mgSinMapear || [])[idx];
+  if (!r) return;
+  if (_mgSmPP === null){
+    var pp = await sbFetch('productos_proveedores?select=id,proveedor,canonico_id,xubio_producto_compra_id,productos_canonicos(nombre)&order=proveedor.asc').catch(function(){ return null; });
+    _mgSmPP = Array.isArray(pp) ? pp : [];
+  }
+  if (!_mgSmPP.length){ toast('No pude leer productos_proveedores (¿permisos?)', 'err'); return; }
+  // Mismo proveedor primero (match laxo por texto), después el resto
+  var provTxt = String(r.proveedor_xubio_nombre || '').toLowerCase();
+  var propios = [], resto = [];
+  _mgSmPP.forEach(function(p){
+    var nomCan = (p.productos_canonicos && p.productos_canonicos.nombre) || ('canónico ' + p.canonico_id);
+    var o = { id: p.id, label: nomCan + ' — ' + (p.proveedor || 's/prov') + (p.xubio_producto_compra_id ? ' (revincula #' + p.xubio_producto_compra_id + ')' : '') };
+    var pv = String(p.proveedor || '').toLowerCase();
+    if (pv && provTxt && (provTxt.indexOf(pv) !== -1 || pv.indexOf(provTxt.split(' ')[0]) !== -1)) propios.push(o); else resto.push(o);
+  });
+  var opts = propios.concat(resto).map(function(o){
+    return '<option value="' + o.id + '">' + mgSmEsc(o.label) + '</option>';
+  }).join('');
+  var ov = document.createElement('div');
+  ov.id = 'mg-sm-modal';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:900;display:flex;align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML = '<div style="background:#FFFDF9;border-radius:14px;max-width:440px;width:100%;padding:16px;">'
+    + '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:17px;color:#B71C1C;margin-bottom:6px;">Vincular compra de Xubio</div>'
+    + '<div style="font-size:12px;color:#3E2723;margin-bottom:2px;"><b>' + mgSmEsc(r.producto_xubio_nombre || '') + '</b></div>'
+    + '<div style="font-size:11px;color:#8A7A66;margin-bottom:10px;">' + mgSmEsc(r.proveedor_xubio_nombre || '') + ' · Xubio #' + r.producto_xubio_id + '</div>'
+    + '<div style="font-size:11px;color:#5C4F3A;margin-bottom:4px;">¿A qué producto TCK (fila de productos_proveedores) corresponde?</div>'
+    + '<select id="mg-sm-sel" style="width:100%;padding:8px;border:1.5px solid #D4A574;border-radius:8px;font-size:12px;background:#fff;margin-bottom:12px;">' + opts + '</select>'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end;">'
+    + '<button class="fc-fact-btn" style="background:#8A7A66;" onclick="document.getElementById(\'mg-sm-modal\').remove()">Cancelar</button>'
+    + '<button class="fc-fact-btn" style="background:#1B5E20;" onclick="mgSmConfirmarVinculo(' + idx + ')">Vincular</button>'
+    + '</div></div>';
+  document.body.appendChild(ov);
+}
+
+async function mgSmConfirmarVinculo(idx){
+  var r = (_mgSinMapear || [])[idx];
+  var sel = document.getElementById('mg-sm-sel');
+  if (!r || !sel || !sel.value) return;
+  var ppId = Number(sel.value);
+  var btns = document.querySelectorAll('#mg-sm-modal button');
+  btns.forEach(function(b){ b.disabled = true; });
+  try {
+    var resp = await sbFetch('productos_proveedores?id=eq.' + ppId,
+      { method: 'PATCH', body: JSON.stringify({ xubio_producto_compra_id: r.producto_xubio_id }) });
+    if (!Array.isArray(resp) || !resp.length){
+      toast('El vínculo NO se guardó (0 filas: permisos RLS o id inexistente)', 'err');
+      btns.forEach(function(b){ b.disabled = false; });
+      return;
+    }
+    toast('Vinculado. Recargando costos…', 'ok');
+    var m = document.getElementById('mg-sm-modal'); if (m) m.remove();
+    _mgSinMapear = (_mgSinMapear || []).filter(function(x){ return x.producto_xubio_id !== r.producto_xubio_id; });
+    _mgSmPP = null;
+    _mgData = null;          // invalida el tab para refetch con el costo fresco
+    margenesInit();
+  } catch (e){
+    toast('Error al vincular: ' + (e.message || e), 'err');
+    btns.forEach(function(b){ b.disabled = false; });
+  }
 }
 
 function mgRenderVariaciones(){
