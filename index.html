@@ -1,5 +1,23 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.149.0 — 11/08/2026
+     v13.149.0: COMISIONES — CARRIL PUBLICIDAD + CARD DE JOSÉ (va con
+        tck-comisiones-publicidad fases 1/2/2b/3a corridas en Supabase).
+        · Regla (Braian 11/08): clientes captados por Meta Ads pagan al
+          vendedor asignado 3% SOLO sobre el excedente del piso (sin el
+          2% de producción); su margen suma al piso igual. José cobra 3%
+          de TODO el margen publicidad, sin piso. Mostrador no comisiona
+          al vendedor (José sí cobra). Cartera $8.000 excluida en estos
+          clientes. Marca permanente, congelada al primer pedido.
+        · KPI "Publicidad" (bono vendedores + comisión José) y fila
+          Publicidad en la card del vendedor (solo si tiene margen
+          publicitario ese mes). "Margen generado" ahora = margen_total.
+        · Card de JOSÉ al final de la lista, con detalle por cliente.
+          Fuente: rpc/admin_comisiones_marketing + _detalle (SECURITY
+          DEFINER, misma validación de rol que admin_comisiones).
+          Fail-soft: sin las RPC, la card avisa qué SQL correr y el
+          resto del tab sigue igual.
+
      TCK ADMIN — v13.148.0 — 11/08/2026
      v13.148.0: PANEL DE SUGERIDOS DIRECCIONAL (va con el SQL
        tck_sugerencias_simetricas_v1: fn_precios_sugerir ahora también
@@ -15221,7 +15239,7 @@ input.canales-exp-input[type="date"] {
       background:#fff; color:#3D2410; font-family:inherit; }
     #view-comisiones .cm-btn-ref{ border:1.5px solid #E0D3BE; background:#fff; border-radius:10px; padding:7px 11px;
       font-size:12.5px; font-weight:700; color:#6B5B47; cursor:pointer; }
-    #view-comisiones .cm-kpis{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; padding:0 14px 12px; }
+    #view-comisiones .cm-kpis{ display:grid; grid-template-columns:repeat(5,1fr); gap:8px; padding:0 14px 12px; }
     @media (max-width:640px){ #view-comisiones .cm-kpis{ grid-template-columns:repeat(2,1fr); } }
     #view-comisiones .cm-kpi{ background:#fff; border:1.5px solid #EFE4D2; border-radius:13px; padding:10px 11px; }
     #view-comisiones .cm-kpi.tot{ background:linear-gradient(160deg,#3D2410,#5A341A); border-color:#3D2410; }
@@ -15270,10 +15288,13 @@ input.canales-exp-input[type="date"] {
       padding:2px 6px; margin-left:6px; vertical-align:middle; }
     #view-comisiones .cm-badge.ok{ background:#E8F5E9; color:#1E8449; }
     #view-comisiones .cm-badge.no{ background:#FDECEA; color:#C0392B; }
+    /* v13.149.0 — card José (marketing) */
+    #view-comisiones .cm-v.mkt .cm-av{ background:#E3EEF5; color:#1E6B8C; }
+    #view-comisiones .cm-v.mkt{ border-color:#D7E5EE; }
   </style>
     <div class="cm-head">
       <h2>💵 Comisiones de vendedores</h2>
-      <div class="cm-sub">Producción · crecimiento sobre piso · cartera. Margen POST-IIBB, sin pedidos no entregados.<br>Los $8.000 del cliente nuevo caen en el mes en que lo aprobás.</div>
+      <div class="cm-sub">Producción · crecimiento sobre piso · cartera · publicidad (3%). Margen POST-IIBB, sin pedidos no entregados.<br>Los $8.000 del cliente nuevo caen en el mes en que lo aprobás.</div>
     </div>
     <div class="cm-ctrl">
       <select class="cm-sel" id="cm-mes" onchange="comSetMes(this.value)"></select>
@@ -22320,6 +22341,9 @@ async function fcmpMotivoGuardar(){
 
 var _cmMes = null;      // 'YYYY-MM'
 var _cmData = [];       // filas de admin_comisiones
+var _cmMkt = null;      // v13.149.0 — filas de admin_comisiones_marketing (null = RPC ausente)
+var _cmMktDet = [];     // v13.149.0 — detalle por cliente de José
+var _cmMktAbierto = false;
 var _cmCand = [];       // candidatos de cartera del mes
 var _cmAbierto = {};    // vendedor -> bool (detalle desplegado)
 var _cmCargando = false;
@@ -22397,10 +22421,14 @@ async function comCargar(forzar) {
     var body = JSON.stringify({ p_mes: _cmMes });
     var res = await Promise.all([
       sbFetch('rpc/admin_comisiones', { method: 'POST', body: body }),
-      sbFetch('rpc/admin_cartera_candidatos', { method: 'POST', body: body })
+      sbFetch('rpc/admin_cartera_candidatos', { method: 'POST', body: body }),
+      sbFetch('rpc/admin_comisiones_marketing', { method: 'POST', body: body }).catch(function () { return null; }),
+      sbFetch('rpc/admin_comisiones_marketing_detalle', { method: 'POST', body: body }).catch(function () { return []; })
     ]);
     _cmData = Array.isArray(res[0]) ? res[0] : [];
     _cmCand = Array.isArray(res[1]) ? res[1] : [];
+    _cmMkt = Array.isArray(res[2]) ? res[2] : null;   // null = falta la RPC (fail-soft)
+    _cmMktDet = Array.isArray(res[3]) ? res[3] : [];
     comRender();
   } catch (e) {
     var msg = String((e && e.message) || e);
@@ -22439,18 +22467,24 @@ function cmRenderSelector() {
 function cmRenderKpis() {
   var cont = document.getElementById('cm-kpis');
   if (!cont) return;
-  var tProd = 0, tCrec = 0, tCart = 0, tTot = 0;
+  var tProd = 0, tCrec = 0, tCart = 0, tPub = 0, tTot = 0;
   _cmData.forEach(function (r) {
     tProd += Number(r.bono_produccion || 0);
     tCrec += Number(r.bono_crecimiento || 0);
     tCart += Number(r.bono_cartera || 0);
+    tPub += Number(r.bono_publicidad || 0);
     tTot += Number(r.total || 0);
   });
+  // v13.149.0 — José entra al total a pagar y al KPI de publicidad
+  var mktMes = (_cmMkt || []).filter(function (x) { return x.mes === _cmMes; })[0];
+  var tJose = mktMes ? Number(mktMes.comision || 0) : 0;
+  tPub += tJose; tTot += tJose;
   cont.innerHTML =
     '<div class="cm-kpi tot"><div class="cm-k-n">' + cmCorto(tTot) + '</div><div class="cm-k-l">Total a pagar</div></div>' +
     '<div class="cm-kpi"><div class="cm-k-n">' + cmCorto(tProd) + '</div><div class="cm-k-l">Producción</div></div>' +
     '<div class="cm-kpi"><div class="cm-k-n">' + cmCorto(tCrec) + '</div><div class="cm-k-l">Crecimiento</div></div>' +
-    '<div class="cm-kpi"><div class="cm-k-n">' + cmCorto(tCart) + '</div><div class="cm-k-l">Cartera</div></div>';
+    '<div class="cm-kpi"><div class="cm-k-n">' + cmCorto(tCart) + '</div><div class="cm-k-l">Cartera</div></div>' +
+    '<div class="cm-kpi"><div class="cm-k-n">' + cmCorto(tPub) + '</div><div class="cm-k-l">Publicidad</div></div>';
 
   // Aviso: candidatos sin verificar + margen excluido por no entregados
   // v13.142.0 — los pendientes se cuentan sobre la lista real (que ahora
@@ -22513,13 +22547,38 @@ function cmRenderVendedores() {
     var nCart = Number(r.clientes_cartera || 0);
     var nPend = Number(r.cartera_pendientes || 0);
 
+    // v13.149.0 — carril publicidad (solo si el vendedor tiene margen publicitario)
+    var mPub = Number(r.margen_publicidad || 0);
+    var excPub = r.exc_publicidad == null ? null : Number(r.exc_publicidad);
+    var bonoPub = Number(r.bono_publicidad || 0);
+    var pctPub = Math.round(Number(r.pct_publicidad || 0) * 1000) / 10;
+    var pubRow = '';
+    if (mPub > 0) {
+      var pubSub, pubMonto, pubZero;
+      if (piso === null) {
+        pubSub = 'Sin piso cargado para este mes — no se liquida';
+        pubMonto = '—'; pubZero = true;
+      } else if (!excPub) {
+        pubSub = cmPesos(mPub) + ' de margen de clientes de publicidad · paga ' + pctPub + '% al superar el piso';
+        pubMonto = cmPesos(0); pubZero = true;
+      } else {
+        pubSub = pctPub + '% de ' + cmPesos(excPub) + ' por encima del piso · margen publicidad ' + cmPesos(mPub);
+        pubMonto = cmPesos(bonoPub); pubZero = false;
+      }
+      pubRow = '<div class="cm-r">' +
+        '<div><div class="cm-r-t">Publicidad 📣</div>' +
+        '<div class="cm-r-s">' + pubSub + '</div></div>' +
+        '<div class="cm-r-m' + (pubZero ? ' z' : '') + '">' + pubMonto + '</div>' +
+      '</div>';
+    }
+
     return '' +
       '<div class="cm-v' + (abierto ? ' open' : '') + '" id="cm-v-' + cmEsc(v) + '">' +
         '<div class="cm-v-top" onclick="comToggle(\'' + cmEsc(v) + '\')">' +
           '<div class="cm-av">' + cmEsc(v.charAt(0)) + '</div>' +
           '<div>' +
             '<div class="cm-v-nom">' + cmEsc(v) + '</div>' +
-            '<div class="cm-v-sub">Margen generado ' + cmPesos(r.produccion_margen) + '</div>' +
+            '<div class="cm-v-sub">Margen generado ' + cmPesos(r.margen_total != null ? r.margen_total : r.produccion_margen) + '</div>' +
           '</div>' +
           '<div class="cm-v-tot"><div class="n">' + cmPesos(r.total) + '</div><div class="l">a pagar</div></div>' +
           '<div class="cm-caret">›</div>' +
@@ -22535,6 +22594,7 @@ function cmRenderVendedores() {
             '<div class="cm-r-s">' + crecSub + '</div></div>' +
             '<div class="cm-r-m' + (crecZero ? ' z' : '') + '">' + crecMonto + '</div>' +
           '</div>' +
+          pubRow +
           '<div class="cm-r">' +
             '<div><div class="cm-r-t">Clientes nuevos</div>' +
             '<div class="cm-r-s">' + nCart + ' aprobado' + (nCart === 1 ? '' : 's') +
@@ -22545,13 +22605,57 @@ function cmRenderVendedores() {
             'Se descontaron ' + cmPesos(r.margen_excluido) + ' por ese motivo.</div>' +
         '</div>' +
       '</div>';
-  }).join('');
+  }).join('') + cmMktCard();
 }
 
 function comToggle(v) {
   _cmAbierto[v] = !_cmAbierto[v];
   var el = document.getElementById('cm-v-' + v);
   if (el) el.classList.toggle('open', !!_cmAbierto[v]);
+}
+
+// v13.149.0 — card de José (marketing): 3% del margen publicidad, sin piso
+function cmMktCard() {
+  if (_cmMkt === null) {
+    return '<div class="cm-v mkt"><div class="cm-v-top">' +
+      '<div class="cm-av">J</div><div><div class="cm-v-nom">José · Marketing</div>' +
+      '<div class="cm-v-sub">Faltan las RPC en Supabase — corré tck-comisiones-publicidad-fase3a-rpc-v1.sql</div></div></div></div>';
+  }
+  var m = _cmMkt.filter(function (x) { return x.mes === _cmMes; })[0];
+  var margen = m ? Number(m.margen_publicidad || 0) : 0;
+  var com = m ? Number(m.comision || 0) : 0;
+  var nCli = m ? Number(m.clientes || 0) : 0;
+  var nPed = m ? Number(m.pedidos || 0) : 0;
+  var pct = m ? Math.round(Number(m.pct_marketing || 0) * 1000) / 10 : 3;
+  var det = _cmMktDet.filter(function (d) { return d.mes === _cmMes; });
+  var detHtml = det.length ? det.map(function (d) {
+    var np = Number(d.pedidos || 0);
+    return '<div class="cm-r">' +
+      '<div><div class="cm-r-t">' + cmEsc(d.cliente || '?') + '</div>' +
+      '<div class="cm-r-s">' + np + ' pedido' + (np === 1 ? '' : 's') +
+        (d.vendedor_asignado ? ' · atiende ' + cmEsc(d.vendedor_asignado) : ' · sin vendedor asignado') + '</div></div>' +
+      '<div class="cm-r-m' + (Number(d.comision_jose || 0) ? '' : ' z') + '">' + cmPesos(d.comision_jose || 0) + '</div>' +
+    '</div>';
+  }).join('') : '<div class="cm-r-s" style="padding:4px 0 2px;">Sin clientes de publicidad con ventas este mes.</div>';
+  return '' +
+    '<div class="cm-v mkt' + (_cmMktAbierto ? ' open' : '') + '" id="cm-v-mkt">' +
+      '<div class="cm-v-top" onclick="cmMktToggle()">' +
+        '<div class="cm-av">J</div>' +
+        '<div><div class="cm-v-nom">José · Marketing</div>' +
+        '<div class="cm-v-sub">' + pct + '% del margen publicidad · sin piso · ' + nCli + ' cliente' + (nCli === 1 ? '' : 's') + ' · ' + nPed + ' pedido' + (nPed === 1 ? '' : 's') + '</div></div>' +
+        '<div class="cm-v-tot"><div class="n">' + cmPesos(com) + '</div><div class="l">a pagar</div></div>' +
+        '<div class="cm-caret">›</div>' +
+      '</div>' +
+      '<div class="cm-v-det">' + detHtml +
+        '<div class="cm-nota">3% de ' + cmPesos(margen) + ' de margen POST-IIBB de clientes captados por publicidad. Incluye pedidos por catálogo y mostrador; excluye no entregados.</div>' +
+      '</div>' +
+    '</div>';
+}
+
+function cmMktToggle() {
+  _cmMktAbierto = !_cmMktAbierto;
+  var el = document.getElementById('cm-v-mkt');
+  if (el) el.classList.toggle('open', _cmMktAbierto);
 }
 
 // ── VERIFICACIÓN DE CLIENTES NUEVOS ────────────────────────────────
