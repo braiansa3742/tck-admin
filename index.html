@@ -1,5 +1,32 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.151.0 — 13/08/2026
+     v13.151.0: LOS 4 AGUJEROS DEL TAB QUE BRAIAN MARCÓ EL 13/08.
+       (1) RECHAZAR/APROBAR TIRABA 409. precios_sugerencias tiene
+           UNIQUE (canonico_id, estado): resolver una pendiente choca
+           contra la fila histórica del mismo producto con ese estado
+           (los 5 pendientes del 13/08 tenían todos un rechazo previo).
+           Arreglo definitivo = SQL tck_sugerencias_unique_v2 (indice
+           parcial solo sobre pendientes). Acá: _mgSugResolver tolera
+           el 23505 y, sobre todo, en APROBAR el marcado ya no puede
+           reventar después de haber aplicado el precio (riesgo de
+           doble aplicación).
+       (2) OPORTUNIDADES ERA UN CARTEL. Mostraba "+$3,89M/mes de margen
+           extra" y no había ningún botón. Ahora cada fila trae el
+           mismo editor inline que las alertas ("Bajar precio" con
+           el precio a objetivo precargado y el candado anti-precio-
+           abajo-del-costo).
+       (3) KPI "31 SIN COSTO / SIN OBJ" ERA RUIDO: 24 de esos 30 no
+           vendieron una caja en 30 días. Pasa a "Vendiendo sin costo"
+           (6 hoy, rojo si >0) y los dormidos van a la letra chica.
+       (4) EL NÚMERO GRANDE NO ES LA GANANCIA. Nota bajo los KPIs:
+           margen bruto sobre volumen 30d, sin sueldos, flete, alquiler
+           ni notas de crédito (las NC fueron 8,2% de la facturación
+           de los últimos 30 días).
+       (+) Frescura de costos: el texto ahora dice qué significa de
+           verdad (no hay factura cargada) y que 30 días en un
+           proveedor mensual es normal.
+
      TCK ADMIN — v13.150.0 — 13/08/2026
      v13.150.0: VINCULAR QUE FUNCIONA (el botón del panel rojo tiraba
        "¿permisos?" en TODOS los casos: la query pedía columnas que no
@@ -15107,7 +15134,8 @@ input.canales-exp-input[type="date"] {
       <div class="mg-sub">Costo de reposición · margen POST-IIBB vs objetivo · volumen 7/30 días</div>
     </div>
     <div class="mg-kpis" id="mg-kpis"></div>
-    <!-- 📥 FRESCURA DE COSTOS — v13.147.0 (vw_costos_frescura) -->
+    <!-- v13.151.0 — letra chica del KPI grande -->
+    <div id="mg-kpi-nota" style="font-size:10.5px;color:#8A7B63;line-height:1.35;padding:2px 14px 8px;"></div>    <!-- 📥 FRESCURA DE COSTOS — v13.147.0 (vw_costos_frescura) -->
     <div id="mg-fresh-wrap" style="display:none;border-radius:14px;padding:10px 14px;margin:8px 12px 6px;border:1.5px solid #E8DCC8;background:#FFFDF9;">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
         <span id="mg-fresh-tit" style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:15px;"></span>
@@ -41598,8 +41626,11 @@ async function mgSugAprobar(id){
   try {
     var j = await aplicarPrecioTierAware(s.canonico_id, s.producto, s.precio_sugerido, 'sugerencia aprobada (objetivo ' + mgSugPct(s.margen_objetivo) + ')', 'sugerencia');
     if (j && (j.status === 'ok' || j.status === 'sin_cambio')){
-      await sbFetch('precios_sugerencias?id=eq.' + id,
-        { method:'PATCH', body: JSON.stringify({ estado:'aprobado', resuelto_at: new Date().toISOString() }) });
+      // v13.151.0 — el precio YA se aplico: si marcar el estado falla (23505), no
+      // se puede reventar el flujo ni dejar la tarjeta viva, o Braian reaplica.
+      try { await _mgSugResolver(id, 'aprobado'); }
+      catch(eE){ if (typeof toast==='function') toast('\u26A0\uFE0F Precio aplicado, pero la sugerencia qued\u00F3 sin marcar: ' + (eE.message||eE), 'err'); }
+      _mgSug = _mgSug.filter(function(x){ return x.id !== id; });
       var xl = String((j && j.xubio_lista) || '');
       var extra = (xl.indexOf('actualizado')===0) ? ' \u00B7 Xubio \u2713'
                 : (xl.indexOf('sin_cambio')===0) ? '' : ' \u00B7 \u26A0\uFE0F Xubio a mano';
@@ -41613,16 +41644,39 @@ async function mgSugAprobar(id){
   }
 }
 
+// v13.151.0 — precios_sugerencias tiene UNIQUE (canonico_id, estado). Al resolver
+// una sugerencia el UPDATE choca contra la fila historica del MISMO producto con
+// ese estado -> 23505 "duplicate key" y el boton quedaba muerto (los 5 pendientes
+// del 13/08 tenian todos un rechazado viejo). Arreglo real = el SQL que reemplaza
+// esa constraint por un indice parcial sobre pendientes; este helper deja el tab
+// usable igual: si el UPDATE choca, borra la fila pendiente (el historico ya
+// tiene el registro con ese estado) en vez de dejar la tarjeta trabada.
+function _mgSugEsDuplicado(e){
+  var m = String((e && e.message) || e || '');
+  return m.indexOf('23505') !== -1 || m.toLowerCase().indexOf('duplicate key') !== -1;
+}
+async function _mgSugResolver(id, estado){
+  try {
+    await sbFetch('precios_sugerencias?id=eq.' + id,
+      { method:'PATCH', body: JSON.stringify({ estado: estado, resuelto_at: new Date().toISOString() }) });
+    return 'ok';
+  } catch(e){
+    if (!_mgSugEsDuplicado(e)) throw e;
+    await sbFetch('precios_sugerencias?id=eq.' + id, { method:'DELETE', prefer:'return=minimal' });
+    return 'duplicado';
+  }
+}
+
 async function mgSugRechazar(id){
   var s = _mgSug.find(function(x){ return x.id === id; });
   if (!s) return;
   if (!confirm('Rechazar la sugerencia de ' + s.producto + '? No cambia ningún precio.')) return;
   try {
-    await sbFetch('precios_sugerencias?id=eq.' + id,
-      { method:'PATCH', body: JSON.stringify({ estado:'rechazado', resuelto_at: new Date().toISOString() }) });
+    var r = await _mgSugResolver(id, 'rechazado');
     _mgSug = _mgSug.filter(function(x){ return x.id !== id; });
     mgSugRender();
-    if (typeof toast==='function') toast('Sugerencia de ' + s.producto + ' rechazada', 'ok');
+    if (typeof toast==='function') toast('Sugerencia de ' + s.producto + ' rechazada' +
+      (r === 'duplicado' ? ' (ya hab\u00EDa un rechazo previo de este producto)' : ''), 'ok');
   } catch(e){
     if (typeof toast==='function') toast('\u274C No se pudo rechazar: ' + (e && e.message || e), 'error');
   }
@@ -41950,13 +42004,22 @@ function mgRender(){
   // porque el umbral estaba puesto sobre el margen bruto.
   var bajoObj = conC.filter(function(d){ var b = mgN(d.brecha_objetivo_pts); return b!==null && b < -1; }).length;
   var sinObj  = conC.filter(function(d){ return mgN(d.margen_objetivo_pct) === null; }).length;
+  // v13.151.0 — el KPI contaba 31 (30 sin costo + 1 sin objetivo) pero 24 de esos
+  // no vendieron una sola caja en 30 dias: productos dormidos inflando un numero
+  // rojo que no se puede accionar. Ahora cuenta solo los que VENDEN sin costo.
+  var sinCVend = sinCRows.filter(function(d){ return (mgN(d.unid_30d) || 0) > 0; }).length;
+  var sinCDorm = sinCRows.length - sinCVend;
   var kp = document.getElementById('mg-kpis');
   if(kp) kp.innerHTML =
     '<div class="mg-kpi big"><div class="v">'+mgFmtC(ganTotal)+'</div><div class="l">Ganás/mes post-IIBB</div></div>' +
     '<div class="mg-kpi"><div class="v">'+margenPond.toFixed(1)+'%</div><div class="l">Margen pond. neto</div></div>' +
     '<div class="mg-kpi rojo"><div class="v">'+bajoObj+'</div><div class="l">Bajo objetivo</div></div>' +
-    '<div class="mg-kpi gris"><div class="v">'+(sinCRows.length+sinObj)+'</div><div class="l">Sin costo / sin obj.</div></div>';
-
+    '<div class="mg-kpi ' + (sinCVend > 0 ? 'rojo' : 'gris') + '"><div class="v">'+sinCVend+'</div><div class="l">Vendiendo sin costo</div></div>';
+  // v13.151.0 — el numero grande es margen de contribucion, no la ganancia del mes.
+  var kpn = document.getElementById('mg-kpi-nota');
+  if (kpn) kpn.innerHTML = 'Margen bruto estimado sobre el volumen de 30 d\u00EDas: <b>no descuenta</b> sueldos, flete, alquiler ni notas de cr\u00E9dito.'
+    + (sinCDorm > 0 ? ' \u00B7 ' + sinCDorm + ' producto(s) sin costo no vendieron nada en 30 d\u00EDas (dormidos, no urgen).' : '')
+    + (sinObj > 0 ? ' \u00B7 ' + sinObj + ' sin objetivo de margen cargado.' : '');
   // orden
   conC.sort(function(a,b){
     if(_mgOrden==='gan') return mgGanMes(b)-mgGanMes(a);
@@ -42021,8 +42084,14 @@ function mgAlertasArmar(){
     if(v && mgN(v.var_pct) !== null && mgN(v.var_pct) < 0 && u30 > 0){
       var ca = mgN(v.costo_anterior), cn = mgN(v.costo_nuevo);
       if(ca !== null && cn !== null && ca > cn){
-        opor.push({ d:d, v:v, m:m, obj:obj, u30:u30, extra: Math.round((ca - cn) * u30), fk:fk });
-      }
+        // v13.151.0 — el panel mostraba la oportunidad y ahi moria: no habia forma
+        // de bajar el precio desde ahi. Se cargan los mismos campos que las filas
+        // de alerta para reusar el editor inline.
+        var ivaO  = mgN(d.alicuota_iva) || 21;
+        var pActO = mgN(d.precio_venta_civa) || 0;
+        var pObjO = mgPrecioAObjetivo(mgN(d.costo_neto_caja), ivaO, obj);
+        opor.push({ d:d, v:v, m:m, obj:obj, u30:u30, extra: Math.round((ca - cn) * u30), fk:fk,
+                    iva:ivaO, pAct:pActO, pObj:pObjO });      }
     }
   });
   pend.sort(function(a,b){ return (b.plata - a.plata) || (a.m - a.obj) - (b.m - b.obj); });
@@ -42076,8 +42145,7 @@ function mgRenderFrescura(){
                    : '📥 Costos al día (última carga hace ' + masFresca + ' día' + (masFresca === 1 ? '' : 's') + ')');
   if (!_mgFreshExpand){
     body.innerHTML = (peor >= 10
-      ? '<div style="font-size:11px;color:#5C4F3A;margin-top:4px;">El tab avisa con lo que Xubio tiene: <b>primero se cargan las facturas (Gastón), después se miran precios.</b></div>'
-      : '');
+      ? '<div style="font-size:11px;color:#5C4F3A;margin-top:4px;">Significa que <b>en Xubio no hay ninguna factura de ese proveedor desde esa fecha</b> \u2014 puede ser que no le compraste, o que Gast\u00F3n no la carg\u00F3 todav\u00EDa. Mientras no est\u00E9, el costo de esos productos queda congelado en el \u00FAltimo conocido.</div>'      : '');
     return;
   }
   var html = '<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:8px;">';
@@ -42089,8 +42157,7 @@ function mgRenderFrescura(){
     html += '<span style="font-size:10.5px;font-weight:800;color:' + c + ';background:' + bg +
       ';border:1px solid ' + c + '33;border-radius:8px;padding:3px 8px;">' + nom + ' · ' + d + 'd</span>';
   });
-  html += '</div><div style="font-size:10px;color:#8A7A66;margin-top:6px;">Días desde la última factura de mercadería vinculada cargada en Xubio. Verde ≤4 · amarillo 5-9 · rojo 10+.</div>';
-  body.innerHTML = html;
+  html += '</div><div style="font-size:10px;color:#8A7A66;margin-top:6px;">D\u00EDas desde la \u00FAltima factura de mercader\u00EDa <b>vinculada</b> cargada en Xubio. Verde \u22644 \u00B7 amarillo 5-9 \u00B7 rojo 10+. Si a un proveedor le compr\u00E1s cada 3-4 semanas, 30 d\u00EDas es normal: mir\u00E1 los que deber\u00EDan facturarte todas las semanas.</div>';  body.innerHTML = html;
 }
 
 var _mgSmExpand = false;   // v13.146.0 — colapsado por defecto
@@ -42462,6 +42529,7 @@ function mgAlertaFila(x){
 function mgOporFila(x){
   var d = x.d, v = x.v;
   var pct = mgN(v.var_pct);
+  var rid = 'mgo-' + encodeURIComponent(d.producto || '').replace(/[^a-zA-Z0-9]/g, '_');
   return '<div class="mg-var-row">'
     + '<div class="mg-var-l1">'
       + '<div><div class="mg-var-nom">' + (d.producto||'') + '</div>'
@@ -42473,6 +42541,21 @@ function mgOporFila(x){
       + (x.obj !== null ? ' (obj ' + x.obj.toFixed(1).replace('.',',') + '%)' : '') + '</div>'
     + '<div style="margin-top:4px;display:inline-block;font-size:11px;font-weight:900;background:#E8F5E9;color:#1B5E20;border-radius:7px;padding:4px 9px;">'
       + '+' + mgFmt(x.extra) + '/mes de margen extra \u00B7 pod\u00E9s sostener el precio o usarlo para competir</div>'
+    // v13.151.0 — acciones reales sobre la oportunidad
+    + '<div class="mg-var-acc">'
+      + '<button class="mg-var-btn" onclick="mgVarInlineToggle(\'' + rid + '\')">\uD83D\uDCB2 Bajar precio</button>'
+      + (x.pObj && x.pObj < x.pAct
+          ? '<span style="font-size:10.5px;color:#5C4F3A;align-self:center;">a objetivo: <b>' + mgFmt(x.pObj) + '</b></span>'
+          : '<span style="font-size:10.5px;color:#5C4F3A;align-self:center;">ya est\u00E1s en objetivo o abajo</span>')
+    + '</div>'
+    + '<div class="mg-var-inline" id="' + rid + '" style="display:none;">'
+      + '<input type="number" inputmode="numeric" class="mg-var-inp" id="' + rid + '-inp" value="' + Math.round(x.pObj || x.pAct) + '"'
+      + ' data-costo="' + (mgN(d.costo_neto_caja) || 0) + '" data-iva="' + x.iva + '" data-pact="' + x.pAct + '" data-obj="' + x.obj + '"'
+      + ' oninput="mgVarInlineCalc(\'' + rid + '\')">'
+      + '<span class="mg-var-mgn" id="' + rid + '-mgn"></span>'
+      + '<button class="mg-var-btn go" data-prod="' + encodeURIComponent(d.producto||'') + '" onclick="mgVarInlineAplicar(this,\'' + rid + '\')">\u2713 Aplicar</button>'
+      + '<button class="mg-var-btn" onclick="mgVarInlineToggle(\'' + rid + '\')">\u2715</button>'
+    + '</div>'
   + '</div>';
 }
 
