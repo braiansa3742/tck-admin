@@ -1,5 +1,38 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.152.0 — 13/08/2026
+     v13.152.0: EL CIRCUITO OPERATIVO ENTERO OPERABLE POR FRANCISCO (P1).
+       Backend requerido: Apps Script v25.114.0 + SQL tck_circuito_v1 y v2.
+       (1) 🧭 CENTRO DE CONTROL (menú Más): responde "¿algo impide vender,
+           facturar, cargar, entregar o rendir?" con tarjetas ROJO/AMARILLO
+           y acciones al lado de cada problema (reintentar factura, asignar
+           viaje, reabrir carga e incorporar, próxima salida, resolver
+           evento, reparar todos). Verde explícito cuando está sano. Badge
+           con los críticos en el menú y puntito rojo en "Más". Refresco
+           cada 5 min.
+       (2) 🔁 REINTENTAR FACTURACIÓN en el tab Facturación (junto a
+           "Cambiar producto"): confirma, ejecuta facturadorReintentar,
+           muestra el resultado o el error NUEVO, refresca y queda
+           auditado en ops_eventos con quién/cuándo/error anterior.
+           Sirve para requiere_accion Y para el caso Utello: stock que
+           entró después del tope de 3 intentos.
+       (3) 🧭 CIRCUITO DE CARGA dentro del detalle de cada viaje
+           (inyectado envolviendo lzRenderDetalleViaje, sin tocar el
+           render legacy): estado de planilla (SIN GENERAR / vN vigente /
+           DESACTUALIZADA con motivo), Generar vN+1 con diff ➕/➖,
+           Imprimir la VERSIÓN EXACTA (ventana propia desde el snapshot de
+           viajes_planillas: lo impreso == lo guardado, con hash y quién),
+           historial reimprimible, CONTROL FÍSICO por SKU consolidado
+           (cantidades precargadas, tocás solo lo que NO coincide,
+           checkbox de verificación real, faltantes → evento crítico) y
+           CERRAR CARGA (guía cada requisito que falte) / REABRIR /
+           ARRANCAR sólo con carga cerrada.
+       (4) Viajes en estado carga_cerrada ahora se listan (estados= del
+           lzCargarViajes) y muestran sus acciones correctas.
+       (5) El flujo viejo "Cerrar viaje e imprimir planillas" sigue
+           vivo mientras VIAJE_EXIGIR_CIERRE_CARGA=false en el backend:
+           conviven hasta probar el nuevo con Francisco (plan punto 15).
+     ═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v13.151.0 — 13/08/2026
      v13.151.0: LOS 4 AGUJEROS DEL TAB QUE BRAIAN MARCÓ EL 13/08.
        (1) RECHAZAR/APROBAR TIRABA 409. precios_sugerencias tiene
@@ -14105,6 +14138,8 @@ input.canales-exp-input[type="date"] {
   </div>
 
   <!-- ═══ VIEW LOGÍSTICA ═══ -->
+  <div class="view" id="view-ccontrol" style="display:none;"></div>
+
   <div class="view" id="view-logistica">
     <div class="planilla-wrap">
 
@@ -15962,6 +15997,12 @@ input.canales-exp-input[type="date"] {
       <button class="menu-mas-item" id="menu-mas-foodconcil" onclick="cambiarTab('foodconcil');cerrarMenuMas()">
         <div class="menu-mas-icon">&#129525;</div>
         <div class="menu-mas-lbl">Concil. Food</div>
+      </button>
+      <!-- v13.152.0 — Centro de Control operativo -->
+      <button class="menu-mas-item" id="menu-mas-ccontrol" onclick="cambiarTab('ccontrol');cerrarMenuMas()">
+        <div class="menu-mas-icon">&#129517;</div>
+        <div class="menu-mas-lbl">Centro Control</div>
+        <div class="menu-mas-badge" id="menu-mas-ccontrol-badge" style="display:none;background:#C62828;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;margin-top:3px;">0</div>
       </button>
       <!-- v12.29 — Tab Márgenes -->
       <button class="menu-mas-item" id="menu-mas-margenes" onclick="cambiarTab('margenes');cerrarMenuMas()">
@@ -22945,7 +22986,7 @@ function cambiarTab(tab) {
   _tabActual = tab;
 
   // Views — incluye logistica + stock (v12.15.0) + compras (v12.18.0) + tesoreria (v12.20.0)
-  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock','compras','cc','tesoreria','margenes','facturacion','buffet','ccprod','pulso','foodconcil','comisiones','embudo'].forEach(function(t) {
+  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock','compras','cc','tesoreria','margenes','facturacion','buffet','ccprod','pulso','foodconcil','comisiones','embudo','ccontrol'].forEach(function(t) {
     var v = document.getElementById('view-' + t);
     var b = document.getElementById('tab-btn-' + t);
     if (v) v.classList.toggle('active', t === tab);
@@ -30372,7 +30413,7 @@ async function lzCargarViajes() {
     // Traer viajes en estados activos (no cerrados)
     const url = APPS_SCRIPT_URL +
       '?accion=viajeListar' +
-      '&estados=' + encodeURIComponent('planificado,preparando,en_ruta,rindiendo') +
+      '&estados=' + encodeURIComponent('planificado,preparando,carga_cerrada,en_ruta,rindiendo') +
       '&orden=fecha_salida.asc';
     const resp = await fetch(url);
     const data = await resp.json();
@@ -44583,6 +44624,8 @@ function _fcRenderTrabados() {
       '<div class="fc-meta" style="color:#C62828;margin-top:2px;">' + motivo + '</div></div>' +
       '<div class="fc-monto">' + _fcMoneda(r.total) + '</div>' +
       chipDias +
+      '<button class="fc-fbtn" style="background:#1B5E20;color:#fff;" title="Volver a intentar la factura en Xubio ahora" ' +
+        'onclick="ccReintentarFactura(\'' + _fcEsc(r.pedido_id) + '\', this)">🔁 Reintentar</button>' +
       (esStock && _fcPuedeSustituir()
         ? '<button class="fc-fbtn" style="background:#0D47A1;color:#fff;" title="Facturar esta línea con el producto equivalente" ' +
           'onclick="fcSustAbrir(\'' + _fcEsc(r.pedido_id) + '\')">🔄 Cambiar producto</button>'
@@ -46097,6 +46140,603 @@ async function pdcAbrir(pedidoId, ev) {
     _pdcCargando = false;
   }
 }
+</script>
+<script>
+// ════════════════════════════════════════════════════════════════════════════
+//  v13.152.0 — CENTRO DE CONTROL + CIRCUITO DE CARGA (planilla versionada,
+//  control físico, cerrar/reabrir carga) + reintento de facturación.
+//  Módulo autocontenido: se cuelga de cambiarTab y lzRenderDetalleViaje por
+//  envoltura, para no depender de más anclas en el archivo.
+// ════════════════════════════════════════════════════════════════════════════
+(function () {
+'use strict';
+
+function ccQuien() {
+  try { if (typeof vendedorActual !== 'undefined' && vendedorActual) return vendedorActual; } catch (e) {}
+  return 'admin';
+}
+function ccEsc(x) {
+  return String(x == null ? '' : x).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function ccMon(n) {
+  var v = Number(n) || 0;
+  if (Math.abs(v) >= 1000000) return '$' + (v / 1000000).toFixed(2) + 'M';
+  if (Math.abs(v) >= 1000) return '$' + Math.round(v / 1000) + 'k';
+  return '$' + Math.round(v);
+}
+function ccHora(ts) {
+  if (!ts) return '';
+  try {
+    var d = new Date(ts);
+    return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }) + ' ' +
+           d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+  } catch (e) { return String(ts).substring(0, 16); }
+}
+async function ccGAS(params) {
+  var url = APPS_SCRIPT_URL + '?' + params + '&_cb=' + Date.now();
+  var r = await fetch(url);
+  return r.json();
+}
+function ccToast(msg, tipo) {
+  if (typeof toast === 'function') toast(msg, tipo || 'ok');
+  else alert(msg);
+}
+function ccRefrescarFacturacion() {
+  var fns = ['fcCargar', '_fcCargar', 'fcInit', 'fcRender'];
+  for (var i = 0; i < fns.length; i++) {
+    try { if (typeof window[fns[i]] === 'function') { window[fns[i]](); return; } } catch (e) {}
+  }
+}
+
+// ── estilos ────────────────────────────────────────────────────────────────
+var st = document.createElement('style');
+st.textContent =
+  '#view-ccontrol{padding:12px;max-width:860px;margin:0 auto;}' +
+  '.cc-hdr{font-family:"Barlow Condensed",sans-serif;font-weight:900;font-size:22px;margin:4px 0 2px;}' +
+  '.cc-sub{font-size:12px;color:var(--text3,#8a6f5f);margin-bottom:12px;}' +
+  '.cc-card{background:#fff;border:1.5px solid var(--cream3,#E8DCC8);border-radius:14px;margin-bottom:12px;overflow:hidden;}' +
+  '.cc-card-hd{display:flex;align-items:center;gap:8px;padding:10px 14px;font-family:"Barlow Condensed",sans-serif;font-weight:800;font-size:15px;text-transform:uppercase;letter-spacing:.4px;}' +
+  '.cc-card.rojo .cc-card-hd{background:#FFEBEE;color:#B71C1C;}' +
+  '.cc-card.amarillo .cc-card-hd{background:#FFF8E1;color:#B45309;}' +
+  '.cc-card.verde .cc-card-hd{background:#E8F5E9;color:#1B5E20;}' +
+  '.cc-n{margin-left:auto;background:rgba(0,0,0,.08);border-radius:10px;padding:1px 9px;font-size:13px;}' +
+  '.cc-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:9px 14px;border-top:1px solid var(--cream2,#F4ECDD);font-size:13px;}' +
+  '.cc-row b{font-weight:800;}' +
+  '.cc-meta{color:var(--text3,#8a6f5f);font-size:12px;width:100%;}' +
+  '.cc-err{color:#C62828;font-size:12px;width:100%;}' +
+  '.cc-btn{border:none;border-radius:9px;padding:7px 12px;font-family:"Barlow Condensed",sans-serif;font-weight:800;font-size:12.5px;text-transform:uppercase;letter-spacing:.3px;cursor:pointer;}' +
+  '.cc-btn.verde{background:#1B5E20;color:#fff;}' +
+  '.cc-btn.azul{background:#0D47A1;color:#fff;}' +
+  '.cc-btn.rojo{background:#B71C1C;color:#fff;}' +
+  '.cc-btn.gris{background:var(--cream2,#F4ECDD);color:var(--text,#3A2318);border:1.5px solid var(--cream3,#E8DCC8);}' +
+  '.cc-btn:disabled{opacity:.5;cursor:not-allowed;}' +
+  '.cc-ok-box{padding:16px;text-align:center;color:#1B5E20;font-weight:700;}' +
+  '.vc-box{margin:12px;border:2px solid #B45309;border-radius:14px;background:#FFF8EF;overflow:hidden;}' +
+  '.vc-hd{padding:9px 14px;font-family:"Barlow Condensed",sans-serif;font-weight:900;font-size:14px;letter-spacing:.4px;color:#7A3E06;background:#FDEBD2;}' +
+  '.vc-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:9px 14px;border-top:1px solid #F3DFC2;font-size:13px;}' +
+  '.vc-tag{border-radius:8px;padding:2px 8px;font-size:11.5px;font-weight:800;}' +
+  '.vc-tag.ok{background:#E8F5E9;color:#1B5E20;}' +
+  '.vc-tag.warn{background:#FFF3E0;color:#B45309;}' +
+  '.vc-tag.err{background:#FFEBEE;color:#B71C1C;}' +
+  '.vc-modal-bk{position:fixed;inset:0;background:rgba(30,15,5,.55);z-index:9800;display:flex;align-items:flex-end;justify-content:center;}' +
+  '.vc-modal{background:#fff;border-radius:18px 18px 0 0;width:100%;max-width:720px;max-height:88vh;overflow:auto;padding:16px;}' +
+  '.vc-modal h3{margin:0 0 4px;font-family:"Barlow Condensed",sans-serif;font-size:19px;}' +
+  '.vc-tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px;}' +
+  '.vc-tbl th{background:var(--cream2,#F4ECDD);text-align:left;padding:6px 8px;font-size:11px;text-transform:uppercase;letter-spacing:.3px;}' +
+  '.vc-tbl td{padding:6px 8px;border-top:1px solid var(--cream2,#F4ECDD);}' +
+  '.vc-tbl input[type=number]{width:64px;padding:4px;border:1.5px solid var(--cream3,#E8DCC8);border-radius:7px;font-size:13px;text-align:center;}' +
+  '.vc-tbl tr.exc td{background:#FFF3E0;}' +
+  '.vc-check{display:flex;gap:8px;align-items:flex-start;background:#FFF8E1;border:1.5px solid #F3DFC2;border-radius:10px;padding:10px;margin-top:10px;font-size:12.5px;}' +
+  '.cc-dot-mas{position:absolute;top:4px;right:14px;width:9px;height:9px;border-radius:50%;background:#C62828;display:none;}';
+document.head.appendChild(st);
+
+// ── CENTRO DE CONTROL ──────────────────────────────────────────────────────
+var _ccData = null, _ccCargando = false;
+var CC_TITULOS = {
+  entregado_sin_factura:       ['🔴', 'Entregados sin factura'],
+  factura_requiere_accion:     ['🔴', 'Facturación rechazada (requiere acción)'],
+  sin_viaje_urgente:           ['🔴', 'Con salida y sin viaje'],
+  viajes_vencidos_abiertos:    ['🔴', 'Viajes vencidos sin cerrar'],
+  carga_cerrada_con_diferencias:['🔴', 'Carga cerrada con faltantes declarados'],
+  eventos_criticos:            ['🔴', 'Eventos críticos sin resolver'],
+  cancelado_con_factura:       ['🔴', 'Cancelados con factura (falta NC)'],
+  pendiente_con_factura:       ['🔴', 'Pendientes con factura (estado incompatible)'],
+  bloqueado_stock:             ['🟡', 'Facturación esperando stock (reintento automático)'],
+  planillas_desactualizadas:   ['🟡', 'Planillas desactualizadas'],
+  pendientes_vencidos:         ['🟡', 'Pendientes con salida vencida'],
+  entregado_sin_rendir:        ['🟡', 'Entregas sin rendir'],
+  pedido_viaje_fecha_distinta: ['🟡', 'Pedido y viaje con fechas distintas']
+};
+
+window.ccCargar = async function () {
+  if (_ccCargando) return;
+  _ccCargando = true;
+  var cont = document.getElementById('cc-cont');
+  if (cont && !_ccData) cont.innerHTML = '<div style="padding:30px;text-align:center;color:#8a6f5f;">Cargando circuito…</div>';
+  try {
+    var d = await ccGAS('accion=centroControl');
+    if (d.status !== 'ok') throw new Error(d.message || 'respuesta inesperada');
+    _ccData = d;
+    ccRender();
+    ccBadge();
+  } catch (err) {
+    if (cont) cont.innerHTML = '<div class="cc-err" style="padding:20px;">No se pudo cargar el Centro de Control: ' + ccEsc(err.message) + '</div>';
+  } finally { _ccCargando = false; }
+};
+
+function ccItemHTML(clave, r) {
+  var linea1 = '', meta = '', extra = '', acciones = '';
+  var pid = r.pedido_id || '', vid = r.id || r.viaje_id || '';
+  if (clave === 'eventos_criticos') {
+    linea1 = '<b>' + ccEsc(r.tipo || 'evento') + '</b>';
+    meta = ccEsc(r.motivo || '') + (r.pedido_id ? ' · ' + ccEsc(r.pedido_id) : '') + ' · ' + ccHora(r.creado_at);
+    if (r.tipo === 'pedido_vs_carga_cerrada' && r.pedido_id && r.viaje_id) {
+      acciones =
+        '<button class="cc-btn verde" onclick="ccColaReabrir(' + r.id + ',\'' + ccEsc(r.pedido_id) + '\',\'' + ccEsc(r.viaje_id) + '\')">Reabrir e incorporar</button>' +
+        '<button class="cc-btn azul" onclick="ccColaProxima(' + r.id + ',\'' + ccEsc(r.pedido_id) + '\')">Próx. salida</button>';
+    } else {
+      acciones = '<button class="cc-btn gris" onclick="ccResolverEvento(' + r.id + ', this)">Resolver</button>';
+    }
+  } else if (clave === 'viajes_vencidos_abiertos' || clave === 'planillas_desactualizadas' || clave === 'carga_cerrada_con_diferencias') {
+    linea1 = '<b>' + ccEsc(r.zona || '') + '</b> · ' + ccEsc(r.fecha_salida || '') + ' · ' + ccEsc(r.estado || '');
+    meta = (r.chofer ? 'Chofer ' + ccEsc(r.chofer) + ' · ' : '') + (r.total_pedidos != null ? r.total_pedidos + ' pedidos · ' : '') + ccMon(r.monto_total);
+    acciones = '<button class="cc-btn gris" onclick="ccIrViaje(\'' + ccEsc(vid) + '\')">Ver viaje</button>';
+  } else if (clave === 'entregado_sin_rendir') {
+    linea1 = '<b>' + ccEsc(r.cliente || r.pedido_id || '') + '</b>';
+    meta = ccEsc(r.zona || '') + ' · entregado ' + ccHora(r.fecha_entrega) + ' · ' + ccMon(r.monto_cobrado_real || r.total);
+  } else {
+    linea1 = '<b>' + ccEsc(r.cliente || pid) + '</b>' + (r.total ? ' · ' + ccMon(r.total) : '');
+    meta = ccEsc(r.zona || '') + (r.salida_planificada ? ' · sale ' + ccEsc(r.salida_planificada) : '') +
+           (r.vendedor ? ' · ' + ccEsc(r.vendedor) : '') + (pid ? ' · ' + ccEsc(pid) : '');
+    if (r.facturacion_error) extra = '<div class="cc-err">⛔ ' + ccEsc(String(r.facturacion_error).substring(0, 150)) +
+      (r.facturacion_intentos != null ? ' · ' + r.facturacion_intentos + ' intentos' : '') +
+      (r.facturacion_ultimo_intento ? ' · último ' + ccHora(r.facturacion_ultimo_intento) : '') + '</div>';
+    if (clave === 'factura_requiere_accion' || clave === 'bloqueado_stock') {
+      acciones = '<button class="cc-btn verde" onclick="ccReintentarFactura(\'' + ccEsc(pid) + '\', this)">🔁 Reintentar</button>';
+    }
+    if (clave === 'sin_viaje_urgente') {
+      acciones = '<button class="cc-btn azul" onclick="ccRepararUno(\'' + ccEsc(pid) + '\', this)">Asignar viaje</button>';
+    }
+  }
+  return '<div class="cc-row"><div style="flex:1;min-width:180px;">' + linea1 +
+         '<div class="cc-meta">' + meta + '</div>' + extra + '</div>' + acciones + '</div>';
+}
+
+function ccSeccion(color, clave, rows) {
+  var t = CC_TITULOS[clave] || ['•', clave];
+  var arr = rows || [];
+  if (!arr.length) return '';
+  var head = '<div class="cc-card-hd">' + t[0] + ' ' + ccEsc(t[1]) + '<span class="cc-n">' + arr.length + '</span></div>';
+  var body = arr.slice(0, 40).map(function (r) { return ccItemHTML(clave, r); }).join('');
+  if (arr.length > 40) body += '<div class="cc-row cc-meta">… y ' + (arr.length - 40) + ' más</div>';
+  var extraHd = '';
+  if (clave === 'sin_viaje_urgente') {
+    extraHd = '<div class="cc-row"><button class="cc-btn azul" onclick="ccRepararSinViaje(this)">🛠 Reparar todos (asigna al viaje de su salida)</button></div>';
+  }
+  return '<div class="cc-card ' + color + '">' + head + extraHd + body + '</div>';
+}
+
+function ccRender() {
+  var cont = document.getElementById('cc-cont');
+  if (!cont || !_ccData) return;
+  var d = _ccData, html = '';
+  var rojoN = 0, amaN = 0;
+  Object.keys(d.rojo || {}).forEach(function (k) { rojoN += (d.rojo[k] || []).length; });
+  Object.keys(d.amarillo || {}).forEach(function (k) { amaN += (d.amarillo[k] || []).length; });
+  html += '<div class="cc-hdr">🧭 Centro de Control</div>';
+  html += '<div class="cc-sub">¿Algo impide vender, facturar, cargar, entregar o rendir? · actualizado ' + ccHora(d.generado) +
+          ' · <a href="javascript:ccCargar()" style="color:#0D47A1;">refrescar</a></div>';
+  Object.keys(d.rojo || {}).forEach(function (k) { html += ccSeccion('rojo', k, d.rojo[k]); });
+  Object.keys(d.amarillo || {}).forEach(function (k) { html += ccSeccion('amarillo', k, d.amarillo[k]); });
+  if (!rojoN && !amaN) {
+    html += '<div class="cc-card verde"><div class="cc-card-hd">🟢 Todo el circuito en orden</div>' +
+            '<div class="cc-ok-box">Pedidos → viaje → factura → planilla → carga → entrega → rendición: sin desvíos detectados.</div></div>';
+  } else if (!rojoN) {
+    html += '<div class="cc-card verde"><div class="cc-card-hd">🟢 Sin críticos</div>' +
+            '<div class="cc-ok-box">No hay nada que frene la operación de hoy. Quedan los amarillos de arriba.</div></div>';
+  }
+  cont.innerHTML = html;
+}
+
+function ccBadge() {
+  var d = _ccData; if (!d) return;
+  var rojoN = 0;
+  Object.keys(d.rojo || {}).forEach(function (k) { rojoN += (d.rojo[k] || []).length; });
+  var b = document.getElementById('menu-mas-ccontrol-badge');
+  if (b) { b.textContent = rojoN; b.style.display = rojoN ? '' : 'none'; }
+  var mas = document.getElementById('tab-btn-mas');
+  if (mas) {
+    var dot = document.getElementById('cc-dot-mas');
+    if (!dot) {
+      dot = document.createElement('span'); dot.id = 'cc-dot-mas'; dot.className = 'cc-dot-mas';
+      mas.style.position = 'relative'; mas.appendChild(dot);
+    }
+    dot.style.display = rojoN ? 'block' : 'none';
+  }
+}
+
+window.ccReintentarFactura = async function (pedidoId, btn) {
+  if (!confirm('¿Reintentar la facturación de ' + pedidoId + ' ahora?')) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Facturando…'; }
+  try {
+    var d = await ccGAS('accion=facturadorReintentar&pedido_id=' + encodeURIComponent(pedidoId) +
+                        '&quien=' + encodeURIComponent(ccQuien()));
+    if (d.status === 'ok') {
+      ccToast('✅ ' + pedidoId + ' facturado' + (d.factura ? ' (' + d.factura + ')' : ''), 'ok');
+    } else {
+      ccToast('⛔ Sigue fallando: ' + (d.message || d.error || 'sin detalle'), 'err');
+    }
+  } catch (e) { ccToast('Error de red: ' + e.message, 'err'); }
+  if (btn) { btn.disabled = false; btn.textContent = '🔁 Reintentar'; }
+  ccCargar(); ccRefrescarFacturacion();
+};
+
+window.ccResolverEvento = async function (id, btn) {
+  if (btn) btn.disabled = true;
+  var d = await ccGAS('accion=opsEventoResolver&id=' + id + '&quien=' + encodeURIComponent(ccQuien()));
+  ccToast(d.status === 'ok' ? 'Evento resuelto' : ('No se pudo: ' + (d.message || '')), d.status === 'ok' ? 'ok' : 'err');
+  ccCargar();
+};
+
+window.ccColaReabrir = async function (eventoId, pedidoId, viajeId) {
+  var motivo = prompt('Reabrir la carga para incorporar ' + pedidoId + '.\nMotivo (queda auditado):', 'Incorporar pedido tardío');
+  if (motivo === null) return;
+  try {
+    var r1 = await ccGAS('accion=viajeReabrirCarga&viaje_id=' + encodeURIComponent(viajeId) +
+      '&quien=' + encodeURIComponent(ccQuien()) + '&motivo=' + encodeURIComponent(motivo));
+    if (r1.status !== 'ok') return ccToast('No se pudo reabrir: ' + (r1.message || ''), 'err');
+    var r2 = await ccGAS('accion=viajeAgregarPedido&viaje_id=' + encodeURIComponent(viajeId) +
+      '&pedido_id=' + encodeURIComponent(pedidoId) + '&quien=' + encodeURIComponent(ccQuien()) + '&force_reabierto=1');
+    if (r2.status !== 'ok') return ccToast('Reabierta pero no se pudo asociar: ' + (r2.message || ''), 'err');
+    await ccGAS('accion=opsEventoResolver&id=' + eventoId + '&quien=' + encodeURIComponent(ccQuien()));
+    ccToast('✅ Carga reabierta e incorporado ' + pedidoId + '. Generá la planilla nueva y verificá la carga extra.', 'ok');
+  } catch (e) { ccToast('Error: ' + e.message, 'err'); }
+  ccCargar(); if (typeof lzCargarViajes === 'function') lzCargarViajes();
+};
+
+window.ccColaProxima = async function (eventoId, pedidoId) {
+  if (!confirm('Pasar ' + pedidoId + ' a la PRÓXIMA salida de su zona?')) return;
+  var d = await ccGAS('accion=pedidoReagendar&pedido_id=' + encodeURIComponent(pedidoId) +
+    '&quien=' + encodeURIComponent(ccQuien()) + '&motivo=' + encodeURIComponent('Choque con carga cerrada'));
+  if (d.status === 'ok') {
+    await ccGAS('accion=opsEventoResolver&id=' + eventoId + '&quien=' + encodeURIComponent(ccQuien()));
+    ccToast('✅ Reagendado a ' + ((d.registro && d.registro.salida_planificada) || 'próxima salida'), 'ok');
+  } else ccToast('No se pudo reagendar: ' + (d.message || ''), 'err');
+  ccCargar();
+};
+
+window.ccRepararUno = async function (pedidoId, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Asignando…'; }
+  var d = await ccGAS('accion=pedidoReagendar&pedido_id=' + encodeURIComponent(pedidoId) +
+    '&quien=' + encodeURIComponent(ccQuien()) + '&motivo=' + encodeURIComponent('Reparación: sin viaje'));
+  ccToast(d.status === 'ok' ? '✅ ' + pedidoId + ' asignado' : '⛔ ' + (d.message || ''), d.status === 'ok' ? 'ok' : 'err');
+  ccCargar();
+};
+
+window.ccRepararSinViaje = async function (btn) {
+  if (btn) btn.disabled = true;
+  try {
+    var dry = await ccGAS('accion=repararPedidosSinViaje&dry=1');
+    var n = (dry.reparables || dry.pedidos || []).length || dry.total || 0;
+    if (!n) { ccToast('No hay pedidos reparables ahora', 'ok'); if (btn) btn.disabled = false; return; }
+    if (!confirm('Se van a asignar ' + n + ' pedidos al viaje de su zona/salida (los vencidos pasan a la próxima salida). ¿Confirmás?')) {
+      if (btn) btn.disabled = false; return;
+    }
+    var d = await ccGAS('accion=repararPedidosSinViaje&dry=0&quien=' + encodeURIComponent(ccQuien()));
+    ccToast(d.status === 'ok' ? '✅ Reparados: ' + (d.reparados != null ? d.reparados : n) : '⛔ ' + (d.message || ''), d.status === 'ok' ? 'ok' : 'err');
+  } catch (e) { ccToast('Error: ' + e.message, 'err'); }
+  if (btn) btn.disabled = false;
+  ccCargar(); if (typeof lzCargarViajes === 'function') lzCargarViajes();
+};
+
+window.ccIrViaje = function (viajeId) {
+  cambiarTab('logistica');
+  setTimeout(function () {
+    try { if (viajeId && typeof lzAbrirDetalleViaje === 'function') lzAbrirDetalleViaje(viajeId); } catch (e) {}
+  }, 700);
+};
+
+// ── CIRCUITO DE CARGA EN EL DETALLE DEL VIAJE ─────────────────────────────
+function vcBloque(v) {
+  var est = String(v.estado || '').toLowerCase();
+  var ver = Number(v.planilla_version || 0);
+  var des = !!v.planilla_desactualizada;
+  var h = '<div class="vc-box"><div class="vc-hd">🧭 CIRCUITO DE CARGA</div>';
+
+  // Planilla
+  h += '<div class="vc-row"><b>Planilla</b>';
+  if (!ver) {
+    h += '<span class="vc-tag warn">SIN GENERAR</span>';
+  } else {
+    h += '<span class="vc-tag ' + (des ? 'err' : 'ok') + '">v' + ver + (des ? ' · DESACTUALIZADA' : ' · vigente') + '</span>';
+    if (v.planilla_generada_at) h += '<span style="color:#8a6f5f;font-size:11.5px;">' + ccHora(v.planilla_generada_at) + '</span>';
+  }
+  h += '<span style="flex:1"></span>';
+  if (est === 'planificado' || est === 'preparando' || est === 'carga_cerrada') {
+    if (des || !ver) h += '<button class="cc-btn verde" onclick="vcGenerarPlanilla(\'' + v.id + '\')">📄 Generar v' + (ver + 1) + '</button>';
+    else h += '<button class="cc-btn gris" onclick="vcGenerarPlanilla(\'' + v.id + '\')">📄 Regenerar</button>';
+  }
+  if (ver) {
+    h += '<button class="cc-btn azul" onclick="vcImprimirVersion(\'' + v.id + '\',' + ver + ')">🖨 Imprimir v' + ver + '</button>';
+    h += '<button class="cc-btn gris" onclick="vcHistorial(\'' + v.id + '\')">Historial</button>';
+  }
+  h += '</div>';
+
+  if (des) {
+    h += '<div class="vc-row" style="background:#FFEBEE;color:#B71C1C;font-size:12.5px;">⚠ Entraron/salieron pedidos después de imprimir la v' + ver +
+         '. Generá la nueva versión antes de cerrar la carga (el detalle sale al generarla).</div>';
+  }
+
+  // Control físico + cierre
+  if (est === 'planificado' || est === 'preparando') {
+    h += '<div class="vc-row"><b>Depósito</b><span style="flex:1"></span>' +
+         '<button class="cc-btn azul" onclick="vcAbrirControl(\'' + v.id + '\')">📦 Control de carga</button>' +
+         '<button class="cc-btn rojo" onclick="vcCerrarCarga(\'' + v.id + '\')">🔒 Cerrar carga</button></div>' +
+         '<div class="vc-row" style="font-size:11.5px;color:#8a6f5f;">Cerrar carga = "el camión quedó bien preparado". Arrancar (el botón de abajo del flujo viejo) = "el camión salió". Con el circuito nuevo: planilla vigente + control físico + facturas → cerrar → arrancar.</div>';
+  } else if (est === 'carga_cerrada') {
+    h += '<div class="vc-row"><span class="vc-tag ok">🔒 CARGA CERRADA' + (v.carga_cerrada_at ? ' · ' + ccHora(v.carga_cerrada_at) : '') +
+         (v.carga_cerrada_por ? ' · ' + ccEsc(v.carga_cerrada_por) : '') + '</span><span style="flex:1"></span>' +
+         '<button class="cc-btn gris" onclick="vcReabrirCarga(\'' + v.id + '\')">↩ Reabrir</button>' +
+         '<button class="cc-btn verde" onclick="vcArrancar(\'' + v.id + '\')">🚚 Arrancar viaje</button></div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+var _vcPrevRender = null;
+function vcParchearRender() {
+  if (typeof lzRenderDetalleViaje !== 'function' || _vcPrevRender) return;
+  _vcPrevRender = lzRenderDetalleViaje;
+  lzRenderDetalleViaje = function () {
+    var html = _vcPrevRender();
+    try {
+      var v = _vDetalleData;
+      if (v && v.zona !== 'mostrador') {
+        var marca = '<div class="v-detalle-acciones">';
+        var i = html.indexOf(marca);
+        if (i >= 0) html = html.slice(0, i) + vcBloque(v) + html.slice(i);
+        else html = html.replace('</div>', vcBloque(v) + '</div>'); // fallback improbable
+      }
+    } catch (e) { console.warn('[vc] inyección falló', e); }
+    return html;
+  };
+}
+
+function vcModal(html) {
+  var bk = document.createElement('div');
+  bk.className = 'vc-modal-bk';
+  bk.onclick = function (e) { if (e.target === bk) bk.remove(); };
+  bk.innerHTML = '<div class="vc-modal">' + html + '</div>';
+  document.body.appendChild(bk);
+  return bk;
+}
+function vcRefrescarDetalle(viajeId) {
+  if (typeof lzCargarViajes === 'function') lzCargarViajes();
+  setTimeout(function () {
+    try {
+      if (typeof _vDetalleId !== 'undefined' && _vDetalleId === viajeId && typeof lzAbrirDetalleViaje === 'function') {
+        lzAbrirDetalleViaje(viajeId);
+      }
+    } catch (e) {}
+  }, 900);
+}
+
+window.vcGenerarPlanilla = async function (viajeId) {
+  var d = await ccGAS('accion=planillaGenerar&viaje_id=' + encodeURIComponent(viajeId) +
+                      '&quien=' + encodeURIComponent(ccQuien()));
+  if (d.status !== 'ok') return ccToast('⛔ ' + (d.message || 'No se pudo generar'), 'err');
+  var ag = d.agregados || [], qt = d.quitados || [];
+  var h = '<h3>📄 Planilla v' + d.version + ' generada</h3>' +
+    '<div style="font-size:12.5px;color:#8a6f5f;">' + d.total_pedidos + ' pedidos · ' + ccMon(d.monto_total) +
+    ' · hash ' + ccEsc(String(d.hash || '').substring(0, 8)) + '</div>';
+  if (ag.length || qt.length) {
+    h += '<div class="vc-tbl-wrap"><table class="vc-tbl"><tr><th></th><th>Cliente</th><th>Localidad</th><th style="text-align:right">Monto</th></tr>';
+    ag.forEach(function (p) { h += '<tr><td>➕</td><td>' + ccEsc(p.cliente) + '</td><td>' + ccEsc(p.localidad || '') + '</td><td style="text-align:right">' + ccMon(p.total) + '</td></tr>'; });
+    qt.forEach(function (p) { h += '<tr style="color:#B71C1C;"><td>➖</td><td>' + ccEsc(p.cliente) + '</td><td>' + ccEsc(p.localidad || '') + '</td><td style="text-align:right">' + ccMon(p.total) + '</td></tr>'; });
+    h += '</table></div><div style="font-size:11.5px;color:#8a6f5f;margin-top:4px;">➕ entraron después de la versión anterior · ➖ ya no van</div>';
+  } else if (d.version > 1) {
+    h += '<div style="margin-top:8px;font-size:13px;">Sin cambios de pedidos contra la versión anterior.</div>';
+  }
+  h += '<div style="display:flex;gap:8px;margin-top:14px;">' +
+       '<button class="cc-btn azul" style="flex:1" onclick="vcImprimirVersion(\'' + viajeId + '\',' + d.version + ');">🖨 Imprimir v' + d.version + '</button>' +
+       '<button class="cc-btn gris" onclick="this.closest(\'.vc-modal-bk\').remove()">Cerrar</button></div>';
+  vcModal(h);
+  vcRefrescarDetalle(viajeId);
+};
+
+window.vcImprimirVersion = async function (viajeId, version) {
+  try {
+    var rows = await sbFetch('viajes_planillas?viaje_id=eq.' + encodeURIComponent(viajeId) +
+      '&version=eq.' + Number(version) + '&select=version,generada_at,generada_por,hash,pedidos&limit=1');
+    if (!rows || !rows.length) return ccToast('No encontré la planilla v' + version, 'err');
+    var pl = rows[0];
+    var v = (typeof _lzViajes !== 'undefined' && _lzViajes.find(function (x) { return x.id === viajeId; })) || {};
+    var peds = pl.pedidos || [];
+    var tot = peds.reduce(function (s, p) { return s + (Number(p.total) || 0); }, 0);
+    var w = window.open('', '_blank');
+    var filas = peds.map(function (p, i) {
+      return '<tr><td>' + (i + 1) + '</td><td>' + ccEsc(p.cliente || '') + '</td><td>' + ccEsc(p.localidad || '') +
+             '</td><td style="text-align:right">' + ccMon(p.total) + '</td><td style="width:60px;border-bottom:1px solid #999;"></td></tr>';
+    }).join('');
+    w.document.write('<html><head><title>Planilla v' + pl.version + '</title><style>' +
+      'body{font-family:Arial,sans-serif;font-size:12px;margin:18px;}h2{margin:0;}table{width:100%;border-collapse:collapse;margin-top:10px;}' +
+      'th,td{border:1px solid #bbb;padding:5px 7px;text-align:left;}th{background:#eee;font-size:10.5px;text-transform:uppercase;}' +
+      '.pie{margin-top:24px;font-size:11px;}</style></head><body>' +
+      '<h2>PLANILLA DE CARGA — ' + ccEsc((typeof lzZonaNombreFromKey === 'function' ? lzZonaNombreFromKey(v.zona) : v.zona) || '') + '</h2>' +
+      '<div>Salida ' + ccEsc(v.fecha_salida || '') + ' · Chofer ' + ccEsc(v.chofer || '—') +
+      ' · <b>v' + pl.version + '</b> · generada ' + ccHora(pl.generada_at) + ' por ' + ccEsc(pl.generada_por || '') +
+      ' · hash ' + ccEsc(String(pl.hash || '').substring(0, 8)) + '</div>' +
+      '<table><tr><th>#</th><th>Cliente</th><th>Localidad</th><th>Monto</th><th>✔</th></tr>' + filas +
+      '<tr><th colspan="3" style="text-align:right">TOTAL</th><th style="text-align:right">' + ccMon(tot) + '</th><th></th></tr></table>' +
+      '<div class="pie">Carga verificada por: ______________________ &nbsp;&nbsp; Hora: ________ &nbsp;&nbsp; (control físico se registra en el admin)</div>' +
+      '</body></html>');
+    w.document.close();
+    setTimeout(function () { try { w.print(); } catch (e) {} }, 350);
+  } catch (e) { ccToast('Error imprimiendo: ' + e.message, 'err'); }
+};
+
+window.vcHistorial = async function (viajeId) {
+  var d = await ccGAS('accion=planillaHistorial&viaje_id=' + encodeURIComponent(viajeId));
+  if (d.status !== 'ok') return ccToast('⛔ ' + (d.message || ''), 'err');
+  var vs = d.versiones || [];
+  var h = '<h3>Historial de planillas</h3>';
+  if (!vs.length) h += '<div style="font-size:13px;">Todavía no se generó ninguna.</div>';
+  else {
+    h += '<table class="vc-tbl"><tr><th>v</th><th>Generada</th><th>Por</th><th>Pedidos</th><th></th></tr>' +
+      vs.map(function (x) {
+        return '<tr><td><b>v' + x.version + '</b></td><td>' + ccHora(x.generada_at) + '</td><td>' + ccEsc(x.generada_por || '') +
+               '</td><td>' + (x.pedidos_n != null ? x.pedidos_n : '') + '</td>' +
+               '<td><button class="cc-btn azul" onclick="vcImprimirVersion(\'' + viajeId + '\',' + x.version + ')">🖨</button></td></tr>';
+      }).join('') + '</table>';
+  }
+  h += '<div style="margin-top:12px;text-align:right;"><button class="cc-btn gris" onclick="this.closest(\'.vc-modal-bk\').remove()">Cerrar</button></div>';
+  vcModal(h);
+};
+
+window.vcAbrirControl = async function (viajeId) {
+  var d = await ccGAS('accion=cargaControlEstado&viaje_id=' + encodeURIComponent(viajeId));
+  if (d.status !== 'ok') {
+    if (d.requiere === 'planillaGenerar' && confirm((d.message || '') + '\n\n¿Generar la planilla ahora?')) return vcGenerarPlanilla(viajeId);
+    return ccToast('⛔ ' + (d.message || ''), 'err');
+  }
+  var items = d.items || [];
+  var prev = d.control_previo;
+  var h = '<h3>📦 Control físico de carga</h3>' +
+    '<div style="font-size:12.5px;color:#8a6f5f;">' + ccEsc(d.viaje.zona) + ' · ' + ccEsc(d.viaje.fecha_salida) +
+    ' · planilla <b>v' + d.planilla_version + '</b> · ' + d.pedidos_en_planilla + ' pedidos · ' + d.total_skus + ' productos</div>';
+  if (d.planilla_desactualizada) {
+    h += '<div class="vc-row" style="background:#FFEBEE;color:#B71C1C;border-radius:8px;margin-top:8px;">⚠ La planilla quedó desactualizada: generá la nueva versión y controlá esa.</div>';
+  }
+  if (prev && prev.confirmado_at) {
+    h += '<div class="vc-row" style="background:#E8F5E9;color:#1B5E20;border-radius:8px;margin-top:8px;">✔ Esta versión ya fue verificada por ' +
+         ccEsc(prev.confirmado_por) + ' el ' + ccHora(prev.confirmado_at) +
+         ((prev.excepciones || []).length ? ' · ' + prev.excepciones.length + ' excepciones' : ' · sin excepciones') + '. Podés volver a confirmarla si recontrolaron.</div>';
+  }
+  h += '<div style="max-height:44vh;overflow:auto;"><table class="vc-tbl" id="vc-ctl-tbl">' +
+       '<tr><th>Producto</th><th style="text-align:right">Pide</th><th>Cargado</th><th style="text-align:right">Clientes</th></tr>' +
+    items.map(function (it, i) {
+      return '<tr data-i="' + i + '"><td>' + ccEsc(it.producto) + '</td>' +
+        '<td style="text-align:right;font-weight:700;">' + it.requerido + '</td>' +
+        '<td><input type="number" step="any" value="' + it.requerido + '" data-req="' + it.requerido + '" data-prod="' + ccEsc(it.producto) + '" oninput="vcMarcarExc(this)"></td>' +
+        '<td style="text-align:right;">' + it.pedidos + '</td></tr>';
+    }).join('') + '</table></div>';
+  if ((d.pedidos_sin_detalle || []).length) {
+    h += '<div class="vc-row" style="background:#FFF3E0;border-radius:8px;font-size:12px;">⚠ ' + d.pedidos_sin_detalle.length +
+         ' pedido(s) sin detalle de productos (no entran al consolidado): ' +
+         d.pedidos_sin_detalle.slice(0, 3).map(function (p) { return ccEsc(p.cliente || p.pedido_id); }).join(', ') +
+         (d.pedidos_sin_detalle.length > 3 ? '…' : '') + '. Controlalos contra la planilla impresa.</div>';
+  }
+  h += '<div class="vc-check"><input type="checkbox" id="vc-ctl-chk" style="margin-top:2px;">' +
+       '<label for="vc-ctl-chk">Confirmo que las cantidades de la planilla <b>v' + d.planilla_version +
+       '</b> fueron <b>verificadas físicamente</b> contra la mercadería cargada en el vehículo. Lo que no coincide quedó anotado arriba como excepción.</label></div>' +
+       '<div style="display:flex;gap:8px;margin-top:12px;">' +
+       '<button class="cc-btn verde" style="flex:1" onclick="vcConfirmarControl(\'' + viajeId + '\',' + d.planilla_version + ', this)">✅ Confirmar carga</button>' +
+       '<button class="cc-btn gris" onclick="this.closest(\'.vc-modal-bk\').remove()">Cancelar</button></div>';
+  vcModal(h);
+};
+
+window.vcMarcarExc = function (inp) {
+  var tr = inp.closest('tr');
+  if (Number(inp.value) !== Number(inp.getAttribute('data-req'))) tr.classList.add('exc');
+  else tr.classList.remove('exc');
+};
+
+window.vcConfirmarControl = async function (viajeId, version, btn) {
+  var chk = document.getElementById('vc-ctl-chk');
+  if (!chk || !chk.checked) return ccToast('Falta tildar la confirmación de verificación física', 'err');
+  var exc = [];
+  document.querySelectorAll('#vc-ctl-tbl input[type=number]').forEach(function (inp) {
+    var req = Number(inp.getAttribute('data-req')), car = Number(inp.value);
+    if (car !== req) exc.push({ producto: inp.getAttribute('data-prod'), requerido: req, cargado: car });
+  });
+  if (exc.length && !confirm('Vas a confirmar con ' + exc.length + ' excepción(es) — queda registrado como FALTANTE crítico visible para Braian y Francisco.\n\n¿Confirmás?')) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
+  var d = await ccGAS('accion=cargaControlConfirmar&viaje_id=' + encodeURIComponent(viajeId) +
+    '&version=' + version + '&quien=' + encodeURIComponent(ccQuien()) +
+    '&excepciones=' + encodeURIComponent(JSON.stringify(exc)));
+  if (d.status === 'ok') {
+    ccToast(exc.length ? '⚠ Carga confirmada con ' + exc.length + ' faltante(s) registrados' : '✅ Carga verificada sin diferencias', exc.length ? 'err' : 'ok');
+    document.querySelectorAll('.vc-modal-bk').forEach(function (m) { m.remove(); });
+    vcRefrescarDetalle(viajeId);
+  } else {
+    ccToast('⛔ ' + (d.message || ''), 'err');
+    if (btn) { btn.disabled = false; btn.textContent = '✅ Confirmar carga'; }
+  }
+};
+
+window.vcCerrarCarga = async function (viajeId, force, motivo) {
+  var q = 'accion=viajeCerrarCarga&viaje_id=' + encodeURIComponent(viajeId) + '&quien=' + encodeURIComponent(ccQuien());
+  if (force) q += '&force=1&motivo=' + encodeURIComponent(motivo || '');
+  var d = await ccGAS(q);
+  if (d.status === 'ok') {
+    ccToast('🔒 Carga cerrada. El camión queda listo: ahora sí, Arrancar cuando salga.', 'ok');
+    vcRefrescarDetalle(viajeId);
+    return;
+  }
+  if (d.requiere === 'planillaGenerar') {
+    if (confirm((d.message || 'Falta planilla vigente') + '\n\n¿Generar la planilla ahora?')) vcGenerarPlanilla(viajeId);
+    return;
+  }
+  if (d.requiere === 'controlCarga') {
+    if (confirm((d.message || 'Falta el control físico') + '\n\n¿Abrir el control de carga ahora?')) vcAbrirControl(viajeId);
+    return;
+  }
+  if (d.requiere === 'facturar_o_force') {
+    var m = prompt('⛔ ' + (d.message || 'Hay pedidos sin facturar en el viaje') +
+      '\n\nPara cerrar IGUAL escribí el motivo (queda auditado). Cancelar = no cerrar.');
+    if (m) vcCerrarCarga(viajeId, true, m);
+    return;
+  }
+  ccToast('⛔ No se pudo cerrar: ' + (d.message || 'sin detalle'), 'err');
+};
+
+window.vcReabrirCarga = async function (viajeId) {
+  var m = prompt('Motivo para reabrir la carga (queda auditado):', '');
+  if (m === null) return;
+  var d = await ccGAS('accion=viajeReabrirCarga&viaje_id=' + encodeURIComponent(viajeId) +
+    '&quien=' + encodeURIComponent(ccQuien()) + '&motivo=' + encodeURIComponent(m));
+  ccToast(d.status === 'ok' ? '↩ Carga reabierta (preparando)' : '⛔ ' + (d.message || ''), d.status === 'ok' ? 'ok' : 'err');
+  vcRefrescarDetalle(viajeId);
+};
+
+window.vcArrancar = async function (viajeId) {
+  if (!confirm('¿El camión salió? Se marca EN RUTA.')) return;
+  var d = await ccGAS('accion=viajeArrancar&viaje_id=' + encodeURIComponent(viajeId));
+  if (d.status === 'ok') {
+    ccToast('🚚 Viaje en ruta', 'ok');
+    if (typeof lzCerrarDetalleViaje === 'function') lzCerrarDetalleViaje();
+    if (typeof lzCargarViajes === 'function') lzCargarViajes();
+  } else ccToast('⛔ ' + (d.message || ''), 'err');
+};
+
+// ── ENGANCHES ──────────────────────────────────────────────────────────────
+var _ccPrevCT = null;
+function ccParchearTab() {
+  if (typeof cambiarTab !== 'function' || _ccPrevCT) return;
+  _ccPrevCT = cambiarTab;
+  cambiarTab = function (t) {
+    _ccPrevCT(t);
+    if (t === 'ccontrol') ccCargar();
+  };
+}
+function ccInitView() {
+  var v = document.getElementById('view-ccontrol');
+  if (v && !v.innerHTML.trim()) v.innerHTML = '<div id="cc-cont"></div>';
+}
+function ccBoot() {
+  ccInitView();
+  ccParchearTab();
+  vcParchearRender();
+  ccCargar();                       // primer semáforo + badge
+  setInterval(ccCargar, 5 * 60 * 1000);
+}
+if (document.readyState === 'complete' || document.readyState === 'interactive') setTimeout(ccBoot, 1200);
+else document.addEventListener('DOMContentLoaded', function () { setTimeout(ccBoot, 1200); });
+
+})();
+
 </script>
 </body>
 </html>
