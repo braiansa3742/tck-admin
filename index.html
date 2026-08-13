@@ -1,5 +1,25 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.150.0 — 13/08/2026
+     v13.150.0: VINCULAR QUE FUNCIONA (el botón del panel rojo tiraba
+       "¿permisos?" en TODOS los casos: la query pedía columnas que no
+       existen —proveedor, canonico_id— y un embed sin FK a
+       productos_canonicos → PostgREST 400, no RLS).
+       · Selector arreglado: producto_tck_nombre + proveedores(nombre)
+         vía la FK real. El toast ahora muestra el error verdadero.
+       · Camino B nuevo en el mismo modal: "➕ Crear ficha y vincular"
+         para productos SIN fila en productos_proveedores (caso pastas
+         Tía Tere: 6 productos vendiendo sin costo, 5 sin ficha — el
+         Vincular solo no los rescataba). Elige producto canónico +
+         proveedor, marca es_proveedor_primario si es la primera ficha
+         y, si al proveedor le falta xubio_id y coincide con el de la
+         factura, lo completa desde compras_xubio (anti-incidente
+         Unión Ganadera, bitácora #780). Si no coincide, avisa y no
+         pisa nada.
+       · Post-vínculo (ambos caminos): rpc/recalcular_costos_reales_30d
+         al toque — antes el costo recién entraba con el cron de las
+         6:00 aunque el cartel dijera "Recargando costos…".
+
      TCK ADMIN — v13.149.0 — 11/08/2026
      v13.149.0: COMISIONES — CARRIL PUBLICIDAD + CARD DE JOSÉ (va con
         tck-comisiones-publicidad fases 1/2/2b/3a corridas en Supabase).
@@ -42134,38 +42154,123 @@ async function mgSmIgnorar(idx){
   toast('Ignorado ✓ — no vuelve a aparecer', 'ok');
 }
 
+// v13.150.0 — cache de proveedores para el modal (id, nombre, xubio_id)
+var _mgSmProvs = null;
+async function _mgSmProvsCargar(){
+  if (_mgSmProvs !== null) return _mgSmProvs;
+  try {
+    var pv = await sbFetch('proveedores?select=id,nombre,xubio_id&order=nombre.asc');
+    _mgSmProvs = Array.isArray(pv) ? pv : [];
+  } catch(e){ _mgSmProvs = []; }
+  return _mgSmProvs;
+}
+
+// v13.150.0 — xubio_id del proveedor de ESTA factura (match exacto por nombre,
+// nunca por producto: los productos de compra se comparten entre proveedores).
+async function _mgSmProvXubioId(provNombre){
+  if (!provNombre) return null;
+  try {
+    var c = await sbFetch('compras_xubio?select=proveedor_xubio_id&proveedor_xubio_nombre=eq.' +
+      encodeURIComponent(provNombre) + '&order=fecha.desc&limit=1');
+    return (Array.isArray(c) && c.length) ? c[0].proveedor_xubio_id : null;
+  } catch(e){ return null; }
+}
+
+// v13.150.0 — cierre común: sacar la fila, recalcular YA (sin esto el costo
+// recién entraba con el cron de las 6:00) y refrescar el tab.
+async function _mgSmPostVinculo(r){
+  var m = document.getElementById('mg-sm-modal'); if (m) m.remove();
+  _mgSinMapear = (_mgSinMapear || []).filter(function(x){ return x.producto_xubio_id !== r.producto_xubio_id; });
+  mgRenderSinMapear();
+  _mgSmPP = null;
+  toast('Vinculado ✓ — recalculando costo…', 'ok');
+  try {
+    await sbFetch('rpc/recalcular_costos_reales_30d', { method: 'POST', body: '{}' });
+  } catch(e){
+    toast('Vinculado, pero el recálculo falló: el costo entra con el cron de las 6:00', 'err');
+  }
+  _mgData = null;          // invalida el tab para refetch con el costo fresco
+  margenesInit();
+}
+
+function _mgSmMatchLaxo(a, b){
+  a = String(a || '').toLowerCase(); b = String(b || '').toLowerCase();
+  if (!a || !b) return false;
+  return a.indexOf(b) !== -1 || b.indexOf(a.split(' ')[0]) !== -1;
+}
+
 async function mgSmAbrirVincular(idx){
   var r = (_mgSinMapear || [])[idx];
   if (!r) return;
   if (_mgSmPP === null){
-    var pp = await sbFetch('productos_proveedores?select=id,proveedor,canonico_id,xubio_producto_compra_id,productos_canonicos(nombre)&order=proveedor.asc').catch(function(){ return null; });
-    _mgSmPP = Array.isArray(pp) ? pp : [];
+    // v13.150.0 — la query vieja pedía columnas que NO existen (proveedor,
+    // canonico_id) y un embed sin FK (productos_canonicos): PostgREST devolvía
+    // 400 y el toast mentía "¿permisos?". Columnas reales + proveedores(nombre)
+    // vía la FK proveedor_id, y el error verdadero al toast.
+    try {
+      var pp = await sbFetch('productos_proveedores?select=id,producto_tck_nombre,proveedor_id,xubio_producto_compra_id,proveedores(nombre,xubio_id)&order=producto_tck_nombre.asc');
+      _mgSmPP = Array.isArray(pp) ? pp : [];
+    } catch(e){
+      toast('No pude leer productos_proveedores: ' + (e.message || e), 'err');
+      return;
+    }
   }
-  if (!_mgSmPP.length){ toast('No pude leer productos_proveedores (¿permisos?)', 'err'); return; }
-  // Mismo proveedor primero (match laxo por texto), después el resto
-  var provTxt = String(r.proveedor_xubio_nombre || '').toLowerCase();
+  await _mgSmProvsCargar();
+  var provTxt = String(r.proveedor_xubio_nombre || '');
+  // Camino A: fichas existentes — mismo proveedor primero (match laxo)
   var propios = [], resto = [];
-  _mgSmPP.forEach(function(p){
-    var nomCan = (p.productos_canonicos && p.productos_canonicos.nombre) || ('canónico ' + p.canonico_id);
-    var o = { id: p.id, label: nomCan + ' — ' + (p.proveedor || 's/prov') + (p.xubio_producto_compra_id ? ' (revincula #' + p.xubio_producto_compra_id + ')' : '') };
-    var pv = String(p.proveedor || '').toLowerCase();
-    if (pv && provTxt && (provTxt.indexOf(pv) !== -1 || pv.indexOf(provTxt.split(' ')[0]) !== -1)) propios.push(o); else resto.push(o);
+  (_mgSmPP || []).forEach(function(p){
+    if (!p) return;
+    var nomProv = (p.proveedores && p.proveedores.nombre) || 's/prov';
+    var o = { id: p.id, label: (p.producto_tck_nombre || ('ficha #' + p.id)) + ' — ' + nomProv +
+      (p.xubio_producto_compra_id ? ' (revincula #' + p.xubio_producto_compra_id + ')' : '') };
+    if (_mgSmMatchLaxo(provTxt, nomProv)) propios.push(o); else resto.push(o);
   });
   var opts = propios.concat(resto).map(function(o){
     return '<option value="' + o.id + '">' + mgSmEsc(o.label) + '</option>';
   }).join('');
+  // Camino B: crear la ficha (caso pastas Tía Tere: venden sin costo porque el
+  // producto no tiene NINGUNA fila en productos_proveedores y Vincular solo no
+  // las rescata). Productos canónicos salen de _mgData, ya cargado en el tab.
+  var xnom = String(r.producto_xubio_nombre || '').toLowerCase();
+  var prodOpts = '<option value="">— elegí el producto TCK —</option>';
+  var _yaSel = false;
+  (_mgData || []).slice().sort(function(a, b){
+    return String((a && a.producto) || '').localeCompare(String((b && b.producto) || ''));
+  }).forEach(function(d){
+    if (!d || !d.producto) return;
+    var pl = String(d.producto).toLowerCase();
+    var sel = '';
+    if (!_yaSel && xnom && (xnom.indexOf(pl) !== -1 || pl.indexOf(xnom) !== -1)){ sel = ' selected'; _yaSel = true; }
+    prodOpts += '<option value="' + mgSmEsc(d.producto) + '"' + sel + '>' + mgSmEsc(d.producto) + '</option>';
+  });
+  var provOpts = '<option value="">— elegí el proveedor —</option>';
+  var _yaSelV = false;
+  (_mgSmProvs || []).forEach(function(v){
+    if (!v) return;
+    var sel = '';
+    if (!_yaSelV && _mgSmMatchLaxo(provTxt, v.nombre)){ sel = ' selected'; _yaSelV = true; }
+    provOpts += '<option value="' + v.id + '"' + sel + '>' + mgSmEsc(v.nombre || ('#' + v.id)) +
+      (v.xubio_id ? '' : ' (sin xubio_id)') + '</option>';
+  });
   var ov = document.createElement('div');
   ov.id = 'mg-sm-modal';
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:900;display:flex;align-items:center;justify-content:center;padding:16px;';
-  ov.innerHTML = '<div style="background:#FFFDF9;border-radius:14px;max-width:440px;width:100%;padding:16px;">'
+  ov.innerHTML = '<div style="background:#FFFDF9;border-radius:14px;max-width:440px;width:100%;padding:16px;max-height:86vh;overflow:auto;">'
     + '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:17px;color:#B71C1C;margin-bottom:6px;">Vincular compra de Xubio</div>'
     + '<div style="font-size:12px;color:#3E2723;margin-bottom:2px;"><b>' + mgSmEsc(r.producto_xubio_nombre || '') + '</b></div>'
     + '<div style="font-size:11px;color:#8A7A66;margin-bottom:10px;">' + mgSmEsc(r.proveedor_xubio_nombre || '') + ' · Xubio #' + r.producto_xubio_id + '</div>'
-    + '<div style="font-size:11px;color:#5C4F3A;margin-bottom:4px;">¿A qué producto TCK (fila de productos_proveedores) corresponde?</div>'
-    + '<select id="mg-sm-sel" style="width:100%;padding:8px;border:1.5px solid #D4A574;border-radius:8px;font-size:12px;background:#fff;margin-bottom:12px;">' + opts + '</select>'
+    + (opts
+        ? '<div style="font-size:11px;color:#5C4F3A;margin-bottom:4px;">Ficha existente (producto — proveedor):</div>'
+          + '<select id="mg-sm-sel" style="width:100%;padding:8px;border:1.5px solid #D4A574;border-radius:8px;font-size:12px;background:#fff;margin-bottom:8px;">' + opts + '</select>'
+          + '<button class="fc-fact-btn" style="background:#1B5E20;width:100%;margin-bottom:12px;" onclick="mgSmConfirmarVinculo(' + idx + ')">Vincular a esa ficha</button>'
+        : '<div style="font-size:11.5px;color:#B71C1C;background:#FDECEA;border-radius:8px;padding:8px;margin-bottom:12px;">No hay fichas en productos_proveedores: creá una acá abajo.</div>')
+    + '<div style="font-size:11px;font-weight:800;color:#8A7A66;text-align:center;margin:2px 0 8px;">— o crear la ficha nueva —</div>'
+    + '<select id="mg-sm-np" style="width:100%;padding:8px;border:1.5px solid #D4A574;border-radius:8px;font-size:12px;background:#fff;margin-bottom:6px;">' + prodOpts + '</select>'
+    + '<select id="mg-sm-nv" style="width:100%;padding:8px;border:1.5px solid #D4A574;border-radius:8px;font-size:12px;background:#fff;margin-bottom:10px;">' + provOpts + '</select>'
+    + '<button class="fc-fact-btn" style="background:#EF6C00;width:100%;margin-bottom:12px;" onclick="mgSmCrearFicha(' + idx + ')">➕ Crear ficha y vincular</button>'
     + '<div style="display:flex;gap:8px;justify-content:flex-end;">'
     + '<button class="fc-fact-btn" style="background:#8A7A66;" onclick="document.getElementById(\'mg-sm-modal\').remove()">Cancelar</button>'
-    + '<button class="fc-fact-btn" style="background:#1B5E20;" onclick="mgSmConfirmarVinculo(' + idx + ')">Vincular</button>'
     + '</div></div>';
   document.body.appendChild(ov);
 }
@@ -42179,20 +42284,71 @@ async function mgSmConfirmarVinculo(idx){
   btns.forEach(function(b){ b.disabled = true; });
   try {
     var resp = await sbFetch('productos_proveedores?id=eq.' + ppId,
-      { method: 'PATCH', body: JSON.stringify({ xubio_producto_compra_id: r.producto_xubio_id }) });
+      { method: 'PATCH', body: JSON.stringify({
+          xubio_producto_compra_id: Number(r.producto_xubio_id),
+          xubio_nombre_compra: r.producto_xubio_nombre || null }) });
     if (!Array.isArray(resp) || !resp.length){
       toast('El vínculo NO se guardó (0 filas: permisos RLS o id inexistente)', 'err');
       btns.forEach(function(b){ b.disabled = false; });
       return;
     }
-    toast('Vinculado. Recargando costos…', 'ok');
-    var m = document.getElementById('mg-sm-modal'); if (m) m.remove();
-    _mgSinMapear = (_mgSinMapear || []).filter(function(x){ return x.producto_xubio_id !== r.producto_xubio_id; });
-    _mgSmPP = null;
-    _mgData = null;          // invalida el tab para refetch con el costo fresco
-    margenesInit();
+    await _mgSmPostVinculo(r);
   } catch (e){
     toast('Error al vincular: ' + (e.message || e), 'err');
+    btns.forEach(function(b){ b.disabled = false; });
+  }
+}
+
+// v13.150.0 — Camino B: crear la ficha proveedor–producto y vincularla.
+// es_proveedor_primario = true solo si el producto no tenía ninguna ficha.
+async function mgSmCrearFicha(idx){
+  var r = (_mgSinMapear || [])[idx];
+  if (!r) return;
+  var selP = document.getElementById('mg-sm-np');
+  var selV = document.getElementById('mg-sm-nv');
+  if (!selP || !selP.value){ toast('Elegí a qué producto TCK corresponde', 'err'); return; }
+  if (!selV || !selV.value){ toast('Elegí el proveedor', 'err'); return; }
+  var prodNombre = selP.value;
+  var provId = Number(selV.value);
+  var prov = (_mgSmProvs || []).filter(function(x){ return x && x.id === provId; })[0] || {};
+  var esPrimario = !(_mgSmPP || []).some(function(p){ return p && p.producto_tck_nombre === prodNombre; });
+  var btns = document.querySelectorAll('#mg-sm-modal button');
+  btns.forEach(function(b){ b.disabled = true; });
+  try {
+    // Sin proveedores.xubio_id el cron de costos no matchea la factura
+    // (incidente Unión Ganadera, bitácora #780). Si falta y el proveedor
+    // elegido ES el de la factura (match laxo), lo tomamos de compras_xubio
+    // por nombre exacto. Si no matchea, se avisa y NO se pisa nada.
+    if (!prov.xubio_id){
+      if (_mgSmMatchLaxo(r.proveedor_xubio_nombre, prov.nombre)){
+        var xid = await _mgSmProvXubioId(r.proveedor_xubio_nombre);
+        if (xid != null){
+          await sbFetch('proveedores?id=eq.' + provId + '&xubio_id=is.null',
+            { method: 'PATCH', body: JSON.stringify({ xubio_id: xid }) }).catch(function(){ return null; });
+          prov.xubio_id = xid;
+        }
+      }
+      if (!prov.xubio_id){
+        toast('Ojo: el proveedor quedó sin xubio_id — el costo no corre hasta cargarlo', 'err');
+      }
+    }
+    var ins = await sbFetch('productos_proveedores', { method: 'POST', body: JSON.stringify({
+      producto_tck_nombre: prodNombre,
+      proveedor_id: provId,
+      xubio_producto_compra_id: Number(r.producto_xubio_id),
+      xubio_nombre_compra: r.producto_xubio_nombre || null,
+      es_proveedor_primario: esPrimario,
+      estado: 'activo',
+      notas: 'creada desde admin (compras sin vincular)'
+    }) });
+    if (!Array.isArray(ins) || !ins.length){
+      toast('La ficha NO se creó (0 filas: ¿sesión vencida? Reingresá con PIN)', 'err');
+      btns.forEach(function(b){ b.disabled = false; });
+      return;
+    }
+    await _mgSmPostVinculo(r);
+  } catch (e){
+    toast('Error al crear la ficha: ' + (e.message || e), 'err');
     btns.forEach(function(b){ b.disabled = false; });
   }
 }
