@@ -1,5 +1,34 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.154.0 — 14/08/2026
+     v13.154.0: DOS RECLAMOS DE FRANCISCO DEL 14/08, LOS DOS DE FRONT.
+       No requiere deploy de Apps Script (v25.116.0 ya cubre el backend).
+       (A) "EL PEDIDO NO ESTA EN LA PLANILLA" (caso Crespo, Casbas,
+           TCK-20260812-1304-MIG-YXH7, FC A-00008-00002327 con "FALTO"
+           escrito a mano en los dos renglones). El pedido SI estaba en la
+           planilla; lo que faltaba era su mercaderia: pide 6 + 6 y los
+           totales decian 1 + 1. CAUSA: en parsearProductos el plural se
+           armaba con s? (esperaba "unidads"), asi que "6 unidades" no
+           matcheaba y la cantidad caia al default 1. Solo rompia de 2 en
+           adelante ("1 unidad" singular si matcheaba), por eso paso
+           inadvertido. Pega en los productos que el catalogo vende por
+           unidad suelta (Tapa Mania). Medido sobre el Sheet: 19 pedidos /
+           137 unidades que nunca se le pidieron al deposito. Se agrego
+           tambien "cajita". IMPORTA AUNQUE v13.153.0 haya migrado el PDF a
+           planillaVigente: la planilla VETERINARIA sigue armandose del
+           Sheet con este parser (kg declarados en transito) y el PDF lo
+           conserva como rama fallback (_plvLineasDe).
+       (B) "CUANDO LOS CHICOS EDITAN UN PEDIDO NO ME DEJA FACTURARLO". El
+           facturador devuelve 6 status omitido_* (GAS v25.113→116) y el
+           admin solo contemplaba omitido_fecha. Los otros 5 no caian en
+           ninguna rama: en el lote la fila quedaba clavada en "Facturando
+           en Xubio..." para siempre — sin sumar siquiera al contador de
+           errores — y en el individual salia "Sigue trabado: error
+           desconocido". El pedido estaba esperando la reconfirmacion del
+           vendedor y la app no tenia como decirlo. Nuevo _fcMotivoOmitido()
+           traduce los 6 a lenguaje de deposito, usado por las dos vias, +
+           rama final para status desconocido (backend nuevo / admin viejo).
+     ═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v13.153.1 — 14/08/2026
      v13.153.1: FIX DE ETIQUETADO (sin cambios de lógica). TCK_UPD_LOCAL
        venía en 13.143.0 con version.json ya en 13.153.0: el cartel de
@@ -34578,7 +34607,17 @@ function parsearProductos(detalle) {
       // Mirar siguiente parte para cantidad+unidad
       if (i + 1 < partes.length) {
         var sig = partes[i + 1];
-        var mCant = sig.match(/^(\d+)\s+(?:caja|bolsa|maple|paquete|unidad|lata|kilo|kg)s?\b/i);
+        // v13.154.0 — "unidades" es plural IRREGULAR: el patrón viejo armaba el
+        // plural con s? (esperaba "unidads"), así que "6 unidades" NO matcheaba
+        // y la cantidad caía al default 1. Los productos que el catálogo vende
+        // por unidad suelta (Tapa Manía) se pedían de a 1 al depósito sin
+        // importar cuánto compró el cliente: 19 pedidos / 137 unidades que nunca
+        // subieron al camión (caso Crespo 14/08, factura A-00008-00002327 con
+        // "FALTO" escrito a mano en los dos renglones). Pasó desapercibido
+        // porque "1 unidad" en singular SÍ matcheaba: solo rompía de 2 en
+        // adelante. "cajita" va ANTES que "caja" para que la alternancia no
+        // consuma el prefijo y deje "itas" rompiendo el \b.
+        var mCant = sig.match(/^(\d+)\s+(?:cajita|caja|bolsa|maple|paquete|unidad(?:es)?|lata|kilo|kg)s?\b/i);
         if (mCant) {
           cantidad = parseInt(mCant[1]) || 1;
           i++; // consumir también la siguiente parte
@@ -44907,6 +44946,40 @@ async function fcSustAnular(id, pedidoId) {
   } catch (e) { toast('Error de conexión: ' + e.message, 'err'); }
 }
 
+// ═══ v13.154.0 — TRADUCIR LOS "omitido_*" DEL FACTURADOR ═══
+// El facturador (GAS v25.113→116) devuelve 6 status omitido_* y el admin solo
+// contemplaba omitido_fecha. Los otros 5 no caían en ninguna rama: en el lote
+// la fila quedaba clavada en "Facturando en Xubio…" para siempre (ni siquiera
+// contaba como error en el resumen) y en el individual salía "Sigue trabado:
+// error desconocido". Ese es el reporte de Fran del 14/08 ("cuando los chicos
+// editan un pedido no me deja facturarlo"): el pedido estaba esperando la
+// reconfirmación del vendedor y la app no tenía cómo decirlo.
+// Devuelve null si el status NO es un omitido conocido (el llamador decide).
+function _fcMotivoOmitido(r) {
+  if (!r || !r.status) return null;
+  switch (r.status) {
+    case 'omitido_fecha':
+      return '📅 Previo al corte de facturación (' + (r.desde || '') + ')';
+    case 'omitido_estado':
+      return String(r.estado) === 'Cancelado'
+        ? '🚫 Pedido cancelado — no se factura'
+        : '⏳ El pedido está en PENDIENTE: el vendedor lo tiene que confirmar antes de facturar';
+    case 'omitido_edicion_pendiente':
+      return '✏️ Lo editaron y falta que el vendedor lo reconfirme — avisale y reintentá';
+    case 'omitido_requiere_accion':
+      return '⛔ Necesita que alguien lo toque: ' + (r.error || 'sin detalle') +
+             ' — reintentá desde el Centro de Control';
+    case 'omitido_bloqueado_stock':
+      return '📦 Stock negativo en Xubio. Se reintenta solo' +
+             (r.horas_para_reintento ? ' en ~' + r.horas_para_reintento + ' h' : '') +
+             '; para adelantarlo, cargá la compra en Xubio';
+    case 'omitido_max_intentos':
+      return '🔁 Agotó los ' + (r.intentos || 3) + ' reintentos automáticos — usá Reintentar en el Centro de Control';
+    default:
+      return null;
+  }
+}
+
 async function fcSustFacturar(pedidoId) {
   fcSustCerrar();
   toast('Facturando ' + pedidoId + '…'); // sin tipo: solo existen .toast.ok y .toast.err
@@ -44914,12 +44987,15 @@ async function fcSustFacturar(pedidoId) {
     var resp = await fetch(APPS_SCRIPT_URL + '?accion=facturarLote&ids=' + encodeURIComponent(pedidoId));
     var data = await resp.json();
     var r = (data.resultados && data.resultados[0]) || {};
+    var _omit = _fcMotivoOmitido(r);   // v13.154.0
     if (r.status === 'facturada' || r.status === 'ya_facturada') {
       toast('✅ Facturado: FC ' + (r.factura_nro || r.factura_id || ''), 'ok');
     } else if (r.status === 'sin_cae') {
       toast('⚠️ Comprobante creado SIN CAE — revisalo en Xubio', 'err');
+    } else if (_omit) {
+      toast(_omit, 'err');
     } else {
-      toast('Sigue trabado: ' + (r.error || data.message || 'error desconocido'), 'err');
+      toast('Sigue trabado: ' + (r.error || data.message || r.status || 'error desconocido'), 'err');
     }
   } catch (e) {
     toast('Error de conexión: ' + e.message, 'err');
@@ -45237,6 +45313,18 @@ async function _fcFacturarLista(pend, etiqueta) {
         else if (r.status === 'sin_cae') { errN++; errores.push((r.pedido_id || '') + ': sin CAE (revisar en Xubio)'); if (_e) { _e.status = 'err'; _e.meta = '⚠️ Sin CAE — revisar en Xubio'; } }
         else if (r.status === 'omitido_fecha') { if (_e) { _e.status = 'ya'; _e.meta = 'Omitido (previo al corte)'; } }
         else if (r.status === 'error') { errN++; errores.push((r.pedido_id || '') + ': ' + (r.error || '')); if (_e) { _e.status = 'err'; _e.meta = r.error || 'Error'; } }
+        // v13.154.0 — los 5 omitido_* restantes: antes no caían en NINGUNA rama
+        // y la fila quedaba colgada en "Facturando en Xubio…" sin sumar al
+        // resumen. Ahora dicen por qué no se facturó (reporte Fran 14/08).
+        else if (_fcMotivoOmitido(r)) {
+          var _m = _fcMotivoOmitido(r);
+          errN++; errores.push((r.pedido_id || '') + ': ' + _m);
+          if (_e) { _e.status = 'err'; _e.meta = _m; }
+        }
+        // Red de seguridad: status desconocido (backend nuevo, admin viejo) —
+        // antes también quedaba colgado. Preferimos decir "no sé qué pasó" a mentir.
+        else { errN++; errores.push((r.pedido_id || '') + ': sin facturar (' + (r.status || 'sin status') + ')');
+               if (_e) { _e.status = 'err'; _e.meta = 'Sin facturar · ' + (r.status || '?'); } }
       });
       if (j.restantes && j.restantes.length) ids = j.restantes.concat(ids);
       _fcpRender({ nombre: _fnom, orden: _ford, st: _fst, n: _fn, hechas: hechas, ya: yaEst, err: errN, tanda: tanda, terminado: false });
@@ -45861,7 +45949,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.153.1';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.154.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
