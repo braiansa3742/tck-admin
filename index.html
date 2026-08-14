@@ -1,5 +1,11 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.153.1 — 14/08/2026
+     v13.153.1: FIX DE ETIQUETADO (sin cambios de lógica). TCK_UPD_LOCAL
+       venía en 13.143.0 con version.json ya en 13.153.0: el cartel de
+       "hay versión nueva" salta en loop porque el local nunca iguala al
+       remoto. Queda alineado en 13.153.1 (subir también version.json).
+     ═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v13.153.0 — 14/08/2026
      v13.153.0: ETAPA 2 — EL PDF DEJA DE ARMARSE DESDE EL SHEET.
        Backend requerido: Apps Script v25.116.0 + tck_circuito_v3.sql.
@@ -45855,7 +45861,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.143.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.153.1';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
