@@ -1,5 +1,35 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.153.0 — 14/08/2026
+     v13.153.0: ETAPA 2 — EL PDF DEJA DE ARMARSE DESDE EL SHEET.
+       Backend requerido: Apps Script v25.116.0 + tck_circuito_v3.sql.
+       (1) FUENTE UNICA. La planilla de carga y la veterinaria ahora piden
+           `planillaVigente` (snapshot vN de viajes_planillas, con las
+           lineas tomadas de pedidos_items) y renderizan EXACTAMENTE esa
+           version. Antes el PDF parseaba el texto del Sheet mientras la
+           pantalla de Deposito leia pedidos_items: el 13/08 eso dio
+           planilla=McCain y Deposito=Balcarce para el pedido de Correa.
+           Se preserva TODO el formato: orden inverso de ruta, agrupacion
+           por ciudad, categorias veterinarias, totales y firma.
+       (2) SI NO HAY PLANILLA, la ofrece generar (planillaGenerar v1) en
+           vez de fallar. Si la version quedo vieja porque alguien edito un
+           pedido, avisa y ofrece generar la vN+1 antes de imprimir.
+       (3) EL CANDADO FISCAL SALE DE LA IMPRESION. Regla nueva:
+           Confirmado + viaje + no Cancelado => entra en la planilla aunque
+           NO tenga factura. Una falla de Xubio no puede hacer desaparecer
+           mercaderia que Deposito tiene que cargar. Los pedidos sin factura
+           se marcan con ⚠ SIN FACTURA en el PDF y se listan en un recuadro
+           al pie, pero ya no bloquean imprimir. El candado queda donde
+           corresponde: Cerrar carga / Arrancar viaje.
+       (4) CANCELADOS: el snapshot los excluye en el backend, asi que no
+           pueden entrar al PDF ni al control fisico aunque conserven
+           viaje_id (deja evento critico para el Centro de Control).
+       A JUBILAR cuando Francisco valide el circuito nuevo (NO todavia):
+           · fcCandadoPlanilla() — ya no se llama desde la impresion.
+           · lzEjecutarCerrarViaje() — desasocia Pendientes al cerrar; es la
+             causa confirmada de los 22 pedidos huerfanos.
+           · el parseo de productos desde Sheet en el PDF (rama fallback).
+     ═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v13.152.0 — 13/08/2026
      v13.152.0: EL CIRCUITO OPERATIVO ENTERO OPERABLE POR FRANCISCO (P1).
        Backend requerido: Apps Script v25.114.0 + SQL tck_circuito_v1 y v2.
@@ -33694,8 +33724,9 @@ async function _vetGenerarAsync(opts) {
   }
 
   // ═══ v13.36.0 — CANDADO DE FACTURACIÓN también en la planilla VET ═══
-  const _fcGateVet = await fcCandadoPlanilla(pedidos, { chofer: chofer, viajeId: viajeId });
-  if (!_fcGateVet.ok) return;
+  // v13.153.0 — la veterinaria tampoco se bloquea por falta de factura: es un
+  // documento sanitario de la mercadería que viaja, no un comprobante fiscal.
+  // El candado fiscal actúa en Cerrar carga / Arrancar viaje.
 
   // Agrupar por ciudad → categoría
   const porCiudad = {};
@@ -33829,14 +33860,34 @@ async function descargarPlanillaCarga(choferParam) {
   const fechaPDF = dd + '/' + mm + '/' + aaaa;
 
   // ── Filtrado de pedidos (igual que la versión anterior) ──
-  let pedidos;
+  // ── v13.153.0 — FUENTE: la VERSION vigente de la planilla ──────────
+  // Misma respuesta que consume Deposito. Si el viaje no tiene planilla, se
+  // ofrece generarla; si quedo vieja, se ofrece la vN+1 antes de imprimir.
+  let pedidos, _plvSinFactura = [], _plvVersion = null;
   if (viajeId) {
-    const idsDelViaje = (typeof lzPedidosDeViaje === 'function')
-      ? lzPedidosDeViaje(viajeId).map(p => p.pedido_id)
-      : [];
-    pedidos = todosLosPedidos.filter(p =>
-      p.estado === 'Confirmado' && idsDelViaje.indexOf(p.pedidoId) >= 0
-    );
+    const _plv = await _plvObtener(viajeId);
+    if (_plv === null) return;                       // el usuario cancelo
+    if (_plv && _plv.status === 'ok') {
+      _plvVersion = _plv.version;
+      _plvSinFactura = _plv.sin_factura || [];
+      pedidos = (_plv.pedidos || []).map(function (p) {
+        return {
+          pedidoId: p.pedido_id, cliente: p.cliente, comercio: p.cliente,
+          localidad: p.localidad, vendedor: p.vendedor, total: p.total,
+          estado: p.estado, facturado: p.facturado, facturaNro: p.factura_nro,
+          _lineas: (p.items || []).map(function (i) {
+            return { nombre: i.producto + (i.calibre ? ' (' + i.calibre + ')' : ''),
+                     cantidad: Number(i.cantidad) || 0 };
+          })
+        };
+      });
+    } else {
+      // Fallback (viaje sin planilla y el usuario eligio imprimir igual)
+      const idsDelViaje = (typeof lzPedidosDeViaje === 'function')
+        ? lzPedidosDeViaje(viajeId).map(p => p.pedido_id) : [];
+      pedidos = todosLosPedidos.filter(p =>
+        p.estado === 'Confirmado' && idsDelViaje.indexOf(p.pedidoId) >= 0);
+    }
   } else {
     pedidos = todosLosPedidos.filter(p =>
       p.estado === 'Confirmado' && p.choferAsignado === chofer
@@ -33848,10 +33899,11 @@ async function descargarPlanillaCarga(choferParam) {
     return;
   }
 
-  // ═══ v13.36.0 — CANDADO DE FACTURACIÓN: sin factura no hay planilla ═══
-  // Cubre también lzImprimirPlanillaCargaViaje (delega en esta función).
-  const _fcGate = await fcCandadoPlanilla(pedidos, { chofer: chofer, viajeId: viajeId });
-  if (!_fcGate.ok) return;
+  // ═══ v13.153.0 — EL CANDADO FISCAL YA NO BLOQUEA LA IMPRESION ═══
+  // Un Confirmado sin factura viaja igual: Deposito tiene que verlo. Se
+  // marca en el PDF y se lista al pie. El candado actua en Cerrar carga /
+  // Arrancar viaje (viajeCerrarCarga, requiere:'facturar_o_force').
+  const _sinFacturaPDF = (typeof _plvSinFactura !== 'undefined' && _plvSinFactura) ? _plvSinFactura : [];
 
   toast('⏳ Generando PDF...', 'ok');
 
@@ -33864,7 +33916,7 @@ async function descargarPlanillaCarga(choferParam) {
     // ── Cálculo de totales globales y por ciudad ──
     const totalesProd = {};
     pedidos.forEach(function(p) {
-      parsearProductos(p.detalle || p.resumen || '').forEach(function(pr) {
+      _plvLineasDe(p).forEach(function(pr) {
         const mapeo = vetBuscarMapeo(pr.nombre);
         const cat   = mapeo ? mapeo[0] : 'Otros';
         if (!totalesProd[pr.nombre]) totalesProd[pr.nombre] = { cantidad: 0, cat };
@@ -33889,7 +33941,7 @@ async function descargarPlanillaCarga(choferParam) {
         ? 'Sin localidad'
         : _ciudadCanonizar(ciudadRaw);
       if (!porCiudadProds[ciudad]) porCiudadProds[ciudad] = {};
-      parsearProductos(p.detalle || p.resumen || '').forEach(function(pr) {
+      _plvLineasDe(p).forEach(function(pr) {
         const mapeo = vetBuscarMapeo(pr.nombre);
         const cat   = mapeo ? mapeo[0] : 'Otros';
         if (!porCiudadProds[ciudad][cat]) porCiudadProds[ciudad][cat] = {};
@@ -33937,6 +33989,13 @@ async function descargarPlanillaCarga(choferParam) {
     doc.setTextColor(110, 110, 110);
     doc.text('TCK The Chicken Kings S.R.L.', W - M, y + 13, { align: 'right' });
     doc.text(hoyTxt, W - M, y + 18, { align: 'right' });
+    if (_plvVersion) {                                     // v13.153.0
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(180, 83, 9);
+      doc.text('PLANILLA v' + _plvVersion, W - M, y + 23, { align: 'right' });
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(110, 110, 110);
+    }
     y += 28;
 
     // ── BOX INFO ──
@@ -34154,7 +34213,14 @@ async function descargarPlanillaCarga(choferParam) {
 
     // ═══ v13.39.0 — FACTURAS DEL VIAJE (checklist para Francisco y el chofer) ═══
     try {
-      const _facMap = (_fcGate && _fcGate.facturas) || {};
+      // v13.153.0 — el estado fiscal ya viene en el snapshot (p.facturado /
+      // p.facturaNro). Se sigue imprimiendo el checklist con ⚠ SIN FACTURA,
+      // pero eso YA NO impide imprimir: el candado actúa al cerrar carga.
+      const _facMap = {};
+      pedidos.forEach(function (p) {
+        _facMap[p.pedidoId] = { nro: p.facturado ? (p.facturaNro || 's/n') : null,
+                                total: Number(p.total || 0), cliente: p.cliente || p.comercio || '' };
+      });
       if (Object.keys(_facMap).length) {
         const filas = pedidos.map(function(p) {
           const f = _facMap[p.pedidoId] || { nro: null, total: 0, cliente: p.cliente || p.comercio || '' };
@@ -46734,6 +46800,88 @@ function ccBoot() {
 }
 if (document.readyState === 'complete' || document.readyState === 'interactive') setTimeout(ccBoot, 1200);
 else document.addEventListener('DOMContentLoaded', function () { setTimeout(ccBoot, 1200); });
+
+})();
+
+</script>
+<script>
+// ════════════════════════════════════════════════════════════════════════════
+//  v13.153.0 — FUENTE ÚNICA PARA EL PDF DE PLANILLA (Etapa 2)
+//  _plvObtener: trae la versión vigente; si falta o quedó vieja, la resuelve.
+//  _plvLineasDe: líneas de un pedido — del snapshot si vino, si no del Sheet.
+// ════════════════════════════════════════════════════════════════════════════
+(function () {
+'use strict';
+
+function _plvQuien() {
+  try { if (typeof vendedorActual !== 'undefined' && vendedorActual) return vendedorActual; } catch (e) {}
+  return 'admin';
+}
+async function _plvGAS(qs) {
+  var r = await fetch(APPS_SCRIPT_URL + '?' + qs + '&_cb=' + Date.now());
+  return r.json();
+}
+
+/**
+ * Devuelve la versión vigente de la planilla del viaje, resolviendo los casos
+ * borde ANTES de imprimir:
+ *   · sin planilla   → ofrece generar la v1
+ *   · quedó vieja    → ofrece generar la vN+1 (o imprimir la vieja igual)
+ * @return objeto planillaVigente | false (imprimir por la rama vieja) | null (cancelado)
+ */
+window._plvObtener = async function (viajeId) {
+  var pv;
+  try {
+    pv = await _plvGAS('accion=planillaVigente&viaje_id=' + encodeURIComponent(viajeId));
+  } catch (e) {
+    if (!confirm('No pude leer la planilla del viaje (' + e.message + ').\n\n¿Imprimir con el método viejo?')) return null;
+    return false;
+  }
+
+  if (pv && pv.status === 'sin_planilla') {
+    if (!confirm('Este viaje todavía no tiene PLANILLA generada.\n\n' +
+                 'Generar la v1 ahora deja registrado exactamente qué se manda a cargar ' +
+                 '(y es lo que va a ver Depósito).\n\n¿Generar la v1 e imprimir?')) return null;
+    var g1 = await _plvGAS('accion=planillaGenerar&viaje_id=' + encodeURIComponent(viajeId) +
+                           '&quien=' + encodeURIComponent(_plvQuien()));
+    if (!g1 || g1.status !== 'ok') {
+      if (typeof toast === 'function') toast('⛔ ' + ((g1 && g1.message) || 'No se pudo generar'), 'err');
+      return null;
+    }
+    return await _plvGAS('accion=planillaVigente&viaje_id=' + encodeURIComponent(viajeId));
+  }
+
+  if (pv && pv.status === 'ok' && (!pv.vigente || pv.desactualizada_flag)) {
+    var c = pv.cambios || {};
+    var det = '';
+    if ((c.agregados || []).length) det += '\n➕ ' + c.agregados.map(function (x) { return x.cliente; }).join(', ');
+    if ((c.quitados || []).length) det += '\n➖ ' + c.quitados.map(function (x) { return x.cliente; }).join(', ');
+    if (!det) det = '\n(cambió el contenido de algún pedido: productos o cantidades)';
+    var r = confirm('⚠ LA PLANILLA v' + pv.version + ' QUEDÓ VIEJA' + det +
+      '\n\nAceptar = generar la v' + (pv.version + 1) + ' e imprimir ESA (es la que va a ver Depósito).' +
+      '\nCancelar = imprimir la v' + pv.version + ' tal cual está.');
+    if (r) {
+      var g2 = await _plvGAS('accion=planillaGenerar&viaje_id=' + encodeURIComponent(viajeId) +
+                             '&quien=' + encodeURIComponent(_plvQuien()));
+      if (g2 && g2.status === 'ok') {
+        return await _plvGAS('accion=planillaVigente&viaje_id=' + encodeURIComponent(viajeId));
+      }
+      if (typeof toast === 'function') toast('⛔ ' + ((g2 && g2.message) || 'No se pudo generar'), 'err');
+    }
+  }
+  return pv;
+};
+
+/**
+ * Líneas de producto de un pedido para el PDF.
+ * Prioridad: snapshot (_lineas) → parseo del Sheet (fallback de compatibilidad,
+ * a jubilar cuando el circuito nuevo esté validado).
+ */
+window._plvLineasDe = function (p) {
+  if (p && p._lineas && p._lineas.length) return p._lineas;
+  if (typeof parsearProductos === 'function') return parsearProductos((p && (p.detalle || p.resumen)) || '');
+  return [];
+};
 
 })();
 
