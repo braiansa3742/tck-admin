@@ -1,5 +1,53 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.155.0 — 14/08/2026
+     v13.155.0: LA PLANILLA ES UNA SOLA FOTO — VISTA, PDF Y CARDS.
+     Base: v13.154.0 real de produccion (md5 7dfe271d).
+
+     (1) EL PDF DEJA DE RECALCULAR. Hasta la v13.154.0 la seccion de
+         totales re-sumaba las lineas pedido por pedido. Ahora:
+           · "QUE SUBIR AL CAMION"  sale EXCLUSIVAMENTE de
+             viajes_planillas.consolidado — la cantidad oficial es
+             consolidado.requerido, no una suma nuestra.
+           · "REPARTO POR CLIENTE"  sale EXCLUSIVAMENTE de
+             viajes_planillas.pedidos.
+         Ninguna de las dos se recalcula desde pedidos vivos. Si la
+         composicion viva cambio despues de generar la version, la UI
+         lo grita (planilla DESACTUALIZADA); lo que la version
+         representa NO se toca por atras.
+         Se conserva el agrupado por categoria veterinaria y la
+         presentacion porque son la ayuda real para armar la carga,
+         pero el numero sale del consolidado.
+
+     (2) VISTA PREVIA HTML DE LA PLANILLA (nueva). Antes no existia:
+         el unico camino era jsPDF + doc.save(), y vcImprimirVersion
+         abria un popup que AUTO-IMPRIMIA una lista pelada de clientes.
+         Ahora hay pantalla completa con "← Volver", "🖨 Imprimir" y
+         "⬇ Descargar PDF", SIN auto-print.
+         La vista y el PDF comparten el MISMO objeto de snapshot: el
+         boton de descarga le pasa a descargarPlanillaCarga el _plv ya
+         resuelto (parametro _plv), asi que es fisicamente imposible
+         que la vista muestre una version y el PDF baje otra.
+         jsPDF + doc.save() NO se toca: el chofer necesita el archivo
+         descargable (motivo original de la v12.3.0).
+
+     (3) CARDS DE LOGISTICA reescritas. Antes: "48 pedidos" (contando
+         Pendientes y Cancelados juntos) y "N sin facturar" que en
+         realidad contaba Pendientes. Ahora por card:
+           · identidad de zona (ZONA 1A / 1B / ...) + ciudades
+           · chofer / vehiculo
+           · planilla vN vigente o DESACTUALIZADA
+           · snapshot / Confirmados vivos  (ej. 41/43) — CALCULADO,
+             nunca hardcodeado; los Cancelados no cuentan
+           · Pendientes sin confirmar, aparte y con su nombre correcto
+           · estado de carga + pill CARGA CERRADA
+           · proximo paso concreto cuando el viaje esta atrasado
+           · los viajes futuros con 0 pedidos se colapsan en una linea
+
+     NO TOCADO a proposito: legacy de cierre, VIAJE_EXIGIR_CIERRE_CARGA,
+     Ventas, Xubio, saneamiento historico, la rama fallback del Sheet.
+     ───────────────────────────────────────────────────────────
+═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v13.154.0 — 14/08/2026
      v13.154.0: DOS RECLAMOS DE FRANCISCO DEL 14/08, LOS DOS DE FRONT.
        No requiere deploy de Apps Script (v25.116.0 ya cubre el backend).
@@ -30018,6 +30066,33 @@ let _planillaChofer  = 'Joan';
 
 // Metadata de zonas (orden + nombre + ciudades de referencia).
 // Los counts y montos vienen de Supabase en runtime.
+/* ═══ v13.155.0 — estilos de las cards de Logística ═══ */
+(function () {
+  if (document.getElementById('lz155-css')) return;
+  var st = document.createElement('style');
+  st.id = 'lz155-css';
+  st.textContent = [
+    '.lz155-zona{font-weight:800;letter-spacing:.5px;color:#1B5E20;}',
+    '.lz155-ciudades{font-size:11.5px;color:#8a6f5f;margin-top:2px;line-height:1.35;}',
+    '.lz155-mini{font-size:10.5px;color:#8a6f5f;font-weight:500;}',
+    '.lz155-circuito{display:flex;flex-wrap:wrap;gap:5px;padding:7px 12px 9px;}',
+    '.lz155-pill{font-size:10.5px;font-weight:700;padding:2.5px 8px;border-radius:999px;white-space:nowrap;}',
+    '.lz155-pill.verde{background:#E8F5E9;color:#1B5E20;}',
+    '.lz155-pill.roja{background:#FFEBEE;color:#B71C1C;}',
+    '.lz155-pill.ambar{background:#FFF3E0;color:#E65100;}',
+    '.lz155-pill.neutra{background:#F1EDE7;color:#7a6455;}',
+    '.lz155-atrasado{margin:0 12px 10px;padding:6px 9px;border-radius:7px;',
+      'background:#FFEBEE;color:#B71C1C;font-size:11.5px;line-height:1.4;}',
+    '.lz155-colapsada{display:flex;align-items:center;gap:9px;padding:8px 13px;margin:5px 0;',
+      'border:1px dashed #d8cec2;border-radius:9px;background:#FBF8F4;cursor:pointer;}',
+    '.lz155-colapsada:hover{background:#F4EEE6;}',
+    '.lz155-colapsada-zona{font-size:11.5px;font-weight:800;color:#9a8877;letter-spacing:.4px;}',
+    '.lz155-colapsada-txt{flex:1;font-size:11.5px;color:#a89684;}',
+    '.lz155-colapsada-ir{font-size:16px;color:#c4b5a4;line-height:1;}'
+  ].join('');
+  document.head.appendChild(st);
+})();
+
 const LZ_ZONAS = [
   { key: 'z1a', nombre: 'Zona 1A',  dias: 'Sale Lun' },
   { key: 'z1b', nombre: 'Zona 1B',  dias: 'Sale Mar' },
@@ -30485,6 +30560,11 @@ async function lzCargarViajes() {
     if (data.status === 'ok' && Array.isArray(data.viajes)) {
       _lzViajes = data.viajes;
       _lzViajesLoadedAt = new Date();
+      // v13.155.0: total_pedidos de la VERSIÓN vigente, para poder mostrar
+      // "snapshot / confirmados vivos" sin abrir el detalle de cada viaje.
+      try { await lzCargarSnapshotsPlanilla(_lzViajes); } catch (e) {
+        console.warn('[lz v13.155.0] no pude leer los snapshots de planilla:', e);
+      }
       // Re-render si el usuario está en este tab
       if (typeof _tabActual !== 'undefined' && _tabActual === 'logistica') {
         if (_logTab === 'viajes' || _logTab === 'encurso') {
@@ -30499,6 +30579,32 @@ async function lzCargarViajes() {
   } finally {
     _lzViajesLoading = false;
   }
+}
+
+// ═══ v13.155.0 — TAMAÑO DEL SNAPSHOT VIGENTE POR VIAJE ═══════════════
+// Lee viajes_planillas en UNA sola consulta para todos los viajes que ya
+// tienen versión, y cuelga planilla_snapshot_pedidos en cada viaje. Sirve
+// para la card "41/43": 41 es lo que quedó congelado, 43 lo que hay vivo.
+// Si falla, la card cae al modo "N confirmados" y no rompe nada.
+async function lzCargarSnapshotsPlanilla(viajes) {
+  const conVer = (viajes || []).filter(v => Number(v.planilla_version) > 0);
+  if (!conVer.length) return;
+  const ids = conVer.map(v => v.id);
+  const rows = await sbFetch('viajes_planillas?viaje_id=in.(' +
+    ids.map(encodeURIComponent).join(',') +
+    ')&select=viaje_id,version,total_pedidos&order=version.desc&limit=400');
+  const porViaje = {};
+  (rows || []).forEach(r => {
+    const prev = porViaje[r.viaje_id];
+    if (!prev || Number(r.version) > Number(prev.version)) porViaje[r.viaje_id] = r;
+  });
+  conVer.forEach(v => {
+    const r = porViaje[v.id];
+    // Solo vale si la fila corresponde a la versión vigente del viaje.
+    if (r && Number(r.version) === Number(v.planilla_version)) {
+      v.planilla_snapshot_pedidos = Number(r.total_pedidos) || 0;
+    }
+  });
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -30598,6 +30704,69 @@ async function lzCargarEntregasIndex() {
 
 function lzPendientesEnViaje(viajeId) {
   return _lzPedidosZona.filter(p => p.viaje_id === viajeId && p.estado === 'Pendiente').length;
+}
+
+// ═══ v13.155.0 — COMPOSICIÓN VIVA DEL VIAJE ══════════════════════════
+// viajes.total_pedidos mezcla todo (Confirmados + Pendientes + Cancelados):
+// el 14/08 el viaje cebe0ac7 decía 48 cuando lo que sube al camión eran 43.
+// Esto separa lo que hay que separar. Los Cancelados NO cuentan para nada.
+function lzComposicionViaje(viajeId) {
+  let conf = 0, pend = 0, canc = 0, entr = 0, otros = 0;
+  _lzPedidosZona.forEach(p => {
+    if (p.viaje_id !== viajeId) return;
+    const e = String(p.estado || '').trim();
+    if (e === 'Confirmado') conf++;
+    else if (e === 'Pendiente') pend++;
+    else if (e === 'Cancelado' || e === 'Cancelado por admin') canc++;
+    else if (e === 'Entregado') entr++;
+    else otros++;
+  });
+  return { confirmados: conf, pendientes: pend, cancelados: canc,
+           entregados: entr, otros: otros, cargables: conf + entr };
+}
+
+// Nombres de las ciudades del viaje, en orden de ruta (no solo el conteo).
+function lzCiudadesNombresEnViaje(viajeId) {
+  const set = new Set();
+  _lzPedidosZona.forEach(p => {
+    if (p.viaje_id === viajeId && p.estado !== 'Cancelado' &&
+        p.estado !== 'Cancelado por admin' && p.localidad_canonica) {
+      set.add(p.localidad_canonica);
+    }
+  });
+  const arr = Array.from(set);
+  if (_lzRutas && _lzRutas.length) {
+    const om = {};
+    _lzRutas.forEach(r => { if (r.ciudad) om[r.ciudad] = r.orden || 999; });
+    arr.sort((a, b) => (om[a] || 999) - (om[b] || 999) || a.localeCompare(b));
+  } else arr.sort();
+  return arr;
+}
+
+// Días de diferencia contra hoy. Negativo = el viaje quedó atrás.
+function lzDiasDesdeHoy(fechaISO) {
+  if (!fechaISO) return 0;
+  const pp = String(fechaISO).split('-');
+  if (pp.length !== 3) return 0;
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  const f = new Date(+pp[0], +pp[1] - 1, +pp[2]); f.setHours(0, 0, 0, 0);
+  return Math.round((f - hoy) / 86400000);
+}
+
+// El próximo paso concreto de un viaje atrasado. Sin esto la card avisa que
+// algo está mal pero no dice qué hacer, que es la mitad del problema.
+function lzProximoPaso(v, comp) {
+  const est = String(v.estado || '').toLowerCase();
+  const ver = Number(v.planilla_version || 0);
+  const des = !!v.planilla_desactualizada;
+  if (est === 'rindiendo')   return 'Rendir: cargar cobranzas y cerrar el viaje';
+  if (est === 'en_ruta')     return 'Marcar entregas y pasar a rendición';
+  if (est === 'carga_cerrada') return 'Arrancar el viaje (el camión ya está cargado)';
+  if (!v.chofer || v.chofer === '—') return 'Asignar chofer y vehículo';
+  if (!ver)                  return 'Generar la planilla v1';
+  if (des)                   return 'Regenerar la planilla (quedó desactualizada)';
+  if (comp && comp.pendientes > 0) return comp.pendientes + ' pedido(s) sin confirmar: confirmar o sacar del viaje';
+  return 'Control de carga en depósito y cerrar carga';
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -30746,7 +30915,11 @@ function lzRenderViajes(el) {
     html += '  </div>';
 
     viajesDeEseDia.forEach(v => {
-      html += lzRenderViajeCard(v);
+      // v13.155.0: futuro + 0 pedidos → una línea, no una card entera.
+      const _sinPed = (lzComposicionViaje(v.id).cargables === 0) && (Number(v.total_pedidos) || 0) === 0;
+      const _futuro = lzDiasDesdeHoy(v.fecha_salida) > 0;
+      if (_sinPed && _futuro) html += lzRenderViajeCardColapsada(v);
+      else html += lzRenderViajeCard(v);
     });
 
     html += '</div>';
@@ -30765,12 +30938,29 @@ function lzRenderViajeCard(v) {
   const pendientes = lzPendientesEnViaje(v.id);
   const esEspecial = !!v.es_especial; // v12.17.0 (N43)
 
+  // ── v13.155.0 ──────────────────────────────────────────────────
+  const comp        = lzComposicionViaje(v.id);
+  const ciudadesNom = lzCiudadesNombresEnViaje(v.id);
+  const zonaNombre  = (typeof lzZonaNombreFromKey === 'function')
+                        ? lzZonaNombreFromKey(v.zona) : (v.zona || '');
+  const plVer       = Number(v.planilla_version || 0);
+  const plDes       = !!v.planilla_desactualizada;
+  const cargaCerrada = !!v.carga_cerrada_at;
+  const dias        = lzDiasDesdeHoy(v.fecha_salida);
+  const atrasado    = dias < 0 && estado !== 'cerrado';
+  // El snapshot es la foto congelada; los Confirmados vivos son lo que hay
+  // AHORA. Se muestran los dos juntos porque la diferencia entre ambos es
+  // exactamente lo que decide si hay que regenerar la planilla.
+  const snapN       = plVer ? Number(v.planilla_snapshot_pedidos != null
+                        ? v.planilla_snapshot_pedidos : NaN) : NaN;
+
   // Estado pill text
   const estadoText = {
-    'planificado': 'Planificado',
-    'preparando':  'Preparando',
-    'en_ruta':     'En ruta',
-    'rindiendo':   'Rindiendo'
+    'planificado':   'Planificado',
+    'preparando':    'Preparando',
+    'carga_cerrada': 'Carga cerrada',
+    'en_ruta':       'En ruta',
+    'rindiendo':     'Rindiendo'
   }[estado] || estado;
 
   // Chofer badge (si ya está asignado)
@@ -30807,7 +30997,11 @@ function lzRenderViajeCard(v) {
   const badgeEspecial = esEspecial
     ? ' <span class="lz-viaje-badge-especial">⭐ ESPECIAL</span>'
     : '';
-  html += '      <div class="lz-viaje-titulo">' + lzEsc(titulo) + badgeEspecial + ' ' + choferBadge + '</div>';
+  // v13.155.0: la identidad de la ZONA va primero. "Viaje #cebe" no le dice
+  // nada a nadie; "ZONA 1B" es como se habla del viaje en la operación.
+  html += '      <div class="lz-viaje-titulo">'
+        + '<span class="lz155-zona">' + lzEsc(String(zonaNombre).toUpperCase()) + '</span>'
+        + badgeEspecial + ' ' + choferBadge + '</div>';
 
   // Sub texto
   let sub = '';
@@ -30820,6 +31014,12 @@ function lzRenderViajeCard(v) {
     sub = 'click para configurar';
   }
   if (sub) html += '      <div class="lz-viaje-meta">' + sub + '</div>';
+  // v13.155.0 — ciudades por nombre, en orden de ruta
+  if (ciudadesNom.length) {
+    var _cTxt = ciudadesNom.slice(0, 5).join(' · ');
+    if (ciudadesNom.length > 5) _cTxt += ' +' + (ciudadesNom.length - 5);
+    html += '      <div class="lz155-ciudades">📍 ' + lzEsc(_cTxt) + '</div>';
+  }
   html += '    </div>';
 
   html += '    <div class="lz-viaje-estado-pill estado-' + estado + '">' + estadoText + '</div>';
@@ -30841,21 +31041,69 @@ function lzRenderViajeCard(v) {
     html += '    </div>';
     html += '  </div>';
   } else {
-    // Stats normales
+    // ── v13.155.0 — Stats: snapshot / vivos, y los Pendientes APARTE ──
+    // Antes decía "N pedidos" con el total_pedidos crudo (que mezcla
+    // Cancelados) y llamaba "sin facturar" a los Pendientes, que es otra cosa.
     html += '  <div class="lz-viaje-stats-line">';
-    html += '    <div class="lz-viaje-stat">📦 <span class="lz-viaje-stat-num">' + (v.total_pedidos || 0) + '</span> pedidos</div>';
+    if (plVer && !isNaN(snapN)) {
+      html += '    <div class="lz-viaje-stat">📦 <span class="lz-viaje-stat-num">' + snapN + '/' + comp.cargables +
+              '</span> <span class="lz155-mini">snapshot / confirmados</span></div>';
+    } else {
+      html += '    <div class="lz-viaje-stat">📦 <span class="lz-viaje-stat-num">' + comp.cargables + '</span> confirmados</div>';
+    }
     html += '    <div class="lz-viaje-stat">💰 <span class="lz-viaje-stat-num">' + lzFmtMoneda(v.monto_total) + '</span></div>';
     if (ciudades > 0) {
       html += '    <div class="lz-viaje-stat">📍 <span class="lz-viaje-stat-num">' + ciudades + '</span> ciudades</div>';
     }
-    if (pendientes > 0) {
-      html += '    <div class="lz-viaje-stat" style="color:var(--orange);">⚠️ <span class="lz-viaje-stat-num">' + pendientes + '</span> sin facturar</div>';
-    }
     html += '  </div>';
+  }
+
+  // ── v13.155.0 — FILA DE ESTADO DEL CIRCUITO ─────────────────────
+  html += '  <div class="lz155-circuito">';
+
+  // Planilla
+  if (!plVer) {
+    html += '<span class="lz155-pill neutra">📄 Sin planilla</span>';
+  } else if (plDes) {
+    html += '<span class="lz155-pill roja">📄 v' + plVer + ' DESACTUALIZADA</span>';
+  } else {
+    html += '<span class="lz155-pill verde">📄 v' + plVer + ' vigente</span>';
+  }
+
+  // Carga
+  if (cargaCerrada) {
+    html += '<span class="lz155-pill verde">🔒 CARGA CERRADA</span>';
+  } else if (estado === 'planificado' || estado === 'preparando') {
+    html += '<span class="lz155-pill neutra">🔓 Carga abierta</span>';
+  }
+
+  // Pendientes SIN CONFIRMAR — aparte, con su nombre correcto
+  if (comp.pendientes > 0) {
+    html += '<span class="lz155-pill ambar">⚠️ ' + comp.pendientes + ' sin confirmar</span>';
+  }
+
+  html += '  </div>';
+
+  // Próximo paso, solo cuando el viaje quedó atrás
+  if (atrasado) {
+    html += '  <div class="lz155-atrasado">⏰ Atrasado ' + Math.abs(dias) + ' día' + (Math.abs(dias) === 1 ? '' : 's') +
+            ' · <b>' + lzEsc(lzProximoPaso(v, comp)) + '</b></div>';
   }
 
   html += '</div>';
   return html;
+}
+
+// ── v13.155.0 — CARD COLAPSADA (viaje futuro sin pedidos) ───────────
+// Un viaje planificado a 5 días con 0 pedidos ocupaba una card entera y
+// empujaba hacia abajo lo que sí hay que mirar hoy. Queda como una línea.
+function lzRenderViajeCardColapsada(v) {
+  const zonaNombre = (typeof lzZonaNombreFromKey === 'function')
+                       ? lzZonaNombreFromKey(v.zona) : (v.zona || '');
+  return '<div class="lz155-colapsada" onclick="lzAbrirDetalleViaje(\'' + v.id + '\')">'
+       + '<span class="lz155-colapsada-zona">' + lzEsc(String(zonaNombre).toUpperCase()) + '</span>'
+       + '<span class="lz155-colapsada-txt">sin pedidos todavía</span>'
+       + '<span class="lz155-colapsada-ir">›</span></div>';
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -33865,12 +34113,16 @@ async function descargarPlanillaCarga(choferParam) {
   // y llamaba win.print() — Francisco al "compartir" mandaba la URL del popup,
   // no un archivo, y el chofer recibía un link inválido.
 
-  // Acepta string (chofer) o objeto { chofer, vehiculo, viaje_id }
-  let chofer, vehiculoExplicito = null, viajeId = null;
+  // Acepta string (chofer) o objeto { chofer, vehiculo, viaje_id, _plv }
+  // v13.155.0: _plv es el snapshot YA resuelto. Cuando la vista previa lo
+  // pasa, el PDF no vuelve a pedirlo: vista y PDF quedan atados a la MISMA
+  // version por construccion, no por coincidencia.
+  let chofer, vehiculoExplicito = null, viajeId = null, _plvPre = null;
   if (typeof choferParam === 'object' && choferParam !== null) {
     chofer = choferParam.chofer;
     vehiculoExplicito = choferParam.vehiculo || null;
     viajeId = choferParam.viaje_id || null;
+    _plvPre = choferParam._plv || null;
   } else {
     chofer = choferParam;
   }
@@ -33898,13 +34150,15 @@ async function descargarPlanillaCarga(choferParam) {
   // ── v13.153.0 — FUENTE: la VERSION vigente de la planilla ──────────
   // Misma respuesta que consume Deposito. Si el viaje no tiene planilla, se
   // ofrece generarla; si quedo vieja, se ofrece la vN+1 antes de imprimir.
-  let pedidos, _plvSinFactura = [], _plvVersion = null;
+  let pedidos, _plvSinFactura = [], _plvVersion = null, _plvConsolidado = [];
   if (viajeId) {
-    const _plv = await _plvObtener(viajeId);
+    // v13.155.0: si la vista previa ya resolvio el snapshot, se usa ESE.
+    const _plv = _plvPre || await _plvObtener(viajeId);
     if (_plv === null) return;                       // el usuario cancelo
     if (_plv && _plv.status === 'ok') {
       _plvVersion = _plv.version;
       _plvSinFactura = _plv.sin_factura || [];
+      _plvConsolidado = _plv.consolidado || [];      // v13.155.0
       pedidos = (_plv.pedidos || []).map(function (p) {
         return {
           pedidoId: p.pedido_id, cliente: p.cliente, comercio: p.cliente,
@@ -33948,24 +34202,53 @@ async function descargarPlanillaCarga(choferParam) {
       _cargarLogoBase64()
     ]);
 
-    // ── Cálculo de totales globales y por ciudad ──
-    const totalesProd = {};
-    pedidos.forEach(function(p) {
-      _plvLineasDe(p).forEach(function(pr) {
-        const mapeo = vetBuscarMapeo(pr.nombre);
-        const cat   = mapeo ? mapeo[0] : 'Otros';
-        if (!totalesProd[pr.nombre]) totalesProd[pr.nombre] = { cantidad: 0, cat };
-        totalesProd[pr.nombre].cantidad += pr.cantidad;
-      });
-    });
-
+    // ── v13.155.0 — QUÉ SUBIR AL CAMIÓN: SOLO consolidado ──────────────
+    // La cantidad oficial es consolidado.requerido, tal cual quedó congelada
+    // en viajes_planillas. NO se re-suma nada desde los pedidos: si esta
+    // sección y el consolidado pudieran diferir, tendríamos otra vez dos
+    // verdades del mismo viaje (que es justo lo que cerró la Etapa 2).
+    // La categoría veterinaria y la presentación se derivan del nombre del
+    // producto solo para AGRUPAR y ayudar a armar la carga — no tocan el número.
     const porCatTotal = {};
     [...VET_ORDEN_CATS, 'Otros'].forEach(c => porCatTotal[c] = []);
-    Object.keys(totalesProd).forEach(function(nombre) {
-      const d = totalesProd[nombre];
-      if (!porCatTotal[d.cat]) porCatTotal[d.cat] = [];
-      porCatTotal[d.cat].push({ nombre, cantidad: d.cantidad });
-    });
+    const _consolPDF = (typeof _plvConsolidado !== 'undefined' && _plvConsolidado) ? _plvConsolidado : [];
+    let _consolFuente = 'consolidado';
+
+    if (_consolPDF.length) {
+      _consolPDF.forEach(function (c) {
+        const base = String(c.producto || '');
+        const nombre = base + (c.calibre ? ' (' + c.calibre + ')' : '');
+        const mapeo = vetBuscarMapeo(base);
+        const cat = mapeo ? mapeo[0] : 'Otros';
+        if (!porCatTotal[cat]) porCatTotal[cat] = [];
+        porCatTotal[cat].push({
+          nombre: nombre,
+          cantidad: Number(c.requerido) || 0,
+          presentacion: mapeo ? (mapeo[2] || '') : '',
+          nPedidos: Number(c.pedidos) || 0
+        });
+      });
+    } else {
+      // FALLBACK: viaje sin snapshot (el usuario eligió imprimir igual por la
+      // rama vieja). Se re-suma desde las líneas para no dejarlo sin planilla.
+      _consolFuente = 'lineas';
+      const totalesProd = {};
+      pedidos.forEach(function(p) {
+        _plvLineasDe(p).forEach(function(pr) {
+          const mapeo = vetBuscarMapeo(pr.nombre);
+          const cat   = mapeo ? mapeo[0] : 'Otros';
+          if (!totalesProd[pr.nombre]) totalesProd[pr.nombre] = { cantidad: 0, cat };
+          totalesProd[pr.nombre].cantidad += pr.cantidad;
+        });
+      });
+      Object.keys(totalesProd).forEach(function(nombre) {
+        const d = totalesProd[nombre];
+        if (!porCatTotal[d.cat]) porCatTotal[d.cat] = [];
+        const mp = vetBuscarMapeo(nombre);
+        porCatTotal[d.cat].push({ nombre, cantidad: d.cantidad,
+                                  presentacion: mp ? (mp[2] || '') : '', nPedidos: 0 });
+      });
+    }
 
     const porCiudadProds = {};
     pedidos.forEach(function(p) {
@@ -34048,11 +34331,19 @@ async function descargarPlanillaCarga(choferParam) {
     doc.text('CUIT: ' + TCK_EMPRESA.cuit + ' · Establecimiento: San Lorenzo 460, Trenque Lauquen', M + 4, y + 11);
     y += 20;
 
-    // ── SECCIÓN 1: TOTALES GLOBALES ──
+    // ── SECCIÓN 1: QUÉ SUBIR AL CAMIÓN (v13.155.0, desde consolidado) ──
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(12);
     doc.setTextColor(27, 94, 32);
-    doc.text('TOTALES A SACAR DE CÁMARA', M, y);
+    doc.text('QUÉ SUBIR AL CAMIÓN', M, y);
+    if (_plvVersion) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(130, 130, 130);
+      doc.text(_consolFuente === 'consolidado'
+        ? 'Consolidado congelado en la planilla v' + _plvVersion
+        : 'SIN SNAPSHOT — totales recalculados', M + 62, y);
+    }
     y += 6;
 
     // Header tabla
@@ -34072,7 +34363,7 @@ async function descargarPlanillaCarga(choferParam) {
       if (!items || !items.length) return;
       const catUds = items.reduce((a, i) => a + i.cantidad, 0);
 
-      if (y > H - 30) { doc.addPage(); y = 14; headerPagina('TOTALES'); }
+      if (y > H - 30) { doc.addPage(); y = 14; headerPagina('QUÉ SUBIR AL CAMIÓN'); }
 
       // Fila categoría
       doc.setFillColor(232, 245, 233);
@@ -34086,10 +34377,16 @@ async function descargarPlanillaCarga(choferParam) {
 
       items.sort((a,b) => a.nombre.localeCompare(b.nombre)).forEach(function(item) {
         grandTotal += item.cantidad;
-        const mapeo = vetBuscarMapeo(item.nombre);
-        const presentacion = mapeo ? mapeo[2] || '' : '';
+        // v13.155.0: la presentación viene resuelta desde el producto BASE, no
+        // desde el nombre compuesto ("Pollo B x7 Fresco (x7)"). Probado contra
+        // el snapshot v4 real: hoy el nombre compuesto TAMBIÉN resuelve bien,
+        // pero por el 3er tier de vetBuscarMapeo (match por substring), que es
+        // el mismo que en v13.16 mandó Pollo C a Rebozados. Resolver desde el
+        // producto base entra por el tier 1 (clave exacta) y no depende de esa
+        // heurística.
+        const presentacion = item.presentacion || '';
 
-        if (y > H - 25) { doc.addPage(); y = 14; headerPagina('TOTALES'); }
+        if (y > H - 25) { doc.addPage(); y = 14; headerPagina('QUÉ SUBIR AL CAMIÓN'); }
 
         doc.setTextColor(40, 40, 40);
         doc.setFont('helvetica', 'normal');
@@ -34117,7 +34414,7 @@ async function descargarPlanillaCarga(choferParam) {
     });
 
     // ── TOTAL ──
-    if (y > H - 25) { doc.addPage(); y = 14; headerPagina('TOTALES'); }
+    if (y > H - 25) { doc.addPage(); y = 14; headerPagina('QUÉ SUBIR AL CAMIÓN'); }
     y += 1;
     doc.setFillColor(27, 94, 32);
     doc.rect(M, y, W - M*2, 9, 'F');
@@ -34245,6 +34542,131 @@ async function descargarPlanillaCarga(choferParam) {
       });
       y += 2;
     });
+
+    // ═══ v13.155.0 — SECCIÓN 3: REPARTO POR CLIENTE ═══════════════════
+    // Sale EXCLUSIVAMENTE de viajes_planillas.pedidos (el array `pedidos`
+    // de esta función ya es el mapeo 1:1 del snapshot cuando hubo versión).
+    // Es la hoja que usa el chofer para bajar la mercadería: un bloque por
+    // cliente, en ORDEN DE RUTA (directo — al revés que la carga, que se
+    // llena en orden inverso). No se recalcula nada: son las líneas
+    // congeladas en la versión.
+    try {
+      const _repFuente = (typeof _plvVersion !== 'undefined' && _plvVersion) ? ('planilla v' + _plvVersion) : 'sin snapshot';
+      const _repFilas = pedidos.map(function (p) {
+        const ciudadRaw = (p.localidad || '').trim();
+        const FALSAS_R = ['campo', 'campo tck', 'catalogo web tck', ''];
+        const ciudad = FALSAS_R.includes(ciudadRaw.toLowerCase())
+          ? 'Sin localidad' : _ciudadCanonizar(ciudadRaw);
+        return {
+          cliente: (p.cliente || p.comercio || p.pedidoId || '').toString(),
+          ciudad: ciudad,
+          vendedor: p.vendedor || '',
+          total: Number(p.total || 0),
+          facturado: !!p.facturado,
+          facturaNro: p.facturaNro || null,
+          lineas: _plvLineasDe(p)
+        };
+      }).sort(function (a, b) {
+        const oa = ordenDeCiudad(a.ciudad), ob = ordenDeCiudad(b.ciudad);
+        if (oa !== ob) return oa - ob;               // orden de ruta DIRECTO
+        return a.cliente.localeCompare(b.cliente);
+      });
+
+      if (_repFilas.length) {
+        doc.addPage();
+        y = 14;
+        if (logoB64) { try { doc.addImage(logoB64, 'PNG', M, y, 18, 18); } catch (e) {} }
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.setTextColor(27, 94, 32);
+        doc.text('REPARTO POR CLIENTE', W - M, y + 6, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(110, 110, 110);
+        doc.text(chofer + ' · ' + fechaPDF + ' · ' + _repFilas.length + ' clientes · ' + _repFuente,
+                 W - M, y + 11, { align: 'right' });
+        y += 22;
+
+        doc.setFillColor(255, 248, 225);
+        doc.rect(M, y, W - M * 2, 7, 'F');
+        doc.setTextColor(120, 80, 0);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.5);
+        doc.text('Orden de ENTREGA (directo). Tildá cada cliente al dejar la mercadería. Lo que dice esta hoja es lo que se entrega.',
+                 W / 2, y + 4.6, { align: 'center' });
+        y += 11;
+
+        let _repCiudadActual = null;
+        _repFilas.forEach(function (f) {
+          const altoBloque = 13 + (f.lineas.length * 4.6);
+          if (y + altoBloque > H - 16) { doc.addPage(); y = 14; headerPagina('REPARTO POR CLIENTE'); _repCiudadActual = null; }
+
+          // Separador de ciudad
+          if (f.ciudad !== _repCiudadActual) {
+            _repCiudadActual = f.ciudad;
+            doc.setFillColor(27, 94, 32);
+            doc.rect(M, y, W - M * 2, 6, 'F');
+            doc.setTextColor(255, 255, 255);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(9);
+            doc.text(String(f.ciudad).toUpperCase(), M + 3, y + 4.2);
+            y += 8;
+          }
+
+          // Cabecera del cliente
+          doc.setDrawColor(120, 120, 120);
+          doc.rect(M + 2, y + 0.5, 4, 4);                     // checkbox
+          doc.setTextColor(30, 30, 30);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(9.5);
+          let _nomCli = f.cliente;
+          if (_nomCli.length > 46) _nomCli = _nomCli.substring(0, 44) + '...';
+          doc.text(_nomCli, M + 9, y + 4);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(9);
+          doc.text('$' + Math.round(f.total).toLocaleString('es-AR'), W - M - 3, y + 4, { align: 'right' });
+          y += 5.5;
+
+          // Factura / vendedor
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(7);
+          if (f.facturado) {
+            doc.setTextColor(120, 120, 120);
+            doc.text('FC ' + (f.facturaNro || 's/n') + (f.vendedor ? ' · ' + f.vendedor : ''), M + 9, y + 2.5);
+          } else {
+            doc.setTextColor(183, 28, 28);
+            doc.text('SIN FACTURA' + (f.vendedor ? ' · ' + f.vendedor : ''), M + 9, y + 2.5);
+          }
+          y += 4.5;
+
+          // Líneas del pedido (del snapshot)
+          if (!f.lineas.length) {
+            doc.setTextColor(183, 28, 28);
+            doc.setFontSize(7.5);
+            doc.text('· sin detalle de productos en la planilla', M + 12, y + 2.5);
+            y += 4.6;
+          } else {
+            f.lineas.forEach(function (l) {
+              if (y > H - 16) { doc.addPage(); y = 14; headerPagina('REPARTO POR CLIENTE'); _repCiudadActual = null; }
+              doc.setTextColor(60, 60, 60);
+              doc.setFont('helvetica', 'normal');
+              doc.setFontSize(8.5);
+              let _nl = String(l.nombre || '');
+              if (_nl.length > 52) _nl = _nl.substring(0, 50) + '...';
+              doc.text('· ' + _nl, M + 12, y + 2.5);
+              doc.setFont('helvetica', 'bold');
+              doc.text(String(l.cantidad), M + 118, y + 2.5, { align: 'right' });
+              y += 4.6;
+            });
+          }
+          doc.setDrawColor(225, 225, 225);
+          doc.line(M + 2, y + 1, W - M - 2, y + 1);
+          y += 3.5;
+        });
+      }
+    } catch (eRep155) {
+      console.warn('[planilla v13.155.0] sección Reparto por cliente falló (no bloquea el PDF):', eRep155);
+    }
 
     // ═══ v13.39.0 — FACTURAS DEL VIAJE (checklist para Francisco y el chofer) ═══
     try {
@@ -45949,7 +46371,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.154.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.155.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
@@ -46619,7 +47041,7 @@ function vcBloque(v) {
     else h += '<button class="cc-btn gris" onclick="vcGenerarPlanilla(\'' + v.id + '\')">📄 Regenerar</button>';
   }
   if (ver) {
-    h += '<button class="cc-btn azul" onclick="vcImprimirVersion(\'' + v.id + '\',' + ver + ')">🖨 Imprimir v' + ver + '</button>';
+    h += '<button class="cc-btn azul" onclick="vcImprimirVersion(\'' + v.id + '\',' + ver + ')">👁 Ver planilla v' + ver + '</button>';
     h += '<button class="cc-btn gris" onclick="vcHistorial(\'' + v.id + '\')">Historial</button>';
   }
   h += '</div>';
@@ -46707,6 +47129,17 @@ window.vcGenerarPlanilla = async function (viajeId) {
 };
 
 window.vcImprimirVersion = async function (viajeId, version) {
+  // ═══ v13.155.0 ═══════════════════════════════════════════════════
+  // Antes: popup con una lista pelada de clientes y w.print() automático a
+  // los 350 ms. No mostraba QUÉ subir al camión (el consolidado), no dejaba
+  // revisar antes de gastar papel y no había vuelta atrás.
+  // Ahora: vista previa a pantalla completa con las dos secciones reales
+  // (consolidado + reparto), ← Volver, 🖨 Imprimir y ⬇ Descargar PDF.
+  // El PDF sale del MISMO objeto de snapshot que se está mirando.
+  if (typeof window.plvVistaPrevia === 'function') {
+    return window.plvVistaPrevia(viajeId, version);
+  }
+  // Fallback legacy (solo si el bloque de vista previa no cargó)
   try {
     var rows = await sbFetch('viajes_planillas?viaje_id=eq.' + encodeURIComponent(viajeId) +
       '&version=eq.' + Number(version) + '&select=version,generada_at,generada_por,hash,pedidos&limit=1');
@@ -46733,7 +47166,7 @@ window.vcImprimirVersion = async function (viajeId, version) {
       '<div class="pie">Carga verificada por: ______________________ &nbsp;&nbsp; Hora: ________ &nbsp;&nbsp; (control físico se registra en el admin)</div>' +
       '</body></html>');
     w.document.close();
-    setTimeout(function () { try { w.print(); } catch (e) {} }, 350);
+    // v13.155.0: sin auto-print. El usuario decide cuándo imprimir.
   } catch (e) { ccToast('Error imprimiendo: ' + e.message, 'err'); }
 };
 
@@ -46980,5 +47413,334 @@ window._plvLineasDe = function (p) {
 })();
 
 </script>
+<script>
+/* ══════════════════════════════════════════════════════════════════════════
+   v13.155.0 — VISTA PREVIA DE LA PLANILLA
+   Pantalla completa dentro del admin (no popup: "← Volver" tiene que volver
+   a donde estabas). Sin auto-print.
+
+   Las dos secciones salen del snapshot congelado, nada se recalcula:
+     · QUÉ SUBIR AL CAMIÓN → viajes_planillas.consolidado (requerido)
+     · REPARTO POR CLIENTE → viajes_planillas.pedidos
+
+   "⬇ Descargar PDF" le pasa a descargarPlanillaCarga el MISMO objeto _plv
+   que se está mirando, así que la hoja en pantalla y el archivo descargado
+   son la misma versión por construcción.
+   ══════════════════════════════════════════════════════════════════════════ */
+(function () {
+'use strict';
+
+var _plvActual = null;   // snapshot que se está mostrando
+
+function esc(x) {
+  return String(x == null ? '' : x)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function mon(n) { return '$' + Math.round(Number(n) || 0).toLocaleString('es-AR'); }
+function hora(iso) {
+  if (!iso) return '';
+  try {
+    var d = new Date(iso);
+    return d.toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires',
+      day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  } catch (e) { return String(iso).substring(0, 16); }
+}
+function plvToast(m, t) { try { if (typeof ccToast === 'function') return ccToast(m, t); } catch (e) {} }
+
+function inyectarCSS() {
+  if (document.getElementById('plv155-css')) return;
+  var st = document.createElement('style');
+  st.id = 'plv155-css';
+  st.textContent = [
+    '#plv155{position:fixed;inset:0;z-index:99999;background:#fff;overflow:auto;',
+      '-webkit-overflow-scrolling:touch;font-family:Inter,system-ui,Arial,sans-serif;color:#222;}',
+    '#plv155 .plv-bar{position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;',
+      'padding:10px 14px;background:#1B5E20;box-shadow:0 2px 8px rgba(0,0,0,.18);flex-wrap:wrap;}',
+    '#plv155 .plv-bar b{color:#fff;font-size:13px;margin-right:auto;}',
+    '#plv155 .plv-btn{border:0;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:700;',
+      'cursor:pointer;background:#fff;color:#1B5E20;}',
+    '#plv155 .plv-btn.ghost{background:rgba(255,255,255,.16);color:#fff;}',
+    '#plv155 .plv-btn:disabled{opacity:.55;cursor:default;}',
+    '#plv155 .plv-hoja{max-width:900px;margin:0 auto;padding:20px 18px 70px;}',
+    '#plv155 .plv-cab{display:flex;justify-content:space-between;align-items:flex-start;',
+      'border-bottom:3px solid #1B5E20;padding-bottom:10px;margin-bottom:6px;gap:12px;}',
+    '#plv155 .plv-t1{font-size:21px;font-weight:800;color:#1B5E20;line-height:1.15;}',
+    '#plv155 .plv-t2{font-size:12px;color:#666;margin-top:3px;line-height:1.5;}',
+    '#plv155 .plv-ver{text-align:right;font-size:12px;color:#666;white-space:nowrap;line-height:1.5;}',
+    '#plv155 .plv-ver .n{font-size:19px;font-weight:800;color:#1B5E20;display:block;}',
+    '#plv155 .plv-aviso{margin:10px 0;padding:9px 12px;border-radius:7px;font-size:12.5px;line-height:1.45;}',
+    '#plv155 .plv-aviso.rojo{background:#FFEBEE;color:#B71C1C;border:1px solid #ffcdd2;}',
+    '#plv155 .plv-aviso.ambar{background:#FFF8E1;color:#8a5a00;border:1px solid #ffe6a8;}',
+    '#plv155 h3.plv-sec{font-size:15px;font-weight:800;color:#1B5E20;margin:22px 0 3px;',
+      'text-transform:uppercase;letter-spacing:.4px;}',
+    '#plv155 .plv-secsub{font-size:11px;color:#8a8a8a;margin-bottom:7px;}',
+    '#plv155 table{width:100%;border-collapse:collapse;font-size:12.5px;}',
+    '#plv155 th{background:#1B5E20;color:#fff;text-align:left;padding:6px 8px;font-size:10.5px;',
+      'text-transform:uppercase;letter-spacing:.3px;font-weight:700;}',
+    '#plv155 td{border-bottom:1px solid #e6e6e6;padding:5px 8px;vertical-align:top;}',
+    '#plv155 tr.plv-cat td{background:#E8F5E9;color:#1B5E20;font-weight:800;font-size:11.5px;',
+      'text-transform:uppercase;}',
+    '#plv155 .num{text-align:right;font-weight:700;white-space:nowrap;}',
+    '#plv155 .pres{color:#999;font-size:10.5px;}',
+    '#plv155 tr.plv-tot td{background:#1B5E20;color:#fff;font-weight:800;font-size:13.5px;}',
+    '#plv155 .plv-ciudad{background:#1B5E20;color:#fff;font-weight:800;font-size:11.5px;',
+      'padding:5px 9px;margin:14px 0 0;border-radius:5px 5px 0 0;text-transform:uppercase;}',
+    '#plv155 .plv-cli{border:1px solid #e2e2e2;border-top:0;padding:8px 10px;}',
+    '#plv155 .plv-cli-hd{display:flex;justify-content:space-between;gap:10px;align-items:baseline;}',
+    '#plv155 .plv-cli-nom{font-weight:700;font-size:13.5px;}',
+    '#plv155 .plv-cli-meta{font-size:10.5px;color:#999;margin-top:1px;}',
+    '#plv155 .plv-cli-meta.sinfc{color:#B71C1C;font-weight:700;}',
+    '#plv155 .plv-cli ul{margin:5px 0 0;padding-left:17px;}',
+    '#plv155 .plv-cli li{font-size:12px;padding:1px 0;}',
+    '#plv155 .plv-cli li b{float:right;}',
+    '#plv155 .plv-ck{display:inline-block;width:12px;height:12px;border:1.5px solid #999;',
+      'border-radius:2px;margin-right:6px;vertical-align:-1px;}',
+    '#plv155 .plv-pie{margin-top:26px;padding-top:12px;border-top:1px dashed #bbb;',
+      'font-size:11px;color:#777;line-height:2.2;}',
+    '@media print{',
+      'body > *:not(#plv155){display:none !important;}',
+      '#plv155{position:static !important;overflow:visible !important;}',
+      '#plv155 .plv-bar{display:none !important;}',
+      '#plv155 .plv-hoja{max-width:none;padding:0;}',
+      '#plv155 h3.plv-sec{page-break-after:avoid;}',
+      '#plv155 .plv-cli,#plv155 .plv-ciudad{page-break-inside:avoid;}',
+      '@page{margin:12mm;}',
+    '}'
+  ].join('');
+  document.head.appendChild(st);
+}
+
+function cerrar() {
+  var el = document.getElementById('plv155');
+  if (el) el.remove();
+  document.body.style.overflow = '';
+  _plvActual = null;
+}
+
+function catDe(prodBase) {
+  try {
+    var m = (typeof vetBuscarMapeo === 'function') ? vetBuscarMapeo(prodBase) : null;
+    return { cat: m ? m[0] : 'Otros', pres: m ? (m[2] || '') : '' };
+  } catch (e) { return { cat: 'Otros', pres: '' }; }
+}
+
+/* ── SECCIÓN 1: QUÉ SUBIR AL CAMIÓN — solo consolidado ─────────────── */
+function htmlConsolidado(pv) {
+  var cons = pv.consolidado || [];
+  if (!cons.length) {
+    return '<h3 class="plv-sec">Qué subir al camión</h3>' +
+      '<div class="plv-aviso rojo">Esta versión no tiene consolidado guardado. ' +
+      'Generá una versión nueva de la planilla para que Depósito tenga qué contar.</div>';
+  }
+  var ordenCats = [];
+  try { ordenCats = (typeof VET_ORDEN_CATS !== 'undefined' ? VET_ORDEN_CATS : []).concat(['Otros']); }
+  catch (e) { ordenCats = ['Otros']; }
+
+  var porCat = {}, total = 0;
+  cons.forEach(function (c) {
+    var base = String(c.producto || '');
+    var info = catDe(base);
+    var q = Number(c.requerido) || 0;
+    total += q;
+    if (!porCat[info.cat]) porCat[info.cat] = [];
+    porCat[info.cat].push({
+      nombre: base + (c.calibre ? ' (' + c.calibre + ')' : ''),
+      cantidad: q, pres: info.pres, nped: Number(c.pedidos) || 0
+    });
+  });
+  Object.keys(porCat).forEach(function (k) { if (ordenCats.indexOf(k) < 0) ordenCats.push(k); });
+
+  var h = '<h3 class="plv-sec">Qué subir al camión</h3>' +
+    '<div class="plv-secsub">Consolidado congelado en la planilla v' + pv.version +
+    '. La cantidad es <b>requerido</b> tal cual quedó en la versión — no se recalcula.</div>' +
+    '<table><thead><tr><th style="width:52%">Producto</th><th>Presentación</th>' +
+    '<th style="width:70px">Pedidos</th><th class="num" style="width:70px">Cant.</th></tr></thead><tbody>';
+
+  ordenCats.forEach(function (cat) {
+    var items = porCat[cat];
+    if (!items || !items.length) return;
+    var sub = items.reduce(function (a, i) { return a + i.cantidad; }, 0);
+    h += '<tr class="plv-cat"><td colspan="3">' + esc(cat) + '</td><td class="num">' + sub + ' u.</td></tr>';
+    items.sort(function (a, b) { return a.nombre.localeCompare(b.nombre); }).forEach(function (i) {
+      h += '<tr><td><span class="plv-ck"></span>' + esc(i.nombre) + '</td>' +
+           '<td class="pres">' + esc(i.pres) + '</td>' +
+           '<td class="pres">' + (i.nped || '') + '</td>' +
+           '<td class="num">' + i.cantidad + '</td></tr>';
+    });
+  });
+  h += '<tr class="plv-tot"><td colspan="3">TOTAL BULTOS A CARGAR</td><td class="num">' + total + '</td></tr>';
+  h += '</tbody></table>';
+  return h;
+}
+
+/* ── SECCIÓN 2: REPARTO POR CLIENTE — solo pedidos ─────────────────── */
+function htmlReparto(pv) {
+  var peds = pv.pedidos || [];
+  if (!peds.length) return '';
+
+  var FALSAS = ['campo', 'campo tck', 'catalogo web tck', ''];
+  var filas = peds.map(function (p) {
+    var raw = String(p.localidad || '').trim();
+    var ciudad = FALSAS.indexOf(raw.toLowerCase()) >= 0 ? 'Sin localidad'
+      : ((typeof _ciudadCanonizar === 'function') ? _ciudadCanonizar(raw) : raw);
+    return { cliente: String(p.cliente || p.pedido_id || ''), ciudad: ciudad,
+             vendedor: p.vendedor || '', total: Number(p.total) || 0,
+             facturado: !!p.facturado, factura: p.factura_nro || null,
+             items: p.items || [] };
+  }).sort(function (a, b) {
+    var oa = 999, ob = 999;
+    try { if (typeof ordenDeCiudad === 'function') { oa = ordenDeCiudad(a.ciudad); ob = ordenDeCiudad(b.ciudad); } }
+    catch (e) {}
+    if (oa !== ob) return oa - ob;                  // orden de ruta directo
+    return a.cliente.localeCompare(b.cliente);
+  });
+
+  var h = '<h3 class="plv-sec">Reparto por cliente</h3>' +
+    '<div class="plv-secsub">' + filas.length + ' clientes de la planilla v' + pv.version +
+    ', en orden de entrega. Son las líneas congeladas en la versión.</div>';
+
+  var ciudadActual = null;
+  filas.forEach(function (f) {
+    if (f.ciudad !== ciudadActual) {
+      ciudadActual = f.ciudad;
+      h += '<div class="plv-ciudad">' + esc(ciudadActual) + '</div>';
+    }
+    h += '<div class="plv-cli"><div class="plv-cli-hd">' +
+         '<div><div class="plv-cli-nom"><span class="plv-ck"></span>' + esc(f.cliente) + '</div>' +
+         '<div class="plv-cli-meta' + (f.facturado ? '' : ' sinfc') + '">' +
+         (f.facturado ? 'FC ' + esc(f.factura || 's/n') : 'SIN FACTURA') +
+         (f.vendedor ? ' · ' + esc(f.vendedor) : '') + '</div></div>' +
+         '<div class="plv-cli-nom">' + mon(f.total) + '</div></div>';
+    if (!f.items.length) {
+      h += '<div class="plv-cli-meta sinfc">· sin detalle de productos en la planilla</div>';
+    } else {
+      h += '<ul>';
+      f.items.forEach(function (i) {
+        h += '<li>' + esc(String(i.producto || '') + (i.calibre ? ' (' + i.calibre + ')' : '')) +
+             ' <b>' + (Number(i.cantidad) || 0) + '</b></li>';
+      });
+      h += '</ul>';
+    }
+    h += '</div>';
+  });
+  return h;
+}
+
+function htmlHoja(pv) {
+  var vj = pv.viaje || {};
+  var zona = (typeof lzZonaNombreFromKey === 'function') ? lzZonaNombreFromKey(vj.zona) : (vj.zona || '');
+  var sinFC = pv.sin_factura || [];
+
+  var h = '<div class="plv-cab"><div>' +
+    '<div class="plv-t1">Planilla de carga — ' + esc(String(zona).toUpperCase()) + '</div>' +
+    '<div class="plv-t2">Salida ' + esc(vj.fecha_salida || '—') +
+      ' · Chofer ' + esc(vj.chofer || '—') + ' · ' + esc(vj.vehiculo || '—') + '<br>' +
+      'TCK The Chicken Kings S.R.L. · San Lorenzo 460, Trenque Lauquen</div></div>' +
+    '<div class="plv-ver"><span class="n">v' + pv.version + '</span>' +
+      esc(pv.total_pedidos) + ' pedidos · ' + mon(pv.monto_total) + '<br>' +
+      'generada ' + esc(hora(pv.generada_at)) + (pv.generada_por ? ' por ' + esc(pv.generada_por) : '') + '<br>' +
+      'hash ' + esc(String(pv.hash || '').substring(0, 8)) + '</div></div>';
+
+  if (pv.vigente === false) {
+    h += '<div class="plv-aviso rojo"><b>⚠ Esta versión quedó desactualizada.</b> ' +
+      esc(pv.aviso || 'El viaje cambió después de generarla.') +
+      ' Lo que ves acá es lo que la v' + pv.version + ' representa y no se toca por atrás: ' +
+      'si querés la foto nueva, generá la versión siguiente desde el detalle del viaje.</div>';
+  }
+  if (pv.carga_cerrada_at) {
+    h += '<div class="plv-aviso ambar">🔒 La carga de este viaje ya está cerrada (' +
+      esc(hora(pv.carga_cerrada_at)) + (pv.carga_cerrada_por ? ' · ' + esc(pv.carga_cerrada_por) : '') + ').</div>';
+  }
+  if (sinFC.length) {
+    h += '<div class="plv-aviso ambar"><b>' + sinFC.length + ' pedido(s) sin factura</b> por ' +
+      mon(pv.monto_sin_factura || 0) + '. Viajan igual — Depósito los tiene que ver — pero el ' +
+      'candado fiscal actúa al cerrar la carga: ' +
+      esc(sinFC.slice(0, 8).map(function (x) { return x.cliente; }).join(', ')) +
+      (sinFC.length > 8 ? ' y ' + (sinFC.length - 8) + ' más' : '') + '.</div>';
+  }
+
+  h += htmlConsolidado(pv);
+  h += htmlReparto(pv);
+  h += '<div class="plv-pie">Conformidad del chofer: _______________________________ ' +
+       ' Aclaración: ____________________ Hora de salida: _________<br>' +
+       'Control físico verificado por: _______________________________ ' +
+       ' (el control se registra en el admin, esta hoja es el respaldo en papel)</div>';
+  return h;
+}
+
+/* ── API pública ───────────────────────────────────────────────────── */
+window.plvVistaPrevia = async function (viajeId, version) {
+  if (!viajeId) return;
+  inyectarCSS();
+  cerrar();
+
+  var ov = document.createElement('div');
+  ov.id = 'plv155';
+  ov.innerHTML = '<div class="plv-bar"><b>Planilla de carga</b>' +
+    '<button class="plv-btn ghost" id="plv-volver">← Volver</button></div>' +
+    '<div class="plv-hoja" id="plv-cont" style="text-align:center;padding-top:60px;color:#888;">' +
+    'Cargando la planilla…</div>';
+  document.body.appendChild(ov);
+  document.body.style.overflow = 'hidden';
+  document.getElementById('plv-volver').onclick = cerrar;
+
+  var pv;
+  try {
+    var qs = 'accion=planillaVigente&viaje_id=' + encodeURIComponent(viajeId) +
+             (version ? '&version=' + Number(version) : '') + '&_cb=' + Date.now();
+    var r = await fetch(APPS_SCRIPT_URL + '?' + qs);
+    pv = await r.json();
+  } catch (e) {
+    document.getElementById('plv-cont').innerHTML =
+      '<div class="plv-aviso rojo">No pude leer la planilla: ' + esc(e.message) + '</div>';
+    return;
+  }
+  if (!pv || pv.status !== 'ok') {
+    document.getElementById('plv-cont').innerHTML =
+      '<div class="plv-aviso rojo">' + esc((pv && pv.message) || 'No hay planilla generada para este viaje.') +
+      '<br><br>Generala desde el detalle del viaje y volvé a entrar.</div>';
+    return;
+  }
+
+  _plvActual = pv;
+  var vj = pv.viaje || {};
+  var zona = (typeof lzZonaNombreFromKey === 'function') ? lzZonaNombreFromKey(vj.zona) : (vj.zona || '');
+
+  ov.querySelector('.plv-bar').innerHTML =
+    '<b>' + esc(String(zona).toUpperCase()) + ' · ' + esc(vj.fecha_salida || '') + ' · v' + pv.version + '</b>' +
+    '<button class="plv-btn ghost" id="plv-volver">← Volver</button>' +
+    '<button class="plv-btn" id="plv-print">🖨 Imprimir</button>' +
+    '<button class="plv-btn" id="plv-pdf">⬇ Descargar PDF</button>';
+  document.getElementById('plv-cont').removeAttribute('style');
+  document.getElementById('plv-cont').innerHTML = htmlHoja(pv);
+
+  document.getElementById('plv-volver').onclick = cerrar;
+  document.getElementById('plv-print').onclick = function () { window.print(); };
+  document.getElementById('plv-pdf').onclick = async function () {
+    var b = this;
+    b.disabled = true; b.textContent = '⏳ Generando…';
+    try {
+      // MISMO snapshot que está en pantalla: se pasa _plv ya resuelto.
+      await descargarPlanillaCarga({
+        chofer: vj.chofer || '—', vehiculo: vj.vehiculo || '—',
+        viaje_id: vj.id || viajeId, _plv: _plvActual
+      });
+    } catch (e) {
+      plvToast('⛔ No se pudo generar el PDF: ' + e.message, 'err');
+    } finally {
+      b.disabled = false; b.textContent = '⬇ Descargar PDF';
+    }
+  };
+};
+
+// Escape cierra la vista
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape' && document.getElementById('plv155')) cerrar();
+});
+
+})();
+</script>
+
 </body>
 </html>
