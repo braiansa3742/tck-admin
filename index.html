@@ -1,5 +1,52 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.156.0 — 14/08/2026
+     v13.156.0: LOS DOS AGUJEROS QUE ENCONTRÓ LA AUDITORÍA PRE-SANITY.
+     Base: v13.155.0 real de producción (md5 efe3853f).
+
+     FIX 1 — "CARGA CERRADA" SE DECIDE POR EL ESTADO, NO POR UN TIMESTAMP.
+       viajeReabrirCarga hace `estado='preparando'` y NADA más: no limpia
+       carga_cerrada_at, carga_cerrada_por, planilla_version_cerrada ni
+       planilla_hash_cerrada (a propósito: son el registro del cierre).
+       La v13.155.0 preguntaba `!!v.carga_cerrada_at`, así que después de
+       reabrir la card seguía mostrando 🔒 CARGA CERRADA con el viaje ya
+       en preparando. Estaba en DOS lugares, los dos introducidos por mí
+       en la v13.155.0:
+         · lzRenderViajeCard  → la card del listado
+         · la vista previa    → el aviso 🔒 del encabezado
+       vcBloque (detalle del viaje) ya lo hacía bien: gatea por estado y
+       usa el timestamp solo como detalle ADENTRO de esa rama. Ese es el
+       patrón correcto y ahora es el único.
+       Se agrega lzCargaCerrada(v) como ÚNICO punto de decisión, para que
+       no vuelva a haber dos criterios conviviendo.
+       REGLA: los cuatro campos históricos solo son legibles gateados por
+       estado === 'carga_cerrada'. No se limpian ni se tocan.
+
+     FIX 2 — CAMINO DE UI PARA autorizar_diferencia.
+       El GAS devuelve requiere:'autorizar_diferencia' con la lista de
+       faltantes (producto/requerido/cargado/faltan/clientes) desde la
+       v25.114.1, pero vcCerrarCarga nunca lo manejó: caía al toast
+       genérico y no había forma de autorizar desde la pantalla.
+       Ahora abre un modal que muestra el detalle completo y ofrece:
+         · "← Volver y corregir la carga"  (acción por defecto)
+         · "Autorizar salida con diferencia" en dos pasos, con motivo
+           obligatorio y confirmación explícita.
+       El default SIEMPRE es no autorizar: el botón de autorizar es
+       secundario, rojo, y no envía nada hasta el segundo paso.
+       Anti doble click: guard en vuelo por viaje_id + botones
+       deshabilitados mientras hay request.
+
+       OJO (documentado en la UI): autorizar la diferencia YA ESCRIBE
+       aunque el cierre después falle por el candado fiscal. Persiste
+       autorizado/autorizado_por/autorizado_at/autorizado_motivo en
+       viajes_carga_control y deja ops_evento crítico
+       'salida_autorizada_con_faltante'. Se revierte re-confirmando el
+       control físico (cargaControlConfirmar resetea esos 4 campos).
+
+     NO TOCADO a propósito: VIAJE_EXIGIR_CIERRE_CARGA, legacy de cierre,
+     Ventas, Xubio, saneamiento histórico, VET_TABLA. Sin cambios de GAS.
+     ───────────────────────────────────────────────────────────
+═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v13.155.0 — 14/08/2026
      v13.155.0: LA PLANILLA ES UNA SOLA FOTO — VISTA, PDF Y CARDS.
      Base: v13.154.0 real de produccion (md5 7dfe271d).
@@ -30743,6 +30790,17 @@ function lzCiudadesNombresEnViaje(viajeId) {
   return arr;
 }
 
+// ═══ v13.156.0 — ÚNICO PUNTO DE DECISIÓN DE "CARGA CERRADA" ══════════
+// La verdad operativa es viajes.estado y nada más. Los campos
+// carga_cerrada_at / carga_cerrada_por / planilla_version_cerrada /
+// planilla_hash_cerrada NO se limpian al reabrir (viajeReabrirCarga solo
+// hace estado='preparando'), así que preguntar por ellos da un falso
+// positivo permanente después de la primera reapertura.
+// Se pueden mostrar como DETALLE, pero siempre adentro de esta rama.
+function lzCargaCerrada(v) {
+  return String((v && v.estado) || '').trim().toLowerCase() === 'carga_cerrada';
+}
+
 // Días de diferencia contra hoy. Negativo = el viaje quedó atrás.
 function lzDiasDesdeHoy(fechaISO) {
   if (!fechaISO) return 0;
@@ -30945,7 +31003,7 @@ function lzRenderViajeCard(v) {
                         ? lzZonaNombreFromKey(v.zona) : (v.zona || '');
   const plVer       = Number(v.planilla_version || 0);
   const plDes       = !!v.planilla_desactualizada;
-  const cargaCerrada = !!v.carga_cerrada_at;
+  const cargaCerrada = lzCargaCerrada(v);   // v13.156.0 — estado, no timestamp
   const dias        = lzDiasDesdeHoy(v.fecha_salida);
   const atrasado    = dias < 0 && estado !== 'cerrado';
   // El snapshot es la foto congelada; los Confirmados vivos son lo que hay
@@ -46371,7 +46429,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.155.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.156.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
@@ -47259,12 +47317,55 @@ window.vcConfirmarControl = async function (viajeId, version, btn) {
   }
 };
 
-window.vcCerrarCarga = async function (viajeId, force, motivo) {
-  var q = 'accion=viajeCerrarCarga&viaje_id=' + encodeURIComponent(viajeId) + '&quien=' + encodeURIComponent(ccQuien());
-  if (force) q += '&force=1&motivo=' + encodeURIComponent(motivo || '');
-  var d = await ccGAS(q);
+// ═══ v13.156.0 — ANTI DOBLE CLICK ════════════════════════════════════
+// Cerrar carga dispara escrituras (estado, sello, autorización de
+// diferencia). Dos clicks seguidos mandaban dos requests. Un viaje no
+// puede tener dos cierres en vuelo a la vez.
+var _vcCierreEnVuelo = {};
+
+/**
+ * @param viajeId
+ * @param force    true → force=1 (saltea el candado fiscal, con motivo)
+ * @param motivo   motivo del force
+ * @param extra    { autorizar_diferencia:true, motivo_diferencia:'...' }
+ *
+ * Los dos motivos NO se mandan juntos nunca: el backend usa un solo
+ * parámetro `motivo` para las dos cosas. La cadena real es
+ *   1) autorizar_diferencia=1&motivo=<motivo de la diferencia>
+ *      → el GAS persiste la autorización y sigue hasta el candado fiscal
+ *   2) force=1&motivo=<motivo fiscal>
+ *      → en esta segunda llamada el guard de diferencia ya no dispara
+ *        porque viajes_carga_control.autorizado quedó en true.
+ */
+window.vcCerrarCarga = async function (viajeId, force, motivo, extra) {
+  extra = extra || {};
+  if (_vcCierreEnVuelo[viajeId]) {
+    ccToast('Ya hay un cierre en curso para este viaje…', 'err');
+    return;
+  }
+  _vcCierreEnVuelo[viajeId] = true;
+  var d;
+  try {
+    var q = 'accion=viajeCerrarCarga&viaje_id=' + encodeURIComponent(viajeId) + '&quien=' + encodeURIComponent(ccQuien());
+    if (force) {
+      q += '&force=1&motivo=' + encodeURIComponent(motivo || '');
+    } else if (extra.autorizar_diferencia) {
+      q += '&autorizar_diferencia=1&motivo=' + encodeURIComponent(extra.motivo_diferencia || '');
+    }
+    d = await ccGAS(q);
+  } catch (e) {
+    ccToast('⛔ Error de red al cerrar: ' + e.message, 'err');
+    return;
+  } finally {
+    delete _vcCierreEnVuelo[viajeId];
+  }
+
   if (d.status === 'ok') {
     ccToast('🔒 Carga cerrada. El camión queda listo: ahora sí, Arrancar cuando salga.', 'ok');
+    if (d.sello_ok === false) {
+      ccToast('⚠ El viaje cerró pero NO se pudo sellar qué versión salió. Revisá el Centro de Control.', 'err');
+    }
+    document.querySelectorAll('.vc-modal-bk').forEach(function (m) { m.remove(); });
     vcRefrescarDetalle(viajeId);
     return;
   }
@@ -47276,6 +47377,12 @@ window.vcCerrarCarga = async function (viajeId, force, motivo) {
     if (confirm((d.message || 'Falta el control físico') + '\n\n¿Abrir el control de carga ahora?')) vcAbrirControl(viajeId);
     return;
   }
+  // v13.156.0 — CARGA INCOMPLETA: antes caía al toast genérico y no había
+  // manera de autorizar desde la pantalla. Ahora abre el detalle.
+  if (d.requiere === 'autorizar_diferencia') {
+    vcModalDiferencias(viajeId, d.faltantes || [], d.message || '');
+    return;
+  }
   if (d.requiere === 'facturar_o_force') {
     var m = prompt('⛔ ' + (d.message || 'Hay pedidos sin facturar en el viaje') +
       '\n\nPara cerrar IGUAL escribí el motivo (queda auditado). Cancelar = no cerrar.');
@@ -47283,6 +47390,90 @@ window.vcCerrarCarga = async function (viajeId, force, motivo) {
     return;
   }
   ccToast('⛔ No se pudo cerrar: ' + (d.message || 'sin detalle'), 'err');
+};
+
+/* ═══ v13.156.0 — MODAL DE CARGA INCOMPLETA ═══════════════════════════
+   Muestra exactamente lo que devuelve el backend: producto, requerido,
+   cargado, faltan y CLIENTES AFECTADOS (que es el dato que convierte
+   "faltan 2 cajas" en "estos tres clientes no reciben").
+
+   El default es NO autorizar: la acción primaria es volver a corregir.
+   Autorizar es de dos pasos y exige motivo. */
+window.vcModalDiferencias = function (viajeId, faltantes, mensaje) {
+  var totalFaltan = faltantes.reduce(function (a, f) { return a + (Number(f.faltan) || 0); }, 0);
+  var cliSet = {};
+  faltantes.forEach(function (f) { (f.clientes || []).forEach(function (c) { cliSet[c] = 1; }); });
+  var nCli = Object.keys(cliSet).length;
+
+  var h = '<h3 style="color:#B71C1C;">⚠ CARGA INCOMPLETA — el camión no puede salir así</h3>' +
+    '<div style="font-size:12.5px;color:#8a6f5f;margin-bottom:10px;">' +
+    'Faltan <b>' + totalFaltan + '</b> bulto(s) en <b>' + faltantes.length + '</b> producto(s)' +
+    (nCli ? ', que afectan a <b>' + nCli + '</b> cliente(s)' : '') + '.</div>';
+
+  h += '<div class="vc-tbl-wrap" style="max-height:38vh;overflow:auto;"><table class="vc-tbl">' +
+       '<tr><th>Producto</th><th style="text-align:right">Pide</th><th style="text-align:right">Cargado</th>' +
+       '<th style="text-align:right">Faltan</th><th>Clientes afectados</th></tr>' +
+    faltantes.map(function (f) {
+      var cl = (f.clientes || []);
+      return '<tr>' +
+        '<td>' + ccEsc(f.producto) + '</td>' +
+        '<td style="text-align:right">' + (Number(f.requerido) || 0) + '</td>' +
+        '<td style="text-align:right">' + (Number(f.cargado) || 0) + '</td>' +
+        '<td style="text-align:right;color:#B71C1C;font-weight:800;">' + (Number(f.faltan) || 0) + '</td>' +
+        '<td style="font-size:11.5px;">' + (cl.length ? ccEsc(cl.join(', ')) : '—') + '</td></tr>';
+    }).join('') + '</table></div>';
+
+  h += '<div style="display:flex;gap:8px;margin-top:14px;">' +
+       '<button class="cc-btn verde" style="flex:1" id="vc-dif-volver">← Volver y corregir la carga</button>' +
+       '<button class="cc-btn gris" id="vc-dif-cerrar">Cancelar</button></div>';
+
+  h += '<div style="margin-top:14px;border-top:1px solid #e6ded4;padding-top:10px;">' +
+       '<button class="cc-btn rojo" id="vc-dif-abrir-aut" style="width:100%;">Autorizar salida con diferencia</button>' +
+       '<div id="vc-dif-form" style="display:none;margin-top:10px;">' +
+         '<div style="background:#FFEBEE;color:#B71C1C;border-radius:7px;padding:9px 11px;font-size:12px;line-height:1.5;">' +
+           'Vas a autorizar que el camión salga con faltantes. Queda registrado con tu nombre, la hora y el motivo, ' +
+           'y genera un evento crítico visible en el Centro de Control.<br>' +
+           '<b>Se escribe apenas confirmás</b>, aunque después el cierre se frene por el candado de facturación. ' +
+           'Para revertirlo hay que volver a confirmar el control físico.' +
+         '</div>' +
+         '<textarea id="vc-dif-motivo" rows="3" placeholder="Motivo (obligatorio): por qué sale igual y qué se hace con los clientes afectados" ' +
+           'style="width:100%;margin-top:9px;padding:8px;border:1px solid #d8cec2;border-radius:7px;font-family:inherit;font-size:13px;box-sizing:border-box;"></textarea>' +
+         '<div class="vc-check" style="margin-top:6px;"><input type="checkbox" id="vc-dif-chk" style="margin-top:2px;">' +
+           '<label for="vc-dif-chk">Confirmo que avisé (o voy a avisar) a los clientes afectados.</label></div>' +
+         '<button class="cc-btn rojo" id="vc-dif-confirmar" style="width:100%;margin-top:8px;" disabled>' +
+           'Confirmar salida con diferencia</button>' +
+       '</div></div>';
+
+  var bk = vcModal(h);
+
+  var $ = function (id) { return bk.querySelector('#' + id); };
+  $('vc-dif-cerrar').onclick = function () { bk.remove(); };
+  $('vc-dif-volver').onclick = function () { bk.remove(); vcAbrirControl(viajeId); };
+  $('vc-dif-abrir-aut').onclick = function () {
+    $('vc-dif-form').style.display = 'block';
+    this.disabled = true;
+    try { $('vc-dif-motivo').focus(); } catch (e) {}
+  };
+
+  // El botón de confirmar solo se habilita con motivo real + tilde.
+  function revisar() {
+    var m = String($('vc-dif-motivo').value || '').trim();
+    $('vc-dif-confirmar').disabled = !(m.length >= 10 && $('vc-dif-chk').checked);
+  }
+  $('vc-dif-motivo').oninput = revisar;
+  $('vc-dif-chk').onchange = revisar;
+
+  $('vc-dif-confirmar').onclick = function () {
+    var m = String($('vc-dif-motivo').value || '').trim();
+    if (m.length < 10) { ccToast('El motivo es obligatorio (mínimo 10 caracteres)', 'err'); return; }
+    if (!$('vc-dif-chk').checked) { ccToast('Falta tildar la confirmación', 'err'); return; }
+    this.disabled = true; this.textContent = 'Autorizando…';
+    $('vc-dif-volver').disabled = true;
+    $('vc-dif-abrir-aut').disabled = true;
+    bk.remove();
+    vcCerrarCarga(viajeId, false, null, { autorizar_diferencia: true, motivo_diferencia: m });
+  };
+  return bk;
 };
 
 window.vcReabrirCarga = async function (viajeId) {
@@ -47648,9 +47839,12 @@ function htmlHoja(pv) {
       ' Lo que ves acá es lo que la v' + pv.version + ' representa y no se toca por atrás: ' +
       'si querés la foto nueva, generá la versión siguiente desde el detalle del viaje.</div>';
   }
-  if (pv.carga_cerrada_at) {
-    h += '<div class="plv-aviso ambar">🔒 La carga de este viaje ya está cerrada (' +
-      esc(hora(pv.carga_cerrada_at)) + (pv.carga_cerrada_por ? ' · ' + esc(pv.carga_cerrada_por) : '') + ').</div>';
+  // v13.156.0: gatea por el ESTADO del viaje. El timestamp sobrevive a la
+  // reapertura, así que por sí solo mentía apenas se reabría una carga.
+  if (String(vj.estado || '').trim().toLowerCase() === 'carga_cerrada') {
+    h += '<div class="plv-aviso ambar">🔒 La carga de este viaje ya está cerrada' +
+      (pv.carga_cerrada_at ? ' (' + esc(hora(pv.carga_cerrada_at)) +
+        (pv.carga_cerrada_por ? ' · ' + esc(pv.carga_cerrada_por) : '') + ')' : '') + '.</div>';
   }
   if (sinFC.length) {
     h += '<div class="plv-aviso ambar"><b>' + sinFC.length + ' pedido(s) sin factura</b> por ' +
