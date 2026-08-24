@@ -1,5 +1,23 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.157.0 — 24/08/2026
+     v13.157.0: CHAN ENTRA A LOGÍSTICA + ABRIR VIAJE PARA PEDIDOS TARDÍOS.
+     (pendientes Braian 24/08; backend requerido: v25.126.0)
+     1) LOGIN CHAN: botón en paso1 (mismo PIN que usa en Ventas, rol
+        'recepcion' de app_usuarios). ROLES_OFICINA += recepcion;
+        ROL_TABS.recepcion = [pedidos, logistica]; ROL_LABEL.
+     2) NUEVO vcReabrirYSumar + botón "➕ Abrir viaje y sumar pedidos" en
+        el circuito de carga, visible en carga_cerrada Y en_ruta (el botón
+        legacy deja los viajes en_ruta sin que el camión salga): lista
+        candidatos (viajeCandidatosAgregar), reabre, asocia con
+        force_reabierto=1 y regenera la planilla. Todo auditado.
+     3) vcPuedeOperarCarga(): los botones del circuito (control, cerrar,
+        reabrir, arrancar, sumar) solo para dueno/operaciones/admin/
+        recepcion — cobranzas ve el estado sin poder operarlo.
+     4) FIX AUDITORÍA: ccQuien()/_plvQuien() devolvían 'ADMIN' para todo
+        rol de oficina (vendedorActual de compatibilidad); ahora prefieren
+        usuarioActual → en ops_eventos se distingue si operó Chan o Fran.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.156.0 — 14/08/2026
      v13.156.0: LOS DOS AGUJEROS QUE ENCONTRÓ LA AUDITORÍA PRE-SANITY.
      Base: v13.155.0 real de producción (md5 efe3853f).
@@ -13297,6 +13315,10 @@ input.canales-exp-input[type="date"] {
         <div class="login-av" style="background:#1E8449;color:#fff;">V</div>
         <div class="login-btn-name">Valentina<div class="login-btn-role">Cobranzas</div></div>
       </button>
+      <button class="login-btn" id="login-btn-chan" onclick="seleccionarVendedor('Chan','C','#6A1B9A')">
+        <div class="login-av" style="background:#6A1B9A;color:#fff;">C</div>
+        <div class="login-btn-name">Chan<div class="login-btn-role">Recepción / Depósito</div></div>
+      </button>
       <button class="login-btn" id="login-btn-tckfood" onclick="seleccionarVendedor('TCK Food','🍔','#C2410C')">
         <div class="login-av" style="background:#C2410C;color:#fff;">🍔</div>
         <div class="login-btn-name">TCK Food<div class="login-btn-role">Buffet</div></div>
@@ -18909,7 +18931,11 @@ const ROL_TABS = {
   operaciones: 'ALL',
   admin:       'ALL',
   cobranzas:   ['pedidos','logistica','clientes','facturacion','cc','tesoreria','rendiciones','acc-dup','buffet','ccprod','pulso','foodconcil'],
-  tckfood:     ['buffet']
+  tckfood:     ['buffet'],
+  // v13.157.0 — Chan (recepción/depósito): logística para abrir/cerrar
+  // viajes y sumar pedidos de última hora. Nunca 'ALL': sin márgenes,
+  // comisiones ni tesorería.
+  recepcion:   ['pedidos','logistica']
 };
 
 function puedeVer(tab) {
@@ -19137,7 +19163,7 @@ function login(nombre, rol, tabsExtra) {
   rolActual       = rol || 'admin';
   tabsExtraActual = Array.isArray(tabsExtra) ? tabsExtra : [];
   usuarioActual   = nombre;
-  var ROLES_OFICINA = ['dueno','operaciones','cobranzas','admin'];
+  var ROLES_OFICINA = ['dueno','operaciones','cobranzas','admin','recepcion']; // v13.157.0: +recepcion (Chan)
   var esOficina = ROLES_OFICINA.indexOf(rolActual) !== -1;
 
   // Limpiar estado GPS anterior antes de iniciar nueva sesión
@@ -19164,7 +19190,7 @@ function login(nombre, rol, tabsExtra) {
   document.getElementById('paso2').style.display = 'none';
   var esAdmin = vendedorActual === 'ADMIN';
   // Header con el nombre real del usuario + su rol
-  var ROL_LABEL = { dueno:'Dueño', operaciones:'Operaciones', cobranzas:'Cobranzas', admin:'Administración' };
+  var ROL_LABEL = { dueno:'Dueño', operaciones:'Operaciones', cobranzas:'Cobranzas', admin:'Administración', recepcion:'Recepción / Depósito' };
   var rolLbl = document.getElementById('hdr-rol-label');
   var rolSub = document.getElementById('hdr-rol-sub');
   if (rolLbl) rolLbl.textContent = esOficina ? usuarioActual : nombre;
@@ -46792,8 +46818,16 @@ async function pdcAbrir(pedidoId, ev) {
 'use strict';
 
 function ccQuien() {
+  // v13.157.0 — usuarioActual primero: para todo rol de oficina
+  // vendedorActual es literalmente 'ADMIN', así que reabrir/cerrar/generar
+  // quedaba auditado como "ADMIN" sin distinguir si fue Chan o Francisco.
+  try { if (typeof usuarioActual !== 'undefined' && usuarioActual) return usuarioActual; } catch (e) {}
   try { if (typeof vendedorActual !== 'undefined' && vendedorActual) return vendedorActual; } catch (e) {}
   return 'admin';
+}
+// v13.157.0 — quién puede operar el circuito de carga (ver y usar botones).
+function vcPuedeOperarCarga() {
+  try { return ['dueno','operaciones','admin','recepcion'].indexOf(rolActual) !== -1; } catch (e) { return true; }
 }
 function ccEsc(x) {
   return String(x == null ? '' : x).replace(/[&<>"']/g, function (c) {
@@ -47110,7 +47144,10 @@ function vcBloque(v) {
   }
 
   // Control físico + cierre
-  if (est === 'planificado' || est === 'preparando') {
+  var _vcPuede = (typeof vcPuedeOperarCarga !== 'function') || vcPuedeOperarCarga(); // v13.157.0
+  if (!_vcPuede) {
+    // rol sin permiso de operar la carga: ve el estado, sin botones de acción
+  } else if (est === 'planificado' || est === 'preparando') {
     h += '<div class="vc-row"><b>Depósito</b><span style="flex:1"></span>' +
          '<button class="cc-btn azul" onclick="vcAbrirControl(\'' + v.id + '\')">📦 Control de carga</button>' +
          '<button class="cc-btn rojo" onclick="vcCerrarCarga(\'' + v.id + '\')">🔒 Cerrar carga</button></div>' +
@@ -47119,7 +47156,15 @@ function vcBloque(v) {
     h += '<div class="vc-row"><span class="vc-tag ok">🔒 CARGA CERRADA' + (v.carga_cerrada_at ? ' · ' + ccHora(v.carga_cerrada_at) : '') +
          (v.carga_cerrada_por ? ' · ' + ccEsc(v.carga_cerrada_por) : '') + '</span><span style="flex:1"></span>' +
          '<button class="cc-btn gris" onclick="vcReabrirCarga(\'' + v.id + '\')">↩ Reabrir</button>' +
+         '<button class="cc-btn azul" onclick="vcReabrirYSumar(\'' + v.id + '\')">➕ Abrir y sumar pedidos</button>' +
          '<button class="cc-btn verde" onclick="vcArrancar(\'' + v.id + '\')">🚚 Arrancar viaje</button></div>';
+  } else if (est === 'en_ruta') {
+    // v13.157.0 — pedido Braian: meter pedidos de última hora aunque el
+    // viaje figure en ruta (el botón legacy lo pone en_ruta sin que el
+    // camión haya salido). Reabre, elegís qué sumar y regenera la planilla.
+    h += '<div class="vc-row"><span class="vc-tag warn">🚚 EN RUTA</span><span style="flex:1"></span>' +
+         '<button class="cc-btn rojo" onclick="vcReabrirYSumar(\'' + v.id + '\')">➕ Abrir viaje y sumar pedidos</button></div>' +
+         '<div class="vc-row" style="font-size:11.5px;color:#8a6f5f;">Solo si el camión NO salió todavía: reabre el viaje, sumás los pedidos de última hora y se imprime la planilla nueva.</div>';
   }
   h += '</div>';
   return h;
@@ -47485,6 +47530,78 @@ window.vcReabrirCarga = async function (viajeId) {
   vcRefrescarDetalle(viajeId);
 };
 
+// ── v13.157.0 — ABRIR VIAJE Y SUMAR PEDIDOS DE ÚLTIMA HORA ────────────────
+// Pedido Braian 24/08: un pedido cargado a destiempo no entra al viaje ya
+// cerrado/arrancado y nadie se entera. Este flujo: lista los candidatos
+// (Confirmados sin viaje o derivados a la salida siguiente), reabre el
+// viaje (backend v25.126.0 acepta también en_ruta), asocia los elegidos
+// con force_reabierto=1 y regenera la planilla. Queda todo auditado.
+window.vcReabrirYSumar = async function (viajeId) {
+  try {
+    var d = await ccGAS('accion=viajeCandidatosAgregar&viaje_id=' + encodeURIComponent(viajeId));
+    if (d.status !== 'ok') return ccToast('⛔ ' + (d.message || 'No se pudieron buscar candidatos'), 'err');
+    var sinV = d.sin_viaje || [], der = d.derivados || [];
+    if (!sinV.length && !der.length) {
+      if (confirm('No hay pedidos pendientes de sumar para ' + d.zona + '.\n\n¿Reabrir el viaje igual (queda en preparación)?')) {
+        window.vcReabrirCarga(viajeId);
+      }
+      return;
+    }
+    var filas = [];
+    function filaCand(p, tag) {
+      filas.push('<label style="display:flex;gap:8px;align-items:center;padding:7px 4px;border-bottom:1px solid #eee;cursor:pointer;">' +
+        '<input type="checkbox" class="vcrs-chk" data-pid="' + ccEsc(p.pedido_id) + '">' +
+        '<span style="flex:1;min-width:0;"><b>' + ccEsc(p.cliente || '') + '</b> · ' + ccEsc(p.localidad_canonica || '') +
+        '<br><span style="font-size:11px;color:#8a6f5f;">' + ccEsc(p.pedido_id) + (tag ? ' · ' + tag : '') + '</span></span>' +
+        '<b>' + ccMon(p.total) + '</b></label>');
+    }
+    sinV.forEach(function (p) { filaCand(p, 'sin viaje'); });
+    der.forEach(function (p) { filaCand(p, '→ derivado al ' + ccEsc(p.salida_planificada || '')); });
+    var ov = document.createElement('div');
+    ov.id = 'vcrs-modal';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+    ov.innerHTML =
+      '<div style="background:#fff;border-radius:12px;max-width:430px;width:100%;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;">' +
+        '<div style="padding:12px 14px;background:#8B0000;color:#fff;font-weight:700;">➕ Sumar pedidos al viaje · ' + ccEsc(d.zona) + ' ' + ccEsc(d.fecha_salida) + '</div>' +
+        '<div style="padding:4px 14px;overflow-y:auto;flex:1;">' + filas.join('') + '</div>' +
+        '<div style="padding:10px 14px;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid #eee;">' +
+          '<button class="cc-btn gris" onclick="document.getElementById(&quot;vcrs-modal&quot;).remove()">Cancelar</button>' +
+          '<button class="cc-btn verde" id="vcrs-confirmar">Abrir viaje y sumar</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(ov);
+    document.getElementById('vcrs-confirmar').onclick = async function () {
+      var elegidos = Array.prototype.slice.call(document.querySelectorAll('.vcrs-chk:checked'))
+        .map(function (c) { return c.getAttribute('data-pid'); });
+      if (!elegidos.length) return ccToast('Elegí al menos un pedido (o Cancelar)', 'warn');
+      var motivo = prompt('Motivo (queda auditado):', 'Pedidos de última hora');
+      if (motivo === null) return;
+      this.disabled = true; this.textContent = 'Procesando…';
+      try {
+        var r1 = await ccGAS('accion=viajeReabrirCarga&viaje_id=' + encodeURIComponent(viajeId) +
+          '&quien=' + encodeURIComponent(ccQuien()) + '&motivo=' + encodeURIComponent(motivo));
+        if (r1.status !== 'ok') { ccToast('⛔ No se pudo reabrir: ' + (r1.message || ''), 'err'); document.getElementById('vcrs-modal').remove(); return; }
+        var okN = 0, errN = 0;
+        for (var i = 0; i < elegidos.length; i++) {
+          var r2 = await ccGAS('accion=viajeAgregarPedido&viaje_id=' + encodeURIComponent(viajeId) +
+            '&pedido_id=' + encodeURIComponent(elegidos[i]) + '&quien=' + encodeURIComponent(ccQuien()) + '&force_reabierto=1');
+          if (r2.status === 'ok') okN++; else { errN++; console.warn('[vcReabrirYSumar]', elegidos[i], r2); }
+        }
+        var r3 = await ccGAS('accion=planillaGenerar&viaje_id=' + encodeURIComponent(viajeId) +
+          '&quien=' + encodeURIComponent(ccQuien()));
+        document.getElementById('vcrs-modal').remove();
+        ccToast('✅ Viaje reabierto · ' + okN + ' pedido(s) sumado(s)' + (errN ? ' · ⚠ ' + errN + ' con error' : '') +
+          (r3.status === 'ok' ? ' · planilla v' + (r3.version || '?') + ' lista para imprimir' : ' · ⚠ generá la planilla a mano'), errN ? 'warn' : 'ok');
+      } catch (e) {
+        ccToast('Error: ' + e.message, 'err');
+        try { document.getElementById('vcrs-modal').remove(); } catch (e2) {}
+      }
+      vcRefrescarDetalle(viajeId);
+      if (typeof lzCargarViajes === 'function') lzCargarViajes();
+    };
+  } catch (e) { ccToast('Error: ' + e.message, 'err'); }
+};
+
 window.vcArrancar = async function (viajeId) {
   if (!confirm('¿El camión salió? Se marca EN RUTA.')) return;
   var d = await ccGAS('accion=viajeArrancar&viaje_id=' + encodeURIComponent(viajeId));
@@ -47532,6 +47649,9 @@ else document.addEventListener('DOMContentLoaded', function () { setTimeout(ccBo
 'use strict';
 
 function _plvQuien() {
+  // v13.157.0 — usuarioActual primero (mismo fix que ccQuien): auditar la
+  // persona real, no el 'ADMIN' genérico de compatibilidad.
+  try { if (typeof usuarioActual !== 'undefined' && usuarioActual) return usuarioActual; } catch (e) {}
   try { if (typeof vendedorActual !== 'undefined' && vendedorActual) return vendedorActual; } catch (e) {}
   return 'admin';
 }
