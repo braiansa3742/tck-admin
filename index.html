@@ -30706,6 +30706,17 @@ const LZ_DIAS_CORTOS  = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
 // ───────────────────────────────────────────────────────────────
 // CARGA DE VIAJES desde Apps Script
 // ───────────────────────────────────────────────────────────────
+// v13.165.0 — Repinta sólo si Logística sigue visible y el subtab sigue
+// siendo uno de los que muestran viajes. Si el usuario se fue a EN CURSO
+// mientras cargaba, no lo devolvemos a VIAJES: renderLogistica respeta
+// _logTab. No dispara carga: lzCargarViajes ya seteó _lzViajesLoadedAt, y
+// la recarga sólo se pide si pasaron 30 s → no hay loop.
+function _lzRenderSiVisible() {
+  if (typeof _tabActual === 'undefined' || _tabActual !== 'logistica') return;
+  if (_logTab !== 'viajes' && _logTab !== 'encurso') return;
+  renderLogistica();
+}
+
 async function lzCargarViajes() {
   if (_lzViajesLoading) return;
   _lzViajesLoading = true;
@@ -30720,17 +30731,29 @@ async function lzCargarViajes() {
     if (data.status === 'ok' && Array.isArray(data.viajes)) {
       _lzViajes = data.viajes;
       _lzViajesLoadedAt = new Date();
-      // v13.155.0: total_pedidos de la VERSIÓN vigente, para poder mostrar
-      // "snapshot / confirmados vivos" sin abrir el detalle de cada viaje.
-      try { await lzCargarSnapshotsPlanilla(_lzViajes); } catch (e) {
-        console.warn('[lz v13.155.0] no pude leer los snapshots de planilla:', e);
-      }
-      // Re-render si el usuario está en este tab
-      if (typeof _tabActual !== 'undefined' && _tabActual === 'logistica') {
-        if (_logTab === 'viajes' || _logTab === 'encurso') {
-          renderLogistica();
-        }
-      }
+
+      // ═══ v13.165.0 — FIX A: el flag ANTES del render ══════════════════
+      // Bug introducido en v13.163.0: la guarda de renderLogistica pasó a
+      //   if (!_lzDataLoaded || !_lzViajesIntentado)
+      // pero _lzViajesIntentado se seteaba en el finally, DESPUÉS de este
+      // render. Resultado: el render pintaba el spinner y nadie volvía a
+      // renderizar → las cards no aparecían nunca solas. Tocar EN CURSO y
+      // volver a VIAJES forzaba un render nuevo, ya con el flag en true, y
+      // por eso "aparecían inmediatamente". Los datos siempre estuvieron.
+      // El finally lo sigue seteando: es la red para el camino de error.
+      _lzViajesIntentado = true;
+
+      // ═══ v13.165.0 — FIX C: cards primero, snapshots después ══════════
+      // lzCargarSnapshotsPlanilla estaba DENTRO del await (~256 ms medidos).
+      // Sólo alimenta el badge "41/43" de las cards; nada de la card
+      // depende de él para dibujarse. Sale del camino crítico.
+      _lzRenderSiVisible();
+
+      lzCargarSnapshotsPlanilla(_lzViajes)
+        .then(function () { _lzRenderSiVisible(); })   // repinta sólo los badges
+        .catch(function (e) {
+          console.warn('[lz v13.155.0] no pude leer los snapshots de planilla:', e);
+        });
     } else {
       console.warn('[lz viajes] respuesta inesperada:', data);
     }
