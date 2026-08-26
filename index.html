@@ -18997,11 +18997,11 @@ var _modoCampo = new URLSearchParams(window.location.search).get('modo') === 'ca
 // última card se dispara el refresh que quedó pendiente, así no queda viejo.
 var _refreshPendiente = false;
 
-// v13.162.0 — Logistica activa: el tick global de 20 s baja el CSV de ~1.600
-// pedidos y corre deteccion de duplicados (~210 ms de main thread medidos).
-// Operando un viaje de 41 pedidos eso es trabajo puro al pedo, y ademas
-// demora los await en curso. Al SALIR de Logistica el refresco se reanuda
-// solo: la guarda deja de aplicar y _refreshPendiente fuerza una pasada.
+// v13.163.0 — La pausa por Logistica vive SOLO en el tick de 20 s, no aca.
+// En v13.162.0 estaba dentro de adminHayAlgoAbierto(), que tiene otros dos
+// llamadores (adminRefrescarSiQuedoPendiente). Aunque ambos gobiernan
+// cargarPedidos y la semantica no cambiaba, mezclarlo en una helper global
+// compartida es acoplar dos cosas que no tienen por que viajar juntas.
 var _lzRefreshPausadoLog = false;
 
 function lzEstaActivo() {
@@ -19013,8 +19013,7 @@ function lzEstaActivo() {
   return false;
 }
 
-function adminHayAlgoAbierto() {
-  // v13.162.0 — tab Logistica / viaje abierto
+function lzDebePausarRefreshGlobal() {
   if (lzEstaActivo()) {
     if (!_lzRefreshPausadoLog) {
       console.log('[TCK LOGISTICA PERF] refresh global pausado');
@@ -19026,6 +19025,10 @@ function adminHayAlgoAbierto() {
     console.log('[TCK LOGISTICA PERF] refresh global reanudado');
     _lzRefreshPausadoLog = false;
   }
+  return false;
+}
+
+function adminHayAlgoAbierto() {
   // Card de pedido expandida
   if (document.querySelector('#lista-pedidos .pedido-body.on') !== null) return true;
   // Modal de duplicados / "ver otros pedidos del cliente"
@@ -19054,6 +19057,8 @@ setInterval(function() {
     || document.querySelector('#bot-cli-sheet-backdrop.on') !== null;
   if (xubioEnUso || tomadorEnUso || sheetAbierto) return;
   // v13.135.0 — pedido abierto: no tocamos nada, queda anotado para después
+  // v13.163.0 — Logistica activa: saltar SOLO este refresh periodico.
+  if (lzDebePausarRefreshGlobal()) { _refreshPendiente = true; return; }
   if (adminHayAlgoAbierto()) { _refreshPendiente = true; return; }
   const antes = todosLosPedidos.length;
   const dupAntes = new Set(todosLosPedidos.filter(p => p.esDuplicado).map(p => p.pedidoId));
@@ -30624,6 +30629,7 @@ function lzEsc(s) {
 
 // Estado del módulo
 let _lzViajes = [];           // viajes activos (no cerrados)
+let _lzViajesIntentado = false;  // v13.163.0 — la carga TERMINO (ok o error)
 let _lzViajesLoading = false;
 let _lzViajesLoadedAt = null;
 
@@ -30679,6 +30685,7 @@ async function lzCargarViajes() {
     console.error('[lz viajes] error cargando:', err);
   } finally {
     _lzViajesLoading = false;
+    _lzViajesIntentado = true;   // v13.163.0
   }
 }
 
@@ -30896,8 +30903,16 @@ function lzRenderViajes(el) {
     lzCargarViajes();
   }
 
-  // Estado de carga inicial: muestra spinner pero no bloquea
-  if (!_lzDataLoaded && _lzViajes.length === 0) {
+  // Estado de carga inicial. v13.163.0 — antes era
+  //   if (!_lzDataLoaded && _lzViajes.length === 0)
+  // Con AND, si lzCargarDatos() terminaba primero (_lzDataLoaded=true) y
+  // lzCargarViajes() seguia en vuelo, la guarda NO entraba y la pantalla
+  // caia en "Aun no hay viajes activos" con los viajes viajando por la red.
+  // Un array vacio NO es evidencia de que no existan viajes: solo el flag de
+  // "la carga TERMINO" lo es. _lzViajesIntentado se setea en el finally de
+  // lzCargarViajes, asi que un error de red muestra el estado vacio real en
+  // vez de dejar el spinner girando para siempre.
+  if (!_lzDataLoaded || !_lzViajesIntentado) {
     el.innerHTML = '<div class="planilla-empty">'
       + '<div class="loading-spinner" style="margin:0 auto 12px;"></div>'
       + 'Cargando viajes y pedidos...</div>';
