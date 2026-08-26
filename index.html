@@ -1,6 +1,28 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.157.0 — 24/08/2026
+     TCK ADMIN — v13.167.0 — 26/08/2026
+     v13.167.0: UNIÓN DE DUPLICADOS — FIX DE DOBLE SUMA.
+     Caso: TCK-20260826-1857-LIS-K5Q0 (Pablo Enrique Hernandez, Pellegrini)
+     quedó en $151.600 en vez de $92.000 tras unir con ...-1859-LIS-XFO4.
+     El pedido absorbido se sumó DOS VECES (4x McCain en vez de 2x).
+     CAUSA RAÍZ: en cargarPedidos() la detección de duplicados corría
+     ANTES de aplicar _estadosCambiados. Como el Sheet tarda hasta 20 s en
+     reflejar la cancelación que hace dupUnirPedidos(), el tick de 20 s
+     releía el CSV con el absorbido todavía Pendiente → volvía el badge
+     PEDIDO DOBLE sobre un pedido ya unido. Un segundo click sobre "Unir"
+     re-sumaba (la función es acumulativa, no idempotente).
+     1) FIX 1 — el bloque de estados locales se movió ARRIBA, antes de
+        armar mapTotal. Nuevo _dupUnionLocal: durante 2 min pisa el
+        total/detalle/resumen del principal aunque el CSV venga viejo, y
+        marca p.unidoReciente para sacarlo de la detección.
+     2) FIX 2 — dupUnirPedidos(): guard _dupUniendo, botón deshabilitado
+        mientras corre, y bloqueo duro si algún pedido del grupo se unió
+        hace menos de 2 min (alert explícito, no toast silencioso).
+     3) FIX 3 — PASOS INVERTIDOS: primero se cancelan los absorbidos,
+        después se edita el principal. Si se corta en el medio se pierde
+        la unión (recuperable) en vez de dejar un total inflado.
+        + try/finally: el candado se libera siempre.
+     ─────────────────────────────────────────────────────────────────────
      v13.157.0: CHAN ENTRA A LOGÍSTICA + ABRIR VIAJE PARA PEDIDOS TARDÍOS.
      (pendientes Braian 24/08; backend requerido: v25.126.0)
      1) LOGIN CHAN: botón en paso1 (mismo PIN que usa en Ventas, rol
@@ -18909,6 +18931,12 @@ let vendedorActual = null;
 let todosLosPedidos = [];
 let _pedidosCache   = [];
 var _estadosCambiados = {}; // pedidoId -> {estado, timestamp}
+// v13.167.0 — UNION DE DUPLICADOS: memoria local de corta vida.
+//   _dupUnionLocal: pedidoId principal -> {total, items, resumen, detalle, vendedor, ts}
+//   Sirve para que el CSV del Sheet (que tarda hasta 20 s) no pise el
+//   resultado recien unido ni resucite el badge PEDIDO DOBLE.
+var _dupUnionLocal = {};
+var _dupUniendo = false;    // guard de reentrada de dupUnirPedidos()
 let filtroActual = 'todos';
 let filtroFecha = 'hoy';
 let filtroVendedor = 'todos';
@@ -19375,6 +19403,38 @@ async function cargarPedidos(silencioso) {
     await _pNoDups;
     await _pFacturas;   // v13.105: no bloquea si falló (catch interno)
 
+    // ═══ v13.167.0 — FIX 1: ESTADOS LOCALES **ANTES** DE DETECTAR DUPS ═══
+    // Antes este bloque vivia ~20 lineas mas abajo, DESPUES de la deteccion.
+    // Resultado: la deteccion corria contra el CSV crudo y, como el Sheet
+    // tarda hasta 20 s en reflejar la cancelacion que hace dupUnirPedidos(),
+    // el badge PEDIDO DOBLE volvia a aparecer sobre un pedido YA unido.
+    // Si se tocaba "Unir" de nuevo, los productos se sumaban dos veces.
+    // Caso real 26/08/2026: TCK-20260826-1857-LIS-K5Q0 quedo en $151.600
+    // en vez de $92.000 (4x McCain en lugar de 2x).
+    var _tsLocal = Date.now();
+    pedidos.forEach(function(p) {
+      var cambio = _estadosCambiados[p.pedidoId];
+      if (cambio && (_tsLocal - cambio.ts) < 120000) {
+        p.estado = cambio.estado;
+      } else if (cambio) {
+        // Cambio viejo — ya deberia estar en el Sheet, limpiar
+        delete _estadosCambiados[p.pedidoId];
+      }
+      // Pedido principal de una union reciente: el Sheet puede seguir
+      // devolviendo el total/detalle viejo. Pisamos con lo ya enviado.
+      var uni = _dupUnionLocal[p.pedidoId];
+      if (uni && (_tsLocal - uni.ts) < 120000) {
+        p.total    = uni.total;
+        p.items    = uni.items;
+        p.resumen  = uni.resumen;
+        p.detalle  = uni.detalle;
+        if (uni.vendedor) p.vendedor = uni.vendedor;
+        p.unidoReciente = true;   // lo saca de la deteccion de duplicados
+      } else if (uni) {
+        delete _dupUnionLocal[p.pedidoId];
+      }
+    });
+
     // Detectar duplicados — solo dentro del MISMO DÍA
     // MEJORA (fase A): solo marcar como duplicado si comparten algún producto.
     // Pedidos del mismo cliente con productos 100% distintos NO son duplicados,
@@ -19383,6 +19443,7 @@ async function cargarPedidos(silencioso) {
     var mapTotal = {};
     pedidos.forEach(function(p) {
       if (p.estado === 'Cancelado') return;
+      if (p.unidoReciente) return;   // v13.167.0 — union en vuelo, no agrupar
       var mFecha = (p.pedidoId || '').match(/TCK-(\d{8})/);
       var fechaDia = mFecha ? mFecha[1] : (p.fechaHora || '').substring(0, 10).replace(/-/g,'');
       if (!fechaDia) return;
@@ -19426,6 +19487,8 @@ async function cargarPedidos(silencioso) {
 
     pedidos.forEach(function(p) {
       if (p.estado === 'Cancelado') { p.esDuplicado = false; p.tipoDuplicado = null; p.duplicadoCon = ''; return; }
+      // v13.167.0 — recien unido: el Sheet todavia no sincronizo, no marcar.
+      if (p.unidoReciente) { p.esDuplicado = false; p.tipoDuplicado = null; p.duplicadoCon = ''; return; }
       var mFecha = (p.pedidoId || '').match(/TCK-(\d{8})/);
       var fechaDia = mFecha ? mFecha[1] : (p.fechaHora || '').substring(0, 10).replace(/-/g,'');
       if (!fechaDia) { p.esDuplicado = false; p.tipoDuplicado = null; p.duplicadoCon = ''; return; }
@@ -19492,17 +19555,8 @@ async function cargarPedidos(silencioso) {
     }
 
     cargarNotas(pedidos);
-    // Respetar cambios locales recientes (últimos 2 minutos) para no pisar cambios que el Sheet aún no procesó
-    var ahora = Date.now();
-    pedidos.forEach(function(p) {
-      var cambio = _estadosCambiados[p.pedidoId];
-      if (cambio && (ahora - cambio.ts) < 120000) {
-        p.estado = cambio.estado;
-      } else if (cambio) {
-        // Cambio viejo — ya debería estar en el Sheet, limpiar
-        delete _estadosCambiados[p.pedidoId];
-      }
-    });
+    // v13.167.0 — el bloque de "cambios locales recientes" que vivia aca se
+    // movio ARRIBA, antes de la deteccion de duplicados. Ver FIX 1.
     // Marcar chofer asignado
   pedidos.forEach(function(p) { if (_asignaciones[p.pedidoId]) p.choferAsignado = _asignaciones[p.pedidoId]; });
   // Cache: nunca perder pedidos entre refreshes
@@ -20580,11 +20634,37 @@ function _dupConsolidarPedidos(detalles) {
 }
 
 async function dupUnirPedidos() {
+  // ═══ v13.167.0 — FIX 2: GUARD DE REENTRADA + IDEMPOTENCIA ═══════════
+  // Esta funcion es ACUMULATIVA (suma totales y fusiona lineas). Correrla
+  // dos veces sobre el mismo grupo duplica los productos del pedido
+  // absorbido. Como los fetch son mode:'no-cors' (resuelven al instante,
+  // sin esperar a que Apps Script termine), el riesgo es real: doble tap,
+  // o un refresco de 20 s que resucita el badge antes de que el Sheet
+  // registre la cancelacion. Dos candados: flag en vuelo + memoria corta.
+  if (_dupUniendo) { toast('⏳ Unión en curso, esperá…', 'ok'); return; }
+
   var s = _dupModalState;
   if (!s) return;
   var activos = s.grupo.filter(function(x){ return !s.cancelados.has(x.pedidoId); });
   if (activos.length < 2) {
     toast('Ya queda 1 solo pedido activo', 'ok');
+    return;
+  }
+
+  // v13.167.0 — ¿alguno de estos ya se unio hace menos de 2 minutos?
+  var _tsUni = Date.now();
+  var _yaUnido = null;
+  for (var _iu = 0; _iu < activos.length; _iu++) {
+    var _u = _dupUnionLocal[activos[_iu].pedidoId];
+    if (_u && (_tsUni - _u.ts) < 120000) { _yaUnido = activos[_iu]; break; }
+  }
+  if (_yaUnido) {
+    alert('⚠️ ESTE GRUPO YA SE UNIÓ\n\n' +
+          'El pedido ' + _yaUnido.pedidoId + ' se unificó hace menos de 2 minutos ' +
+          'y el Sheet todavía no terminó de sincronizar.\n\n' +
+          'Si volvés a unir ahora, los productos se suman DOS VECES.\n\n' +
+          'Esperá el próximo refresco (20 s) y fijate el total antes de tocar nada.');
+    dupModalCerrar();
     return;
   }
 
@@ -20652,10 +20732,46 @@ async function dupUnirPedidos() {
 
   if (!confirm(confirmMsg)) return;
 
+  // v13.167.0 — candado en vuelo + boton bloqueado mientras dura la operacion
+  _dupUniendo = true;
+  var _btnUnir = document.querySelector('.dup-btn-unir');
+  if (_btnUnir) {
+    _btnUnir.disabled = true;
+    _btnUnir.innerHTML = '<span class="dup-btn-unir-icon">⏳</span>'
+      + '<span class="dup-btn-unir-text">Uniendo…</span>';
+  }
+
   try {
-    // PASO 1: Actualizar pedido principal con productos combinados + vendedor + total
-    // Usamos la acción 'editarPedido' (ya existe en el Apps Script, ahora acepta vendedor)
     var totalFmt = '$' + totalUnido.toLocaleString('es-AR');
+
+    // ═══ v13.167.0 — FIX 3: ORDEN INVERTIDO ═════════════════════════
+    // Antes se editaba el principal PRIMERO y se cancelaban los otros
+    // despues. Si el proceso se cortaba en el medio quedaba el principal
+    // ya sumado + el otro todavia activo = el peor estado posible
+    // (invita a volver a unir y duplicar la plata).
+    // Ahora cancelamos primero: si se corta, se pierde la union pero
+    // ningun numero queda inflado. Falla segura.
+
+    // PASO 1: Cancelar los restantes con nota vinculante
+    for (var i = 0; i < restantes.length; i++) {
+      var r = restantes[i];
+      var notaCancel = '❌ Unido al pedido ' + principal.pedidoId;
+      await fetch(APPS_SCRIPT_URL + '?accion=guardarNota&pedidoId=' + encodeURIComponent(r.pedidoId)
+        + '&nota=' + encodeURIComponent(notaCancel), { mode: 'no-cors' });
+      var paramsCancel = new URLSearchParams({
+        accion:   'cambiarEstado',
+        pedidoId: r.pedidoId,
+        fila:     String(r.fila),
+        estado:   'Cancelado'
+      });
+      await fetch(APPS_SCRIPT_URL + '?' + paramsCancel.toString(), { mode: 'no-cors' });
+      r.estado = 'Cancelado';
+      r.nota = notaCancel;
+      _estadosCambiados[r.pedidoId] = { estado: 'Cancelado', ts: Date.now() };
+    }
+
+    // PASO 2: Actualizar pedido principal con productos combinados + vendedor + total
+    // Usamos la acción 'editarPedido' (ya existe en el Apps Script, acepta vendedor)
     var paramsUpd = new URLSearchParams({
       accion:        'editarPedido',
       pedidoId:      principal.pedidoId,
@@ -20676,8 +20792,20 @@ async function dupUnirPedidos() {
     principal.detalle  = nuevoDetalle;
     principal.esDuplicado = false;
     principal.tipoDuplicado = null;
+    principal.unidoReciente = true;
 
-    // PASO 2: Agregar nota al principal para dejar rastro
+    // v13.167.0 — memoria corta: durante 2 min el CSV del Sheet NO puede
+    // pisar este resultado ni volver a marcar el pedido como duplicado.
+    _dupUnionLocal[principal.pedidoId] = {
+      total:    totalFmt,
+      items:    String(itemsTotal),
+      resumen:  resumenNuevo,
+      detalle:  nuevoDetalle,
+      vendedor: s.acreditarA,
+      ts:       Date.now()
+    };
+
+    // PASO 3: Agregar nota al principal para dejar rastro
     var notaPrincipal = '📦 Pedido unido de ' + activos.length + ' pedidos · Total: ' + totalFmt + ' · Acreditado a ' + s.acreditarA;
     if (principal.nota && principal.nota.trim()) {
       notaPrincipal = principal.nota + ' | ' + notaPrincipal;
@@ -20685,24 +20813,6 @@ async function dupUnirPedidos() {
     await fetch(APPS_SCRIPT_URL + '?accion=guardarNota&pedidoId=' + encodeURIComponent(principal.pedidoId)
       + '&nota=' + encodeURIComponent(notaPrincipal), { mode: 'no-cors' });
     principal.nota = notaPrincipal;
-
-    // PASO 3: Cancelar los restantes con nota vinculante
-    for (var i = 0; i < restantes.length; i++) {
-      var r = restantes[i];
-      var notaCancel = '❌ Unido al pedido ' + principal.pedidoId;
-      await fetch(APPS_SCRIPT_URL + '?accion=guardarNota&pedidoId=' + encodeURIComponent(r.pedidoId)
-        + '&nota=' + encodeURIComponent(notaCancel), { mode: 'no-cors' });
-      var paramsCancel = new URLSearchParams({
-        accion:   'cambiarEstado',
-        pedidoId: r.pedidoId,
-        fila:     String(r.fila),
-        estado:   'Cancelado'
-      });
-      await fetch(APPS_SCRIPT_URL + '?' + paramsCancel.toString(), { mode: 'no-cors' });
-      r.estado = 'Cancelado';
-      r.nota = notaCancel;
-      _estadosCambiados[r.pedidoId] = { estado: 'Cancelado', ts: Date.now() };
-    }
 
     // PASO 4: Marcar el grupo como revisado localmente
     var cliKey = (s.fechaDia + s.cliente).toLowerCase().replace(/\s/g,'');
@@ -20721,6 +20831,14 @@ async function dupUnirPedidos() {
   } catch(e) {
     console.error('Error al unir:', e);
     toast('❌ Error al unir pedidos', 'err');
+  } finally {
+    // v13.167.0 — liberar el candado pase lo que pase
+    _dupUniendo = false;
+    if (_btnUnir) {
+      _btnUnir.disabled = false;
+      _btnUnir.innerHTML = '<span class="dup-btn-unir-icon">🔗</span>'
+        + '<span class="dup-btn-unir-text">Unir en 1 pedido</span>';
+    }
   }
 }
 
