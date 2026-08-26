@@ -30359,8 +30359,61 @@ async function lzCargarDatos() {
     // v13.4: paginado con sbFetchAll — antes era limit=2000 fijo y, al
     // superar la tabla las 2000 filas, recortaba pedidos de los viajes
     // más nuevos (planilla de carga incompleta). Orden estable por pedido_id.
-    const pedidos = await sbFetchAll('pedidos_zona?select=*&order=pedido_id.asc');
-    _lzPedidosZona = Array.isArray(pedidos) ? pedidos : [];
+    // ═══ v13.164.0 — PERF3: dejar de traer TODA pedidos_zona ═══════════
+    // ANTES: select=* sobre la tabla entera → 7.328 filas · 42 columnas ·
+    // 2.502 KB · 8 paginas PostgREST, para despues filtrar en memoria un
+    // viaje de ~41 pedidos.
+    // AHORA dos consultas acotadas que juntas cubren TODO lo que los
+    // consumidores de _lzPedidosZona necesitan:
+    //   Q1 activos  — no cancelados / no entregados / no rendidos. Es lo que
+    //                 mira lzPedidoEnVistaActiva, y NO lleva ventana temporal
+    //                 porque lzGetAtrasados necesita los atrasados viejos.
+    //   Q2 viajes activos — TODOS los estados, incluido Entregado: el detalle
+    //                 de un viaje en_ruta tiene que seguir mostrando los ya
+    //                 entregados (zona3 26/08: 16 de 41).
+    // Union por pedido_id. Medido: 1.486 filas · ~260 KB · 3 requests.
+    // Columnas: las 13 que el bloque Logistica referencia de verdad.
+    var _t0 = Date.now();
+    var LZ_COLS = 'pedido_id,cliente,localidad_canonica,total,vendedor,estado,' +
+                  'zona,zona_inferida_de,salida_planificada,viaje_id,' +
+                  'xubio_factura_nro,cliente_xubio_id,creado_at';
+    var LZ_FINALES = '(Cancelado,"Cancelado por admin",Entregado,Rendido)';
+
+    var activos = await sbFetchAll('pedidos_zona?estado=not.in.' + LZ_FINALES +
+                                   '&select=' + LZ_COLS + '&order=pedido_id.asc');
+    activos = Array.isArray(activos) ? activos : [];
+
+    // Ids de viajes activos: si _lzViajes todavia no cargo, se resuelve con
+    // una consulta propia para no depender del orden de carga.
+    var idsViajes = [];
+    try {
+      if (Array.isArray(_lzViajes) && _lzViajes.length) {
+        idsViajes = _lzViajes.map(function (v) { return v.id; });
+      } else {
+        var vs = await sbFetch('viajes?estado=in.(planificado,preparando,' +
+                               'carga_cerrada,en_ruta,rindiendo)&select=id');
+        idsViajes = (Array.isArray(vs) ? vs : []).map(function (v) { return v.id; });
+      }
+    } catch (eV) { idsViajes = []; }
+
+    var deViajes = [];
+    if (idsViajes.length) {
+      try {
+        deViajes = await sbFetchAll('pedidos_zona?viaje_id=in.(' + idsViajes.join(',') +
+                                    ')&select=' + LZ_COLS + '&order=pedido_id.asc');
+        deViajes = Array.isArray(deViajes) ? deViajes : [];
+      } catch (eP) { deViajes = []; }
+    }
+
+    // Union sin duplicar. Q2 pisa a Q1: es la fuente mas especifica.
+    var _mapa = {};
+    for (var i = 0; i < activos.length; i++)  _mapa[activos[i].pedido_id]  = activos[i];
+    for (var j = 0; j < deViajes.length; j++) _mapa[deViajes[j].pedido_id] = deViajes[j];
+    _lzPedidosZona = Object.keys(_mapa).sort().map(function (k) { return _mapa[k]; });
+
+    console.log('[TCK LOGISTICA PERF2] pedidos ' + (Date.now() - _t0) + ' ms · ' +
+                _lzPedidosZona.length + ' filas (activos ' + activos.length +
+                ' + viajes ' + deViajes.length + ')');
 
     // Ciudades canónicas con su zona (para el grid del drawer "Sin Zona")
     const rutas = await sbFetch('rutas?select=*&order=orden.asc');
