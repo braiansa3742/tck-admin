@@ -1,6 +1,22 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.168.0 — 26/08/2026
+     TCK ADMIN — v13.169.0 — 26/08/2026
+     v13.169.0: CARGA-2 CONSERVADORA — COLUMNAS, NO UNIVERSO.
+     lzCargarDrawers() bajaba entregas SIN filtro con 14 columnas (7.025
+     filas · 1.217 KB · 8 req) y con eso hacia DOS cosas distintas:
+       1) llenar _asignacionesEstado (solo necesita pedido_id + estado)
+       2) llenar _lzNoEntregados, del que en el login SOLO se usa .length
+     Se separan:
+       A) indice: MISMO universo y MISMO order, solo 2 columnas → ~424 KB.
+          No se filtra por fecha ni por viaje: hay 25 pedidos vivos con
+          entrega final de hasta 113 dias (pedidos_zona.estado y
+          entregas.estado no se sincronizan, FIX N42-C) que una ventana
+          temporal haria reaparecer como pendientes.
+          Replay sobre los 1.491 pedidos del dataset: 1.491/1.491 iguales.
+       B) contador: query propia estado=eq.no_entregado&select=id (~80
+          filas). Las 14 columnas se cargan LAZY al abrir el drawer.
+     Siguen siendo 8 requests para el indice: este pase baja payload y saca
+     el drawer pesado del login, no reduce paginacion.
      v13.168.0: ENTREGAS ACOTADAS A VIAJES ACTIVOS + FIX 401 DEL BADGE.
      A) lzCargarEntregasIndex traia TODA la historia de entregas en estado
         final: 5.196 filas · 365 KB · 6 requests. Su unico consumidor es
@@ -31179,7 +31195,11 @@ function lzRenderViajes(el) {
 
   // ── Sección de alertas (solo si hay) ──────────────────────
   const cSinZ  = _lzSinZona ? _lzSinZona.length : 0;
-  const cNoEnt = _lzNoEntregados ? _lzNoEntregados.length : 0;
+  // v13.169.0 — el contador sale de la query liviana; si el drawer ya se
+  // abrio, _lzNoEntregados es la fuente mas fresca.
+  const cNoEnt = (_lzNoEntregados && _lzNoEntregados.length)
+    ? _lzNoEntregados.length
+    : (typeof _lzNoEntCount === 'number' ? _lzNoEntCount : 0);
   const cSinV  = _lzSinViaje ? _lzSinViaje.length : 0;   // v13.75.0
   if (cSinZ > 0 || cNoEnt > 0 || cSinV > 0) {
     html += '<div class="lz-alertas-section">';
@@ -33527,6 +33547,7 @@ function lzCerrarSheet(id, event) {
 // ════════════════════════════════════════════════════════════════
 
 let _lzNoEntregados = [];   // cache de tabla entregas con estado=no_entregado
+let _lzNoEntCount   = 0;    // v13.169.0 — contador liviano para el badge de alertas
 let _lzSinZona      = [];   // pedidos sin zona asignada
 let _lzSinViaje     = [];   // v13.75.0: pedidos activos sin viaje_id (red de seguridad)
 let _lzSvPedidoSel  = null; // v13.75.0: pedido seleccionado para asignar a viaje
@@ -33543,7 +33564,11 @@ async function lzCargarDrawers() {
     // v13.5: paginado — antes limit=1000. Esta carga alimenta _asignacionesEstado
     // (estado de entrega de TODOS los pedidos) además del drawer No Entregados,
     // así que truncar dejaba pedidos sin estado conocido. Tiebreaker por id.
-    const todas = await sbFetchAll('entregas?select=id,pedido_id,chofer,estado,fecha_asignacion,fecha_entrega,cliente,ciudad,comercio,monto,motivo_no_entrega,motivo_detalle,viaje_id,telefono_cliente&order=fecha_entrega.desc.nullslast,id.asc');
+    // ═══ v13.169.0-A — indice: mismo universo y order, 2 columnas ══════
+    // Sin filtro a proposito. El forEach PISA (no hay "primer match gana"),
+    // asi que el order define quien gana: se conserva identico.
+    var _tD = Date.now();
+    const todas = await sbFetchAll('entregas?select=pedido_id,estado&order=fecha_entrega.desc.nullslast,id.asc');
     if (Array.isArray(todas) && todas.length > 0) {
       // v11.5: actualizar también el cache de estados para todos los pedidos
       todas.forEach(e => {
@@ -33563,14 +33588,22 @@ async function lzCargarDrawers() {
     }
 
     // Filtrar las que matchean nuestro criterio
-    _lzNoEntregados = (todas || []).filter(e => {
-      const est = (e.estado || '').toLowerCase();
-      return est === 'no_entregado' || est === 'no entregado' || est === 'noentregado';
-    });
+    console.log('[TCK LOGISTICA PERF2] indice entregas ' + (Date.now() - _tD) +
+                ' ms · ' + (todas || []).length + ' filas · 2 cols');
+
+    // ═══ v13.169.0-B — contador liviano ════════════════════════════════
+    // En el login solo se usa .length (renderLogistica ~31182). Se pide
+    // unicamente id de las ~80 no_entregado. Las 14 columnas del render se
+    // cargan LAZY en lzCargarNoEntregadosFull(), al abrir el drawer.
+    var _tC = Date.now();
+    const soloIds = await sbFetchAll('entregas?estado=eq.no_entregado&select=id');
+    _lzNoEntCount = Array.isArray(soloIds) ? soloIds.length : 0;
+    console.log('[TCK LOGISTICA PERF2] no_entregados count ' + (Date.now() - _tC) +
+                ' ms · ' + _lzNoEntCount + ' filas');
     if (window.LZ_DEBUG) console.log('[lz] No Entregados:', _lzNoEntregados.length);
   } catch (e) {
     console.warn('[lz] error cargando entregas:', e);
-    _lzNoEntregados = [];
+    _lzNoEntCount = 0;
   }
 
   // Sin Zona: filtrar de _lzPedidosZona los que tienen zona null/vacía/sin_zona
@@ -33614,14 +33647,35 @@ async function lzCargarDrawers() {
 }
 
 // ── Drawer 1: NO ENTREGADOS ─────────────────────────────────
+// v13.169.0 — carga completa del drawer No Entregados. Las mismas 14
+// columnas de antes (el render usa 11: chofer, ciudad, cliente, comercio,
+// fecha_entrega, id, monto, motivo_detalle, motivo_no_entrega, pedido_id,
+// telefono_cliente) pero solo sobre las ~80 filas no_entregado en vez de
+// las 7.025 de toda la tabla. Se conservan las 14 a proposito: el ahorro
+// sobre 80 filas es despreciable y el riesgo de sacar una columna que use
+// otra funcion del drawer, no.
+async function lzCargarNoEntregadosFull() {
+  try {
+    var _t = Date.now();
+    const filas = await sbFetchAll('entregas?estado=eq.no_entregado&select=id,pedido_id,chofer,estado,fecha_asignacion,fecha_entrega,cliente,ciudad,comercio,monto,motivo_no_entrega,motivo_detalle,viaje_id,telefono_cliente&order=fecha_entrega.desc.nullslast,id.asc');
+    _lzNoEntregados = Array.isArray(filas) ? filas : [];
+    _lzNoEntCount = _lzNoEntregados.length;
+    console.log('[TCK LOGISTICA PERF2] drawer no_entregados ' + (Date.now() - _t) +
+                ' ms · ' + _lzNoEntregados.length + ' filas');
+  } catch (e) {
+    console.warn('[lz] error cargando drawer No Entregados:', e);
+    _lzNoEntregados = [];
+  }
+}
+
 async function lzAbrirNoEntregados() {
   const cont = document.getElementById('lz-noent-content');
   cont.innerHTML = '<div class="lz-empty">'
     + '<div class="loading-spinner" style="margin:0 auto 12px;"></div>Cargando...</div>';
   lzAbrirSheet('lz-drawer-noent');
 
-  // Recargar antes de mostrar (por si llegaron nuevos)
-  await lzCargarDrawers();
+  // v13.169.0 — lazy: las 14 columnas se piden RECIEN aca, no en el login.
+  await lzCargarNoEntregadosFull();
 
   if (_lzNoEntregados.length === 0) {
     cont.innerHTML = '<div class="lz-empty">'
