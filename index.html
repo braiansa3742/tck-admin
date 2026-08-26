@@ -1,6 +1,17 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.167.0 — 26/08/2026
+     TCK ADMIN — v13.168.0 — 26/08/2026
+     v13.168.0: ENTREGAS ACOTADAS A VIAJES ACTIVOS + FIX 401 DEL BADGE.
+     A) lzCargarEntregasIndex traia TODA la historia de entregas en estado
+        final: 5.196 filas · 365 KB · 6 requests. Su unico consumidor es
+        _lzEntregasIndexPorPedidoId, leido solo por lzPedidosDeViaje para
+        marcar Entregado en el viaje ABIERTO. Se acota por viaje_id a los
+        viajes activos: ~121 filas · ~8,7 KB · 1 request (-97,6%).
+        NO toca _asignacionesEstado ni cargarAsignaciones(): ese es OTRO
+        indice, con otros consumidores (alertas y vista por zona).
+     B) _ltBadge() hacia fetch crudo con 'Bearer ' + SUPABASE_KEY, sin el
+        JWT de sesion → 401 en cada render de tab. Ahora usa el mismo
+        header que sbFetch + reintento anon.
      v13.167.0: UNIÓN DE DUPLICADOS — FIX DE DOBLE SUMA.
      Caso: TCK-20260826-1857-LIS-K5Q0 (Pablo Enrique Hernandez, Pellegrini)
      quedó en $151.600 en vez de $92.000 tras unir con ...-1859-LIS-XFO4.
@@ -30541,7 +30552,8 @@ async function lzCargarDatos() {
     // para que lzPedidosDeViaje pueda sobreescribir el estado
     // de pedidos_zona con el estado real de entregas.
     // No bloqueante: si falla, se sigue mostrando sin entregas.
-    lzCargarEntregasIndex();
+    // v13.168.0 — idsViajes ya resuelto arriba: 0 requests extra.
+    lzCargarEntregasIndex(idsViajes);
 
     _lzDataLoaded = true;
 
@@ -30998,13 +31010,48 @@ function lzPedidosDeViaje(viajeId) {
 // FIX N42-C: índice de entregas por pedido_id para lookup rápido en lzPedidosDeViaje
 let _lzEntregasIndexPorPedidoId = {};
 
-async function lzCargarEntregasIndex() {
-  // Cargar entregas en estados finales (entregado / no_encontrado) para los viajes en curso/cerrados recientes
-  // Limit para no traer toda la historia.
+// v13.168.0 — ids de los viajes activos, sin request extra si ya los tenemos.
+// _lzViajes lo llena lzCargarViajes (v13.166.0, Supabase directo). En el
+// login todavia esta vacio, asi que ahi si se consulta: 1 request de 14 ids.
+async function _lzIdsViajesActivos() {
   try {
+    if (Array.isArray(_lzViajes) && _lzViajes.length) {
+      return _lzViajes.map(function (v) { return v.id; });
+    }
+    var vs = await sbFetch('viajes?estado=in.(planificado,preparando,' +
+                           'carga_cerrada,en_ruta,rindiendo)&select=id');
+    return (Array.isArray(vs) ? vs : []).map(function (v) { return v.id; });
+  } catch (e) { return []; }
+}
+
+async function lzCargarEntregasIndex(idsViajes) {
+  // ═══ v13.168.0 — solo las entregas que alguien consulta ══════════════
+  // BEFORE: entregas?estado=in.(entregado,no_encontrado)&select=3cols
+  //         → 5.196 filas · 365 KB · 6 requests (toda la historia)
+  // AFTER : + &viaje_id=in.(<ids viajes activos>)
+  //         → ~121 filas · ~8,7 KB · 1 request
+  // El unico consumidor de _lzEntregasIndexPorPedidoId es lzPedidosDeViaje,
+  // que sobreescribe el estado a 'Entregado' para los pedidos del viaje
+  // ABIERTO. Sus 5 llamadores operan sobre el viaje en pantalla. Ademas,
+  // desde v13.164.0 _lzPedidosZona solo contiene activos + pedidos de
+  // viajes activos: un viaje cerrado del Historico ya devolvia vacio ANTES
+  // de este cambio, asi que acotar aca no puede empeorarlo.
+  // NO toca _asignacionesEstado ni cargarAsignaciones(): otro indice, otros
+  // consumidores (alertas y vista por zona), queda intacto.
+  // Sin ventana temporal y sin cache: el filtro es por viaje.
+  try {
+    var _tE = Date.now();
+    var ids = (Array.isArray(idsViajes) && idsViajes.length)
+      ? idsViajes
+      : await _lzIdsViajesActivos();
+    if (!ids.length) {
+      _lzEntregasIndexPorPedidoId = {};
+      console.log('[TCK LOGISTICA PERF2] entregas 0 filas (sin viajes activos)');
+      return;
+    }
     // v13.5: paginado — antes limit=2000 y la tabla entregas crece sin techo.
     // Orden con tiebreaker por id para que la paginación no saltee filas.
-    const rows = await sbFetchAll('entregas?estado=in.(entregado,no_encontrado)&select=pedido_id,estado,fecha_entrega&order=fecha_entrega.desc.nullslast,id.asc');
+    const rows = await sbFetchAll('entregas?estado=in.(entregado,no_encontrado)&viaje_id=in.(' + ids.join(',') + ')&select=pedido_id,estado,fecha_entrega&order=fecha_entrega.desc.nullslast,id.asc');
     const idx = {};
     (rows || []).forEach(e => {
       if (e.pedido_id && !idx[e.pedido_id]) {
@@ -31012,6 +31059,8 @@ async function lzCargarEntregasIndex() {
       }
     });
     _lzEntregasIndexPorPedidoId = idx;
+    console.log('[TCK LOGISTICA PERF2] entregas ' + (Date.now() - _tE) + ' ms · ' +
+                (rows || []).length + ' filas · ' + ids.length + ' viajes');
   } catch(err) {
     console.warn('[lz N42-C] Error cargando índice entregas:', err);
   }
@@ -36794,9 +36843,25 @@ function _ltModalExport(d) {
 // ── Badge: contador de pendientes en el botón del tab ──
 async function _ltBadge() {
   try {
-    var resp = await fetch(SUPABASE_URL + '/rest/v1/entregas?forma_cobro=eq.transferencia&estado=eq.entregado&transfer_conciliada=not.is.true&transfer_disputa=is.null&select=id&limit=1', {
-      headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY, 'Prefer': 'count=exact', 'Range': '0-0' }
-    });
+    // ═══ v13.168.0 — FIX 401 ════════════════════════════════════════
+    // Mandaba 'Bearer ' + SUPABASE_KEY (anon), saltandose el JWT de sesion
+    // que usa sbFetch. Con RLS sobre entregas la anon key sola es
+    // rechazada: 401 en cada render de tab (2 por entrada a Logistica).
+    // NO se usa sbFetch porque el contador sale del header content-range y
+    // sbFetch devuelve el JSON ya parseado, sin la Response. Se replica el
+    // header de sbFetch, que es la infraestructura de auth existente.
+    var _mkHdr = function (auth) {
+      return { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + auth,
+               'Prefer': 'count=exact', 'Range': '0-0' };
+    };
+    var _urlBadge = SUPABASE_URL + '/rest/v1/entregas?forma_cobro=eq.transferencia' +
+      '&estado=eq.entregado&transfer_conciliada=not.is.true&transfer_disputa=is.null' +
+      '&select=id&limit=1';
+    var resp = await fetch(_urlBadge, { headers: _mkHdr(_JWT || SUPABASE_KEY) });
+    // Mismo criterio que sbFetch: JWT rechazado → reintento anon, una vez.
+    if (resp.status === 401 && _JWT) {
+      resp = await fetch(_urlBadge, { headers: _mkHdr(SUPABASE_KEY) });
+    }
     var cr = resp.headers.get('content-range') || '';
     var total = parseInt(cr.split('/')[1], 10);
     var b = document.getElementById('log-tab-transferencias');
