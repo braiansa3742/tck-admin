@@ -34380,7 +34380,7 @@ async function descargarPlanillaCarga(choferParam) {
 
     // ── ENCABEZADO ──
     if (logoB64) {
-      try { doc.addImage(logoB64, 'PNG', M, y, 24, 24); } catch(e) {}
+      try { doc.addImage(logoB64, 'PNG', M, y, 24, 24, 'tcklogo', 'FAST'); } catch(e) {}
     }
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(15);
@@ -34542,7 +34542,7 @@ async function descargarPlanillaCarga(choferParam) {
     doc.addPage();
     y = 14;
     if (logoB64) {
-      try { doc.addImage(logoB64, 'PNG', M, y, 18, 18); } catch(e) {}
+      try { doc.addImage(logoB64, 'PNG', M, y, 18, 18, 'tcklogo', 'FAST'); } catch(e) {}
     }
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
@@ -34659,7 +34659,7 @@ async function descargarPlanillaCarga(choferParam) {
       if (_repFilas.length) {
         doc.addPage();
         y = 14;
-        if (logoB64) { try { doc.addImage(logoB64, 'PNG', M, y, 18, 18); } catch (e) {} }
+        if (logoB64) { try { doc.addImage(logoB64, 'PNG', M, y, 18, 18, 'tcklogo', 'FAST'); } catch (e) {} }
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(14);
         doc.setTextColor(27, 94, 32);
@@ -34886,7 +34886,7 @@ async function descargarPDFVet() {
 
     // ── ENCABEZADO ──
     if (logoB64) {
-      try { doc.addImage(logoB64, 'PNG', M, y, 24, 24); } catch(e) {}
+      try { doc.addImage(logoB64, 'PNG', M, y, 24, 24, 'tcklogo', 'FAST'); } catch(e) {}
     }
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(15);
@@ -37578,10 +37578,21 @@ function _cargarLogoBase64() {
     img.crossOrigin = 'anonymous';
     img.onload = function() {
       try {
+        // v13.161.0 — El logo maestro es 3375x3375 RGBA. jsPDF lo embebia
+        // crudo: 32,6 MB RGB + 10,9 MB de SMask = 43,5 MB por PDF, para
+        // dibujarlo a 24 mm (283 px @300dpi). Se reescala a 600 px, que a
+        // 24 mm da ~635 ppi: sobra resolucion para impresion. NO se toca el
+        // asset maestro (lo usan el header y el resto de TCK).
+        var _LOGO_PDF_PX = 600;
+        var _lado = Math.min(_LOGO_PDF_PX, Math.max(img.width, img.height)) || _LOGO_PDF_PX;
+        var _esc = _lado / Math.max(img.width, img.height);
         var canvas = document.createElement('canvas');
-        canvas.width = img.width; canvas.height = img.height;
+        canvas.width  = Math.round(img.width  * _esc);
+        canvas.height = Math.round(img.height * _esc);
         var ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0);
+        ctx.imageSmoothingEnabled = true;
+        if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         _logoBase64 = canvas.toDataURL('image/png');
         resolve(_logoBase64);
       } catch (e) {
@@ -37623,7 +37634,7 @@ async function devGenerarPDF(devolucionId) {
 
     // ── ENCABEZADO: Logo (izq) + Título (der) ──
     if (logoB64) {
-      try { doc.addImage(logoB64, 'PNG', M, y, 28, 28); } catch(e) {}
+      try { doc.addImage(logoB64, 'PNG', M, y, 28, 28, 'tcklogo', 'FAST'); } catch(e) {}
     }
     // Título derecha
     doc.setFont('helvetica', 'bold');
