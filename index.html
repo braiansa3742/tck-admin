@@ -47294,7 +47294,8 @@ window.vcHistorial = async function (viajeId) {
 window.vcAbrirControl = async function (viajeId) {
   var d = await ccGAS('accion=cargaControlEstado&viaje_id=' + encodeURIComponent(viajeId));
   if (d.status !== 'ok') {
-    if (d.requiere === 'planillaGenerar' && confirm((d.message || '') + '\n\n¿Generar la planilla ahora?')) return vcGenerarPlanilla(viajeId);
+    // v13.160.0 PERF-2 — sin confirm: si falta la planilla se genera sola.
+    if (d.requiere === 'planillaGenerar') { ccToast('⏳ Generando la planilla...', 'ok'); return vcGenerarPlanilla(viajeId); }
     return ccToast('⛔ ' + (d.message || ''), 'err');
   }
   var items = d.items || [];
@@ -47667,47 +47668,63 @@ async function _plvGAS(qs) {
  *   · quedó vieja    → ofrece generar la vN+1 (o imprimir la vieja igual)
  * @return objeto planillaVigente | false (imprimir por la rama vieja) | null (cancelado)
  */
+window._plvLock = false;
+
 window._plvObtener = async function (viajeId) {
-  var pv;
+  // v13.160.0 PERF-2 — un solo round-trip contra planillaImprimir (GAS v25.131.0).
+  // Sin confirm() en el camino feliz: si la planilla quedo vieja se regenera
+  // sola y se avisa por toast. Los errores SI siguen siendo visibles.
+  if (window._plvLock) {
+    if (typeof toast === 'function') toast('\u23f3 Ya se esta actualizando la carga...', 'warn');
+    return null;
+  }
+  window._plvLock = true;
+  var _t0 = Date.now();
   try {
-    pv = await _plvGAS('accion=planillaVigente&viaje_id=' + encodeURIComponent(viajeId));
-  } catch (e) {
-    if (!confirm('No pude leer la planilla del viaje (' + e.message + ').\n\n¿Imprimir con el método viejo?')) return null;
-    return false;
-  }
+    var r = await _plvGAS('accion=planillaImprimir&viaje_id=' + encodeURIComponent(viajeId) +
+                          '&quien=' + encodeURIComponent(_plvQuien()));
+    console.log('[TCK Planilla PERF] planillaImprimir ' + ((Date.now() - _t0) / 1000).toFixed(2) + 's');
 
-  if (pv && pv.status === 'sin_planilla') {
-    if (!confirm('Este viaje todavía no tiene PLANILLA generada.\n\n' +
-                 'Generar la v1 ahora deja registrado exactamente qué se manda a cargar ' +
-                 '(y es lo que va a ver Depósito).\n\n¿Generar la v1 e imprimir?')) return null;
-    var g1 = await _plvGAS('accion=planillaGenerar&viaje_id=' + encodeURIComponent(viajeId) +
-                           '&quien=' + encodeURIComponent(_plvQuien()));
-    if (!g1 || g1.status !== 'ok') {
-      if (typeof toast === 'function') toast('⛔ ' + ((g1 && g1.message) || 'No se pudo generar'), 'err');
-      return null;
-    }
-    return await _plvGAS('accion=planillaVigente&viaje_id=' + encodeURIComponent(viajeId));
-  }
-
-  if (pv && pv.status === 'ok' && (!pv.vigente || pv.desactualizada_flag)) {
-    var c = pv.cambios || {};
-    var det = '';
-    if ((c.agregados || []).length) det += '\n➕ ' + c.agregados.map(function (x) { return x.cliente; }).join(', ');
-    if ((c.quitados || []).length) det += '\n➖ ' + c.quitados.map(function (x) { return x.cliente; }).join(', ');
-    if (!det) det = '\n(cambió el contenido de algún pedido: productos o cantidades)';
-    var r = confirm('⚠ LA PLANILLA v' + pv.version + ' QUEDÓ VIEJA' + det +
-      '\n\nAceptar = generar la v' + (pv.version + 1) + ' e imprimir ESA (es la que va a ver Depósito).' +
-      '\nCancelar = imprimir la v' + pv.version + ' tal cual está.');
-    if (r) {
-      var g2 = await _plvGAS('accion=planillaGenerar&viaje_id=' + encodeURIComponent(viajeId) +
-                             '&quien=' + encodeURIComponent(_plvQuien()));
-      if (g2 && g2.status === 'ok') {
-        return await _plvGAS('accion=planillaVigente&viaje_id=' + encodeURIComponent(viajeId));
+    if (!r || r.status !== 'ok') {
+      if (typeof toast === 'function') {
+        toast('\u26d4 ' + ((r && r.message) || 'No se pudo actualizar la carga'), 'err');
       }
-      if (typeof toast === 'function') toast('⛔ ' + ((g2 && g2.message) || 'No se pudo generar'), 'err');
+      return null;                                  // NO imprime. Sin fallback silencioso.
     }
+
+    // ── Compat de shape con planillaVigente ────────────────────────────
+    // planillaImprimir no devuelve sin_factura (lo derivaba GAS). El PDF lo
+    // usa, y el snapshot ya trae 'facturado' por pedido: se calcula aca, sin
+    // tocar Apps Script. Mismo criterio que planillaVigente.
+    var _sf = (r.pedidos || []).filter(function (p) { return !p.facturado; })
+      .map(function (p) {
+        return { pedido_id: p.pedido_id, cliente: p.cliente, total: p.total,
+                 facturacion_estado: p.facturacion_estado };
+      });
+    r.sin_factura = _sf;
+    r.monto_sin_factura = _sf.reduce(function (s, x) { return s + Number(x.total || 0); }, 0);
+    // Post-planillaImprimir la version devuelta ES la vigente, por invariante
+    // del backend (viajes.planilla_version = N y hash de N).
+    r.vigente = true;
+    r.desactualizada_flag = false;
+    r.es_la_ultima = true;
+
+    if (typeof toast === 'function') {
+      toast(r.sin_cambios
+        ? '\u2705 Carga V' + r.version + ' vigente \u00b7 sin cambios'
+        : '\u2705 Carga V' + r.version + ' actualizada \u00b7 ' + r.total_pedidos +
+          ' pedidos \u00b7 $' + Math.round(Number(r.monto_total) || 0).toLocaleString('es-AR'),
+        'ok');
+    }
+    return r;
+  } catch (e) {
+    if (typeof toast === 'function') {
+      toast('\u26d4 No se pudo actualizar la carga: ' + (e && e.message ? e.message : e), 'err');
+    }
+    return null;
+  } finally {
+    window._plvLock = false;
   }
-  return pv;
 };
 
 /**
