@@ -18997,7 +18997,35 @@ var _modoCampo = new URLSearchParams(window.location.search).get('modo') === 'ca
 // última card se dispara el refresh que quedó pendiente, así no queda viejo.
 var _refreshPendiente = false;
 
+// v13.162.0 — Logistica activa: el tick global de 20 s baja el CSV de ~1.600
+// pedidos y corre deteccion de duplicados (~210 ms de main thread medidos).
+// Operando un viaje de 41 pedidos eso es trabajo puro al pedo, y ademas
+// demora los await en curso. Al SALIR de Logistica el refresco se reanuda
+// solo: la guarda deja de aplicar y _refreshPendiente fuerza una pasada.
+var _lzRefreshPausadoLog = false;
+
+function lzEstaActivo() {
+  var view = document.getElementById('view-logistica');
+  if (view && view.classList.contains('active')) return true;
+  var ov = document.getElementById('v-detalle-overlay');
+  if (ov && ov.classList.contains('open')) return true;
+  if (document.querySelector('.vc-modal-bk') !== null) return true;
+  return false;
+}
+
 function adminHayAlgoAbierto() {
+  // v13.162.0 — tab Logistica / viaje abierto
+  if (lzEstaActivo()) {
+    if (!_lzRefreshPausadoLog) {
+      console.log('[TCK LOGISTICA PERF] refresh global pausado');
+      _lzRefreshPausadoLog = true;
+    }
+    return true;
+  }
+  if (_lzRefreshPausadoLog) {
+    console.log('[TCK LOGISTICA PERF] refresh global reanudado');
+    _lzRefreshPausadoLog = false;
+  }
   // Card de pedido expandida
   if (document.querySelector('#lista-pedidos .pedido-body.on') !== null) return true;
   // Modal de duplicados / "ver otros pedidos del cliente"
@@ -34191,7 +34219,69 @@ async function _vetGenerarAsync(opts) {
 }
 
 
+// ═══════════════════════════════════════════════════════════════
+//  v13.162.0 — FEEDBACK INMEDIATO + LOCK DE OPERACION COMPLETA
+//  Sintoma (26/08, Braian): "para descargar la planilla tuve que tocar
+//  dos veces". Causa: descargarPlanillaCarga hacia
+//  `await _plvObtener()` (5,66 s) ANTES del toast 'Generando PDF'. El
+//  usuario clickeaba y no pasaba NADA visible durante ~6 s.
+//  Ademas _plvLock (PERF-2) cubria solo el fetch: entre que resolvia y
+//  doc.save() el lock ya estaba libre y un click ahi disparaba un ciclo
+//  entero nuevo.
+//  Ahora el lock envuelve click -> fetch -> jsPDF -> logo -> doc.save().
+//  Se usa un wrapper con try/finally en vez de tocar los 5 return y 6
+//  catch de la funcion original: el finally libera por CUALQUIER camino.
+// ═══════════════════════════════════════════════════════════════
+window._plvOpLock = false;
+
+function _plvOpInicio() {
+  if (window._plvOpLock) {
+    console.warn('[TCK Planilla PERF] operacion ya en curso: click ignorado');
+    return false;
+  }
+  window._plvOpLock = true;
+  window._plvOpT0 = Date.now();
+  // Feedback en el MISMO tick del click, antes de cualquier await.
+  window._plvOpBtns = [];
+  var btns = document.querySelectorAll('.v-btn-planilla');
+  for (var i = 0; i < btns.length; i++) {
+    window._plvOpBtns.push({ el: btns[i], html: btns[i].innerHTML });
+    btns[i].disabled = true;
+    btns[i].style.opacity = '0.55';
+    btns[i].style.pointerEvents = 'none';
+  }
+  if (btns.length) btns[0].innerHTML = '\u23f3 Generando planilla\u2026';
+  if (typeof toast === 'function') toast('\u23f3 Generando planilla\u2026', 'ok');
+  return true;
+}
+
+function _plvOpFin() {
+  var b = window._plvOpBtns || [];
+  for (var i = 0; i < b.length; i++) {
+    b[i].el.disabled = false;
+    b[i].el.style.opacity = '';
+    b[i].el.style.pointerEvents = '';
+    b[i].el.innerHTML = b[i].html;
+  }
+  window._plvOpBtns = [];
+  if (window._plvOpT0) {
+    console.log('[TCK Planilla PERF] pdf total ' +
+                ((Date.now() - window._plvOpT0) / 1000).toFixed(2) + 's');
+    window._plvOpT0 = null;
+  }
+  window._plvOpLock = false;
+}
+
 async function descargarPlanillaCarga(choferParam) {
+  if (!_plvOpInicio()) return;
+  try {
+    return await _descargarPlanillaCargaInterno(choferParam);
+  } finally {
+    _plvOpFin();
+  }
+}
+
+async function _descargarPlanillaCargaInterno(choferParam) {
   // v12.3.0: reescrito con jsPDF + doc.save() para que el PDF se descargue
   // como archivo real al celular (Android/iOS). Antes abría una ventana popup
   // y llamaba win.print() — Francisco al "compartir" mandaba la URL del popup,
