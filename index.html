@@ -30721,13 +30721,26 @@ async function lzCargarViajes() {
   if (_lzViajesLoading) return;
   _lzViajesLoading = true;
   try {
-    // Traer viajes en estados activos (no cerrados)
-    const url = APPS_SCRIPT_URL +
-      '?accion=viajeListar' +
-      '&estados=' + encodeURIComponent('planificado,preparando,carga_cerrada,en_ruta,rindiendo') +
-      '&orden=fecha_salida.asc';
-    const resp = await fetch(url);
-    const data = await resp.json();
+    // ═══ v13.166.0 — viajes DIRECTO de Supabase, sin Apps Script ═══════
+    // Medido en produccion: accion=viajeListar tardaba 5.336 ms. Adentro
+    // hace UNA sola llamada HTTP (_viajeSbFetch) y la query en Postgres
+    // corre en 0,83 ms sobre 14 filas: el tiempo NO es la consulta, es el
+    // costo fijo de invocar el endpoint de Apps Script. Comparacion del
+    // mismo perfil: planillaImprimir hace 7 llamadas internas y tarda
+    // 5.660 ms — 7 vs 1 llamada da 324 ms de diferencia. Todas las demas
+    // consultas Supabase del perfil midieron entre 171 y 256 ms.
+    // Permisos verificados en produccion: el JWT lee viajes con select=*
+    // y devuelve los 14 viajes activos.
+    // Si falla, se propaga al catch: NO hay fallback a Apps Script.
+    const _tV = Date.now();
+    const viajesRows = await sbFetch(
+      'viajes?estado=in.(planificado,preparando,carga_cerrada,en_ruta,rindiendo)' +
+      '&select=*&order=fecha_salida.asc');
+    console.log('[TCK LOGISTICA PERF2] viajes ' + (Date.now() - _tV) + ' ms · ' +
+                (Array.isArray(viajesRows) ? viajesRows.length : 0) + ' filas');
+    // sbFetch devuelve el array pelado; viajeListar devolvia {status, viajes}.
+    const data = { status: Array.isArray(viajesRows) ? 'ok' : 'error',
+                   viajes: Array.isArray(viajesRows) ? viajesRows : [] };
     if (data.status === 'ok' && Array.isArray(data.viajes)) {
       _lzViajes = data.viajes;
       _lzViajesLoadedAt = new Date();
