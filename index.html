@@ -1,6 +1,21 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.175.0 — 27/08/2026
+     TCK ADMIN — v13.176.0 — 27/08/2026
+     v13.176.0: ARRANCAR = "EL CAMIÓN SALIÓ". Confirmación inequívoca.
+     Solo texto: cero cambios de lógica, estados, endpoints ni Apps Script.
+     El circuito ya está completo desde v13.157.0 (botón CERRAR CARGA,
+     estado CARGA CERRADA, Reabrir, Abrir y sumar). Lo único que quedaba
+     era que el confirm dijera qué consecuencia tiene tocarlo: el texto
+     viejo ("¿El camión salió? Se marca EN RUTA.") se leía como trámite y
+     se usaba a las 18:17 de la víspera.
+     MEDIDO (vw_viaje_primer_arranque, 151 viajes con arranque):
+       mayo 0% · junio 0% · julio 36% · agosto 46% arrancados el DÍA
+       ANTERIOR a la salida, entre las 18:17 y las 23:04. Sistemático y
+       creciente. Ese fue el root cause de los 11 pedidos colgados del
+       26/08: $1.821.600 facturados con CAE que no subieron al camión.
+     Acompaña a GAS v25.133.0 (blocker por hash) y prepara el terreno para
+     VIAJE_EXIGIR_CIERRE_CARGA = true, que NO se activa todavía.
+     ─────────────────────────────────────────────────────────────────────
      v13.175.0: FIX BANDEJA "SIN ZONA" — el botón "Asignar ciudad" ahora llama
      al endpoint oficial actualizarCiudadPedido (backend). El PATCH directo
      de la v12.0 escribía zona en formato "Zona 1A" (que ni el admin ni el
@@ -48232,7 +48247,16 @@ window.vcReabrirYSumar = async function (viajeId) {
 };
 
 window.vcArrancar = async function (viajeId) {
-  if (!confirm('¿El camión salió? Se marca EN RUTA.')) return;
+  // v13.176.0 — el texto viejo ("¿El camión salió? Se marca EN RUTA.") se
+  // leía como confirmación de trámite y se usaba para decir "terminé de
+  // preparar". Ahora dice qué consecuencia tiene y adónde ir si no salió.
+  if (!confirm(
+      '¿EL CAMIÓN SALIÓ FÍSICAMENTE DEL DEPÓSITO?\n\n' +
+      'Esto marcará el viaje EN RUTA.\n\n' +
+      'Los pedidos nuevos posteriores se asignarán al próximo viaje.\n\n' +
+      'Si todavía estás preparando o revisando la carga,\n' +
+      'NO ARRANQUES.\n\n' +
+      'Usá CERRAR CARGA cuando termines de preparar el camión.')) return;
   var d = await ccGAS('accion=viajeArrancar&viaje_id=' + encodeURIComponent(viajeId));
   if (d.status === 'ok') {
     ccToast('🚚 Viaje en ruta', 'ok');
