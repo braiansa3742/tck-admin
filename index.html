@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.171.0 — 27/08/2026
-     v13.171.0: FIX BANDEJA "SIN ZONA" — el botón "Asignar ciudad" ahora llama
+     TCK ADMIN — v13.172.0 — 27/08/2026
+     v13.172.0: FIX BANDEJA "SIN ZONA" — el botón "Asignar ciudad" ahora llama
      al endpoint oficial actualizarCiudadPedido (backend). El PATCH directo
      de la v12.0 escribía zona en formato "Zona 1A" (que ni el admin ni el
      backend reconocen), no ponía salida_planificada y no reasignaba el
@@ -10,7 +10,7 @@
      (vendedor por cartera_localidad, auditado con ccQuien()). Caso
      disparador: KQAE "9 d julio pcia bs as" 27/08.
      + FIX: TCK_UPD_LOCAL venía en 13.156.0 con version.json en 13.169.0
-       → banner "Nueva versión" clavado para todos. Alineados en 13.171.0.
+       → banner "Nueva versión" clavado para todos. Alineados en 13.172.0.
      ─────────────────────────────────────────────────────────────────────
      v13.169.0: CARGA-2 CONSERVADORA — COLUMNAS, NO UNIVERSO.
      lzCargarDrawers() bajaba entregas SIN filtro con 14 columnas (7.025
@@ -14921,18 +14921,19 @@ input.canales-exp-input[type="date"] {
     </div>
   </div>
 
-  <!-- ═══ v13.171.0 — CUENTA CORRIENTE (PILOTO) ═══ -->
+  <!-- ═══ v13.172.0 — CUENTA CORRIENTE 2026 (PILOTO) ═══ -->
   <div class="view" id="view-ctacte">
-    <div class="ccx-head">
-      <h2>Cuenta Corriente</h2>
-      <div id="ccx-salud" class="ccx-chips"></div>
+    <div class="ccx-top">
+      <div class="ccx-head">
+        <h2>Cuenta Corriente 2026 <span class="ccx-badge" title="Piloto: visible solo para Braian. Las cobranzas quedan en estado piloto y no se postean a Xubio.">🧪 PILOTO</span></h2>
+        <div id="ccx-salud" class="ccx-chips"></div>
+      </div>
+      <div class="ccx-search">
+        <input type="text" id="ccx-q" placeholder="Buscar cliente por nombre o CUIT…" autocomplete="off">
+        <button class="btn1" onclick="ccxBuscar()">Buscar</button>
+      </div>
+      <div id="ccx-res"></div>
     </div>
-    <div class="ccx-piloto">🧪 <b>PILOTO</b> — visible solo para Braian. Las cobranzas quedan en estado <code>piloto</code> y <b>no se postean a Xubio</b>.</div>
-    <div class="ccx-search">
-      <input type="text" id="ccx-q" placeholder="Buscar cliente por nombre o CUIT…" autocomplete="off">
-      <button class="btn1" onclick="ccxBuscar()">Buscar</button>
-    </div>
-    <div id="ccx-res"></div>
     <div id="ccx-panel"></div>
   </div>
 
@@ -16178,6 +16179,11 @@ input.canales-exp-input[type="date"] {
     <span class="tab-icon">📒</span>
     <span class="tab-label">Ctas Ctes</span>
   </button>
+  <!-- v13.172.0 — destino desktop del modulo nuevo de Cuenta Corriente -->
+  <button class="tab-btn" id="tab-btn-ctacte" onclick="cambiarTab('ctacte')" style="display:none !important;">
+    <span class="tab-icon">💳</span>
+    <span class="tab-label">Cta. Cte. 2026</span>
+  </button>
   <button class="tab-btn" id="tab-btn-tesoreria" onclick="cambiarTab('tesoreria')" style="display:none !important;">
     <span class="tab-icon">🏦</span>
     <span class="tab-label">Tesorería</span>
@@ -16295,10 +16301,10 @@ input.canales-exp-input[type="date"] {
         <div class="menu-mas-icon">📒</div>
         <div class="menu-mas-lbl">Ctas Ctes</div>
       </button>
-      <!-- v13.171.0 — Cuenta Corriente (PILOTO, solo dueno) -->
+      <!-- v13.172.0 — Cuenta Corriente (PILOTO, solo dueno) -->
       <button class="menu-mas-item" id="menu-mas-ctacte" onclick="cambiarTab('ctacte');cerrarMenuMas()">
         <div class="menu-mas-icon">💳</div>
-        <div class="menu-mas-lbl">Cuenta Cte</div>
+        <div class="menu-mas-lbl">Cta. Cte. 2026</div>
       </button>
       <!-- v12.20.0 — Tab Tesorería -->
       <button class="menu-mas-item" id="menu-mas-tesoreria" onclick="cambiarTab('tesoreria');cerrarMenuMas()">
@@ -19024,7 +19030,7 @@ const ROL_TABS = {
   recepcion:   ['pedidos','logistica']
 };
 
-// v13.171.0 — TABS EN PILOTO: lista blanca de roles, se evalua ANTES del 'ALL'.
+// v13.172.0 — TABS EN PILOTO: lista blanca de roles, se evalua ANTES del 'ALL'.
 // Para abrirlo a Administracion: agregar 'cobranzas'. Para liberarlo: borrar la entrada.
 const TABS_PILOTO = { ctacte: ['dueno'] };
 function puedeVer(tab) {
@@ -23382,7 +23388,7 @@ function cambiarTab(tab) {
   // v13.57.0 — Cobranzas no puede abrir tabs fuera de su perfil ni por código
   if (rolActual === 'cobranzas' && typeof puedeVer === 'function' && !puedeVer(tab)) tab = 'pedidos';
   if (rolActual === 'tckfood' && tab !== 'buffet') tab = 'buffet';
-  // v13.171.0 — nadie fuera de la lista blanca abre ctacte, ni por consola
+  // v13.172.0 — nadie fuera de la lista blanca abre ctacte, ni por consola
   if (tab === 'ctacte' && typeof puedeVer === 'function' && !puedeVer('ctacte')) tab = 'pedidos';
   if (_tabActual === tab) return;
   _tabActual = tab;
@@ -24555,7 +24561,7 @@ function mostrarTabs() {
   _tckSetDisp('menu-mas-margenes',    puedeVer('margenes'));
   _tckSetDisp('menu-mas-facturacion', puedeVer('facturacion'));
   _tckSetDisp('menu-mas-cc',          puedeVer('cc'));
-  _tckSetDisp('menu-mas-ctacte',      puedeVer('ctacte'));   // v13.171.0 piloto
+  _tckSetDisp('menu-mas-ctacte',      puedeVer('ctacte'));   // v13.172.0 piloto
   _tckSetDisp('menu-mas-tesoreria',   puedeVer('tesoreria'));
   _tckSetDisp('menu-mas-clientes',    puedeVer('clientes'));
   _tckSetDisp('menu-mas-visitas',     puedeVer('gps'));
@@ -33943,7 +33949,7 @@ async function lzSzAsignarCiudad(ciudad) {
   }
 
   try {
-    // v13.171.0 — el PATCH directo de la v12.0 escribía ruta.zona crudo
+    // v13.172.0 — el PATCH directo de la v12.0 escribía ruta.zona crudo
     // ("Zona 1A", formato que nada reconoce), sin salida_planificada y sin
     // tocar el vendedor. El endpoint valida contra rutas, calcula zona+salida
     // y desde v25.120 ADOPTA los sin_ruta (vendedor por cartera_localidad).
@@ -46931,7 +46937,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.171.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.172.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
@@ -47042,35 +47048,89 @@ async function fcCandadoPlanilla(pedidos, ctx) {
 .pdc-info{font-size:13.5px;line-height:1.5;color:#5A4632;padding:8px 0;}
 .pdc-info-error{color:#B00020;}
 
-/* ═══ v13.171.0 — CUENTA CORRIENTE (piloto) ═══ */
-.ccx-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+/* ═══ v13.172.0 — CUENTA CORRIENTE 2026 (piloto) — responsive ═══ */
+#view-ctacte{overflow-x:hidden;padding-bottom:calc(150px + env(safe-area-inset-bottom))}
+.ccx-top{position:sticky;top:0;z-index:30;background:var(--cream1,#FAF4EC);padding:8px 0 10px;margin-bottom:2px}
+.ccx-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.ccx-head h2{margin:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ccx-badge{font-size:10px;font-weight:900;letter-spacing:.5px;background:#FFF3E0;color:#B45309;border:1px solid #F0D9BC;border-radius:999px;padding:2px 8px;white-space:nowrap;cursor:help}
 .ccx-chips{display:flex;gap:6px;flex-wrap:wrap}
 .ccx-chip{font-size:11px;font-weight:700;background:#FBEFE0;color:#7A6A55;border-radius:6px;padding:3px 8px}
 .ccx-chip.ok{background:#E8F5E9;color:#1E8449}
 .ccx-chip.warn{background:#FFF3E0;color:#B45309}
 .ccx-chip.err{background:#FDECEA;color:#C0392B}
-.ccx-piloto{font-size:12px;background:#FFF3E0;color:#B45309;border-radius:8px;padding:8px 10px;margin-bottom:10px}
-.ccx-piloto code{background:#FBEFE0;padding:1px 5px;border-radius:4px}
-.ccx-search{display:flex;gap:8px;margin-bottom:12px}
-.ccx-search input{flex:1;padding:10px 12px;border:1px solid #EEE3D2;border-radius:10px;font-size:14px}
-.ccx-saldo{margin-top:8px;font-size:15px;color:#1A0800}
-.ccx-saldo b{font-family:'Barlow Condensed',sans-serif;font-size:22px;color:#B45309}
+.ccx-search{display:flex;gap:8px}
+.ccx-search input{flex:1;min-width:0;padding:11px 12px;border:1px solid #EEE3D2;border-radius:10px;font-size:16px}
+.ccx-cli{position:sticky;top:0;z-index:20;background:#fff;border:1px solid #EEE3D2;border-radius:12px;padding:12px 14px;margin-bottom:12px}
+.ccx-cli .n{font-weight:900;font-size:15px;color:#1A0800;line-height:1.2}
+.ccx-cli .m{font-size:11.5px;color:#7A6A55;margin-top:2px}
+.ccx-cli .s{font-family:'Barlow Condensed',sans-serif;font-size:30px;font-weight:900;color:#B45309;line-height:1.05;margin-top:6px}
+.ccx-cli .sl{font-size:10.5px;font-weight:800;letter-spacing:.4px;color:#8A7960;text-transform:uppercase}
+.ccx-cred{margin-top:6px;font-size:12px;font-weight:700;color:#1E8449;background:#E8F5E9;border-radius:6px;padding:3px 8px;display:inline-block}
 .ccx-warn{margin-top:6px;font-size:12px;font-weight:700;color:#B45309;background:#FFF3E0;border-radius:6px;padding:4px 8px;display:inline-block}
-.ccx-sub{font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:900;color:#1A0800;margin:16px 0 6px;letter-spacing:.4px}
-.ccx-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
-.ccx-tbl th{text-align:left;color:#7A6A55;font-weight:700;border-bottom:1px solid #EEE3D2;padding:5px 6px}
-.ccx-tbl td{padding:5px 6px;border-bottom:1px solid #F6F0E6}
-.ccx-tbl .r{text-align:right}
-.ccx-tbl i{color:#B08968;font-style:normal;font-size:11px}
-.ccx-mini{width:104px;padding:3px 6px;border:1px solid #EEE3D2;border-radius:6px;text-align:right}
-.ccx-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:10px;margin-bottom:10px}
-.ccx-form label{display:flex;flex-direction:column;gap:3px;font-size:11.5px;font-weight:700;color:#7A6A55}
-.ccx-form input,.ccx-form select{padding:8px 10px;border:1px solid #EEE3D2;border-radius:8px;font-size:14px}
+.ccx-sub{font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:900;color:#1A0800;margin:14px 0 8px;letter-spacing:.4px}
+/* ── documentos: CARDS (default = movil) ── */
+.ccx-docs{display:flex;flex-direction:column;gap:8px}
+.ccx-doc{display:flex;align-items:stretch;gap:10px;background:#fff;border:1px solid #EEE3D2;border-radius:12px;padding:11px 12px;min-height:56px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.ccx-doc.sel{border-color:#B45309;background:#FFFBF5;box-shadow:0 0 0 1px #B45309 inset}
+.ccx-doc .chk{flex:0 0 24px;display:flex;align-items:center;justify-content:center;position:relative}
+.ccx-doc .chk::before{content:'';position:absolute;top:-12px;left:-12px;right:-12px;bottom:-12px}
+.ccx-doc .chk i{width:24px;height:24px;border:2px solid #D9C9B0;border-radius:7px;display:block;position:relative}
+.ccx-doc.sel .chk i{border-color:#B45309;background:#B45309}
+.ccx-doc.sel .chk i::after{content:'✓';position:absolute;inset:0;color:#fff;font-size:15px;font-weight:900;display:flex;align-items:center;justify-content:center}
+.ccx-doc .body{flex:1;min-width:0}
+.ccx-doc .l1{font-size:12px;color:#7A6A55;display:flex;gap:6px;flex-wrap:wrap}
+.ccx-doc .l1 b{color:#1A0800;font-weight:800}
+.ccx-doc .l2{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:3px}
+.ccx-doc .imp{font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:900;color:#B45309;line-height:1}
+.ccx-doc .pl{font-size:10px;font-weight:800;letter-spacing:.4px;color:#8A7960;text-transform:uppercase}
+.ccx-doc .d{font-size:11.5px;color:#9C8A72;white-space:nowrap}
+.ccx-doc .hist{font-size:10px;font-weight:800;color:#8A7960;background:#F4EDE2;border-radius:5px;padding:1px 6px}
+.ccx-tbl{display:none}
+/* ── formulario: 1 columna en movil ── */
+.ccx-form{display:grid;grid-template-columns:1fr;gap:10px;margin-bottom:10px}
+.ccx-form label{display:flex;flex-direction:column;gap:4px;font-size:11.5px;font-weight:800;color:#7A6A55}
+.ccx-form input,.ccx-form select{min-height:44px;padding:10px 12px;border:1px solid #EEE3D2;border-radius:10px;font-size:16px;background:#fff}
 .ccx-form .hint{font-weight:400;color:#B08968}
-.ccx-tot{margin-top:8px;font-size:12.5px;color:#7A6A55}
-.ccx-tot b.ok{color:#1E8449}.ccx-tot b.warn{color:#B45309}.ccx-tot b.err{color:#C0392B}
-.ccx-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
-.ccx-nota{margin-top:10px;font-size:11.5px;color:#B08968;background:#FCF8F1;border-radius:8px;padding:8px 10px}
+/* ── resumen de imputacion ── */
+.ccx-res3{background:#FCF8F1;border:1px solid #EEE3D2;border-radius:10px;padding:10px 12px;margin-top:10px}
+.ccx-res3 .r{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;padding:3px 0}
+.ccx-res3 .r span{color:#7A6A55;font-weight:700}
+.ccx-res3 .r b{font-variant-numeric:tabular-nums;color:#1A0800}
+.ccx-res3 .r.tot{border-top:1px dashed #E3D6C2;margin-top:4px;padding-top:6px}
+.ccx-res3 .r.tot b.ok{color:#1E8449}.ccx-res3 .r.tot b.warn{color:#B45309}.ccx-res3 .r.tot b.err{color:#C0392B}
+.ccx-manual{margin-top:8px}
+.ccx-manual .m{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;padding:5px 0;border-bottom:1px solid #F6F0E6}
+.ccx-mini{width:112px;min-height:38px;padding:5px 8px;border:1px solid #EEE3D2;border-radius:8px;text-align:right;font-size:15px}
+/* ── CTA sticky por ENCIMA de la nav inferior ── */
+.ccx-cta{position:sticky;bottom:calc(62px + env(safe-area-inset-bottom));z-index:25;background:linear-gradient(180deg,rgba(250,244,236,0) 0%,var(--cream1,#FAF4EC) 22%);padding:14px 0 6px;margin-top:14px}
+.ccx-cta .save{width:100%;min-height:52px;border:0;border-radius:12px;background:#B45309;color:#fff;font-size:16px;font-weight:900;letter-spacing:.3px;cursor:pointer}
+.ccx-cta .save:disabled{opacity:.55;cursor:default}
+.ccx-cta .fifo{display:block;width:100%;background:none;border:0;color:#8A7960;font-size:13px;font-weight:700;text-decoration:underline;padding:8px 0 10px;cursor:pointer}
+.ccx-nota{margin-top:8px;font-size:11px;color:#B08968;text-align:center}
+.rv-empty{padding:22px 12px;text-align:center;color:#9C8A72;font-size:13px}
+/* ══ DESKTOP ≥1024px: dos paneles ══ */
+@media (min-width:1024px){
+  #view-ctacte{padding-bottom:24px}
+  .ccx-top{position:static}
+  .ccx-grid{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:20px;align-items:start}
+  .ccx-cli{position:static}
+  .ccx-right{position:sticky;top:16px}
+  .ccx-docs{display:none}
+  .ccx-tbl{display:table;width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #EEE3D2;border-radius:12px;overflow:hidden}
+  .ccx-tbl th{text-align:left;color:#7A6A55;font-weight:800;background:#FCF8F1;border-bottom:1px solid #EEE3D2;padding:9px 10px}
+  .ccx-tbl td{padding:9px 10px;border-bottom:1px solid #F6F0E6}
+  .ccx-tbl tr.sel td{background:#FFFBF5}
+  .ccx-tbl .r{text-align:right;font-variant-numeric:tabular-nums}
+  .ccx-tbl .imp{font-weight:900;color:#B45309}
+  .ccx-tbl input[type=checkbox]{width:18px;height:18px;cursor:pointer}
+  .ccx-tbl i{color:#B08968;font-style:normal;font-size:11px}
+  .ccx-cta{position:static;background:none;padding:12px 0 0;margin-top:12px}
+  .ccx-form{gap:12px}
+}
+@media (min-width:1024px) and (max-width:1279px){
+  .ccx-grid{grid-template-columns:minmax(0,1fr) 330px;gap:16px}
+}
 </style>
 <script>
 /* ═══════════════════════════════════════════════════════════════════
@@ -48578,7 +48638,7 @@ document.addEventListener('keydown', function (e) {
 
 })();
 
-/* ═══ v13.171.0 — CUENTA CORRIENTE (piloto) — JS ═══ */
+/* ═══ v13.172.0 — CUENTA CORRIENTE (piloto) — JS ═══ */
 // ═══ TCK — TAB CUENTA CORRIENTE · v2 ═════════════════════════════════════
 // v2 (P0 corregidos vs v1):
 //   · NO manda 'id': lo genera la IDENTITY de Postgres (secuencia alineada en 2770)
@@ -48648,46 +48708,66 @@ async function ccxAbrir(clienteId){
 function ccxRender(){
   var p=document.getElementById('ccx-panel'); if(!p||!_ccxCli) return;
   var bloq=!!_ccxCli.bloqueado, h='';
-  h+='<div class="rv-card"><div class="t">'+_ccxEsc(_ccxCli.cliente_nombre)+'</div>';
+  // ── ficha del cliente (sticky en movil)
+  h+='<div class="ccx-cli"><div class="n">'+_ccxEsc(_ccxCli.cliente_nombre)+'</div>';
   h+='<div class="m">'+(_ccxCli.cuit?'CUIT '+_ccxEsc(_ccxCli.cuit)+' · ':'')+(_ccxCli.condicion_iva||'')+'</div>';
-  h+='<div class="ccx-saldo">Saldo operativo 2026 <b>'+_ccxFmt(_ccxCli.saldo_estimado)+'</b></div>';
+  h+='<div class="sl">Saldo operativo 2026</div><div class="s">'+_ccxFmt(_ccxCli.saldo_estimado)+'</div>';
   if(_ccxN(_ccxCli.credito_disponible)>0)
-    h+='<div class="ccx-warn">Crédito disponible '+_ccxFmt(_ccxCli.credito_disponible)+'</div>';
+    h+='<div class="ccx-cred">Crédito '+_ccxFmt(_ccxCli.credito_disponible)+'</div>';
   if(bloq) h+='<div class="ccx-warn">🔒 SOLO LECTURA — histórico ambiguo pendiente de revisión</div>';
   h+='</div>';
 
+  h+='<div class="ccx-grid"><div class="ccx-left">';
   h+='<div class="ccx-sub">DOCUMENTOS ABIERTOS ('+_ccxDocs.length+')</div>';
   if(!_ccxDocs.length){ h+='<div class="rv-empty">Sin documentos abiertos.</div>'; }
   else{
+    // móvil: cards
+    h+='<div class="ccx-docs">';
+    _ccxDocs.forEach(function(f){
+      var k=f.factura_numero, sel=_ccxImput[k]!=null;
+      h+='<div class="ccx-doc'+(sel?' sel':'')+'" data-k="'+_ccxEsc(k)+'"'+(bloq?'':' onclick="ccxToggle(\''+_ccxEsc(k)+'\')"')+'>'+
+         '<div class="chk"><i></i></div><div class="body">'+
+         '<div class="l1">'+_ccxEsc(String(f.factura_fecha).slice(8,10)+'/'+String(f.factura_fecha).slice(5,7))+
+           ' · <b>'+_ccxEsc(k)+'</b>'+(f.fuente==='historico'?' <span class="hist">saldo anterior</span>':'')+'</div>'+
+         '<div class="l2"><div><div class="imp">'+_ccxFmt(f.saldo_residual)+'</div>'+
+           '<div class="pl">pendiente</div></div><div class="d">'+f.dias+' días</div></div>'+
+         '</div></div>';
+    });
+    h+='</div>';
+    // desktop: tabla
     h+='<table class="ccx-tbl"><tr><th></th><th>Fecha</th><th>Documento</th>'+
        '<th class="r">Original</th><th class="r">Pendiente</th><th class="r">Días</th></tr>';
     _ccxDocs.forEach(function(f){
-      var k=f.factura_numero, chk=_ccxImput[k]!=null;
-      h+='<tr><td>'+(bloq?'':'<input type="checkbox" '+(chk?'checked':'')+
+      var k=f.factura_numero, sel=_ccxImput[k]!=null;
+      h+='<tr class="'+(sel?'sel':'')+'" data-k="'+_ccxEsc(k)+'"><td>'+(bloq?'':'<input type="checkbox" '+(sel?'checked':'')+
           ' onchange="ccxToggle(\''+_ccxEsc(k)+'\')">')+'</td>'+
         '<td>'+_ccxEsc(String(f.factura_fecha).slice(0,10))+'</td>'+
         '<td>'+_ccxEsc(k)+(f.fuente==='historico'?' <i>(saldo anterior)</i>':'')+'</td>'+
         '<td class="r">'+_ccxFmt(f.importe_original)+'</td>'+
-        '<td class="r"><b>'+_ccxFmt(f.saldo_residual)+'</b></td>'+
+        '<td class="r imp">'+_ccxFmt(f.saldo_residual)+'</td>'+
         '<td class="r">'+f.dias+'</td></tr>';
     });
     h+='</table>';
   }
+  h+='</div>';
 
+  h+='<div class="ccx-right">';
   if(!bloq){
     h+='<div class="ccx-sub">REGISTRAR COBRANZA</div><div class="ccx-form">';
     h+='<label>Fecha real del pago<input type="date" id="ccx-fecha" value="'+_ccxHoy()+'"></label>';
-    h+='<label>Importe<input type="number" id="ccx-importe" step="0.01" min="0" oninput="ccxAutoImputar()"></label>';
+    h+='<label>Importe<input type="number" inputmode="decimal" id="ccx-importe" step="0.01" min="0" placeholder="0" oninput="ccxAutoImputar()"></label>';
     h+='<label>Medio<select id="ccx-medio">'+CCX_MEDIOS.map(function(m){
         return '<option value="'+m.k+'">'+m.label+'</option>'; }).join('')+'</select></label>';
     h+='<label>Referencia <span class="hint">(mp_id, nº cheque, nº op.)</span><input type="text" id="ccx-ref"></label>';
     h+='<label>Observación<input type="text" id="ccx-obs"></label></div>';
     h+='<div class="ccx-imput" id="ccx-imput"></div>';
-    h+='<div class="ccx-actions"><button class="btn2" onclick="ccxAutoImputar(true)">Imputar automático (FIFO)</button>'+
-       '<button class="btn1" onclick="ccxGuardar()"'+(_ccxGuardando?' disabled':'')+'>'+
-       (_ccxGuardando?'⏳ Guardando…':'GUARDAR COBRANZA')+'</button></div>';
-    h+='<div class="ccx-nota">La cobranza queda <b>registrada</b> en TCK. El posteo a Xubio está deshabilitado.</div>';
+    h+='<div class="ccx-cta">'+
+       '<button class="fifo" onclick="ccxAutoImputar(true)">Imputar automático (FIFO)</button>'+
+       '<button class="save" onclick="ccxGuardar()"'+(_ccxGuardando?' disabled':'')+'>'+
+       (_ccxGuardando?'⏳ Guardando…':'GUARDAR COBRANZA')+'</button>'+
+       '<div class="ccx-nota">Queda en estado <b>piloto</b>. No se postea a Xubio.</div></div>';
   }
+  h+='</div></div>';
   p.innerHTML=h; if(!bloq) ccxRenderImput();
 }
 
@@ -48698,7 +48778,19 @@ function ccxToggle(k){
     var f=_ccxDocs.filter(function(x){ return x.factura_numero===k; })[0];
     if(f) _ccxImput[k]=_ccxN(f.saldo_residual);
   }
+  ccxPintarSel();   // v13.172.0: refleja la seleccion SIN recrear el formulario
   ccxRenderImput();
+}
+// v13.172.0 — sincroniza la clase .sel de cards/filas con _ccxImput.
+// No toca el formulario: los valores tipeados se conservan.
+function ccxPintarSel(){
+  var p=document.getElementById('ccx-panel'); if(!p) return;
+  p.querySelectorAll('[data-k]').forEach(function(el){
+    var k=el.getAttribute('data-k'), sel=_ccxImput[k]!=null;
+    el.classList.toggle('sel', sel);
+    var cb=el.querySelector('input[type=checkbox]');
+    if(cb) cb.checked=sel;
+  });
 }
 function ccxAutoImputar(force){
   var imp=_ccxN((document.getElementById('ccx-importe')||{}).value);
@@ -48709,7 +48801,7 @@ function ccxAutoImputar(force){
     var f=_ccxDocs[i], apl=Math.min(resto,_ccxN(f.saldo_residual));
     if(apl>0.009){ _ccxImput[f.factura_numero]=Math.round(apl*100)/100; resto-=apl; }
   }
-  ccxRenderImput();
+  ccxPintarSel(); ccxRenderImput();
 }
 function ccxRenderImput(){
   var el=document.getElementById('ccx-imput'); if(!el) return;
@@ -48717,22 +48809,31 @@ function ccxRenderImput(){
   var ks=Object.keys(_ccxImput);
   var sum=ks.reduce(function(a,k){ return a+_ccxN(_ccxImput[k]); },0);
   var dif=Math.round((imp-sum)*100)/100;
-  var h='<table class="ccx-tbl"><tr><th>Documento</th><th class="r">Pendiente</th><th class="r">A aplicar</th></tr>';
-  ks.forEach(function(k){
-    var f=_ccxDocs.filter(function(x){ return x.factura_numero===k; })[0]; if(!f) return;
-    h+='<tr><td>'+_ccxEsc(k)+'</td><td class="r">'+_ccxFmt(f.saldo_residual)+'</td>'+
-       '<td class="r"><input type="number" step="0.01" class="ccx-mini" value="'+_ccxImput[k]+
-       '" oninput="ccxSetImput(\''+_ccxEsc(k)+'\', this.value)"></td></tr>';
-  });
-  h+='</table><div class="ccx-tot">Importe '+_ccxFmt(imp)+' · imputado '+_ccxFmt(sum)+' · <b class="'+
-     (Math.abs(dif)<0.01?'ok':(dif>0?'warn':'err'))+'">'+
-     (Math.abs(dif)<0.01?'calza':(dif>0?'a favor '+_ccxFmt(dif):'excede '+_ccxFmt(-dif)))+'</b></div>';
+  var cls = Math.abs(dif)<0.01 ? 'ok' : (dif>0 ? 'warn' : 'err');
+  var lbl = Math.abs(dif)<0.01 ? _ccxFmt(0) : (dif>0 ? _ccxFmt(dif) : 'EXCEDE '+_ccxFmt(-dif));
+  var h='<div class="ccx-res3">'+
+        '<div class="r"><span>Cobranza</span><b>'+_ccxFmt(imp)+'</b></div>'+
+        '<div class="r"><span>Imputado</span><b>'+_ccxFmt(sum)+'</b></div>'+
+        '<div class="r tot"><span>Sin imputar</span><b class="'+cls+'">'+lbl+'</b></div></div>';
+  if(ks.length){
+    h+='<div class="ccx-manual">';
+    ks.forEach(function(k){
+      var f=_ccxDocs.filter(function(x){ return x.factura_numero===k; })[0]; if(!f) return;
+      var rest=Math.round((_ccxN(f.saldo_residual)-_ccxN(_ccxImput[k]))*100)/100;
+      h+='<div class="m"><div><b>'+_ccxEsc(k)+'</b><br><span style="color:#9C8A72;font-size:11px">'+
+         'pendiente '+_ccxFmt(f.saldo_residual)+' → queda '+_ccxFmt(rest)+'</span></div>'+
+         '<input type="number" inputmode="decimal" step="0.01" class="ccx-mini" value="'+_ccxImput[k]+
+         '" oninput="ccxSetImput(\''+_ccxEsc(k)+'\', this.value)"></div>';
+    });
+    h+='</div>';
+  }
   el.innerHTML=h;
 }
+
 function ccxSetImput(k,v){
   var n=_ccxN(v);
   if(n<=0) delete _ccxImput[k]; else _ccxImput[k]=Math.round(n*100)/100;
-  ccxRenderImput();
+  ccxPintarSel(); ccxRenderImput();
 }
 
 // ── Guardar · Supabase únicamente ────────────────────────────────────────
