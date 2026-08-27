@@ -1,6 +1,17 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.169.0 — 26/08/2026
+     TCK ADMIN — v13.170.0 — 27/08/2026
+     v13.170.0: FIX BANDEJA "SIN ZONA" — el botón "Asignar ciudad" ahora llama
+     al endpoint oficial actualizarCiudadPedido (backend). El PATCH directo
+     de la v12.0 escribía zona en formato "Zona 1A" (que ni el admin ni el
+     backend reconocen), no ponía salida_planificada y no reasignaba el
+     vendedor → un pedido sin_ruta "resuelto" quedaba invisible para todos.
+     Con el endpoint: zona canónica + salida calculada + adopción v25.120
+     (vendedor por cartera_localidad, auditado con ccQuien()). Caso
+     disparador: KQAE "9 d julio pcia bs as" 27/08.
+     + FIX: TCK_UPD_LOCAL venía en 13.156.0 con version.json en 13.169.0
+       → banner "Nueva versión" clavado para todos. Alineados en 13.170.0.
+     ─────────────────────────────────────────────────────────────────────
      v13.169.0: CARGA-2 CONSERVADORA — COLUMNAS, NO UNIVERSO.
      lzCargarDrawers() bajaba entregas SIN filtro con 14 columnas (7.025
      filas · 1.217 KB · 8 req) y con eso hacia DOS cosas distintas:
@@ -33903,33 +33914,27 @@ async function lzSzAsignarCiudad(ciudad) {
   }
 
   try {
-    // PATCH directo a Supabase pedidos_zona
-    // Nota: el endpoint Apps Script `actualizarCiudadPedido` viene en v25.2 (sesión aparte)
-    // Mientras tanto, escribimos directo. El backfill ya manejó esto correctamente.
-    await sbFetch('pedidos_zona?pedido_id=eq.' + encodeURIComponent(pid), {
-      method: 'PATCH',
-      headers: { 'Prefer': 'return=minimal' },
-      body: JSON.stringify({
-        localidad_canonica: ciudad,
-        zona:               ruta.zona,
-        zona_inferida_de:   'admin_manual',
-        zona_override_por:  'Francisco',  // TODO: leer del PIN del usuario logueado
-        actualizado_at:     new Date().toISOString()
-      })
-    });
+    // v13.170.0 — el PATCH directo de la v12.0 escribía ruta.zona crudo
+    // ("Zona 1A", formato que nada reconoce), sin salida_planificada y sin
+    // tocar el vendedor. El endpoint valida contra rutas, calcula zona+salida
+    // y desde v25.120 ADOPTA los sin_ruta (vendedor por cartera_localidad).
+    const resp = await fetch(APPS_SCRIPT_URL
+      + '?accion=actualizarCiudadPedido'
+      + '&pedidoId=' + encodeURIComponent(pid)
+      + '&ciudadCanonica=' + encodeURIComponent(ciudad)
+      + '&usuario=' + encodeURIComponent(ccQuien()));
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    if (!data || !data.ok) throw new Error((data && data.error) || 'Error desconocido');
 
-    // Update local: mover el pedido de _lzSinZona al pool general con su nueva zona/ciudad
-    const idx = _lzPedidosZona.findIndex(x => x.pedido_id === pid);
-    if (idx >= 0) {
-      _lzPedidosZona[idx].localidad_canonica = ciudad;
-      _lzPedidosZona[idx].zona = ruta.zona;
-      _lzPedidosZona[idx].zona_inferida_de = 'admin_manual';
-    }
-    _lzSinZona = _lzSinZona.filter(p => p.pedido_id !== pid);
+    // El backend seteó zona, salida y (si venía sin_ruta) vendedor:
+    // releer la base en vez de duplicar esa lógica acá.
+    await lzCargarDatos();
+    await lzCargarDrawers();
     _lzSzPedidoSel = null;
 
     // Toast con info concreta
-    const zonaUI = lzNormalizarZona(ruta.zona);
+    const zonaUI = data.zonaUI || lzNormalizarZona(ruta.zona);
     const zonaNombre = (LZ_ZONAS.find(z => z.key === zonaUI) || {}).nombre || ruta.zona;
     toast('📍 Pedido asignado a ' + ciudad + ' (' + zonaNombre + ')', 'ok');
 
@@ -46897,7 +46902,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.156.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.170.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
