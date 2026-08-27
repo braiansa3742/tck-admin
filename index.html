@@ -1,6 +1,26 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.177.0 — 27/08/2026
+     TCK ADMIN — v13.178.0 — 27/08/2026
+     v13.178.0: C1 — CON LA CARGA CERRADA NO SE REGENERA LA PLANILLA.
+     Cambio de UI, cero lógica, cero endpoints, cero Apps Script.
+     BYPASS QUE CIERRA (alcanzable por operación normal): el botón
+     Generar/Regenerar estaba disponible en carga_cerrada, al lado de
+     Arrancar. Entraba un pedido → la etiqueta decía DESACTUALIZADA → se
+     regeneraba → el hash volvía a coincidir → ARRANCAR pasaba, sin que
+     nadie hubiera reabierto ni vuelto a controlar el camión. Y el control
+     físico de depósito tiene clave (viaje_id, planilla_version): al subir
+     a v+1 quedaba huérfano y nadie lo pedía.
+     Ahora en carga_cerrada las acciones son: Ver planilla · Reabrir ·
+     Abrir y sumar pedidos · Arrancar. Para cambiar la planilla hay que
+     REABRIR primero. "Ver planilla vN" se conserva: es solo lectura.
+     C1 es UX. La integridad la garantiza GAS v25.134.0 server-side
+     (planilla_version_cerrada / planilla_hash_cerrada), todavía sin
+     desplegar.
+     + FIX BANNER: TCK_UPD_LOCAL venía clavado en 13.175.0 desde el deploy
+       de v13.176.0 mientras version.json ya iba en 13.176/13.177 → banner
+       "Nueva versión" permanente. Los tres quedan alineados en 13.178.0.
+     ─────────────────────────────────────────────────────────────────────
+     v13.177.0 — 27/08/2026
      v13.177.0: ARRANCAR = "EL CAMIÓN SALIÓ". Confirmación inequívoca.
      Solo texto: cero cambios de lógica, estados, endpoints ni Apps Script.
      El circuito ya está completo desde v13.157.0 (botón CERRAR CARGA,
@@ -47005,7 +47025,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.175.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.178.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
@@ -47771,7 +47791,10 @@ function vcBloque(v) {
     if (v.planilla_generada_at) h += '<span style="color:#8a6f5f;font-size:11.5px;">' + ccHora(v.planilla_generada_at) + '</span>';
   }
   h += '<span style="flex:1"></span>';
-  if (est === 'planificado' || est === 'preparando' || est === 'carga_cerrada') {
+  // v13.178.0 C1 — 'carga_cerrada' SALE de esta lista. Regenerar con la
+  // carga cerrada re-sellaba el hash y habilitaba ARRANCAR sin que nadie
+  // volviera a controlar el camión. Para cambiar la planilla: REABRIR.
+  if (est === 'planificado' || est === 'preparando') {
     if (des || !ver) h += '<button class="cc-btn verde" onclick="vcGenerarPlanilla(\'' + v.id + '\')">📄 Generar v' + (ver + 1) + '</button>';
     else h += '<button class="cc-btn gris" onclick="vcGenerarPlanilla(\'' + v.id + '\')">📄 Regenerar</button>';
   }
