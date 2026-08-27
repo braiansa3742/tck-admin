@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.176.0 — 27/08/2026
-     v13.176.0: ARRANCAR = "EL CAMIÓN SALIÓ". Confirmación inequívoca.
+     TCK ADMIN — v13.177.0 — 27/08/2026
+     v13.177.0: ARRANCAR = "EL CAMIÓN SALIÓ". Confirmación inequívoca.
      Solo texto: cero cambios de lógica, estados, endpoints ni Apps Script.
      El circuito ya está completo desde v13.157.0 (botón CERRAR CARGA,
      estado CARGA CERRADA, Reabrir, Abrir y sumar). Lo único que quedaba
@@ -48247,7 +48247,7 @@ window.vcReabrirYSumar = async function (viajeId) {
 };
 
 window.vcArrancar = async function (viajeId) {
-  // v13.176.0 — el texto viejo ("¿El camión salió? Se marca EN RUTA.") se
+  // v13.177.0 — el texto viejo ("¿El camión salió? Se marca EN RUTA.") se
   // leía como confirmación de trámite y se usaba para decir "terminé de
   // preparar". Ahora dice qué consecuencia tiene y adónde ir si no salió.
   if (!confirm(
@@ -48962,7 +48962,11 @@ async function ccxGuardar(){
     referencia: ref||null,
     observacion: (obs||'Cobranza cta cte')+' ['+idem+']',
     estado: 'piloto', idem_key: idem,   // ← 'piloto' NO entra a vw_ctacte_a_postear
-    creado_por: quien, xubio_estado: null
+    creado_por: quien
+    // v13.177.0 FIX: NO mandar xubio_estado. La columna es NOT NULL con
+    // DEFAULT 'pendiente'; enviar null explicito violaba la constraint 23502
+    // y el INSERT se rechazaba (la secuencia avanzaba sin dejar fila).
+    // Omitir el campo deja que actue el default de la base.
   };
 
   try{
