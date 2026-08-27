@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.172.0 — 27/08/2026
-     v13.172.0: FIX BANDEJA "SIN ZONA" — el botón "Asignar ciudad" ahora llama
+     TCK ADMIN — v13.173.0 — 27/08/2026
+     v13.173.0: FIX BANDEJA "SIN ZONA" — el botón "Asignar ciudad" ahora llama
      al endpoint oficial actualizarCiudadPedido (backend). El PATCH directo
      de la v12.0 escribía zona en formato "Zona 1A" (que ni el admin ni el
      backend reconocen), no ponía salida_planificada y no reasignaba el
@@ -10,7 +10,7 @@
      (vendedor por cartera_localidad, auditado con ccQuien()). Caso
      disparador: KQAE "9 d julio pcia bs as" 27/08.
      + FIX: TCK_UPD_LOCAL venía en 13.156.0 con version.json en 13.169.0
-       → banner "Nueva versión" clavado para todos. Alineados en 13.172.0.
+       → banner "Nueva versión" clavado para todos. Alineados en 13.173.0.
      ─────────────────────────────────────────────────────────────────────
      v13.169.0: CARGA-2 CONSERVADORA — COLUMNAS, NO UNIVERSO.
      lzCargarDrawers() bajaba entregas SIN filtro con 14 columnas (7.025
@@ -14921,7 +14921,7 @@ input.canales-exp-input[type="date"] {
     </div>
   </div>
 
-  <!-- ═══ v13.172.0 — CUENTA CORRIENTE 2026 (PILOTO) ═══ -->
+  <!-- ═══ v13.173.0 — CUENTA CORRIENTE 2026 (PILOTO) ═══ -->
   <div class="view" id="view-ctacte">
     <div class="ccx-top">
       <div class="ccx-head">
@@ -16179,7 +16179,7 @@ input.canales-exp-input[type="date"] {
     <span class="tab-icon">📒</span>
     <span class="tab-label">Ctas Ctes</span>
   </button>
-  <!-- v13.172.0 — destino desktop del modulo nuevo de Cuenta Corriente -->
+  <!-- v13.173.0 — destino desktop del modulo nuevo de Cuenta Corriente -->
   <button class="tab-btn" id="tab-btn-ctacte" onclick="cambiarTab('ctacte')" style="display:none !important;">
     <span class="tab-icon">💳</span>
     <span class="tab-label">Cta. Cte. 2026</span>
@@ -16301,7 +16301,7 @@ input.canales-exp-input[type="date"] {
         <div class="menu-mas-icon">📒</div>
         <div class="menu-mas-lbl">Ctas Ctes</div>
       </button>
-      <!-- v13.172.0 — Cuenta Corriente (PILOTO, solo dueno) -->
+      <!-- v13.173.0 — Cuenta Corriente (PILOTO, solo dueno) -->
       <button class="menu-mas-item" id="menu-mas-ctacte" onclick="cambiarTab('ctacte');cerrarMenuMas()">
         <div class="menu-mas-icon">💳</div>
         <div class="menu-mas-lbl">Cta. Cte. 2026</div>
@@ -19030,7 +19030,7 @@ const ROL_TABS = {
   recepcion:   ['pedidos','logistica']
 };
 
-// v13.172.0 — TABS EN PILOTO: lista blanca de roles, se evalua ANTES del 'ALL'.
+// v13.173.0 — TABS EN PILOTO: lista blanca de roles, se evalua ANTES del 'ALL'.
 // Para abrirlo a Administracion: agregar 'cobranzas'. Para liberarlo: borrar la entrada.
 const TABS_PILOTO = { ctacte: ['dueno'] };
 function puedeVer(tab) {
@@ -23388,7 +23388,7 @@ function cambiarTab(tab) {
   // v13.57.0 — Cobranzas no puede abrir tabs fuera de su perfil ni por código
   if (rolActual === 'cobranzas' && typeof puedeVer === 'function' && !puedeVer(tab)) tab = 'pedidos';
   if (rolActual === 'tckfood' && tab !== 'buffet') tab = 'buffet';
-  // v13.172.0 — nadie fuera de la lista blanca abre ctacte, ni por consola
+  // v13.173.0 — nadie fuera de la lista blanca abre ctacte, ni por consola
   if (tab === 'ctacte' && typeof puedeVer === 'function' && !puedeVer('ctacte')) tab = 'pedidos';
   if (_tabActual === tab) return;
   _tabActual = tab;
@@ -24561,7 +24561,7 @@ function mostrarTabs() {
   _tckSetDisp('menu-mas-margenes',    puedeVer('margenes'));
   _tckSetDisp('menu-mas-facturacion', puedeVer('facturacion'));
   _tckSetDisp('menu-mas-cc',          puedeVer('cc'));
-  _tckSetDisp('menu-mas-ctacte',      puedeVer('ctacte'));   // v13.172.0 piloto
+  _tckSetDisp('menu-mas-ctacte',      puedeVer('ctacte'));   // v13.173.0 piloto
   _tckSetDisp('menu-mas-tesoreria',   puedeVer('tesoreria'));
   _tckSetDisp('menu-mas-clientes',    puedeVer('clientes'));
   _tckSetDisp('menu-mas-visitas',     puedeVer('gps'));
@@ -33949,7 +33949,7 @@ async function lzSzAsignarCiudad(ciudad) {
   }
 
   try {
-    // v13.172.0 — el PATCH directo de la v12.0 escribía ruta.zona crudo
+    // v13.173.0 — el PATCH directo de la v12.0 escribía ruta.zona crudo
     // ("Zona 1A", formato que nada reconoce), sin salida_planificada y sin
     // tocar el vendedor. El endpoint valida contra rutas, calcula zona+salida
     // y desde v25.120 ADOPTA los sin_ruta (vendedor por cartera_localidad).
@@ -46937,7 +46937,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.172.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.173.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
@@ -47048,7 +47048,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
 .pdc-info{font-size:13.5px;line-height:1.5;color:#5A4632;padding:8px 0;}
 .pdc-info-error{color:#B00020;}
 
-/* ═══ v13.172.0 — CUENTA CORRIENTE 2026 (piloto) — responsive ═══ */
+/* ═══ v13.173.0 — CUENTA CORRIENTE 2026 (piloto) — responsive ═══ */
 #view-ctacte{overflow-x:hidden;padding-bottom:calc(150px + env(safe-area-inset-bottom))}
 .ccx-top{position:sticky;top:0;z-index:30;background:var(--cream1,#FAF4EC);padding:8px 0 10px;margin-bottom:2px}
 .ccx-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px}
@@ -47130,6 +47130,18 @@ async function fcCandadoPlanilla(pedidos, ctx) {
 }
 @media (min-width:1024px) and (max-width:1279px){
   .ccx-grid{grid-template-columns:minmax(0,1fr) 330px;gap:16px}
+}
+/* v13.173.0 — ANCHO REAL EN DESKTOP.
+   Causa: en >=1024px el contenedor .panel lleva max-width:1040px (linea ~6697),
+   heredado por #view-ctacte. Con el sidebar de 248px quedaban ~630px vacios en 1920.
+   Override SCOPEADO con :has() -> solo aplica cuando el tab activo es ctacte.
+   Pedidos y el resto de las views conservan sus 1040px. */
+@media (min-width:1024px){
+  body:has(#view-ctacte.active) .panel{ max-width:1400px; }
+  body:has(#view-ctacte.active) > .view{ max-width:1400px; }
+}
+@media (min-width:1500px){
+  .ccx-grid{grid-template-columns:minmax(0,1fr) 420px;gap:24px}
 }
 </style>
 <script>
@@ -48638,7 +48650,7 @@ document.addEventListener('keydown', function (e) {
 
 })();
 
-/* ═══ v13.172.0 — CUENTA CORRIENTE (piloto) — JS ═══ */
+/* ═══ v13.173.0 — CUENTA CORRIENTE (piloto) — JS ═══ */
 // ═══ TCK — TAB CUENTA CORRIENTE · v2 ═════════════════════════════════════
 // v2 (P0 corregidos vs v1):
 //   · NO manda 'id': lo genera la IDENTITY de Postgres (secuencia alineada en 2770)
@@ -48778,10 +48790,10 @@ function ccxToggle(k){
     var f=_ccxDocs.filter(function(x){ return x.factura_numero===k; })[0];
     if(f) _ccxImput[k]=_ccxN(f.saldo_residual);
   }
-  ccxPintarSel();   // v13.172.0: refleja la seleccion SIN recrear el formulario
+  ccxPintarSel();   // v13.173.0: refleja la seleccion SIN recrear el formulario
   ccxRenderImput();
 }
-// v13.172.0 — sincroniza la clase .sel de cards/filas con _ccxImput.
+// v13.173.0 — sincroniza la clase .sel de cards/filas con _ccxImput.
 // No toca el formulario: los valores tipeados se conservan.
 function ccxPintarSel(){
   var p=document.getElementById('ccx-panel'); if(!p) return;
