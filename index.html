@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.178.0 — 27/08/2026
-     v13.178.0: C1 — CON LA CARGA CERRADA NO SE REGENERA LA PLANILLA.
+     TCK ADMIN — v13.179.0 — 27/08/2026
+     v13.179.0: C1 — CON LA CARGA CERRADA NO SE REGENERA LA PLANILLA.
      Cambio de UI, cero lógica, cero endpoints, cero Apps Script.
      BYPASS QUE CIERRA (alcanzable por operación normal): el botón
      Generar/Regenerar estaba disponible en carga_cerrada, al lado de
@@ -18,7 +18,7 @@
      desplegar.
      + FIX BANNER: TCK_UPD_LOCAL venía clavado en 13.175.0 desde el deploy
        de v13.176.0 mientras version.json ya iba en 13.176/13.177 → banner
-       "Nueva versión" permanente. Los tres quedan alineados en 13.178.0.
+       "Nueva versión" permanente. Los tres quedan alineados en 13.179.0.
      ─────────────────────────────────────────────────────────────────────
      v13.177.0 — 27/08/2026
      v13.177.0: ARRANCAR = "EL CAMIÓN SALIÓ". Confirmación inequívoca.
@@ -36097,7 +36097,7 @@ async function renderLogisticaTransferencias(el) {
   _ltState.el = el;
   el.innerHTML = '<div class="planilla-empty"><div class="loading-spinner" style="margin:0 auto 12px;"></div>Cargando transferencias...</div>';
   try {
-    var SEL = 'id,cliente,comercio,ciudad,monto,forma_cobro,detalle_cobro,comprobante_transfer,transfer_conciliada,transfer_conciliada_en,transfer_exportada_en,transfer_disputa,transfer_disputa_en,transfer_ocr,chofer,fecha_entrega,pedido_id';
+    var SEL = 'id,cliente,comercio,ciudad,monto,forma_cobro,detalle_cobro,comprobante_transfer,transfer_conciliada,transfer_conciliada_en,transfer_exportada_en,transfer_disputa,transfer_disputa_en,transfer_ocr,chofer,fecha_entrega,pedido_id,transfer_descartado,transfer_descartado_motivo,transfer_descartado_ref,transfer_descartado_por,transfer_descartado_en';
     var q1 = await sbFetch('entregas?forma_cobro=eq.transferencia&estado=eq.entregado&order=fecha_entrega.desc&select=' + SEL + '&limit=400') || [];
     var q2 = await sbFetch('entregas?comprobante_transfer=not.is.null&estado=eq.entregado&order=fecha_entrega.desc&select=' + SEL + '&limit=400') || [];
     var _map = {};
@@ -36379,15 +36379,29 @@ function _ltPintar() {
     return true;
   });
 
-  var disputa = rows.filter(function(e) { return e.transfer_disputa && !e.transfer_conciliada; });
-  var pend    = rows.filter(function(e) { return !e.transfer_conciliada && !e.transfer_disputa; });
+  // v13.179.0 - los descartados salen de RECLAMAR y de PENDIENTES.
+  var descart = rows.filter(function(e) { return e.transfer_descartado; });
+  var _htmlDesc = '';
+  if (descart.length) {
+    _htmlDesc += '<div style="font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:900;color:#7A6A55;margin:14px 0 6px">&#128683; NO CORRESPONDE COBRAR (' + descart.length + ')</div>';
+    descart.forEach(function(e) {
+      _htmlDesc += '<div style="background:#FAFAFA;border:1px solid var(--cream3);border-radius:10px;padding:9px 11px;margin-bottom:6px;font-size:12px"><b>' +
+        (e.cliente||'') + '</b> &middot; $' + Math.round(e.monto||0).toLocaleString('es-AR') +
+        '<div style="color:var(--text3);font-size:11px;margin-top:2px">' + (e.transfer_descartado_motivo||'') +
+        (e.transfer_descartado_ref ? ' &middot; ' + e.transfer_descartado_ref : '') + ' &middot; ' +
+        (e.transfer_descartado_por||'') + (e.transfer_descartado_en ? ' &middot; ' + String(e.transfer_descartado_en).slice(0,10) : '') +
+        '</div></div>';
+    });
+  }
+  var disputa = rows.filter(function(e) { return e.transfer_disputa && !e.transfer_conciliada && !e.transfer_descartado; });
+  var pend    = rows.filter(function(e) { return !e.transfer_conciliada && !e.transfer_disputa && !e.transfer_descartado; });
   var conc    = rows.filter(function(e) { return e.transfer_conciliada; });
   var sinFoto = pend.filter(function(e) { return !e.comprobante_transfer; });
   var totalPend = pend.reduce(function(s, e) { return s + _ltMontoTransfer(e); }, 0);
   var exportables = all.filter(function(e) { return _ltExportable(e) && !_ltPreCorte(e); });
   var expViejas   = all.filter(function(e) { return _ltExportable(e) && _ltPreCorte(e); });
 
-  var html = '';
+  var html = _htmlDesc;   // v13.179.0 - la seccion NO CORRESPONDE COBRAR va primero
 
   html += '<div style="background:#E8F5E9;border-radius:12px;padding:12px 16px;margin-bottom:10px;display:flex;gap:10px;flex-wrap:wrap;">';
   html += '<div style="flex:1;min-width:110px;text-align:center;"><div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;">A conciliar</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#1B5E20;">' + fmt(totalPend) + '</div><div style="font-size:11px;color:#2E7D32;">' + pend.length + ' transferencia' + (pend.length === 1 ? '' : 's') + '</div></div>';
@@ -36528,6 +36542,7 @@ function _ltPintar() {
     s += '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">';
     s += btnFoto(e);
     s += '<button onclick="transferDisputaResolver(\'' + e.id + '\',true)" style="flex:1;min-width:120px;padding:9px;background:#2E7D32;color:#fff;border:none;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">✅ Se resolvió → conciliar</button>';
+      s += '<button onclick="ltDescartarAbrir(\'' + e.id + '\')" style="flex:1;min-width:120px;padding:9px;border-radius:9px;border:1.5px solid #C62828;background:#fff;color:#C62828;font-weight:800;font-size:12px;cursor:pointer">&#128683; No corresponde cobrar</button>';
     s += '<button onclick="transferDisputaResolver(\'' + e.id + '\',false)" style="flex:1;min-width:120px;padding:9px;background:#fff;color:#777;border:1.5px solid #BDBDBD;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">↩ Volver a pendiente</button>';
     s += '</div></div>';
     return s;
@@ -36878,7 +36893,94 @@ async function _transferDisputarGuardar(id, motivo) {
   }
 }
 
+
+  // === v13.179.0 - DESCARTE "NO CORRESPONDE COBRAR" =======================
+  // Una entrega resuelta por NC / sin factura NO debe marcarse como
+  // transferencia conciliada: eso la mete en vw_transferencias_a_postear y el
+  // cron le crea una cobranza FALSA en Xubio. Este flujo la saca del panel sin
+  // tocar transfer_conciliada.
+  var LT_DESCARTE_MOTIVOS = [
+    { k:'nota_credito', label:'Nota de credito', pideRef:true,  ph:'N de NC (ej: B-00008-00000224)' },
+    { k:'sin_factura',  label:'Sin factura',     pideRef:false, ph:'Observacion (opcional)' },
+    { k:'incobrable',   label:'Incobrable',      pideRef:false, ph:'Observacion (opcional)' },
+    { k:'error_carga',  label:'Error de carga',  pideRef:false, ph:'Observacion (opcional)' },
+    { k:'otro',         label:'Otro',            pideRef:true,  ph:'Motivo (obligatorio)' }
+  ];
+  function ltDescartarAbrir(id) {
+    var e = (_ltState.rows || []).filter(function(x){ return x.id === id; })[0];
+    if (!e) { toast('No encontre la entrega', 'err'); return; }
+    var h = '<div style="padding:16px;max-width:420px">' +
+      '<div style="font-family:Barlow Condensed,sans-serif;font-size:19px;font-weight:900;color:#C62828;margin-bottom:4px">NO CORRESPONDE COBRAR</div>' +
+      '<div style="font-size:13px;color:var(--text2);margin-bottom:12px"><b>' + (e.cliente||'') + '</b><br>$' +
+        Math.round(e.monto||0).toLocaleString('es-AR') + ' &middot; ' + (e.pedido_id||'') + '</div>' +
+      '<label style="display:block;font-size:11.5px;font-weight:800;color:var(--text2);margin-bottom:4px">Motivo</label>' +
+      '<select id="ltDescMotivo" onchange="ltDescartarPh()" style="width:100%;min-height:44px;padding:10px;border:1px solid var(--cream3);border-radius:9px;font-size:16px;margin-bottom:10px">' +
+        LT_DESCARTE_MOTIVOS.map(function(m){ return '<option value="'+m.k+'">'+m.label+'</option>'; }).join('') +
+      '</select>' +
+      '<label style="display:block;font-size:11.5px;font-weight:800;color:var(--text2);margin-bottom:4px">Referencia</label>' +
+      '<input id="ltDescRef" type="text" style="width:100%;min-height:44px;padding:10px;border:1px solid var(--cream3);border-radius:9px;font-size:16px;margin-bottom:14px">' +
+      '<div style="display:flex;gap:8px">' +
+        '<button onclick="ltDescartarCerrar()" style="flex:1;min-height:44px;border-radius:9px;border:1.5px solid var(--cream3);background:#fff;font-weight:800;cursor:pointer">Cancelar</button>' +
+        '<button onclick="ltDescartarConfirmar(\'' + id + '\')" style="flex:1;min-height:44px;border-radius:9px;border:0;background:#C62828;color:#fff;font-weight:900;cursor:pointer">Descartar</button>' +
+      '</div></div>';
+    var ov = document.createElement('div');
+    ov.id = 'ltDescOverlay';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px';
+    ov.innerHTML = '<div style="background:#fff;border-radius:16px;max-height:90vh;overflow:auto">' + h + '</div>';
+    document.body.appendChild(ov);
+    ltDescartarPh();
+  }
+  function ltDescartarPh() {
+    var s = document.getElementById('ltDescMotivo'), i = document.getElementById('ltDescRef');
+    if (!s || !i) return;
+    var m = LT_DESCARTE_MOTIVOS.filter(function(x){ return x.k === s.value; })[0];
+    if (m) i.placeholder = m.ph;
+  }
+  function ltDescartarCerrar() {
+    var ov = document.getElementById('ltDescOverlay');
+    if (ov) ov.remove();
+  }
+  async function ltDescartarConfirmar(id) {
+    var e = (_ltState.rows || []).filter(function(x){ return x.id === id; })[0];
+    var motivo = (document.getElementById('ltDescMotivo')||{}).value || '';
+    var ref = ((document.getElementById('ltDescRef')||{}).value || '').trim();
+    var m = LT_DESCARTE_MOTIVOS.filter(function(x){ return x.k === motivo; })[0];
+    if (!m) { toast('Elegi un motivo', 'err'); return; }
+    if (m.pideRef && !ref) { toast('La referencia es obligatoria para ' + m.label, 'err'); return; }
+    if (!confirm('Marcar como NO COBRABLE?\n\n' + ((e && e.cliente) || '') + '\n$' +
+        Math.round((e && e.monto) || 0).toLocaleString('es-AR') + '\nMotivo: ' + m.label +
+        (ref ? '\nRef: ' + ref : '') + '\n\nNo se va a crear ninguna cobranza.')) return;
+    try {
+      await sbFetch('entregas?id=eq.' + id, {
+        method: 'PATCH', headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({
+          transfer_descartado: true,
+          transfer_descartado_motivo: motivo,
+          transfer_descartado_ref: ref || null,
+          transfer_descartado_por: (typeof usuarioActual !== 'undefined' && usuarioActual) ? usuarioActual : 'admin',
+          transfer_descartado_en: new Date().toISOString(),
+          transfer_disputa: null, transfer_disputa_en: null
+        })
+      });
+      ltDescartarCerrar();
+      toast('Marcada como no cobrable', 'ok');
+      var el = document.getElementById('logistica-contenido');
+      if (el) renderLogisticaTransferencias(el);
+    } catch (err) {
+      console.error('ltDescartarConfirmar:', err);
+      toast('Error al guardar', 'err');
+    }
+  }
+
 async function transferDisputaResolver(id, conciliar) {
+  // v13.179.0 - GUARD: una entrega descartada NO puede conciliarse, ni desde consola.
+  if (conciliar) {
+    var _e = (_ltState.rows || []).filter(function(x){ return x.id === id; })[0];
+    if (_e && _e.transfer_descartado) {
+      toast('Marcada como NO COBRABLE (' + (_e.transfer_descartado_motivo || '') + '). No se puede conciliar.', 'err');
+      return;
+    }
+  }
   try {
     var payload = conciliar
       ? { transfer_conciliada: true, transfer_conciliada_en: new Date().toISOString(), transfer_disputa: null, transfer_disputa_en: null }
@@ -47025,7 +47127,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.178.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.179.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
@@ -47791,7 +47893,7 @@ function vcBloque(v) {
     if (v.planilla_generada_at) h += '<span style="color:#8a6f5f;font-size:11.5px;">' + ccHora(v.planilla_generada_at) + '</span>';
   }
   h += '<span style="flex:1"></span>';
-  // v13.178.0 C1 — 'carga_cerrada' SALE de esta lista. Regenerar con la
+  // v13.179.0 C1 — 'carga_cerrada' SALE de esta lista. Regenerar con la
   // carga cerrada re-sellaba el hash y habilitaba ARRANCAR sin que nadie
   // volviera a controlar el camión. Para cambiar la planilla: REABRIR.
   if (est === 'planificado' || est === 'preparando') {
