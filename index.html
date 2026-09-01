@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.179.0 — 27/08/2026
-     v13.179.0: C1 — CON LA CARGA CERRADA NO SE REGENERA LA PLANILLA.
+     TCK ADMIN — v13.180.0 — 27/08/2026
+     v13.180.0: C1 — CON LA CARGA CERRADA NO SE REGENERA LA PLANILLA.
      Cambio de UI, cero lógica, cero endpoints, cero Apps Script.
      BYPASS QUE CIERRA (alcanzable por operación normal): el botón
      Generar/Regenerar estaba disponible en carga_cerrada, al lado de
@@ -18,7 +18,7 @@
      desplegar.
      + FIX BANNER: TCK_UPD_LOCAL venía clavado en 13.175.0 desde el deploy
        de v13.176.0 mientras version.json ya iba en 13.176/13.177 → banner
-       "Nueva versión" permanente. Los tres quedan alineados en 13.179.0.
+       "Nueva versión" permanente. Los tres quedan alineados en 13.180.0.
      ─────────────────────────────────────────────────────────────────────
      v13.177.0 — 27/08/2026
      v13.177.0: ARRANCAR = "EL CAMIÓN SALIÓ". Confirmación inequívoca.
@@ -15009,6 +15009,21 @@ input.canales-exp-input[type="date"] {
     </div>
   </div>
 
+  <!-- v13.180.0 - PAGOS A CONCILIAR (solo lectura) -->
+  <div class="view" id="view-mpconc">
+    <div class="ccx-head"><h2>Pagos a conciliar <span class="ccx-badge">SOLO LECTURA</span></h2></div>
+    <div class="ccx-piloto">Vista de observaci&oacute;n. No registra cobranzas ni modifica Mercado Pago.</div>
+    <div class="ccx-search">
+      <input type="text" id="mpc-q" placeholder="Cliente, email, CUIT, factura o mp_id..." autocomplete="off">
+      <button class="btn1" onclick="mpcBuscar()">Buscar</button>
+      <select id="mpc-dias" onchange="mpcSetDias(this.value)" style="min-height:44px;padding:0 10px;border:1px solid #EEE3D2;border-radius:10px;font-size:15px">
+        <option value="7" selected>7 d&iacute;as</option><option value="15">15 d&iacute;as</option>
+        <option value="30">30 d&iacute;as</option><option value="45">45 d&iacute;as</option>
+      </select>
+    </div>
+    <div id="mpc-cont"></div>
+  </div>
+
   <!-- ═══ v13.175.0 — CUENTA CORRIENTE 2026 (PILOTO) ═══ -->
   <div class="view" id="view-ctacte">
     <div class="ccx-top">
@@ -16268,6 +16283,10 @@ input.canales-exp-input[type="date"] {
     <span class="tab-label">Ctas Ctes</span>
   </button>
   <!-- v13.175.0 — destino desktop del modulo nuevo de Cuenta Corriente -->
+  <button class="tab-btn" id="tab-btn-mpconc" onclick="cambiarTab('mpconc')" style="display:none !important;">
+    <span class="tab-icon">&#128270;</span>
+    <span class="tab-label">Conciliar MP</span>
+  </button>
   <button class="tab-btn" id="tab-btn-ctacte" onclick="cambiarTab('ctacte')" style="display:none !important;">
     <span class="tab-icon">💳</span>
     <span class="tab-label">Cta. Cte. 2026</span>
@@ -16390,6 +16409,10 @@ input.canales-exp-input[type="date"] {
         <div class="menu-mas-lbl">Ctas Ctes</div>
       </button>
       <!-- v13.175.0 — Cuenta Corriente (PILOTO, solo dueno) -->
+      <button class="menu-mas-item" id="menu-mas-mpconc" onclick="cambiarTab('mpconc');cerrarMenuMas()">
+        <div class="menu-mas-icon">&#128270;</div>
+        <div class="menu-mas-lbl">Conciliar MP</div>
+      </button>
       <button class="menu-mas-item" id="menu-mas-ctacte" onclick="cambiarTab('ctacte');cerrarMenuMas()">
         <div class="menu-mas-icon">💳</div>
         <div class="menu-mas-lbl">Cta. Cte. 2026</div>
@@ -19120,7 +19143,7 @@ const ROL_TABS = {
 
 // v13.175.0 — TABS EN PILOTO: lista blanca de roles, se evalua ANTES del 'ALL'.
 // Para abrirlo a Administracion: agregar 'cobranzas'. Para liberarlo: borrar la entrada.
-const TABS_PILOTO = { ctacte: ['dueno'] };
+const TABS_PILOTO = { ctacte: ['dueno'], mpconc: ['dueno'] };
 function puedeVer(tab) {
   var soloRoles = TABS_PILOTO[tab];
   if (soloRoles) return soloRoles.indexOf(rolActual) !== -1;   // gate duro del piloto
@@ -23478,11 +23501,12 @@ function cambiarTab(tab) {
   if (rolActual === 'tckfood' && tab !== 'buffet') tab = 'buffet';
   // v13.175.0 — nadie fuera de la lista blanca abre ctacte, ni por consola
   if (tab === 'ctacte' && typeof puedeVer === 'function' && !puedeVer('ctacte')) tab = 'pedidos';
+  if (tab === 'mpconc' && typeof puedeVer === 'function' && !puedeVer('mpconc')) tab = 'pedidos';
   if (_tabActual === tab) return;
   _tabActual = tab;
 
   // Views — incluye logistica + stock (v12.15.0) + compras (v12.18.0) + tesoreria (v12.20.0)
-  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock','compras','cc','tesoreria','margenes','facturacion','buffet','ccprod','pulso','foodconcil','comisiones','embudo','ccontrol','ctacte'].forEach(function(t) {
+  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock','compras','cc','tesoreria','margenes','facturacion','buffet','ccprod','pulso','foodconcil','comisiones','embudo','ccontrol','ctacte','mpconc'].forEach(function(t) {
     var v = document.getElementById('view-' + t);
     var b = document.getElementById('tab-btn-' + t);
     if (v) v.classList.toggle('active', t === tab);
@@ -23542,6 +23566,7 @@ function cambiarTab(tab) {
 
   // v12.20.0 — Tesorería: cargar al abrir
   if (tab === 'ctacte') { if (typeof ccxInit === 'function') ccxInit(); }
+  if (tab === 'mpconc') { if (typeof mpcInit === 'function') mpcInit(); }
   if (tab === 'tesoreria') {
     if (typeof tesCargar === 'function') tesCargar();
     var v = document.getElementById('view-tesoreria'); if (v) v.scrollTop = 0;
@@ -24650,6 +24675,7 @@ function mostrarTabs() {
   _tckSetDisp('menu-mas-facturacion', puedeVer('facturacion'));
   _tckSetDisp('menu-mas-cc',          puedeVer('cc'));
   _tckSetDisp('menu-mas-ctacte',      puedeVer('ctacte'));   // v13.175.0 piloto
+  _tckSetDisp('menu-mas-mpconc',      puedeVer('mpconc'));   // v13.180.0
   _tckSetDisp('menu-mas-tesoreria',   puedeVer('tesoreria'));
   _tckSetDisp('menu-mas-clientes',    puedeVer('clientes'));
   _tckSetDisp('menu-mas-visitas',     puedeVer('gps'));
@@ -36379,7 +36405,7 @@ function _ltPintar() {
     return true;
   });
 
-  // v13.179.0 - los descartados salen de RECLAMAR y de PENDIENTES.
+  // v13.180.0 - los descartados salen de RECLAMAR y de PENDIENTES.
   var descart = rows.filter(function(e) { return e.transfer_descartado; });
   var _htmlDesc = '';
   if (descart.length) {
@@ -36401,7 +36427,7 @@ function _ltPintar() {
   var exportables = all.filter(function(e) { return _ltExportable(e) && !_ltPreCorte(e); });
   var expViejas   = all.filter(function(e) { return _ltExportable(e) && _ltPreCorte(e); });
 
-  var html = _htmlDesc;   // v13.179.0 - la seccion NO CORRESPONDE COBRAR va primero
+  var html = _htmlDesc;   // v13.180.0 - la seccion NO CORRESPONDE COBRAR va primero
 
   html += '<div style="background:#E8F5E9;border-radius:12px;padding:12px 16px;margin-bottom:10px;display:flex;gap:10px;flex-wrap:wrap;">';
   html += '<div style="flex:1;min-width:110px;text-align:center;"><div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;">A conciliar</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#1B5E20;">' + fmt(totalPend) + '</div><div style="font-size:11px;color:#2E7D32;">' + pend.length + ' transferencia' + (pend.length === 1 ? '' : 's') + '</div></div>';
@@ -36894,7 +36920,7 @@ async function _transferDisputarGuardar(id, motivo) {
 }
 
 
-  // === v13.179.0 - DESCARTE "NO CORRESPONDE COBRAR" =======================
+  // === v13.180.0 - DESCARTE "NO CORRESPONDE COBRAR" =======================
   // Una entrega resuelta por NC / sin factura NO debe marcarse como
   // transferencia conciliada: eso la mete en vw_transferencias_a_postear y el
   // cron le crea una cobranza FALSA en Xubio. Este flujo la saca del panel sin
@@ -36973,7 +36999,7 @@ async function _transferDisputarGuardar(id, motivo) {
   }
 
 async function transferDisputaResolver(id, conciliar) {
-  // v13.179.0 - GUARD: una entrega descartada NO puede conciliarse, ni desde consola.
+  // v13.180.0 - GUARD: una entrega descartada NO puede conciliarse, ni desde consola.
   if (conciliar) {
     var _e = (_ltState.rows || []).filter(function(x){ return x.id === id; })[0];
     if (_e && _e.transfer_descartado) {
@@ -47127,7 +47153,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.179.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.180.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
@@ -47329,6 +47355,43 @@ async function fcCandadoPlanilla(pedidos, ctx) {
 }
 @media (min-width:1500px){
   .ccx-grid{grid-template-columns:minmax(0,1fr) 420px;gap:24px}
+}
+
+/* === v13.180.0 - PAGOS A CONCILIAR === */
+#view-mpconc{overflow-x:hidden;padding-bottom:calc(90px + env(safe-area-inset-bottom))}
+.mpc-tabs{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px}
+.mpc-tab{display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:10px 12px;border:1.5px solid #EEE3D2;border-radius:12px;background:#fff;cursor:pointer;text-align:left}
+.mpc-tab b{font-family:'Barlow Condensed',sans-serif;font-size:24px;font-weight:900;line-height:1}
+.mpc-tab span{font-size:11px;font-weight:800;letter-spacing:.3px;text-transform:uppercase;color:#8A7960}
+.mpc-tab i{font-style:normal;font-size:11px;color:#9C8A72}
+.mpc-tab.on span{color:inherit}
+.mpc-sub{font-size:12px;color:#8A7960;margin-bottom:8px}
+.mpc-cards{display:flex;flex-direction:column;gap:8px}
+.mpc-card{background:#fff;border:1px solid #EEE3D2;border-radius:12px;padding:11px 13px}
+.mpc-card .l1{display:flex;align-items:baseline;justify-content:space-between}
+.mpc-card .l1 b{font-family:'Barlow Condensed',sans-serif;font-size:23px;font-weight:900;color:#1A0800}
+.mpc-card .l1 .d{font-size:12px;color:#9C8A72}
+.mpc-card .l2{margin-top:4px;font-size:13px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.mpc-card .l2 i{color:#B08968;font-style:italic}
+.mpc-card .l3{font-size:11.5px;color:#7A6A55;margin-top:3px;word-break:break-word}
+.mpc-card .l4{font-size:11px;color:#9C8A72;margin-top:4px}
+.mpc-card .l5{font-size:11.5px;color:#8A7960;margin-top:5px;padding-top:5px;border-top:1px dashed #F0E6D8}
+.mpc-card .l6{font-size:10.5px;color:#B8A894;margin-top:3px}
+.chip{font-size:10px;font-weight:800;border-radius:999px;padding:2px 7px;white-space:nowrap}
+.chip.conf-alta{background:#E8F5E9;color:#1E8449}
+.chip.conf-media{background:#FFF3E0;color:#B45309}
+.chip.conf-baja{background:#F4EDE2;color:#8A7960}
+.mpc-tbl{display:none}
+@media (min-width:1024px){
+  body:has(#view-mpconc.active) .panel{max-width:var(--dk-full)}
+  .mpc-tabs{grid-template-columns:repeat(4,1fr);max-width:900px}
+  .mpc-cards{display:none}
+  .mpc-tbl{display:table;width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:1px solid #EEE3D2;border-radius:12px;overflow:hidden}
+  .mpc-tbl th{text-align:left;font-weight:800;color:#7A6A55;background:#FCF8F1;border-bottom:1px solid #EEE3D2;padding:8px 9px;white-space:nowrap}
+  .mpc-tbl td{padding:8px 9px;border-bottom:1px solid #F6F0E6;vertical-align:top}
+  .mpc-tbl .r{text-align:right;font-variant-numeric:tabular-nums}
+  .mpc-tbl .mut{color:#9C8A72;font-size:11px}
+  .mpc-tbl .warn{color:#C0392B;font-weight:800}
 }
 </style>
 <script>
@@ -47893,7 +47956,7 @@ function vcBloque(v) {
     if (v.planilla_generada_at) h += '<span style="color:#8a6f5f;font-size:11.5px;">' + ccHora(v.planilla_generada_at) + '</span>';
   }
   h += '<span style="flex:1"></span>';
-  // v13.179.0 C1 — 'carga_cerrada' SALE de esta lista. Regenerar con la
+  // v13.180.0 C1 — 'carga_cerrada' SALE de esta lista. Regenerar con la
   // carga cerrada re-sellaba el hash y habilitaba ARRANCAR sin que nadie
   // volviera a controlar el camión. Para cambiar la planilla: REABRIR.
   if (est === 'planificado' || est === 'preparando') {
@@ -49151,6 +49214,146 @@ function ccxInit(){
     q.addEventListener('keydown',function(ev){ if(ev.key==='Enter') ccxBuscar(); }); }
   ccxSalud();
 }
+
+
+  // ═══ v13.180.0 — PAGOS A CONCILIAR (solo lectura) ═══════════════════════
+  // Consume vw_mp_a_conciliar. NO escribe: cero PATCH/POST/INSERT,
+  // cero boton conciliar, cero automatizacion.
+  var _mpcState = { rows: [], clase: 'MATCH_AUTOMATICO', dias: 7, q: '' };
+
+  var MPC_CLASES = [
+    { k:'MATCH_AUTOMATICO',  label:'Automatico',  color:'#1E8449', bg:'#E8F5E9' },
+    { k:'CANDIDATO',         label:'Candidato',   color:'#B45309', bg:'#FFF3E0' },
+    { k:'REQUIERE_REVISION', label:'Revision',    color:'#8A7960', bg:'#F4EDE2' },
+    { k:'CONFLICTO',         label:'Conflicto',   color:'#C0392B', bg:'#FDECEA' }
+  ];
+  function _mpcClase(k){ for(var i=0;i<MPC_CLASES.length;i++) if(MPC_CLASES[i].k===k) return MPC_CLASES[i]; return MPC_CLASES[2]; }
+  function _mpcN(v){ var n=Number(v); return isFinite(n)?n:0; }
+  function _mpcFmt(n){ return '$'+Math.round(_mpcN(n)).toLocaleString('es-AR'); }
+  function _mpcEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  async function mpcCargar() {
+    var el = document.getElementById('mpc-cont');
+    if (!el) return;
+    el.innerHTML = '<div class="rv-empty">Cargando…</div>';
+    try {
+      var desde = new Date(Date.now() - _mpcState.dias*86400000).toISOString().slice(0,10);
+      _mpcState.rows = await sbFetch('vw_mp_a_conciliar?fecha=gte.' + desde +
+        '&select=*&order=fecha.desc&limit=500') || [];
+      mpcRender();
+    } catch (e) {
+      console.error('[mpc] cargar', e);
+      el.innerHTML = '<div class="rv-empty">Error al cargar. ¿Existe vw_mp_a_conciliar?</div>';
+    }
+  }
+
+  function mpcSetClase(k){ _mpcState.clase = k; mpcRender(); }
+  function mpcSetDias(d){ _mpcState.dias = _mpcN(d)||7; mpcCargar(); }
+  function mpcBuscar(){ _mpcState.q = ((document.getElementById('mpc-q')||{}).value||'').trim().toLowerCase(); mpcRender(); }
+
+  function _mpcFiltradas() {
+    var q = _mpcState.q;
+    return _mpcState.rows.filter(function(r){
+      if (r.clasificacion !== _mpcState.clase) return false;
+      if (!q) return true;
+      return [r.cliente_nombre_sugerido, r.payer_email, r.payer_doc, r.payer_nombre,
+              r.factura_sugerida, r.mp_id, r.pedido_sugerido]
+        .some(function(v){ return String(v==null?'':v).toLowerCase().indexOf(q) >= 0; });
+    });
+  }
+
+  function mpcRender() {
+    var el = document.getElementById('mpc-cont'); if (!el) return;
+    var todas = _mpcState.rows, h = '';
+
+    // contadores por clase
+    h += '<div class="mpc-tabs">';
+    MPC_CLASES.forEach(function(c){
+      var n = todas.filter(function(r){ return r.clasificacion === c.k; }).length;
+      var tot = todas.filter(function(r){ return r.clasificacion === c.k; })
+                     .reduce(function(a,r){ return a + _mpcN(r.monto); }, 0);
+      var on = (_mpcState.clase === c.k);
+      h += '<button class="mpc-tab' + (on?' on':'') + '" onclick="mpcSetClase(\'' + c.k + '\')" ' +
+           'style="' + (on ? 'background:'+c.bg+';border-color:'+c.color+';color:'+c.color : '') + '">' +
+           '<b>' + n + '</b><span>' + c.label + '</span>' +
+           '<i>' + _mpcFmt(tot) + '</i></button>';
+    });
+    h += '</div>';
+
+    var rows = _mpcFiltradas();
+    h += '<div class="mpc-sub">' + rows.length + ' de ' + todas.length +
+         ' movimientos · últimos ' + _mpcState.dias + ' días</div>';
+
+    if (!rows.length) { h += '<div class="rv-empty">Sin movimientos en esta clase.</div>'; el.innerHTML = h; return; }
+
+    // ── cards (movil) ──
+    h += '<div class="mpc-cards">';
+    rows.forEach(function(r){
+      var c = _mpcClase(r.clasificacion);
+      h += '<div class="mpc-card" style="border-left:4px solid ' + c.color + '">' +
+        '<div class="l1"><b>' + _mpcFmt(r.monto) + '</b>' +
+        '<span class="d">' + _mpcEsc(String(r.fecha).slice(0,10)) + '</span></div>' +
+        '<div class="l2">' + (r.cliente_nombre_sugerido
+            ? '<b>' + _mpcEsc(r.cliente_nombre_sugerido) + '</b>'
+            : '<i>sin cliente identificado</i>') +
+          ' <span class="chip" style="background:' + c.bg + ';color:' + c.color + '">' +
+          _mpcEsc(r.origen_match) + (r.alias_veces ? '·' + r.alias_veces : '') + '</span>' +
+          '<span class="chip conf-' + _mpcEsc(r.confianza) + '">' + _mpcEsc(r.confianza) + '</span></div>' +
+        '<div class="l3">' + _mpcEsc(r.payer_email || r.payer_nombre || '—') +
+          (r.payer_doc ? ' · doc ' + _mpcEsc(r.payer_doc) : '') + '</div>' +
+        (r.factura_sugerida
+          ? '<div class="l3">📄 ' + _mpcEsc(r.factura_sugerida) + ' · residual ' + _mpcFmt(r.residual_sugerido) + '</div>'
+          : '') +
+        '<div class="l4">' +
+          'fact ' + _mpcN(r.cantidad_facturas_posibles) +
+          ' · cli ' + _mpcN(r.cantidad_clientes_posibles) +
+          ' · mismo importe ' + _mpcN(r.cantidad_movimientos_mismo_importe) +
+          (r.importe_comun ? ' · <b style="color:#C0392B">importe común</b>' : '') +
+          (r.calidad_historica && r.calidad_historica !== 'OK'
+            ? ' · <b style="color:#B45309">' + _mpcEsc(r.calidad_historica) + '</b>' : '') +
+        '</div>' +
+        '<div class="l5">' + _mpcEsc(r.motivo_clasificacion) + '</div>' +
+        '<div class="l6">mp_id ' + _mpcEsc(r.mp_id) + ' · ' + _mpcEsc(r.operation_type) + '</div>' +
+      '</div>';
+    });
+    h += '</div>';
+
+    // ── tabla (desktop) ──
+    h += '<table class="mpc-tbl"><tr>' +
+      '<th>Fecha</th><th class="r">Monto</th><th>Pagador</th><th>Cliente sugerido</th>' +
+      '<th>Factura</th><th class="r">Residual</th><th>Match</th><th>Conf.</th>' +
+      '<th class="r">F/C/M</th><th>Calidad</th><th>Motivo</th></tr>';
+    rows.forEach(function(r){
+      var c = _mpcClase(r.clasificacion);
+      h += '<tr>' +
+        '<td>' + _mpcEsc(String(r.fecha).slice(0,10)) + '</td>' +
+        '<td class="r"><b>' + _mpcFmt(r.monto) + '</b></td>' +
+        '<td>' + _mpcEsc(r.payer_email || r.payer_nombre || '—') +
+          (r.payer_doc ? '<br><span class="mut">' + _mpcEsc(r.payer_doc) + '</span>' : '') + '</td>' +
+        '<td>' + (r.cliente_nombre_sugerido ? _mpcEsc(r.cliente_nombre_sugerido) : '<i class="mut">—</i>') + '</td>' +
+        '<td>' + _mpcEsc(r.factura_sugerida || '—') + '</td>' +
+        '<td class="r">' + (r.residual_sugerido ? _mpcFmt(r.residual_sugerido) : '—') + '</td>' +
+        '<td><span class="chip" style="background:' + c.bg + ';color:' + c.color + '">' +
+          _mpcEsc(r.origen_match) + (r.alias_veces ? '·' + r.alias_veces : '') + '</span></td>' +
+        '<td><span class="chip conf-' + _mpcEsc(r.confianza) + '">' + _mpcEsc(r.confianza) + '</span></td>' +
+        '<td class="r ' + (r.importe_comun ? 'warn' : '') + '">' +
+          _mpcN(r.cantidad_facturas_posibles) + '/' + _mpcN(r.cantidad_clientes_posibles) + '/' +
+          _mpcN(r.cantidad_movimientos_mismo_importe) + '</td>' +
+        '<td>' + _mpcEsc(r.calidad_historica || '—') + '</td>' +
+        '<td class="mut">' + _mpcEsc(r.motivo_clasificacion) + '</td>' +
+      '</tr>';
+    });
+    h += '</table>';
+    el.innerHTML = h;
+  }
+
+  function mpcInit() {
+    var q = document.getElementById('mpc-q');
+    if (q && !q._mpcBound) { q._mpcBound = true;
+      q.addEventListener('keydown', function(ev){ if (ev.key === 'Enter') mpcBuscar(); }); }
+    if (!_mpcState.rows.length) mpcCargar();
+  }
 
 </script>
 
