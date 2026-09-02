@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.180.0 — 27/08/2026
-     v13.180.0: C1 — CON LA CARGA CERRADA NO SE REGENERA LA PLANILLA.
+     TCK ADMIN — v13.181.0 — 27/08/2026
+     v13.181.0: C1 — CON LA CARGA CERRADA NO SE REGENERA LA PLANILLA.
      Cambio de UI, cero lógica, cero endpoints, cero Apps Script.
      BYPASS QUE CIERRA (alcanzable por operación normal): el botón
      Generar/Regenerar estaba disponible en carga_cerrada, al lado de
@@ -18,7 +18,7 @@
      desplegar.
      + FIX BANNER: TCK_UPD_LOCAL venía clavado en 13.175.0 desde el deploy
        de v13.176.0 mientras version.json ya iba en 13.176/13.177 → banner
-       "Nueva versión" permanente. Los tres quedan alineados en 13.180.0.
+       "Nueva versión" permanente. Los tres quedan alineados en 13.181.0.
      ─────────────────────────────────────────────────────────────────────
      v13.177.0 — 27/08/2026
      v13.177.0: ARRANCAR = "EL CAMIÓN SALIÓ". Confirmación inequívoca.
@@ -15009,7 +15009,21 @@ input.canales-exp-input[type="date"] {
     </div>
   </div>
 
-  <!-- v13.180.0 - PAGOS A CONCILIAR (solo lectura) -->
+  <!-- v13.181.0 - PANEL COBRANZAS (MVP-A, solo lectura) -->
+  <div class="view" id="view-cobranzas">
+    <div class="ccx-head"><h2>Cobranzas <span class="ccx-badge">SOLO LECTURA</span></h2></div>
+    <div class="ccx-search">
+      <input type="text" id="cbz-q" placeholder="Cliente, factura, referencia..." autocomplete="off">
+      <button class="btn1" onclick="cbzBuscar()">Buscar</button>
+      <select id="cbz-dias" onchange="cbzSetDias(this.value)" style="min-height:44px;padding:0 10px;border:1px solid #EEE3D2;border-radius:10px;font-size:15px">
+        <option value="7" selected>7 d&iacute;as</option><option value="15">15 d&iacute;as</option>
+        <option value="30">30 d&iacute;as</option><option value="45">45 d&iacute;as</option>
+      </select>
+    </div>
+    <div id="cbz-cont"></div>
+  </div>
+
+  <!-- v13.181.0 - PAGOS A CONCILIAR (solo lectura) -->
   <div class="view" id="view-mpconc">
     <div class="ccx-head"><h2>Pagos a conciliar <span class="ccx-badge">SOLO LECTURA</span></h2></div>
     <div class="ccx-piloto">Vista de observaci&oacute;n. No registra cobranzas ni modifica Mercado Pago.</div>
@@ -16283,6 +16297,10 @@ input.canales-exp-input[type="date"] {
     <span class="tab-label">Ctas Ctes</span>
   </button>
   <!-- v13.175.0 — destino desktop del modulo nuevo de Cuenta Corriente -->
+  <button class="tab-btn" id="tab-btn-cobranzas" onclick="cambiarTab('cobranzas')" style="display:none !important;">
+    <span class="tab-icon">&#128176;</span>
+    <span class="tab-label">Cobranzas</span>
+  </button>
   <button class="tab-btn" id="tab-btn-mpconc" onclick="cambiarTab('mpconc')" style="display:none !important;">
     <span class="tab-icon">&#128270;</span>
     <span class="tab-label">Conciliar MP</span>
@@ -16409,6 +16427,10 @@ input.canales-exp-input[type="date"] {
         <div class="menu-mas-lbl">Ctas Ctes</div>
       </button>
       <!-- v13.175.0 — Cuenta Corriente (PILOTO, solo dueno) -->
+      <button class="menu-mas-item" id="menu-mas-cobranzas" onclick="cambiarTab('cobranzas');cerrarMenuMas()">
+        <div class="menu-mas-icon">&#128176;</div>
+        <div class="menu-mas-lbl">Cobranzas</div>
+      </button>
       <button class="menu-mas-item" id="menu-mas-mpconc" onclick="cambiarTab('mpconc');cerrarMenuMas()">
         <div class="menu-mas-icon">&#128270;</div>
         <div class="menu-mas-lbl">Conciliar MP</div>
@@ -19143,7 +19165,7 @@ const ROL_TABS = {
 
 // v13.175.0 — TABS EN PILOTO: lista blanca de roles, se evalua ANTES del 'ALL'.
 // Para abrirlo a Administracion: agregar 'cobranzas'. Para liberarlo: borrar la entrada.
-const TABS_PILOTO = { ctacte: ['dueno'], mpconc: ['dueno'] };
+const TABS_PILOTO = { ctacte: ['dueno'], mpconc: ['dueno'], cobranzas: ['dueno'] };
 function puedeVer(tab) {
   var soloRoles = TABS_PILOTO[tab];
   if (soloRoles) return soloRoles.indexOf(rolActual) !== -1;   // gate duro del piloto
@@ -23502,11 +23524,12 @@ function cambiarTab(tab) {
   // v13.175.0 — nadie fuera de la lista blanca abre ctacte, ni por consola
   if (tab === 'ctacte' && typeof puedeVer === 'function' && !puedeVer('ctacte')) tab = 'pedidos';
   if (tab === 'mpconc' && typeof puedeVer === 'function' && !puedeVer('mpconc')) tab = 'pedidos';
+  if (tab === 'cobranzas' && typeof puedeVer === 'function' && !puedeVer('cobranzas')) tab = 'pedidos';
   if (_tabActual === tab) return;
   _tabActual = tab;
 
   // Views — incluye logistica + stock (v12.15.0) + compras (v12.18.0) + tesoreria (v12.20.0)
-  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock','compras','cc','tesoreria','margenes','facturacion','buffet','ccprod','pulso','foodconcil','comisiones','embudo','ccontrol','ctacte','mpconc'].forEach(function(t) {
+  ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock','compras','cc','tesoreria','margenes','facturacion','buffet','ccprod','pulso','foodconcil','comisiones','embudo','ccontrol','ctacte','mpconc','cobranzas'].forEach(function(t) {
     var v = document.getElementById('view-' + t);
     var b = document.getElementById('tab-btn-' + t);
     if (v) v.classList.toggle('active', t === tab);
@@ -23567,6 +23590,14 @@ function cambiarTab(tab) {
   // v12.20.0 — Tesorería: cargar al abrir
   if (tab === 'ctacte') { if (typeof ccxInit === 'function') ccxInit(); }
   if (tab === 'mpconc') { if (typeof mpcInit === 'function') mpcInit(); }
+  if (tab === 'cobranzas') { if (typeof cbzInit === 'function') cbzInit(); }
+  // v13.181.0 — abrir siempre desde arriba
+  if (tab === 'cobranzas' || tab === 'mpconc' || tab === 'ctacte') {
+    var _v = document.getElementById('view-' + tab); if (_v) _v.scrollTop = 0;
+    var _p = document.getElementById('panel');       if (_p) _p.scrollTop = 0;
+    try { window.scrollTo(0, 0); } catch (e) {}
+    if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
+  }
   if (tab === 'tesoreria') {
     if (typeof tesCargar === 'function') tesCargar();
     var v = document.getElementById('view-tesoreria'); if (v) v.scrollTop = 0;
@@ -24675,7 +24706,8 @@ function mostrarTabs() {
   _tckSetDisp('menu-mas-facturacion', puedeVer('facturacion'));
   _tckSetDisp('menu-mas-cc',          puedeVer('cc'));
   _tckSetDisp('menu-mas-ctacte',      puedeVer('ctacte'));   // v13.175.0 piloto
-  _tckSetDisp('menu-mas-mpconc',      puedeVer('mpconc'));   // v13.180.0
+  _tckSetDisp('menu-mas-mpconc',      puedeVer('mpconc'));   // v13.181.0
+  _tckSetDisp('menu-mas-cobranzas',   puedeVer('cobranzas'));// v13.181.0
   _tckSetDisp('menu-mas-tesoreria',   puedeVer('tesoreria'));
   _tckSetDisp('menu-mas-clientes',    puedeVer('clientes'));
   _tckSetDisp('menu-mas-visitas',     puedeVer('gps'));
@@ -36405,7 +36437,7 @@ function _ltPintar() {
     return true;
   });
 
-  // v13.180.0 - los descartados salen de RECLAMAR y de PENDIENTES.
+  // v13.181.0 - los descartados salen de RECLAMAR y de PENDIENTES.
   var descart = rows.filter(function(e) { return e.transfer_descartado; });
   var _htmlDesc = '';
   if (descart.length) {
@@ -36427,7 +36459,7 @@ function _ltPintar() {
   var exportables = all.filter(function(e) { return _ltExportable(e) && !_ltPreCorte(e); });
   var expViejas   = all.filter(function(e) { return _ltExportable(e) && _ltPreCorte(e); });
 
-  var html = _htmlDesc;   // v13.180.0 - la seccion NO CORRESPONDE COBRAR va primero
+  var html = _htmlDesc;   // v13.181.0 - la seccion NO CORRESPONDE COBRAR va primero
 
   html += '<div style="background:#E8F5E9;border-radius:12px;padding:12px 16px;margin-bottom:10px;display:flex;gap:10px;flex-wrap:wrap;">';
   html += '<div style="flex:1;min-width:110px;text-align:center;"><div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;">A conciliar</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#1B5E20;">' + fmt(totalPend) + '</div><div style="font-size:11px;color:#2E7D32;">' + pend.length + ' transferencia' + (pend.length === 1 ? '' : 's') + '</div></div>';
@@ -36920,7 +36952,7 @@ async function _transferDisputarGuardar(id, motivo) {
 }
 
 
-  // === v13.180.0 - DESCARTE "NO CORRESPONDE COBRAR" =======================
+  // === v13.181.0 - DESCARTE "NO CORRESPONDE COBRAR" =======================
   // Una entrega resuelta por NC / sin factura NO debe marcarse como
   // transferencia conciliada: eso la mete en vw_transferencias_a_postear y el
   // cron le crea una cobranza FALSA en Xubio. Este flujo la saca del panel sin
@@ -36999,7 +37031,7 @@ async function _transferDisputarGuardar(id, motivo) {
   }
 
 async function transferDisputaResolver(id, conciliar) {
-  // v13.180.0 - GUARD: una entrega descartada NO puede conciliarse, ni desde consola.
+  // v13.181.0 - GUARD: una entrega descartada NO puede conciliarse, ni desde consola.
   if (conciliar) {
     var _e = (_ltState.rows || []).filter(function(x){ return x.id === id; })[0];
     if (_e && _e.transfer_descartado) {
@@ -47153,7 +47185,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.180.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.181.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
@@ -47357,7 +47389,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
   .ccx-grid{grid-template-columns:minmax(0,1fr) 420px;gap:24px}
 }
 
-/* === v13.180.0 - PAGOS A CONCILIAR === */
+/* === v13.181.0 - PAGOS A CONCILIAR === */
 #view-mpconc{overflow-x:hidden;padding-bottom:calc(90px + env(safe-area-inset-bottom))}
 .mpc-tabs{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px}
 .mpc-tab{display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:10px 12px;border:1.5px solid #EEE3D2;border-radius:12px;background:#fff;cursor:pointer;text-align:left}
@@ -47392,6 +47424,49 @@ async function fcCandadoPlanilla(pedidos, ctx) {
   .mpc-tbl .r{text-align:right;font-variant-numeric:tabular-nums}
   .mpc-tbl .mut{color:#9C8A72;font-size:11px}
   .mpc-tbl .warn{color:#C0392B;font-weight:800}
+}
+
+/* === v13.181.0 - PANEL COBRANZAS === */
+#view-cobranzas{overflow-x:hidden;padding-bottom:calc(90px + env(safe-area-inset-bottom))}
+.cbz-seg{display:flex;gap:6px;margin-bottom:10px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.cbz-sg{flex:0 0 auto;padding:7px 13px;border:1.5px solid #EEE3D2;border-radius:999px;background:#fff;font-size:12.5px;font-weight:800;color:#7A6A55;cursor:pointer;white-space:nowrap}
+.cbz-sg.on{background:#1A0800;border-color:#1A0800;color:#fff}
+.cbz-sg i{font-style:normal;opacity:.65;font-size:11px}
+.cbz-tabs{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px}
+.cbz-tab{display:flex;flex-direction:column;align-items:flex-start;padding:9px 12px;border:1.5px solid #EEE3D2;border-radius:12px;background:#fff;cursor:pointer;text-align:left}
+.cbz-tab.on{border-color:#B45309;background:#FFFBF5}
+.cbz-tab b{font-family:'Barlow Condensed',sans-serif;font-size:23px;font-weight:900;line-height:1;color:#1A0800}
+.cbz-tab span{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;color:#8A7960}
+.cbz-tab i{font-style:normal;font-size:11px;color:#9C8A72}
+.cbz-sub{font-size:12px;color:#8A7960;margin-bottom:8px}
+.cbz-card{background:#fff;border:1px solid #EEE3D2;border-left:4px solid #C4B8A6;border-radius:12px;padding:11px 13px;margin-bottom:8px}
+.cbz-card.m-mp{border-left-color:#00A6E0}
+.cbz-card.m-efectivo{border-left-color:#1E8449}
+.cbz-card.m-cheques{border-left-color:#B45309}
+.cbz-card .l1{display:flex;align-items:baseline;gap:8px}
+.cbz-card .l1 b{font-family:'Barlow Condensed',sans-serif;font-size:24px;font-weight:900;color:#1A0800}
+.cbz-card .l1 .med{font-size:10px;font-weight:900;letter-spacing:.5px;color:#9C8A72;border:1px solid #EEE3D2;border-radius:5px;padding:1px 5px}
+.cbz-card .l1 .d{margin-left:auto;font-size:12px;color:#9C8A72}
+.cbz-card .l2{margin-top:4px;font-size:13.5px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.cbz-card .l2 i{color:#B08968;font-style:italic}
+.cbz-card .l3{font-size:12px;color:#B45309;font-weight:700;margin-top:3px}
+.cbz-card .l4{font-size:11.5px;color:#8A7960;margin-top:5px}
+.cbz-card .l5{font-size:11.5px;font-weight:800;color:#1A0800;margin-top:6px;padding-top:5px;border-top:1px dashed #F0E6D8}
+.chip.c-alta{background:#E8F5E9;color:#1E8449}
+.chip.c-media{background:#FFF3E0;color:#B45309}
+.chip.c-baja{background:#F4EDE2;color:#8A7960}
+.cbz-det{margin-top:6px}
+.cbz-det summary{font-size:11px;color:#9C8A72;cursor:pointer;list-style:none;user-select:none}
+.cbz-det summary::-webkit-details-marker{display:none}
+.cbz-det .dd{margin-top:4px;padding:7px 9px;background:#FCF8F1;border-radius:8px;display:flex;flex-wrap:wrap;gap:4px 12px}
+.cbz-det .dd span{font-size:10.5px;color:#9C8A72}
+.cbz-det .dd b{color:#7A6A55}
+.cbz-alert{background:#FDECEA;border:1px solid #F5C6C0;border-radius:10px;padding:9px 12px;margin-bottom:10px;font-size:12px;color:#8A3226}
+.cbz-mini{margin-left:8px;padding:3px 10px;border:1px solid #C0392B;border-radius:7px;background:#fff;color:#C0392B;font-weight:800;font-size:11px;cursor:pointer}
+.cbz-errdet{margin-top:6px;font-size:10px;color:#8A7960;font-family:ui-monospace,monospace;word-break:break-word}
+@media (min-width:1024px){
+  body:has(#view-cobranzas.active) .panel{max-width:var(--dk-wide)}
+  .cbz-tabs{grid-template-columns:repeat(4,1fr);max-width:860px}
 }
 </style>
 <script>
@@ -47956,7 +48031,7 @@ function vcBloque(v) {
     if (v.planilla_generada_at) h += '<span style="color:#8a6f5f;font-size:11.5px;">' + ccHora(v.planilla_generada_at) + '</span>';
   }
   h += '<span style="flex:1"></span>';
-  // v13.180.0 C1 — 'carga_cerrada' SALE de esta lista. Regenerar con la
+  // v13.181.0 C1 — 'carga_cerrada' SALE de esta lista. Regenerar con la
   // carga cerrada re-sellaba el hash y habilitaba ARRANCAR sin que nadie
   // volviera a controlar el camión. Para cambiar la planilla: REABRIR.
   if (est === 'planificado' || est === 'preparando') {
@@ -49216,7 +49291,7 @@ function ccxInit(){
 }
 
 
-  // ═══ v13.180.0 — PAGOS A CONCILIAR (solo lectura) ═══════════════════════
+  // ═══ v13.181.0 — PAGOS A CONCILIAR (solo lectura) ═══════════════════════
   // Consume vw_mp_a_conciliar. NO escribe: cero PATCH/POST/INSERT,
   // cero boton conciliar, cero automatizacion.
   var _mpcState = { rows: [], clase: 'MATCH_AUTOMATICO', dias: 7, q: '' };
@@ -49353,6 +49428,181 @@ function ccxInit(){
     if (q && !q._mpcBound) { q._mpcBound = true;
       q.addEventListener('keydown', function(ev){ if (ev.key === 'Enter') mpcBuscar(); }); }
     if (!_mpcState.rows.length) mpcCargar();
+  }
+
+
+  // ═══ v13.181.0 — PANEL COBRANZAS (MVP-A · SOLO LECTURA) ══════════════════
+  // Tres GET independientes en paralelo. NO existe vw_cobranzas_panel:
+  // el UNION ALL en SQL medía 5.104 ms contra ~1.300 ms de la rama MP sola.
+  // Con Promise.allSettled, si una fuente falla las otras siguen visibles.
+  // CERO PATCH/POST/DELETE · CERO acciones · CERO Xubio · CERO cron.
+  var _cbz = { rows: [], medio: 'todos', estado: 'pendientes', dias: 7, q: '', err: {} };
+
+  var CBZ_MEDIOS  = [['todos','Todos'],['mp','MP'],['efectivo','Efectivo'],['cheques','Cheques']];
+  var CBZ_ESTADOS = [['pendientes','Pendientes'],['revisar','Para revisar'],
+                     ['confirmadas','Confirmadas'],['problemas','Problemas']];
+
+  function _cbzN(v){ var n=Number(v); return isFinite(n)?n:0; }
+  function _cbzF(n){ return '$'+Math.round(_cbzN(n)).toLocaleString('es-AR'); }
+  function _cbzE(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function _cbzD(d){ return String(d||'').slice(0,10); }
+
+  function cbzSetMedio(m){ _cbz.medio=m; cbzCargar(); }
+  function cbzSetEstado(e){ _cbz.estado=e; cbzRender(); }
+  function cbzSetDias(d){ _cbz.dias=_cbzN(d)||7; cbzCargar(); }
+  function cbzBuscar(){ _cbz.q=((document.getElementById('cbz-q')||{}).value||'').trim().toLowerCase(); cbzRender(); }
+
+  async function cbzCargar() {
+    var el = document.getElementById('cbz-cont'); if (!el) return;
+    el.innerHTML = '<div class="rv-empty">Cargando…</div>';
+    _cbz.err = {};
+    var desde = new Date(Date.now() - _cbz.dias*86400000).toISOString().slice(0,10);
+    var m = _cbz.medio;
+    // si se filtra un medio, no se consultan los otros
+    var pideMP  = (m==='todos' || m==='mp');
+    var pideChq = (m==='todos' || m==='cheques');
+    var pideEfe = (m==='todos' || m==='efectivo');
+
+    var res = await Promise.allSettled([
+      pideMP  ? sbFetch('vw_mp_a_conciliar?fecha=gte.'+desde+'&select=*&order=fecha.desc&limit=400') : Promise.resolve([]),
+      pideChq ? sbFetch('cheques_recibidos?created_at=gte.'+desde+'&select=*&order=created_at.desc&limit=300') : Promise.resolve([]),
+      pideEfe ? sbFetch('cta_cte_cobranzas?origen=eq.entrega&origen_ref=like.*:efe&fecha=gte.'+desde+
+                        '&select=id,cobranza_id,fecha,monto,cliente_nombre,cliente_xubio_id,origen_ref,xubio_estado,xubio_numero_recibo,creado_por&order=fecha.desc&limit=400')
+              : Promise.resolve([])
+    ]);
+    var out = [];
+    // ── MP
+    if (res[0].status === 'fulfilled') {
+      (res[0].value||[]).forEach(function(r){
+        var est = r.clasificacion==='CONFLICTO' ? 'problemas'
+                : r.clasificacion==='REQUIERE_REVISION' ? 'revisar' : 'pendientes';
+        out.push({ medio:'mp', icono:'MP', ref:String(r.mp_id), fecha:r.fecha, monto:r.monto,
+          cliente: r.cliente_nombre_sugerido, factura: r.factura_sugerida, residual: r.residual_sugerido,
+          estado: est, etiqueta: r.clasificacion==='MATCH_AUTOMATICO' ? 'Sugerido'
+                 : r.clasificacion==='CANDIDATO' ? 'Candidato'
+                 : r.clasificacion==='CONFLICTO' ? 'Conflicto' : 'Revisar',
+          accion: r.clasificacion==='MATCH_AUTOMATICO' ? 'Confirmar cliente y factura'
+                : r.clasificacion==='CANDIDATO' ? 'Elegir factura'
+                : r.clasificacion==='CONFLICTO' ? 'Requiere decision' : 'Elegir cliente',
+          motivo: r.motivo_clasificacion, confianza: r.confianza,
+          det: { 'mp_id': r.mp_id, 'tipo': r.operation_type, 'pagador': r.payer_email||r.payer_nombre,
+                 'doc': r.payer_doc, 'match': r.origen_match, 'alias_veces': r.alias_veces,
+                 'facturas posibles': r.cantidad_facturas_posibles,
+                 'clientes posibles': r.cantidad_clientes_posibles,
+                 'mismo importe': r.cantidad_movimientos_mismo_importe,
+                 'importe comun': r.importe_comun, 'calidad': r.calidad_historica,
+                 'clientes por doc': r.clientes_por_documento } });
+      });
+    } else { _cbz.err.mp = String(res[0].reason && res[0].reason.message || res[0].reason).slice(0,140); }
+    // ── CHEQUES
+    if (res[1].status === 'fulfilled') {
+      (res[1].value||[]).forEach(function(c){
+        var est = c.estado==='rechazado' ? 'problemas' : (c.cobranza_id ? 'confirmadas' : 'pendientes');
+        out.push({ medio:'cheques', icono:'CHQ', ref:c.numero_cheque, fecha:c.created_at, monto:c.monto,
+          cliente:c.cliente, factura:null, residual:null, estado:est,
+          etiqueta: c.cobranza_id ? 'Registrado' : 'Sin registrar',
+          accion: c.cobranza_id ? '—' : 'Registrar cobranza',
+          motivo: (c.banco||'?')+' '+(c.numero_cheque||'?')+
+                  (c.fecha_vencimiento ? ' · vence '+_cbzD(c.fecha_vencimiento) : '')+
+                  ' · cartera: '+(c.estado||'?'),
+          confianza: c.cobranza_id ? 'alta' : 'media',
+          det: { 'banco': c.banco, 'numero': c.numero_cheque, 'emisor': c.emisor,
+                 'vencimiento': _cbzD(c.fecha_vencimiento), 'estado cartera': c.estado,
+                 'pedido': c.pedido_id, 'chofer': c.chofer, 'foto': c.foto_url ? 'si' : 'no',
+                 'cobranza_id': c.cobranza_id } });
+      });
+    } else { _cbz.err.cheques = String(res[1].reason && res[1].reason.message || res[1].reason).slice(0,140); }
+    // ── EFECTIVO
+    if (res[2].status === 'fulfilled') {
+      (res[2].value||[]).forEach(function(k){
+        var est = k.xubio_estado==='ok' ? 'confirmadas'
+                : (k.xubio_estado==='error'||k.xubio_estado==='indeterminada') ? 'problemas' : 'pendientes';
+        out.push({ medio:'efectivo', icono:'EFE', ref:k.origen_ref, fecha:k.fecha, monto:k.monto,
+          cliente:k.cliente_nombre, factura:null, residual:null, estado:est,
+          etiqueta: k.xubio_estado==='ok' ? 'En Xubio' : (k.xubio_estado||'pendiente'),
+          accion: k.xubio_estado==='ok' ? '—' : 'Revisar posteo',
+          motivo: k.xubio_numero_recibo ? ('recibo '+k.xubio_numero_recibo) : 'rendicion confirmada, sin recibo',
+          confianza:'alta',
+          det: { 'entrega': String(k.origen_ref||'').replace(':efe',''), 'recibo Xubio': k.xubio_numero_recibo,
+                 'estado Xubio': k.xubio_estado, 'cliente_xubio_id': k.cliente_xubio_id,
+                 'cobranza': k.id, 'creado por': k.creado_por } });
+      });
+    } else { _cbz.err.efectivo = String(res[2].reason && res[2].reason.message || res[2].reason).slice(0,140); }
+
+    out.sort(function(a,b){ return String(b.fecha).localeCompare(String(a.fecha)); });
+    _cbz.rows = out;
+    cbzRender();
+  }
+
+  function _cbzFiltradas() {
+    var q = _cbz.q;
+    return _cbz.rows.filter(function(r){
+      if (_cbz.medio !== 'todos' && r.medio !== _cbz.medio) return false;
+      if (r.estado !== _cbz.estado) return false;
+      if (!q) return true;
+      return [r.cliente, r.ref, r.factura, r.motivo].some(function(v){
+        return String(v==null?'':v).toLowerCase().indexOf(q) >= 0; });
+    });
+  }
+
+  function cbzRender() {
+    var el = document.getElementById('cbz-cont'); if (!el) return;
+    var h = '';
+    // avisos por fuente caida
+    Object.keys(_cbz.err).forEach(function(k){
+      h += '<div class="cbz-alert">No se pudo cargar <b>'+_cbzE(k)+'</b>. Las otras fuentes siguen visibles.' +
+           ' <button class="cbz-mini" onclick="cbzCargar()">Reintentar</button>' +
+           (typeof rolUsuario!=='undefined' && rolUsuario==='dueno'
+             ? '<div class="cbz-errdet">'+_cbzE(_cbz.err[k])+'</div>' : '') + '</div>';
+    });
+    // filtro de medio
+    h += '<div class="cbz-seg">';
+    CBZ_MEDIOS.forEach(function(m){
+      var n = _cbz.rows.filter(function(r){ return m[0]==='todos' || r.medio===m[0]; }).length;
+      h += '<button class="cbz-sg'+(_cbz.medio===m[0]?' on':'')+'" onclick="cbzSetMedio(\''+m[0]+'\')">' +
+           _cbzE(m[1]) + (n?' <i>'+n+'</i>':'') + '</button>';
+    });
+    h += '</div>';
+    // filtro de estado, con contador y monto
+    h += '<div class="cbz-tabs">';
+    CBZ_ESTADOS.forEach(function(e){
+      var f = _cbz.rows.filter(function(r){
+        return r.estado===e[0] && (_cbz.medio==='todos' || r.medio===_cbz.medio); });
+      var tot = f.reduce(function(a,r){ return a+_cbzN(r.monto); },0);
+      h += '<button class="cbz-tab'+(_cbz.estado===e[0]?' on':'')+'" onclick="cbzSetEstado(\''+e[0]+'\')">' +
+           '<b>'+f.length+'</b><span>'+_cbzE(e[1])+'</span><i>'+_cbzF(tot)+'</i></button>';
+    });
+    h += '</div>';
+
+    var rows = _cbzFiltradas();
+    h += '<div class="cbz-sub">'+rows.length+' movimientos · últimos '+_cbz.dias+' días</div>';
+    if (!rows.length) { h += '<div class="rv-empty">Sin movimientos en esta vista.</div>'; el.innerHTML=h; return; }
+
+    rows.forEach(function(r){
+      var det = Object.keys(r.det||{}).filter(function(k){
+        return r.det[k]!==null && r.det[k]!==undefined && r.det[k]!==''; })
+        .map(function(k){ return '<span>'+_cbzE(k)+': <b>'+_cbzE(r.det[k])+'</b></span>'; }).join('');
+      h += '<div class="cbz-card m-'+r.medio+'">' +
+        '<div class="l1"><b>'+_cbzF(r.monto)+'</b><span class="med">'+r.icono+'</span>' +
+          '<span class="d">'+_cbzE(_cbzD(r.fecha))+'</span></div>' +
+        '<div class="l2">'+(r.cliente ? '<b>'+_cbzE(r.cliente)+'</b>' : '<i>sin cliente identificado</i>') +
+          '<span class="chip c-'+_cbzE(r.confianza)+'">'+_cbzE(r.etiqueta)+'</span></div>' +
+        (r.factura ? '<div class="l3">'+_cbzE(r.factura)+
+           (r.residual ? ' · '+_cbzF(r.residual) : '')+'</div>' : '') +
+        '<div class="l4">'+_cbzE(r.motivo)+'</div>' +
+        (r.accion && r.accion!=='—' ? '<div class="l5">Falta: '+_cbzE(r.accion)+'</div>' : '') +
+        (det ? '<details class="cbz-det"><summary>Detalles</summary><div class="dd">'+det+'</div></details>' : '') +
+      '</div>';
+    });
+    el.innerHTML = h;
+  }
+
+  function cbzInit() {
+    var q = document.getElementById('cbz-q');
+    if (q && !q._b) { q._b = true;
+      q.addEventListener('keydown', function(ev){ if (ev.key==='Enter') cbzBuscar(); }); }
+    if (!_cbz.rows.length) cbzCargar();
   }
 
 </script>
