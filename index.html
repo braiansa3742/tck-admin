@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.181.0 — 27/08/2026
-     v13.181.0: C1 — CON LA CARGA CERRADA NO SE REGENERA LA PLANILLA.
+     TCK ADMIN — v13.182.0 — 27/08/2026
+     v13.182.0: C1 — CON LA CARGA CERRADA NO SE REGENERA LA PLANILLA.
      Cambio de UI, cero lógica, cero endpoints, cero Apps Script.
      BYPASS QUE CIERRA (alcanzable por operación normal): el botón
      Generar/Regenerar estaba disponible en carga_cerrada, al lado de
@@ -18,7 +18,7 @@
      desplegar.
      + FIX BANNER: TCK_UPD_LOCAL venía clavado en 13.175.0 desde el deploy
        de v13.176.0 mientras version.json ya iba en 13.176/13.177 → banner
-       "Nueva versión" permanente. Los tres quedan alineados en 13.181.0.
+       "Nueva versión" permanente. Los tres quedan alineados en 13.182.0.
      ─────────────────────────────────────────────────────────────────────
      v13.177.0 — 27/08/2026
      v13.177.0: ARRANCAR = "EL CAMIÓN SALIÓ". Confirmación inequívoca.
@@ -15009,7 +15009,7 @@ input.canales-exp-input[type="date"] {
     </div>
   </div>
 
-  <!-- v13.181.0 - PANEL COBRANZAS (MVP-A, solo lectura) -->
+  <!-- v13.182.0 - PANEL COBRANZAS (MVP-A, solo lectura) -->
   <div class="view" id="view-cobranzas">
     <div class="ccx-head"><h2>Cobranzas <span class="ccx-badge">SOLO LECTURA</span></h2></div>
     <div class="ccx-search">
@@ -15023,7 +15023,7 @@ input.canales-exp-input[type="date"] {
     <div id="cbz-cont"></div>
   </div>
 
-  <!-- v13.181.0 - PAGOS A CONCILIAR (solo lectura) -->
+  <!-- v13.182.0 - PAGOS A CONCILIAR (solo lectura) -->
   <div class="view" id="view-mpconc">
     <div class="ccx-head"><h2>Pagos a conciliar <span class="ccx-badge">SOLO LECTURA</span></h2></div>
     <div class="ccx-piloto">Vista de observaci&oacute;n. No registra cobranzas ni modifica Mercado Pago.</div>
@@ -23591,7 +23591,7 @@ function cambiarTab(tab) {
   if (tab === 'ctacte') { if (typeof ccxInit === 'function') ccxInit(); }
   if (tab === 'mpconc') { if (typeof mpcInit === 'function') mpcInit(); }
   if (tab === 'cobranzas') { if (typeof cbzInit === 'function') cbzInit(); }
-  // v13.181.0 — abrir siempre desde arriba
+  // v13.182.0 — abrir siempre desde arriba
   if (tab === 'cobranzas' || tab === 'mpconc' || tab === 'ctacte') {
     var _v = document.getElementById('view-' + tab); if (_v) _v.scrollTop = 0;
     var _p = document.getElementById('panel');       if (_p) _p.scrollTop = 0;
@@ -24706,8 +24706,10 @@ function mostrarTabs() {
   _tckSetDisp('menu-mas-facturacion', puedeVer('facturacion'));
   _tckSetDisp('menu-mas-cc',          puedeVer('cc'));
   _tckSetDisp('menu-mas-ctacte',      puedeVer('ctacte'));   // v13.175.0 piloto
-  _tckSetDisp('menu-mas-mpconc',      puedeVer('mpconc'));   // v13.181.0
-  _tckSetDisp('menu-mas-cobranzas',   puedeVer('cobranzas'));// v13.181.0
+  // v13.182.0: 'Cobranzas' reemplaza a 'Conciliar MP'. Se oculta del menu
+  // pero NO se borra el codigo ni la vista: sigue accesible por consola.
+  _tckSetDisp('menu-mas-mpconc',      false);
+  _tckSetDisp('menu-mas-cobranzas',   puedeVer('cobranzas'));// v13.182.0
   _tckSetDisp('menu-mas-tesoreria',   puedeVer('tesoreria'));
   _tckSetDisp('menu-mas-clientes',    puedeVer('clientes'));
   _tckSetDisp('menu-mas-visitas',     puedeVer('gps'));
@@ -36437,7 +36439,7 @@ function _ltPintar() {
     return true;
   });
 
-  // v13.181.0 - los descartados salen de RECLAMAR y de PENDIENTES.
+  // v13.182.0 - los descartados salen de RECLAMAR y de PENDIENTES.
   var descart = rows.filter(function(e) { return e.transfer_descartado; });
   var _htmlDesc = '';
   if (descart.length) {
@@ -36459,7 +36461,7 @@ function _ltPintar() {
   var exportables = all.filter(function(e) { return _ltExportable(e) && !_ltPreCorte(e); });
   var expViejas   = all.filter(function(e) { return _ltExportable(e) && _ltPreCorte(e); });
 
-  var html = _htmlDesc;   // v13.181.0 - la seccion NO CORRESPONDE COBRAR va primero
+  var html = _htmlDesc;   // v13.182.0 - la seccion NO CORRESPONDE COBRAR va primero
 
   html += '<div style="background:#E8F5E9;border-radius:12px;padding:12px 16px;margin-bottom:10px;display:flex;gap:10px;flex-wrap:wrap;">';
   html += '<div style="flex:1;min-width:110px;text-align:center;"><div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;">A conciliar</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#1B5E20;">' + fmt(totalPend) + '</div><div style="font-size:11px;color:#2E7D32;">' + pend.length + ' transferencia' + (pend.length === 1 ? '' : 's') + '</div></div>';
@@ -36952,7 +36954,7 @@ async function _transferDisputarGuardar(id, motivo) {
 }
 
 
-  // === v13.181.0 - DESCARTE "NO CORRESPONDE COBRAR" =======================
+  // === v13.182.0 - DESCARTE "NO CORRESPONDE COBRAR" =======================
   // Una entrega resuelta por NC / sin factura NO debe marcarse como
   // transferencia conciliada: eso la mete en vw_transferencias_a_postear y el
   // cron le crea una cobranza FALSA en Xubio. Este flujo la saca del panel sin
@@ -37031,7 +37033,7 @@ async function _transferDisputarGuardar(id, motivo) {
   }
 
 async function transferDisputaResolver(id, conciliar) {
-  // v13.181.0 - GUARD: una entrega descartada NO puede conciliarse, ni desde consola.
+  // v13.182.0 - GUARD: una entrega descartada NO puede conciliarse, ni desde consola.
   if (conciliar) {
     var _e = (_ltState.rows || []).filter(function(x){ return x.id === id; })[0];
     if (_e && _e.transfer_descartado) {
@@ -47185,7 +47187,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.181.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.182.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
@@ -47389,7 +47391,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
   .ccx-grid{grid-template-columns:minmax(0,1fr) 420px;gap:24px}
 }
 
-/* === v13.181.0 - PAGOS A CONCILIAR === */
+/* === v13.182.0 - PAGOS A CONCILIAR === */
 #view-mpconc{overflow-x:hidden;padding-bottom:calc(90px + env(safe-area-inset-bottom))}
 .mpc-tabs{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px}
 .mpc-tab{display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:10px 12px;border:1.5px solid #EEE3D2;border-radius:12px;background:#fff;cursor:pointer;text-align:left}
@@ -47426,7 +47428,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
   .mpc-tbl .warn{color:#C0392B;font-weight:800}
 }
 
-/* === v13.181.0 - PANEL COBRANZAS === */
+/* === v13.182.0 - PANEL COBRANZAS === */
 #view-cobranzas{overflow-x:hidden;padding-bottom:calc(90px + env(safe-area-inset-bottom))}
 .cbz-seg{display:flex;gap:6px;margin-bottom:10px;overflow-x:auto;-webkit-overflow-scrolling:touch}
 .cbz-sg{flex:0 0 auto;padding:7px 13px;border:1.5px solid #EEE3D2;border-radius:999px;background:#fff;font-size:12.5px;font-weight:800;color:#7A6A55;cursor:pointer;white-space:nowrap}
@@ -47468,6 +47470,11 @@ async function fcCandadoPlanilla(pedidos, ctx) {
   body:has(#view-cobranzas.active) .panel{max-width:var(--dk-wide)}
   .cbz-tabs{grid-template-columns:repeat(4,1fr);max-width:860px}
 }
+
+/* v13.182.0 — Falta: por encima de lo tecnico */
+.cbz-card .l5{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:800;color:#1A0800;margin-top:7px;padding-top:6px;border-top:1px dashed #F0E6D8}
+.cbz-card .l5 span{font-size:9.5px;font-weight:900;letter-spacing:.6px;text-transform:uppercase;color:#fff;background:#B45309;border-radius:5px;padding:2px 6px}
+.cbz-card .l2 .chip{font-size:10.5px;opacity:.9}
 </style>
 <script>
 /* ═══════════════════════════════════════════════════════════════════
@@ -48031,7 +48038,7 @@ function vcBloque(v) {
     if (v.planilla_generada_at) h += '<span style="color:#8a6f5f;font-size:11.5px;">' + ccHora(v.planilla_generada_at) + '</span>';
   }
   h += '<span style="flex:1"></span>';
-  // v13.181.0 C1 — 'carga_cerrada' SALE de esta lista. Regenerar con la
+  // v13.182.0 C1 — 'carga_cerrada' SALE de esta lista. Regenerar con la
   // carga cerrada re-sellaba el hash y habilitaba ARRANCAR sin que nadie
   // volviera a controlar el camión. Para cambiar la planilla: REABRIR.
   if (est === 'planificado' || est === 'preparando') {
@@ -49291,7 +49298,7 @@ function ccxInit(){
 }
 
 
-  // ═══ v13.181.0 — PAGOS A CONCILIAR (solo lectura) ═══════════════════════
+  // ═══ v13.182.0 — PAGOS A CONCILIAR (solo lectura) ═══════════════════════
   // Consume vw_mp_a_conciliar. NO escribe: cero PATCH/POST/INSERT,
   // cero boton conciliar, cero automatizacion.
   var _mpcState = { rows: [], clase: 'MATCH_AUTOMATICO', dias: 7, q: '' };
@@ -49431,7 +49438,7 @@ function ccxInit(){
   }
 
 
-  // ═══ v13.181.0 — PANEL COBRANZAS (MVP-A · SOLO LECTURA) ══════════════════
+  // ═══ v13.182.0 — PANEL COBRANZAS (MVP-A · SOLO LECTURA) ══════════════════
   // Tres GET independientes en paralelo. NO existe vw_cobranzas_panel:
   // el UNION ALL en SQL medía 5.104 ms contra ~1.300 ms de la rama MP sola.
   // Con Promise.allSettled, si una fuente falla las otras siguen visibles.
@@ -49449,7 +49456,11 @@ function ccxInit(){
   function _cbzD(d){ return String(d||'').slice(0,10); }
 
   function cbzSetMedio(m){ _cbz.medio=m; cbzCargar(); }
-  function cbzSetEstado(e){ _cbz.estado=e; cbzRender(); }
+  function cbzSetEstado(e){
+    var prev = _cbz.estado; _cbz.estado = e;
+    var recarga = (prev==='pendientes') !== (e==='pendientes');
+    if (recarga && (_cbz.medio==='todos' || _cbz.medio==='cheques')) cbzCargar(); else cbzRender();
+  }
   function cbzSetDias(d){ _cbz.dias=_cbzN(d)||7; cbzCargar(); }
   function cbzBuscar(){ _cbz.q=((document.getElementById('cbz-q')||{}).value||'').trim().toLowerCase(); cbzRender(); }
 
@@ -49466,7 +49477,12 @@ function ccxInit(){
 
     var res = await Promise.allSettled([
       pideMP  ? sbFetch('vw_mp_a_conciliar?fecha=gte.'+desde+'&select=*&order=fecha.desc&limit=400') : Promise.resolve([]),
-      pideChq ? sbFetch('cheques_recibidos?created_at=gte.'+desde+'&select=*&order=created_at.desc&limit=300') : Promise.resolve([]),
+      // v13.182.0: un cheque sin cobranza es pendiente sin importar cuando entro.
+      pideChq ? sbFetch('cheques_recibidos?' +
+                 (_cbz.estado==='pendientes'
+                   ? 'cobranza_id=is.null&select=*&order=created_at.desc&limit=500'
+                   : 'created_at=gte.'+desde+'&select=*&order=created_at.desc&limit=300'))
+              : Promise.resolve([]),
       pideEfe ? sbFetch('cta_cte_cobranzas?origen=eq.entrega&origen_ref=like.*:efe&fecha=gte.'+desde+
                         '&select=id,cobranza_id,fecha,monto,cliente_nombre,cliente_xubio_id,origen_ref,xubio_estado,xubio_numero_recibo,creado_por&order=fecha.desc&limit=400')
               : Promise.resolve([])
@@ -49479,12 +49495,15 @@ function ccxInit(){
                 : r.clasificacion==='REQUIERE_REVISION' ? 'revisar' : 'pendientes';
         out.push({ medio:'mp', icono:'MP', ref:String(r.mp_id), fecha:r.fecha, monto:r.monto,
           cliente: r.cliente_nombre_sugerido, factura: r.factura_sugerida, residual: r.residual_sugerido,
-          estado: est, etiqueta: r.clasificacion==='MATCH_AUTOMATICO' ? 'Sugerido'
-                 : r.clasificacion==='CANDIDATO' ? 'Candidato'
-                 : r.clasificacion==='CONFLICTO' ? 'Conflicto' : 'Revisar',
+          estado: est,
+          etiqueta: r.clasificacion==='MATCH_AUTOMATICO' ? 'Sugerido'
+                 : r.clasificacion==='CANDIDATO'         ? 'Falta elegir factura'
+                 : r.clasificacion==='CONFLICTO'         ? 'Requiere decisi\u00f3n'
+                 : 'Falta identificar cliente',
           accion: r.clasificacion==='MATCH_AUTOMATICO' ? 'Confirmar cliente y factura'
-                : r.clasificacion==='CANDIDATO' ? 'Elegir factura'
-                : r.clasificacion==='CONFLICTO' ? 'Requiere decision' : 'Elegir cliente',
+                : r.clasificacion==='CANDIDATO'         ? 'Elegir factura'
+                : r.clasificacion==='CONFLICTO'         ? 'Requiere decisi\u00f3n'
+                : 'Identificar cliente',
           motivo: r.motivo_clasificacion, confianza: r.confianza,
           det: { 'mp_id': r.mp_id, 'tipo': r.operation_type, 'pagador': r.payer_email||r.payer_nombre,
                  'doc': r.payer_doc, 'match': r.origen_match, 'alias_veces': r.alias_veces,
@@ -49492,7 +49511,8 @@ function ccxInit(){
                  'clientes posibles': r.cantidad_clientes_posibles,
                  'mismo importe': r.cantidad_movimientos_mismo_importe,
                  'importe comun': r.importe_comun, 'calidad': r.calidad_historica,
-                 'clientes por doc': r.clientes_por_documento } });
+                 'clientes por doc': r.clientes_por_documento,
+                 'clasificacion': r.clasificacion } });
       });
     } else { _cbz.err.mp = String(res[0].reason && res[0].reason.message || res[0].reason).slice(0,140); }
     // ── CHEQUES
@@ -49576,7 +49596,9 @@ function ccxInit(){
     h += '</div>';
 
     var rows = _cbzFiltradas();
-    h += '<div class="cbz-sub">'+rows.length+' movimientos · últimos '+_cbz.dias+' días</div>';
+    var _chqFull = (_cbz.estado==='pendientes' && (_cbz.medio==='todos'||_cbz.medio==='cheques'));
+    h += '<div class="cbz-sub">'+rows.length+' movimientos · últimos '+_cbz.dias+' días' +
+         (_chqFull ? ' · <b>cheques sin registrar: historial completo</b>' : '') + '</div>';
     if (!rows.length) { h += '<div class="rv-empty">Sin movimientos en esta vista.</div>'; el.innerHTML=h; return; }
 
     rows.forEach(function(r){
@@ -49591,7 +49613,7 @@ function ccxInit(){
         (r.factura ? '<div class="l3">'+_cbzE(r.factura)+
            (r.residual ? ' · '+_cbzF(r.residual) : '')+'</div>' : '') +
         '<div class="l4">'+_cbzE(r.motivo)+'</div>' +
-        (r.accion && r.accion!=='—' ? '<div class="l5">Falta: '+_cbzE(r.accion)+'</div>' : '') +
+        (r.accion && r.accion!=='—' ? '<div class="l5"><span>Falta</span>'+_cbzE(r.accion)+'</div>' : '') +
         (det ? '<details class="cbz-det"><summary>Detalles</summary><div class="dd">'+det+'</div></details>' : '') +
       '</div>';
     });
