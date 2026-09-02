@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.182.0 — 27/08/2026
-     v13.182.0: C1 — CON LA CARGA CERRADA NO SE REGENERA LA PLANILLA.
+     TCK ADMIN — v13.183.0 — 27/08/2026
+     v13.183.0: C1 — CON LA CARGA CERRADA NO SE REGENERA LA PLANILLA.
      Cambio de UI, cero lógica, cero endpoints, cero Apps Script.
      BYPASS QUE CIERRA (alcanzable por operación normal): el botón
      Generar/Regenerar estaba disponible en carga_cerrada, al lado de
@@ -18,7 +18,7 @@
      desplegar.
      + FIX BANNER: TCK_UPD_LOCAL venía clavado en 13.175.0 desde el deploy
        de v13.176.0 mientras version.json ya iba en 13.176/13.177 → banner
-       "Nueva versión" permanente. Los tres quedan alineados en 13.182.0.
+       "Nueva versión" permanente. Los tres quedan alineados en 13.183.0.
      ─────────────────────────────────────────────────────────────────────
      v13.177.0 — 27/08/2026
      v13.177.0: ARRANCAR = "EL CAMIÓN SALIÓ". Confirmación inequívoca.
@@ -15009,7 +15009,7 @@ input.canales-exp-input[type="date"] {
     </div>
   </div>
 
-  <!-- v13.182.0 - PANEL COBRANZAS (MVP-A, solo lectura) -->
+  <!-- v13.183.0 - PANEL COBRANZAS (MVP-A, solo lectura) -->
   <div class="view" id="view-cobranzas">
     <div class="ccx-head"><h2>Cobranzas <span class="ccx-badge">SOLO LECTURA</span></h2></div>
     <div class="ccx-search">
@@ -15023,7 +15023,7 @@ input.canales-exp-input[type="date"] {
     <div id="cbz-cont"></div>
   </div>
 
-  <!-- v13.182.0 - PAGOS A CONCILIAR (solo lectura) -->
+  <!-- v13.183.0 - PAGOS A CONCILIAR (solo lectura) -->
   <div class="view" id="view-mpconc">
     <div class="ccx-head"><h2>Pagos a conciliar <span class="ccx-badge">SOLO LECTURA</span></h2></div>
     <div class="ccx-piloto">Vista de observaci&oacute;n. No registra cobranzas ni modifica Mercado Pago.</div>
@@ -23591,7 +23591,7 @@ function cambiarTab(tab) {
   if (tab === 'ctacte') { if (typeof ccxInit === 'function') ccxInit(); }
   if (tab === 'mpconc') { if (typeof mpcInit === 'function') mpcInit(); }
   if (tab === 'cobranzas') { if (typeof cbzInit === 'function') cbzInit(); }
-  // v13.182.0 — abrir siempre desde arriba
+  // v13.183.0 — abrir siempre desde arriba
   if (tab === 'cobranzas' || tab === 'mpconc' || tab === 'ctacte') {
     var _v = document.getElementById('view-' + tab); if (_v) _v.scrollTop = 0;
     var _p = document.getElementById('panel');       if (_p) _p.scrollTop = 0;
@@ -24706,10 +24706,10 @@ function mostrarTabs() {
   _tckSetDisp('menu-mas-facturacion', puedeVer('facturacion'));
   _tckSetDisp('menu-mas-cc',          puedeVer('cc'));
   _tckSetDisp('menu-mas-ctacte',      puedeVer('ctacte'));   // v13.175.0 piloto
-  // v13.182.0: 'Cobranzas' reemplaza a 'Conciliar MP'. Se oculta del menu
+  // v13.183.0: 'Cobranzas' reemplaza a 'Conciliar MP'. Se oculta del menu
   // pero NO se borra el codigo ni la vista: sigue accesible por consola.
   _tckSetDisp('menu-mas-mpconc',      false);
-  _tckSetDisp('menu-mas-cobranzas',   puedeVer('cobranzas'));// v13.182.0
+  _tckSetDisp('menu-mas-cobranzas',   puedeVer('cobranzas'));// v13.183.0
   _tckSetDisp('menu-mas-tesoreria',   puedeVer('tesoreria'));
   _tckSetDisp('menu-mas-clientes',    puedeVer('clientes'));
   _tckSetDisp('menu-mas-visitas',     puedeVer('gps'));
@@ -36439,7 +36439,7 @@ function _ltPintar() {
     return true;
   });
 
-  // v13.182.0 - los descartados salen de RECLAMAR y de PENDIENTES.
+  // v13.183.0 - los descartados salen de RECLAMAR y de PENDIENTES.
   var descart = rows.filter(function(e) { return e.transfer_descartado; });
   var _htmlDesc = '';
   if (descart.length) {
@@ -36461,7 +36461,7 @@ function _ltPintar() {
   var exportables = all.filter(function(e) { return _ltExportable(e) && !_ltPreCorte(e); });
   var expViejas   = all.filter(function(e) { return _ltExportable(e) && _ltPreCorte(e); });
 
-  var html = _htmlDesc;   // v13.182.0 - la seccion NO CORRESPONDE COBRAR va primero
+  var html = _htmlDesc;   // v13.183.0 - la seccion NO CORRESPONDE COBRAR va primero
 
   html += '<div style="background:#E8F5E9;border-radius:12px;padding:12px 16px;margin-bottom:10px;display:flex;gap:10px;flex-wrap:wrap;">';
   html += '<div style="flex:1;min-width:110px;text-align:center;"><div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;">A conciliar</div><div style="font-family:Barlow Condensed,sans-serif;font-size:22px;font-weight:900;color:#1B5E20;">' + fmt(totalPend) + '</div><div style="font-size:11px;color:#2E7D32;">' + pend.length + ' transferencia' + (pend.length === 1 ? '' : 's') + '</div></div>';
@@ -36954,7 +36954,7 @@ async function _transferDisputarGuardar(id, motivo) {
 }
 
 
-  // === v13.182.0 - DESCARTE "NO CORRESPONDE COBRAR" =======================
+  // === v13.183.0 - DESCARTE "NO CORRESPONDE COBRAR" =======================
   // Una entrega resuelta por NC / sin factura NO debe marcarse como
   // transferencia conciliada: eso la mete en vw_transferencias_a_postear y el
   // cron le crea una cobranza FALSA en Xubio. Este flujo la saca del panel sin
@@ -37033,7 +37033,7 @@ async function _transferDisputarGuardar(id, motivo) {
   }
 
 async function transferDisputaResolver(id, conciliar) {
-  // v13.182.0 - GUARD: una entrega descartada NO puede conciliarse, ni desde consola.
+  // v13.183.0 - GUARD: una entrega descartada NO puede conciliarse, ni desde consola.
   if (conciliar) {
     var _e = (_ltState.rows || []).filter(function(x){ return x.id === id; })[0];
     if (_e && _e.transfer_descartado) {
@@ -47187,7 +47187,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.182.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.183.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
@@ -47391,7 +47391,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
   .ccx-grid{grid-template-columns:minmax(0,1fr) 420px;gap:24px}
 }
 
-/* === v13.182.0 - PAGOS A CONCILIAR === */
+/* === v13.183.0 - PAGOS A CONCILIAR === */
 #view-mpconc{overflow-x:hidden;padding-bottom:calc(90px + env(safe-area-inset-bottom))}
 .mpc-tabs{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px}
 .mpc-tab{display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:10px 12px;border:1.5px solid #EEE3D2;border-radius:12px;background:#fff;cursor:pointer;text-align:left}
@@ -47428,7 +47428,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
   .mpc-tbl .warn{color:#C0392B;font-weight:800}
 }
 
-/* === v13.182.0 - PANEL COBRANZAS === */
+/* === v13.183.0 - PANEL COBRANZAS === */
 #view-cobranzas{overflow-x:hidden;padding-bottom:calc(90px + env(safe-area-inset-bottom))}
 .cbz-seg{display:flex;gap:6px;margin-bottom:10px;overflow-x:auto;-webkit-overflow-scrolling:touch}
 .cbz-sg{flex:0 0 auto;padding:7px 13px;border:1.5px solid #EEE3D2;border-radius:999px;background:#fff;font-size:12.5px;font-weight:800;color:#7A6A55;cursor:pointer;white-space:nowrap}
@@ -47471,10 +47471,48 @@ async function fcCandadoPlanilla(pedidos, ctx) {
   .cbz-tabs{grid-template-columns:repeat(4,1fr);max-width:860px}
 }
 
-/* v13.182.0 — Falta: por encima de lo tecnico */
+/* v13.183.0 — Falta: por encima de lo tecnico */
 .cbz-card .l5{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:800;color:#1A0800;margin-top:7px;padding-top:6px;border-top:1px dashed #F0E6D8}
 .cbz-card .l5 span{font-size:9.5px;font-weight:900;letter-spacing:.6px;text-transform:uppercase;color:#fff;background:#B45309;border-radius:5px;padding:2px 6px}
 .cbz-card .l2 .chip{font-size:10.5px;opacity:.9}
+
+/* === v13.183.0 — MVP-B confirmar cobranza === */
+.cbz-go{margin-top:9px;width:100%;min-height:42px;border:0;border-radius:10px;background:#1A0800;color:#fff;font-weight:900;font-size:13px;letter-spacing:.3px;cursor:pointer}
+.cbr-ov{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto}
+.cbr-box{background:#fff;border-radius:16px;max-width:520px;width:100%;padding:16px;margin:auto}
+.cbr-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.cbr-hd b{font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:900;color:#1A0800}
+.cbr-x{border:0;background:none;font-size:26px;line-height:1;color:#9C8A72;cursor:pointer}
+.cbr-mt{font-family:'Barlow Condensed',sans-serif;font-size:32px;font-weight:900;color:#1A0800;line-height:1.05}
+.cbr-mt span{display:block;font-family:'Barlow',sans-serif;font-size:12px;font-weight:600;color:#9C8A72;letter-spacing:0}
+.cbr-ev{font-size:11.5px;color:#8A7960;margin:6px 0 4px;padding:7px 9px;background:#FCF8F1;border-radius:8px}
+.cbr-sec{font-size:10.5px;font-weight:900;letter-spacing:.5px;text-transform:uppercase;color:#8A7960;margin:14px 0 6px}
+.cbr-row{display:flex;gap:8px}
+.cbr-row input{flex:1;min-height:44px;padding:0 11px;border:1px solid #EEE3D2;border-radius:10px;font-size:16px}
+.cbr-op{display:block;width:100%;text-align:left;padding:9px 11px;margin-top:5px;border:1px solid #EEE3D2;border-radius:9px;background:#fff;cursor:pointer;font-size:13px}
+.cbr-op b{display:block;color:#1A0800}
+.cbr-op span{font-size:11px;color:#9C8A72}
+.cbr-cli{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;background:#FFFBF5;border:1px solid #EEE3D2;border-radius:10px;font-size:14px}
+.cbr-lnk{border:0;background:none;color:#B45309;font-weight:800;font-size:12px;cursor:pointer;text-decoration:underline}
+.cbr-doc{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #EEE3D2;border-radius:9px;margin-bottom:5px}
+.cbr-doc.on{border-color:#B45309;background:#FFFBF5}
+.cbr-doc label{display:flex;align-items:center;gap:9px;flex:1;cursor:pointer;min-width:0}
+.cbr-doc input[type=checkbox]{width:19px;height:19px;flex:0 0 auto}
+.cbr-doc span{min-width:0}
+.cbr-doc b{display:block;font-size:12.5px;color:#1A0800}
+.cbr-doc i{font-style:normal;font-size:11px;color:#9C8A72}
+.cbr-imp{width:112px;min-height:38px;padding:0 9px;border:1.5px solid #B45309;border-radius:8px;font-size:15px;font-weight:800;text-align:right;color:#B45309}
+.cbr-res{margin-top:12px;padding:10px 12px;background:#FCF8F1;border:1px solid #EEE3D2;border-radius:10px}
+.cbr-res div{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;padding:3px 0}
+.cbr-res span{color:#7A6A55;font-weight:700}
+.cbr-res b{font-variant-numeric:tabular-nums;color:#1A0800}
+.cbr-res .tot{border-top:1px dashed #E3D6C2;margin-top:4px;padding-top:6px}
+.cbr-res .tot b.ok{color:#1E8449}.cbr-res .tot b.warn{color:#B45309}.cbr-res .tot b.err{color:#C0392B}
+.cbr-alerta{margin-top:8px;padding:8px 10px;background:#FDECEA;border-radius:8px;font-size:12px;color:#8A3226;font-weight:700}
+.cbr-vacio{padding:14px;text-align:center;color:#9C8A72;font-size:12.5px}
+.cbr-go{margin-top:14px;width:100%;min-height:50px;border:0;border-radius:12px;background:#B45309;color:#fff;font-weight:900;font-size:15px;letter-spacing:.4px;cursor:pointer}
+.cbr-go:disabled{opacity:.45;cursor:default}
+.cbr-nota{margin-top:8px;font-size:11px;color:#B08968;text-align:center}
 </style>
 <script>
 /* ═══════════════════════════════════════════════════════════════════
@@ -48038,7 +48076,7 @@ function vcBloque(v) {
     if (v.planilla_generada_at) h += '<span style="color:#8a6f5f;font-size:11.5px;">' + ccHora(v.planilla_generada_at) + '</span>';
   }
   h += '<span style="flex:1"></span>';
-  // v13.182.0 C1 — 'carga_cerrada' SALE de esta lista. Regenerar con la
+  // v13.183.0 C1 — 'carga_cerrada' SALE de esta lista. Regenerar con la
   // carga cerrada re-sellaba el hash y habilitaba ARRANCAR sin que nadie
   // volviera a controlar el camión. Para cambiar la planilla: REABRIR.
   if (est === 'planificado' || est === 'preparando') {
@@ -49298,7 +49336,7 @@ function ccxInit(){
 }
 
 
-  // ═══ v13.182.0 — PAGOS A CONCILIAR (solo lectura) ═══════════════════════
+  // ═══ v13.183.0 — PAGOS A CONCILIAR (solo lectura) ═══════════════════════
   // Consume vw_mp_a_conciliar. NO escribe: cero PATCH/POST/INSERT,
   // cero boton conciliar, cero automatizacion.
   var _mpcState = { rows: [], clase: 'MATCH_AUTOMATICO', dias: 7, q: '' };
@@ -49438,12 +49476,29 @@ function ccxInit(){
   }
 
 
-  // ═══ v13.182.0 — PANEL COBRANZAS (MVP-A · SOLO LECTURA) ══════════════════
+  // ═══ v13.183.0 — PANEL COBRANZAS (MVP-A · SOLO LECTURA) ══════════════════
   // Tres GET independientes en paralelo. NO existe vw_cobranzas_panel:
   // el UNION ALL en SQL medía 5.104 ms contra ~1.300 ms de la rama MP sola.
   // Con Promise.allSettled, si una fuente falla las otras siguen visibles.
   // CERO PATCH/POST/DELETE · CERO acciones · CERO Xubio · CERO cron.
   var _cbz = { rows: [], medio: 'todos', estado: 'pendientes', dias: 7, q: '', err: {} };
+
+  // v13.183.0 — llamada a funciones RPC de Supabase (no existia helper)
+  async function sbRpc(fn, args) {
+    var r = await fetch(SUPABASE_URL + '/rest/v1/rpc/' + fn, {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+                 'Content-Type': 'application/json' },
+      body: JSON.stringify(args || {})
+    });
+    var txt = await r.text();
+    var data = null; try { data = txt ? JSON.parse(txt) : null; } catch (e) { data = txt; }
+    if (!r.ok) {
+      var msg = (data && (data.message || data.hint)) || ('HTTP ' + r.status);
+      throw new Error(msg);
+    }
+    return data;
+  }
 
   var CBZ_MEDIOS  = [['todos','Todos'],['mp','MP'],['efectivo','Efectivo'],['cheques','Cheques']];
   var CBZ_ESTADOS = [['pendientes','Pendientes'],['revisar','Para revisar'],
@@ -49477,7 +49532,7 @@ function ccxInit(){
 
     var res = await Promise.allSettled([
       pideMP  ? sbFetch('vw_mp_a_conciliar?fecha=gte.'+desde+'&select=*&order=fecha.desc&limit=400') : Promise.resolve([]),
-      // v13.182.0: un cheque sin cobranza es pendiente sin importar cuando entro.
+      // v13.183.0: un cheque sin cobranza es pendiente sin importar cuando entro.
       pideChq ? sbFetch('cheques_recibidos?' +
                  (_cbz.estado==='pendientes'
                    ? 'cobranza_id=is.null&select=*&order=created_at.desc&limit=500'
@@ -49614,6 +49669,10 @@ function ccxInit(){
            (r.residual ? ' · '+_cbzF(r.residual) : '')+'</div>' : '') +
         '<div class="l4">'+_cbzE(r.motivo)+'</div>' +
         (r.accion && r.accion!=='—' ? '<div class="l5"><span>Falta</span>'+_cbzE(r.accion)+'</div>' : '') +
+        // v13.183.0: accion primaria solo para MP, solo dueno, nunca CONFLICTO
+        ((r.medio==='mp' && typeof cbrPuede==='function' && cbrPuede() &&
+          r.det && r.det.clasificacion!=='CONFLICTO')
+          ? '<button class="cbz-go" onclick="cbrAbrir(\''+_cbzE(r.ref)+'\')">Revisar y confirmar</button>' : '') +
         (det ? '<details class="cbz-det"><summary>Detalles</summary><div class="dd">'+det+'</div></details>' : '') +
       '</div>';
     });
@@ -49625,6 +49684,161 @@ function ccxInit(){
     if (q && !q._b) { q._b = true;
       q.addEventListener('keydown', function(ev){ if (ev.key==='Enter') cbzBuscar(); }); }
     if (!_cbz.rows.length) cbzCargar();
+  }
+
+
+  // ═══ v13.183.0 — MVP-B · RESOLUCION MANUAL DE MP ════════════════════════
+  // Confirmar termina en ctacte_registrar_cobranza_mp(): cobranza +
+  // imputaciones + vinculo del mp_id, atomico. NO postea a Xubio.
+  // Piloto: solo 'dueno'. CONFLICTO nunca se confirma directo.
+  var _cbr = { mp:null, cliente:null, cliNom:'', docs:[], imput:{}, guardando:false, busq:[] };
+
+  function cbrPuede(){ return (typeof rolActual!=='undefined' && rolActual==='dueno'); }
+
+  function cbrAbrir(mpId) {
+    if (!cbrPuede()) { toast('Solo el dueño puede confirmar cobranzas', 'err'); return; }
+    var r = (_cbz.rows||[]).filter(function(x){ return x.medio==='mp' && String(x.ref)===String(mpId); })[0];
+    if (!r) { toast('No encontré el movimiento', 'err'); return; }
+    if (r.det && r.det.clasificacion === 'CONFLICTO') {
+      toast('Este pago requiere una decisión explícita. No se puede confirmar desde acá.', 'err'); return;
+    }
+    _cbr = { mp:r, cliente:(r.det&&r.det['clientes por doc']>1)?null:_cbrCli(r),
+             cliNom:r.cliente||'', docs:[], imput:{}, guardando:false, busq:[] };
+    _cbrPintar();
+    if (_cbr.cliente) cbrCargarDocs();
+  }
+  function _cbrCli(r){
+    // el cliente sugerido viene de la vista; si el doc es ambiguo, va NULL
+    var d=r.det||{}; return (d['clientes por doc']>1) ? null : (r._cli||null);
+  }
+
+  function cbrCerrar(){ var o=document.getElementById('cbr-ov'); if(o) o.remove(); }
+
+  async function cbrBuscarCliente() {
+    var q=((document.getElementById('cbr-q')||{}).value||'').trim();
+    if (q.length<2) { toast('Escribí al menos 2 letras','err'); return; }
+    try {
+      _cbr.busq = await sbFetch('clientes_xubio?or=(nombre.ilike.*'+encodeURIComponent(q)+
+        '*,cuit.ilike.*'+encodeURIComponent(q)+'*)&select=id,nombre,cuit&limit=20') || [];
+      _cbrPintar();
+    } catch(e){ toast('Error al buscar','err'); }
+  }
+  async function cbrElegirCliente(id, nom) {
+    _cbr.cliente = Number(id); _cbr.cliNom = nom; _cbr.busq = []; _cbr.imput = {};
+    await cbrCargarDocs();
+  }
+  async function cbrCargarDocs() {
+    try {
+      _cbr.docs = await sbFetch('vw_facturas_abiertas?cliente_xubio_id=eq.'+_cbr.cliente+
+        '&select=factura_numero,saldo_residual,factura_fecha,dias&order=factura_fecha.asc&limit=100') || [];
+      // precarga SOLO si la vista sugirió una factura inequívoca
+      var f=_cbr.mp.factura;
+      if (f && !Object.keys(_cbr.imput).length) {
+        var d=_cbr.docs.filter(function(x){ return x.factura_numero===f; })[0];
+        if (d) _cbr.imput[f] = Math.min(Number(_cbr.mp.monto), Number(d.saldo_residual));
+      }
+      _cbrPintar();
+    } catch(e){ toast('Error al cargar documentos','err'); }
+  }
+  function cbrToggleDoc(f, resid) {
+    if (_cbr.imput[f] !== undefined) { delete _cbr.imput[f]; }
+    else {
+      var falta = Number(_cbr.mp.monto) - _cbrSuma();
+      _cbr.imput[f] = Math.max(0, Math.min(falta, Number(resid)));
+      if (_cbr.imput[f] <= 0) { delete _cbr.imput[f]; toast('Ya está todo imputado','err'); }
+    }
+    _cbrPintar();
+  }
+  function cbrMonto(f, v) {
+    var n = Number(String(v).replace(/[^\d.-]/g,''));
+    if (!isFinite(n) || n<=0) delete _cbr.imput[f]; else _cbr.imput[f]=n;
+    _cbrPintar();
+  }
+  function _cbrSuma(){ return Object.keys(_cbr.imput).reduce(function(a,k){ return a+Number(_cbr.imput[k]||0); },0); }
+
+  function _cbrPintar() {
+    var m=_cbr.mp, sum=_cbrSuma(), tot=Number(m.monto), dif=Math.round((tot-sum)*100)/100;
+    var ok = _cbr.cliente && Object.keys(_cbr.imput).length>0 && sum>0 && sum<=tot+0.05;
+    var h='<div class="cbr-box">' +
+      '<div class="cbr-hd"><b>Confirmar cobranza</b>' +
+        '<button onclick="cbrCerrar()" class="cbr-x">&times;</button></div>' +
+      '<div class="cbr-mt">'+_cbzF(tot)+'<span>MP &middot; '+_cbzE(_cbzD(m.fecha))+'</span></div>' +
+      '<div class="cbr-ev">'+_cbzE(m.motivo)+'</div>';
+    // cliente
+    h += '<div class="cbr-sec">Cliente</div>';
+    if (_cbr.cliente) {
+      h += '<div class="cbr-cli"><b>'+_cbzE(_cbr.cliNom||'(sin nombre)')+'</b>' +
+           '<button onclick="_cbr.cliente=null;_cbr.docs=[];_cbr.imput={};_cbrPintar()" class="cbr-lnk">cambiar</button></div>';
+    } else {
+      h += '<div class="cbr-row"><input type="text" id="cbr-q" placeholder="Buscar por nombre o CUIT..." autocomplete="off">' +
+           '<button class="btn1" onclick="cbrBuscarCliente()">Buscar</button></div>';
+      _cbr.busq.forEach(function(c){
+        h += '<button class="cbr-op" onclick="cbrElegirCliente(\''+c.id+'\',\''+
+             _cbzE(String(c.nombre).replace(/'/g,"")) +'\')"><b>'+_cbzE(c.nombre)+'</b>' +
+             (c.cuit?'<span>'+_cbzE(c.cuit)+'</span>':'')+'</button>';
+      });
+    }
+    // documentos
+    if (_cbr.cliente) {
+      h += '<div class="cbr-sec">Facturas a imputar</div>';
+      if (!_cbr.docs.length) h += '<div class="cbr-vacio">Sin facturas abiertas.</div>';
+      _cbr.docs.forEach(function(d){
+        var on = _cbr.imput[d.factura_numero]!==undefined;
+        h += '<div class="cbr-doc'+(on?' on':'')+'">' +
+          '<label><input type="checkbox" '+(on?'checked':'')+' onchange="cbrToggleDoc(\''+
+            d.factura_numero+'\','+Number(d.saldo_residual)+')">' +
+          '<span><b>'+_cbzE(d.factura_numero)+'</b><i>'+_cbzF(d.saldo_residual)+
+          (d.dias!=null?' &middot; '+d.dias+'d':'')+'</i></span></label>' +
+          (on ? '<input class="cbr-imp" type="text" inputmode="decimal" value="'+
+                _cbr.imput[d.factura_numero]+'" onchange="cbrMonto(\''+d.factura_numero+'\',this.value)">' : '') +
+        '</div>';
+      });
+      // resumen
+      h += '<div class="cbr-res">' +
+        '<div><span>Cobranza</span><b>'+_cbzF(tot)+'</b></div>' +
+        '<div><span>Imputado</span><b>'+_cbzF(sum)+'</b></div>' +
+        '<div><span>Facturas</span><b>'+Object.keys(_cbr.imput).length+'</b></div>' +
+        '<div class="tot"><span>Diferencia</span><b class="'+
+          (Math.abs(dif)<0.05?'ok':(dif<0?'err':'warn'))+'">'+_cbzF(dif)+
+          (Math.abs(dif)<0.05?' — cierra exacto':(dif<0?' — excede':' — queda a cuenta'))+'</b></div></div>';
+      if (dif < -0.05) h += '<div class="cbr-alerta">No se puede imputar más que la cobranza.</div>';
+    }
+    h += '<button class="cbr-go" onclick="cbrConfirmar()"'+(ok&&!_cbr.guardando?'':' disabled')+'>' +
+         (_cbr.guardando?'Guardando…':'CONFIRMAR COBRANZA')+'</button>' +
+         '<div class="cbr-nota">Queda en estado <b>piloto</b>. No se postea a Xubio.</div></div>';
+    var ov=document.getElementById('cbr-ov');
+    if (!ov) { ov=document.createElement('div'); ov.id='cbr-ov'; ov.className='cbr-ov'; document.body.appendChild(ov); }
+    ov.innerHTML=h;
+  }
+
+  async function cbrConfirmar() {
+    if (_cbr.guardando) return;
+    var m=_cbr.mp, sum=_cbrSuma(), tot=Number(m.monto), dif=Math.round((tot-sum)*100)/100;
+    var fs=Object.keys(_cbr.imput), ms=fs.map(function(f){ return Number(_cbr.imput[f]); });
+    if (!_cbr.cliente || !fs.length) { toast('Falta cliente o factura','err'); return; }
+    if (sum > tot+0.05) { toast('Lo imputado supera la cobranza','err'); return; }
+    var res='Confirmar cobranza\n\n'+_cbr.cliNom+'\n'+_cbzF(tot)+' · MP '+m.ref+
+      '\n\n'+fs.map(function(f,i){ return '  '+f+'  '+_cbzF(ms[i]); }).join('\n')+
+      '\n\nImputado: '+_cbzF(sum)+(Math.abs(dif)<0.05?'  (cierra exacto)':'  Diferencia: '+_cbzF(dif))+
+      '\n\nNo se postea a Xubio.';
+    if (!confirm(res)) return;
+    _cbr.guardando=true; _cbrPintar();
+    try {
+      var out = await sbRpc('ctacte_registrar_cobranza_mp', {
+        p_mp_id: Number(m.ref), p_cliente: Number(_cbr.cliente),
+        p_facturas: fs, p_montos: ms,
+        p_por: (typeof usuarioActual!=='undefined' && usuarioActual) ? usuarioActual : 'admin'
+      });
+      _cbr.guardando=false;
+      var st = (out && (out.status || (out[0]&&out[0].status))) || '';
+      if (st==='CREADA' || st==='YA_EXISTIA') {
+        cbrCerrar(); toast(st==='CREADA'?'Cobranza registrada':'Ya estaba registrada','ok'); cbzCargar();
+      } else { toast('Respuesta inesperada','err'); console.error('[cbr]',out); }
+    } catch(e) {
+      _cbr.guardando=false; _cbrPintar();
+      console.error('[cbr] confirmar', e);
+      toast('No se pudo registrar: '+String(e&&e.message||e).slice(0,90),'err');
+    }
   }
 
 </script>
