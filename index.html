@@ -1,5 +1,48 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.184.0 — 03/09/2026
+     v13.184.0: RE-PORT de dos fixes que se habían quedado sin subir.
+
+     Los dos estaban escritos, validados y probados desde el 31/08 y el
+     01/09, pero nunca se pushearon; mientras tanto entró la v13.183.0 de
+     Braian. Se bajó producción, se re-aplicaron encima y se renumeró (los
+     números 13.180.0 y 13.181.0 quedaron pisados por el 13.183.0 y NO se
+     reusan). Verificado que el código de Braian no toca ninguna de las dos
+     zonas: los 4 hunks entraron limpios, el único choque fue el número de
+     versión.
+
+     ── (1) FIX SESIÓN ZOMBIE ────────────────────────────────────────────
+     "permission denied for view vw_fact_solo_xubio" en el Centro de
+     Facturación. Port de ventas v14.111.0 (13/07), que al admin nunca se le
+     hizo. CAUSA: tck_session_v3 (30 días) y tck_jwt_admin son
+     independientes. Cuando el token vence —o lo borra jwtLimpiar() tras un
+     401— la sesión sigue viva, recuperarSesion() re-loguea con login() (que
+     NO regenera el JWT) y todo sbFetch cae al fallback anon. Antes pasaba
+     desapercibido; desde que el blindaje del 28/08 revocó anon sobre las
+     vistas del facturador, el estado zombie se volvió visible.
+       · jwtVigente() decodifica el exp (margen 60 s).
+       · Sesión viva + token vencido → limpiarSesion() y pantalla de PIN, en
+         vez de restaurar en zombie.
+       · sbFetch: 401/403 SIN _JWT → "tu sesión venció, re-logueá con PIN"
+         (antes solo cubría el caso _JWT presente y rechazado).
+
+     ── (2) TRANSFERENCIAS: el limit=400 escondía el trabajo pendiente ────
+     El listado traía las 400 MÁS NUEVAS por fecha, sin mirar si estaban
+     resueltas. Como las recientes ya están casi todas conciliadas, lo que
+     quedaba afuera era justo lo que falta hacer. MEDIDO el 31/08 sobre las
+     1.608 transferencias: 86 pendientes → 19 visibles y 70 INVISIBLES por
+     $12.082.590 (la más vieja del 27/04); 475 conciliadas sin exportar →
+     471 invisibles; 4 en disputa → 3 invisibles. El badge del tab contaba
+     bien, así que la pantalla llegaba a decirle a Valentina "todo
+     conciliado" con 70 sin conciliar.
+     FIX: el corte pasa a ser por ESTADO DE TRABAJO en vez de por fecha.
+       · transfer_exportada_en IS NULL  → accionable, SIN límite (sbFetchAll)
+       · transfer_exportada_en NOT NULL → historia, las 400 más nuevas
+     Se agrega id.desc al orden para que la paginación por offset sea estable
+     el día que alguna de las dos consultas pase de 1.000 filas.
+     NO cambia lógica de conciliación, match, export ni disputa: solo QUÉ
+     FILAS LLEGAN a la pantalla.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.183.0 — 27/08/2026
      v13.183.0: C1 — CON LA CARGA CERRADA NO SE REGENERA LA PLANILLA.
      Cambio de UI, cero lógica, cero endpoints, cero Apps Script.
@@ -16694,6 +16737,22 @@ var _JWT = null;
 function jwtGuardar(t) { _JWT = t || null; try { if (t) localStorage.setItem(JWT_KEY, t); } catch(e) {} }
 function jwtLeer() { try { return localStorage.getItem(JWT_KEY) || null; } catch(e) { return null; } }
 function jwtLimpiar() { _JWT = null; try { localStorage.removeItem(JWT_KEY); } catch(e) {} }
+// v13.180.0 — ¿hay JWT y NO está vencido? Decodifica el payload (base64url) y
+// compara exp con margen de 60s. Port de ventas v14.111.0. Sin esto, un token
+// ausente/vencido convive con tck_session_v3 (30 dias, aparte) y el admin entra
+// en estado ZOMBIE: logueado pero cayendo a anon en cada lectura.
+function jwtVigente() {
+  if (!_JWT) return false;
+  try {
+    var p = _JWT.split('.')[1];
+    if (!p) return false;
+    p = p.replace(/-/g, '+').replace(/_/g, '/');
+    while (p.length % 4) p += '=';
+    var payload = JSON.parse(atob(p));
+    if (!payload || !payload.exp) return false;
+    return (payload.exp * 1000) > (Date.now() + 60000);
+  } catch(e) { return false; }
+}
 _JWT = jwtLeer();
 
 
@@ -17175,6 +17234,10 @@ async function sbFetch(path, options = {}) {
     resp = await fetch(url, { ...options, headers });
     if (resp.status === 401 || resp.status === 403) _sbAvisarSesionVencida();
   }
+  // v13.180.0 — 401/403 SIN _JWT = sesion zombie (token vencido/borrado). Antes
+  // el usuario veia el error crudo de Supabase ("permission denied for view
+  // vw_fact_solo_xubio") y no habia forma de saber que faltaba re-loguear.
+  if ((resp.status === 401 || resp.status === 403) && !_JWT) _sbAvisarSesionVencida();
   if (!resp.ok) {
     const err = await resp.text();
     throw new Error('Supabase error: ' + resp.status + ' ' + err);
@@ -19212,10 +19275,20 @@ var _modoCampo = new URLSearchParams(window.location.search).get('modo') === 'ca
 (function() {
   var sesion = recuperarSesion();
   if (sesion && sesion.vendedor && USUARIOS_ADMIN.indexOf(sesion.vendedor) !== -1) {
-    login(sesion.vendedor, sesion.rol, sesion.tabs_extra);
-    // Si viene con ?modo=campo, ir directo al tab Visitas
-    if (_modoCampo) {
-      setTimeout(function() { cambiarTab('gps'); }, 300);
+    // v13.180.0 — sesion viva pero SIN JWT valido (vencido a los 30 dias, o
+    // borrado por un 401 anterior): NO restaurar. Con el blindaje del 28/08 el
+    // fallback a anon ya no lee nada operativo, asi que restaurar equivale a
+    // dejar el panel roto sin decir por que. Cerrar y pedir PIN, que es lo unico
+    // que renueva el token.
+    if (!jwtVigente()) {
+      limpiarSesion();
+      try { toast('🔒 Iniciá sesión con tu PIN para continuar.', 'err'); } catch(e) {}
+    } else {
+      login(sesion.vendedor, sesion.rol, sesion.tabs_extra);
+      // Si viene con ?modo=campo, ir directo al tab Visitas
+      if (_modoCampo) {
+        setTimeout(function() { cambiarTab('gps'); }, 300);
+      }
     }
   }
 })();
@@ -36158,8 +36231,29 @@ async function renderLogisticaTransferencias(el) {
   el.innerHTML = '<div class="planilla-empty"><div class="loading-spinner" style="margin:0 auto 12px;"></div>Cargando transferencias...</div>';
   try {
     var SEL = 'id,cliente,comercio,ciudad,monto,forma_cobro,detalle_cobro,comprobante_transfer,transfer_conciliada,transfer_conciliada_en,transfer_exportada_en,transfer_disputa,transfer_disputa_en,transfer_ocr,chofer,fecha_entrega,pedido_id,transfer_descartado,transfer_descartado_motivo,transfer_descartado_ref,transfer_descartado_por,transfer_descartado_en';
-    var q1 = await sbFetch('entregas?forma_cobro=eq.transferencia&estado=eq.entregado&order=fecha_entrega.desc&select=' + SEL + '&limit=400') || [];
-    var q2 = await sbFetch('entregas?comprobante_transfer=not.is.null&estado=eq.entregado&order=fecha_entrega.desc&select=' + SEL + '&limit=400') || [];
+    // v13.181.0 — el limit=400 escondía trabajo pendiente.
+    // Traía las 400 entregas MÁS NUEVAS ordenadas por fecha, sin mirar si
+    // estaban resueltas. Como las recientes ya están casi todas conciliadas, lo
+    // que quedaba afuera era justo lo que falta hacer. Medido el 31/08 sobre las
+    // 1.608 transferencias de la tabla:
+    //   · 86 pendientes            → 19 visibles, 70 INVISIBLES por $12.082.590
+    //                                (la más vieja del 27/04, en la posición 1.608)
+    //   · 475 conciliadas sin exportar a Xubio → 471 invisibles
+    //   · 4 en disputa             → 3 invisibles
+    // El badge del tab contaba bien (count=exact), así que la pantalla llegaba a
+    // decir "todo conciliado" con 70 sin conciliar.
+    //
+    // El corte pasa a ser por ESTADO DE TRABAJO en vez de por fecha:
+    //   · transfer_exportada_en null      → accionable, SIN límite (568 y 222)
+    //   · transfer_exportada_en no null   → historia, las 400 más nuevas
+    // El id.desc hace el orden total, para que la paginación de sbFetchAll sea
+    // estable el día que alguna de las dos pase de 1.000 filas.
+    var q1a = await sbFetchAll('entregas?forma_cobro=eq.transferencia&estado=eq.entregado&transfer_exportada_en=is.null&order=fecha_entrega.desc,id.desc&select=' + SEL) || [];
+    var q1b = await sbFetch('entregas?forma_cobro=eq.transferencia&estado=eq.entregado&transfer_exportada_en=not.is.null&order=fecha_entrega.desc&select=' + SEL + '&limit=400') || [];
+    var q2a = await sbFetchAll('entregas?comprobante_transfer=not.is.null&estado=eq.entregado&transfer_exportada_en=is.null&order=fecha_entrega.desc,id.desc&select=' + SEL) || [];
+    var q2b = await sbFetch('entregas?comprobante_transfer=not.is.null&estado=eq.entregado&transfer_exportada_en=not.is.null&order=fecha_entrega.desc&select=' + SEL + '&limit=400') || [];
+    var q1 = q1a.concat(q1b);
+    var q2 = q2a.concat(q2b);
     var _map = {};
     q1.concat(q2).forEach(function(e) { if (e && e.id) _map[e.id] = e; });
     var rows = Object.keys(_map).map(function(k) { return _map[k]; });
@@ -47187,7 +47281,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.183.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.184.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
