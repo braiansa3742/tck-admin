@@ -1,5 +1,28 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.185.0 — 04/09/2026
+     v13.185.0: TRANSFERENCIAS — CERRAR LAS QUE NO VAN A CONCILIAR, EN UN PASO.
+     Pedido de Valentina (04/09): "algunas por cercanía coinciden pero las
+     pagaron en efectivo y no sé cómo sacarlas de los pendientes" / "tengo
+     transferencias que no van a aparecer porque fueron notas de crédito o
+     terminó pagando en efectivo y tampoco sé cómo cerrar esa cobranza".
+
+     La herramienta existía: "🚫 No corresponde cobrar" (v13.1xx) con motivo
+     y referencia. Pero vivía SOLO dentro de la tarjeta de DISPUTA: para
+     usarla había que tocar antes "⚠️ No acreditó", y eso no está escrito
+     en ningún lado. Y no había motivo para "pagó en efectivo": había que
+     poner "Otro".
+
+     (1) El botón "No corresponde cobrar" aparece también en la tarjeta
+         PENDIENTE, al lado de "No acreditó". Misma función, un paso menos.
+     (2) Motivos nuevos: "Pago en efectivo (no por transferencia)" y
+         "Anterior a la app (sin comprobante ni factura)". Este último es
+         para las 61 transferencias de ABRIL ($10,79 M) que la 13.184.0
+         destapó: no tienen comprobante, no tienen factura en el sistema y
+         mp_movimientos arranca el 07/06 — no hay contra qué conciliarlas.
+     NO cambia conciliación, match, export ni disputa: solo dónde está el
+     botón y qué motivos ofrece.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.184.0 — 03/09/2026
      v13.184.0: RE-PORT de dos fixes que se habían quedado sin subir.
 
@@ -36660,6 +36683,12 @@ function _ltPintar() {
     }
     s += '<button onclick="transferAjustarMonto(\'' + e.id + '\')" style="flex:1;min-width:120px;padding:9px;background:#fff;color:#283593;border:1.5px solid #283593;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;' + (montoDelta ? 'box-shadow:0 0 0 2px #C5CAE9;' : '') + '">✎ Ajustar monto</button>';
     s += '<button onclick="transferDisputar(\'' + e.id + '\')" style="flex:1;min-width:120px;padding:9px;background:#fff;color:#E65100;border:1.5px solid #E65100;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">⚠️ No acreditó</button>';
+    // v13.185.0 — el descarte también desde PENDIENTE. Hasta hoy "No
+    // corresponde cobrar" vivía solo dentro de la tarjeta de disputa: para
+    // cerrar una transferencia que se pagó en efectivo o fue NC había que
+    // pasar primero por "No acreditó", y nadie lo sabía (Valentina, 04/09:
+    // "no sé cómo sacarla de los pendientes"). Misma función, un paso menos.
+    s += '<button onclick="ltDescartarAbrir(\'' + e.id + '\')" style="flex:1;min-width:120px;padding:9px;border-radius:9px;border:1.5px solid #C62828;background:#fff;color:#C62828;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer">&#128683; No corresponde cobrar</button>';
     s += '</div></div>';
     return s;
   }
@@ -37055,6 +37084,11 @@ async function _transferDisputarGuardar(id, motivo) {
   // tocar transfer_conciliada.
   var LT_DESCARTE_MOTIVOS = [
     { k:'nota_credito', label:'Nota de credito', pideRef:true,  ph:'N de NC (ej: B-00008-00000224)' },
+    // v13.185.0 — pedido de Valentina (04/09): "terminó pagando en efectivo y
+    // no sé cómo cerrar esa cobranza". Antes había que usar "Otro". Cierra la
+    // TRANSFERENCIA que no va a acreditar; el efectivo se cobra por su circuito.
+    { k:'pago_efectivo', label:'Pago en efectivo (no por transferencia)', pideRef:false, ph:'Fecha / quien cobro (opcional)' },
+    { k:'pre_app',       label:'Anterior a la app (sin comprobante ni factura)', pideRef:false, ph:'Observacion (opcional)' },
     { k:'sin_factura',  label:'Sin factura',     pideRef:false, ph:'Observacion (opcional)' },
     { k:'incobrable',   label:'Incobrable',      pideRef:false, ph:'Observacion (opcional)' },
     { k:'error_carga',  label:'Error de carga',  pideRef:false, ph:'Observacion (opcional)' },
@@ -47281,7 +47315,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.184.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.185.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
