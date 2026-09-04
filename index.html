@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.190.0 — 04/09/2026
-     v13.190.0: TRANSFERENCIAS — CERRAR LAS QUE NO VAN A CONCILIAR, EN UN PASO.
+     TCK ADMIN — v13.191.0 — 04/09/2026
+     v13.191.0: TRANSFERENCIAS — CERRAR LAS QUE NO VAN A CONCILIAR, EN UN PASO.
      Pedido de Valentina (04/09): "algunas por cercanía coinciden pero las
      pagaron en efectivo y no sé cómo sacarlas de los pendientes" / "tengo
      transferencias que no van a aparecer porque fueron notas de crédito o
@@ -17884,7 +17884,8 @@ function admRendChequearDif(idx, esperado) {
 }
 
 // Confirmar un pedido individual
-async function admRendConfirmarUno(idx, esperado) {
+function admRendConfirmarUno(){ if (_contBloq('confirmar rendiciones')) return; return _admRendConfirmarUno.apply(this, arguments); }
+async function _admRendConfirmarUno(idx, esperado) {
   var entrega = _admRendActivaEntregas[idx];
   if (!entrega) return;
   var input = document.getElementById('rec-' + idx);
@@ -17998,7 +17999,8 @@ function admRendChequearDifTodo(esperadoEf, esperadoCh) {
 }
 
 // Confirmar todos los pendientes de una
-async function admRendConfirmarTodoJunto() {
+function admRendConfirmarTodoJunto(){ if (_contBloq('confirmar rendiciones')) return; return _admRendConfirmarTodoJunto.apply(this, arguments); }
+async function _admRendConfirmarTodoJunto() {
   if (!_admRendActiva) return;
   var pendientes = _admRendActivaEntregas.filter(function(e) {
     return !e.rendicion_estado || e.rendicion_estado === 'pendiente_confirmacion';
@@ -18092,7 +18094,8 @@ async function admRendConfirmarTodoJunto() {
 }
 
 // ── Cerrar rendición si todas las entregas están confirmadas ──
-async function admRendChequearCierre() {
+function admRendChequearCierre(){ if (_contBloq('cerrar rendiciones')) return; return _admRendChequearCierre.apply(this, arguments); }
+async function _admRendChequearCierre() {
   if (!_admRendActiva) return;
   var sinConfirmar = _admRendActivaEntregas.filter(function(e) {
     return !e.rendicion_estado || e.rendicion_estado === 'pendiente_confirmacion';
@@ -18411,7 +18414,8 @@ function rvIncluirTodasSM(){
   rvRenderPanel();
 }
 
-async function rvCerrar(){
+function rvCerrar(){ if (_contBloq('cerrar rendiciones')) return; return _rvCerrar.apply(this, arguments); }
+async function _rvCerrar(){
   if(_rvCerrando||!_rvSel) return;
   if(_rvSel._devPend>0){ alert('No se puede rendir: hay devoluciones de este viaje sin recibir en depósito (Pancho).'); return; }
   var efeEsp=_rvSumInc('efectivo'), contado=(_rvEfeContado===null)?efeEsp:_rvEfeContado;
@@ -18810,7 +18814,8 @@ function _pcanonSugerencias(nombreCrudo) {
 }
 
 // Resolver: asignar grafía cruda como alias del canónico.
-async function pcanonResolver(idPendiente, nombreCanonico, nombreCrudo) {
+function pcanonResolver(){ if (_contBloq('canonizar productos')) return; return _pcanonResolver.apply(this, arguments); }
+async function _pcanonResolver(idPendiente, nombreCanonico, nombreCrudo) {
   if (!confirm('Agregar "' + nombreCrudo + '" como alias de "' + nombreCanonico + '"?')) return;
   try {
     // 1. Leer aliases actuales del canónico
@@ -18867,7 +18872,8 @@ function pcanonResolverManual(idPendiente, nombreCrudo) {
 }
 
 // Marcar como ignorado: resuelto=true, resuelto_a=null
-async function pcanonIgnorar(idPendiente) {
+function pcanonIgnorar(){ if (_contBloq('ignorar productos')) return; return _pcanonIgnorar.apply(this, arguments); }
+async function _pcanonIgnorar(idPendiente) {
   if (!confirm('Ignorar esta grafía sin asignar a ningún canónico?')) return;
   try {
     await fetch(SUPABASE_URL + '/rest/v1/productos_sin_canonizar?id=eq.' + idPendiente, {
@@ -19099,7 +19105,8 @@ function ccanonRender() {
 }
 
 // Resolver: asignar grafía cruda como alias de la ciudad de rutas.
-async function ccanonResolver(idPendiente, nombreCiudad, nombreCrudo) {
+function ccanonResolver(){ if (_contBloq('canonizar clientes')) return; return _ccanonResolver.apply(this, arguments); }
+async function _ccanonResolver(idPendiente, nombreCiudad, nombreCrudo) {
   if (!confirm('Agregar "' + nombreCrudo + '" como alias de "' + nombreCiudad + '"?')) return;
   try {
     // 1. Leer aliases actuales de la ciudad
@@ -19165,7 +19172,8 @@ function ccanonResolverManual(idPendiente, nombreCrudo) {
 }
 
 // Marcar como ignorado: resuelto=true, resuelto_a=null, resuelto_accion='ignorado'
-async function ccanonIgnorar(idPendiente) {
+function ccanonIgnorar(){ if (_contBloq('ignorar clientes')) return; return _ccanonIgnorar.apply(this, arguments); }
+async function _ccanonIgnorar(idPendiente) {
   if (!confirm('Ignorar esta grafía sin asignar a ninguna ciudad?\n\nÚsalo cuando es una ciudad donde NO entregamos (Lincoln, Olavarría, Bragado, etc.).')) return;
   try {
     await fetch(SUPABASE_URL + '/rest/v1/ciudades_sin_canonizar?id=eq.' + idPendiente, {
@@ -19243,7 +19251,7 @@ const ROL_TABS = {
   operaciones: 'ALL',
   admin:       'ALL',
   cobranzas:   ['pedidos','logistica','clientes','facturacion','cc','tesoreria','rendiciones','acc-dup','buffet','ccprod','pulso','foodconcil'],
-  // v13.190.0 — Contadores (Gaston + Ricardo): VER TODO, MODIFICAR NADA.
+  // v13.191.0 — Contadores (Gaston + Ricardo): VER TODO, MODIFICAR NADA.
   // 'ALL' a proposito: enumerando tabs, uno nuevo quedaria invisible sin que
   // nadie se entere. El control esta en esContador(), no en la lista.
   contador:    'ALL',
@@ -19270,9 +19278,13 @@ function puedeVer(tab) {
 
 // Cobranzas no ve costos ni márgenes (cards de pedidos, panel Acuerdos VIP)
 function esCobranzas() { return rolActual === 'cobranzas'; }
-// v13.190.0 — rol de auditoria. El guard va DENTRO de cada handler, no solo
+// v13.191.0 — rol de auditoria. El guard va DENTRO de cada handler, no solo
 // ocultando botones: desde la consola se los llama igual.
 function esContador() { return (typeof rolActual !== 'undefined' && rolActual === 'contador'); }
+// v13.191.0 — marca en el body para que el CSS apague las acciones
+function _contAplicarClase() {
+  try { document.body.classList.toggle('rol-contador', esContador()); } catch (e) {}
+}
 function _contBloq(que) {
   if (esContador()) {
     try { toast('Usuario de auditoria: solo lectura. No podes ' + (que || 'ejecutar esta accion') + '.', 'err'); }
@@ -20948,7 +20960,8 @@ function _dupConsolidarPedidos(detalles) {
   };
 }
 
-async function dupUnirPedidos() {
+function dupUnirPedidos(){ if (_contBloq('unir pedidos')) return; return _dupUnirPedidos.apply(this, arguments); }
+async function _dupUnirPedidos() {
   // ═══ v13.167.0 — FIX 2: GUARD DE REENTRADA + IDEMPOTENCIA ═══════════
   // Esta funcion es ACUMULATIVA (suma totales y fusiona lineas). Correrla
   // dos veces sobre el mismo grupo duplica los productos del pedido
@@ -21950,7 +21963,8 @@ function _guardarRemito(pedidoId) {
   } catch(e) {}
 }
 
-function guardarTelCliente(pedidoId) {
+function guardarTelCliente(){ if (_contBloq('editar clientes')) return; return _guardarTelCliente.apply(this, arguments); }
+function _guardarTelCliente(pedidoId) {
   var id  = pedidoId.replace(/[^a-zA-Z0-9]/g,'-');
   var el  = document.getElementById('tel-'+id);
   if (!el) return;
@@ -21975,7 +21989,8 @@ function guardarTelCliente(pedidoId) {
   } catch(e) {}
 }
 
-function guardarNota(pedidoId) {
+function guardarNota(){ if (_contBloq('guardar notas')) return; return _guardarNota.apply(this, arguments); }
+function _guardarNota(pedidoId) {
   var id = pedidoId.replace(/[^a-zA-Z0-9]/g,'-');
   var el = document.getElementById('nota-'+id);
   if (!el) return;
@@ -22221,7 +22236,8 @@ function rechazarPedidoConDescuento(pedidoId, fila, event) {
   setTimeout(function(){ var el=document.getElementById('rechazo-motivo'); if(el) el.focus(); }, 100);
 }
 
-async function confirmarRechazoDescuento(pedidoId, fila) {
+function confirmarRechazoDescuento(){ if (_contBloq('rechazar descuentos')) return; return _confirmarRechazoDescuento.apply(this, arguments); }
+async function _confirmarRechazoDescuento(pedidoId, fila) {
   var motivo = (document.getElementById('rechazo-motivo')?.value||'').trim();
   if (!motivo) { document.getElementById('rechazo-err').textContent = 'Escribí el motivo'; return; }
   document.querySelector('div[style*="z-index:600"]')?.remove();
@@ -22755,7 +22771,8 @@ async function _fcMotivosRender(){
   }catch(e){ wrap.innerHTML='<div style="color:var(--red);font-size:12px">Error al cargar motivos: '+_fcEsc(e.message||e)+'</div>'; }
 }
 
-async function fconcilMotivoGuardar(){
+function fconcilMotivoGuardar(){ if (_contBloq('guardar motivos')) return; return _fconcilMotivoGuardar.apply(this, arguments); }
+async function _fconcilMotivoGuardar(){
   var ctx=_fcDetCtx; if(!ctx) return;
   var sel=document.getElementById('fc-mot-sel');
   var nota=document.getElementById('fc-mot-nota');
@@ -22827,7 +22844,8 @@ async function _fcArqRender(){
   }catch(e){ wrap.innerHTML='<div style="color:var(--red);font-size:12px">Error al cargar arqueo: '+_fcEsc(e.message||e)+'</div>'; }
 }
 
-async function fconcilArqueoGuardar(){
+function fconcilArqueoGuardar(){ if (_contBloq('guardar arqueos')) return; return _fconcilArqueoGuardar.apply(this, arguments); }
+async function _fconcilArqueoGuardar(){
   var ctx=_fcDetCtx; if(!ctx) return;
   var inp=document.getElementById('fc-arq-monto');
   var nota=document.getElementById('fc-arq-nota');
@@ -23048,7 +23066,8 @@ async function _fcmpMotRender(){
   }catch(e){ wrap.innerHTML='<div style="color:var(--red);font-size:12px">Error: '+_fcEsc(e.message||e)+'</div>'; }
 }
 
-async function fcmpMotivoGuardar(){
+function fcmpMotivoGuardar(){ if (_contBloq('guardar motivos')) return; return _fcmpMotivoGuardar.apply(this, arguments); }
+async function _fcmpMotivoGuardar(){
   var ctx=_fcmpDetCtx; if(!ctx) return;
   var sel=document.getElementById('fcmp-mot-sel'), nota=document.getElementById('fcmp-mot-nota'), btn=document.getElementById('fcmp-mot-btn');
   if(!sel) return;
@@ -23446,7 +23465,8 @@ function cmRenderCartera() {
   }).join('');
 }
 
-async function comVerificar(idCliente, ok) {
+function comVerificar(){ if (_contBloq('verificar comisiones')) return; return _comVerificar.apply(this, arguments); }
+async function _comVerificar(idCliente, ok) {
   var card = document.getElementById('cm-c-' + idCliente);
   var btns = card ? card.querySelectorAll('button') : [];
   for (var i = 0; i < btns.length; i++) btns[i].disabled = true;
@@ -23705,6 +23725,7 @@ function cambiarTab(tab) {
   // v12.20.0 — Tesorería: cargar al abrir
   if (tab === 'ctacte') { if (typeof ccxInit === 'function') ccxInit(); }
   if (tab === 'mpconc') { if (typeof mpcInit === 'function') mpcInit(); }
+  if (typeof _contAplicarClase === 'function') _contAplicarClase();
   if (tab === 'cobranzas') { if (typeof cbzInit === 'function') cbzInit(); }
   // v13.183.0 — abrir siempre desde arriba
   if (tab === 'cobranzas' || tab === 'mpconc' || tab === 'ctacte') {
@@ -25780,7 +25801,8 @@ function canalesReaCerrarPicker() {
   CANAL_REA_CANAL_NUEVO = null;
 }
 
-async function canalesReaConfirmar() {
+function canalesReaConfirmar(){ if (_contBloq('confirmar reasignaciones')) return; return _canalesReaConfirmar.apply(this, arguments); }
+async function _canalesReaConfirmar() {
   if (!CANAL_REA_CLIENTE_SEL || !CANAL_REA_CANAL_NUEVO) return;
   var c = CANAL_REA_CLIENTE_SEL;
   var canal = CANAL_REA_CANAL_NUEVO;
@@ -25834,7 +25856,8 @@ async function canalesReaConfirmar() {
   }
 }
 
-async function canalesReaQuitar() {
+function canalesReaQuitar(){ if (_contBloq('quitar reasignaciones')) return; return _canalesReaQuitar.apply(this, arguments); }
+async function _canalesReaQuitar() {
   if (!CANAL_REA_CLIENTE_SEL) return;
   if (!confirm('¿Seguro que querés quitar el canal de este cliente?\n\nEl cliente vuelve a estado "Sin clasificar".')) return;
 
@@ -28272,7 +28295,8 @@ function gpsCheckinManual() {
 }
 
 // Confirmar check-in
-async function gpsConfirmarCheckin(nombreCliente) {
+function gpsConfirmarCheckin(){ if (_contBloq('confirmar check-in')) return; return _gpsConfirmarCheckin.apply(this, arguments); }
+async function _gpsConfirmarCheckin(nombreCliente) {
   var modal = document.getElementById('gps-modal-checkin');
   if (modal) modal.remove();
 
@@ -28308,7 +28332,8 @@ async function gpsConfirmarCheckin(nombreCliente) {
 }
 
 // Guardar ubicación permanente del cliente (solo si no tiene una ya)
-async function gpsGuardarUbicacionCliente(nombreCliente, coords, vendedorId) {
+function gpsGuardarUbicacionCliente(){ if (_contBloq('cambiar ubicaciones')) return; return _gpsGuardarUbicacionCliente.apply(this, arguments); }
+async function _gpsGuardarUbicacionCliente(nombreCliente, coords, vendedorId) {
   try {
     // Buscar si el cliente ya existe en la tabla clientes
     var existing = await sbFetch('clientes?nombre=eq.' + encodeURIComponent(nombreCliente) + '&select=id,lat,lng');
@@ -28340,7 +28365,8 @@ async function gpsGuardarUbicacionCliente(nombreCliente, coords, vendedorId) {
 }
 
 // Check-out
-async function gpsCheckout() {
+function gpsCheckout(){ if (_contBloq('hacer check-out')) return; return _gpsCheckout.apply(this, arguments); }
+async function _gpsCheckout() {
   if (!_gpsCheckinActivo) return;
   var coords = await gpsGetCoords();
   var vendedorId = await gpsObtenerVendedorId();
@@ -28392,7 +28418,8 @@ function gpsCheckoutConMotivo() {
   document.body.appendChild(modal);
 }
 
-async function gpsCheckoutFinal(motivo) {
+function gpsCheckoutFinal(){ if (_contBloq('hacer check-out')) return; return _gpsCheckoutFinal.apply(this, arguments); }
+async function _gpsCheckoutFinal(motivo) {
   var modal = document.getElementById('gps-modal-checkout');
   if (modal) modal.remove();
   var cliente = _gpsCheckinActivo ? _gpsCheckinActivo.nombre_cliente : '';
@@ -28449,7 +28476,8 @@ function gpsVisitaSinPedido() {
 }
 
 // Guardar visita sin pedido
-async function gpsGuardarVisita(motivo) {
+function gpsGuardarVisita(){ if (_contBloq('guardar visitas')) return; return _gpsGuardarVisita.apply(this, arguments); }
+async function _gpsGuardarVisita(motivo) {
   var modal = document.getElementById('gps-modal-visita');
   var inp = document.getElementById('gps-input-visita');
   var nombreCliente = inp ? inp.value.trim() : '';
@@ -29652,7 +29680,8 @@ async function objetivosCargar() {
   } catch(e) { console.error('Error objetivos:', e); }
 }
 
-async function objetivoGuardar(vendedorNombre, tipo, valor) {
+function objetivoGuardar(){ if (_contBloq('guardar objetivos')) return; return _objetivoGuardar.apply(this, arguments); }
+async function _objetivoGuardar(vendedorNombre, tipo, valor) {
   try {
     // Buscar vendedor ID
     var vData = await sbFetch('vendedores?nombre=eq.' + encodeURIComponent(vendedorNombre) + '&select=id');
@@ -30336,7 +30365,8 @@ async function tomadorConfirmar() {
   return; // Stop here - actual confirmation happens in tomadorConfirmarFinal
 }
 
-async function tomadorConfirmarFinal() {
+function tomadorConfirmarFinal(){ if (_contBloq('confirmar')) return; return _tomadorConfirmarFinal.apply(this, arguments); }
+async function _tomadorConfirmarFinal() {
   var modal = document.getElementById('tomador-resumen-modal');
   if (modal) modal.remove();
 
@@ -32136,7 +32166,8 @@ function viajeEspValidarFecha() {
 /**
  * Envía a Apps Script `viajeCrearEspecial`.
  */
-async function viajeEspAdminConfirmar() {
+function viajeEspAdminConfirmar(){ if (_contBloq('confirmar viajes especiales')) return; return _viajeEspAdminConfirmar.apply(this, arguments); }
+async function _viajeEspAdminConfirmar() {
   const zona = document.getElementById('viaje-esp-zona').value;
   const fecha = document.getElementById('viaje-esp-fecha').value;
   const motivo = (document.getElementById('viaje-esp-motivo').value || '').trim();
@@ -32194,7 +32225,8 @@ async function viajeEspAdminConfirmar() {
  * Elimina un viaje especial vacío. Solo se llama desde el detalle del viaje.
  * El Apps Script valida que esté en estado 'planificado' y tenga 0 pedidos.
  */
-async function viajeEspAdminEliminar(viajeId) {
+function viajeEspAdminEliminar(){ if (_contBloq('eliminar viajes especiales')) return; return _viajeEspAdminEliminar.apply(this, arguments); }
+async function _viajeEspAdminEliminar(viajeId) {
   if (!viajeId) return;
   if (!confirm('¿Eliminar este viaje especial?\n\n' +
                'Solo se puede eliminar si está vacío (0 pedidos) y en estado planificado.\n\n' +
@@ -32631,7 +32663,8 @@ function _mvpPintar(d) {
     '</div></div>';
 }
 
-async function mvpConfirmar(pedidoId, viajeDestino) {
+function mvpConfirmar(){ if (_contBloq('confirmar')) return; return _mvpConfirmar.apply(this, arguments); }
+async function _mvpConfirmar(pedidoId, viajeDestino) {
   const motivo = (document.getElementById('mvp-motivo') || {}).value || '';
   try {
     const url = APPS_SCRIPT_URL + '?accion=viajeMoverPedido' +
@@ -32659,7 +32692,8 @@ function lzMarcarConfigCambiada() {
 // ───────────────────────────────────────────────────────────────
 // GUARDAR CONFIGURACIÓN (chofer + vehículo) → Apps Script
 // ───────────────────────────────────────────────────────────────
-async function lzGuardarConfigViaje() {
+function lzGuardarConfigViaje(){ if (_contBloq('cambiar la configuracion del viaje')) return; return _lzGuardarConfigViaje.apply(this, arguments); }
+async function _lzGuardarConfigViaje() {
   const chofer = document.getElementById('v-chofer-sel').value;
   const vehiculo = document.getElementById('v-vehiculo-sel').value;
   if (!chofer || !vehiculo) {
@@ -32736,7 +32770,8 @@ function lzCerrarViajeBtn() {
   lzEjecutarCerrarViaje();
 }
 
-async function lzEjecutarCerrarViaje() {
+function lzEjecutarCerrarViaje(){ if (_contBloq('cerrar viajes')) return; return _lzEjecutarCerrarViaje.apply(this, arguments); }
+async function _lzEjecutarCerrarViaje() {
   const v = _vDetalleData;
 
   try {
@@ -32843,7 +32878,8 @@ function lzAbrirReagendar() {
   lzEjecutarReagendar(nuevaFecha, motivo || '');
 }
 
-async function lzEjecutarReagendar(nuevaFecha, motivo) {
+function lzEjecutarReagendar(){ if (_contBloq('reagendar')) return; return _lzEjecutarReagendar.apply(this, arguments); }
+async function _lzEjecutarReagendar(nuevaFecha, motivo) {
   try {
     const url = APPS_SCRIPT_URL +
       '?accion=viajeReagendar' +
@@ -32873,7 +32909,8 @@ async function lzEjecutarReagendar(nuevaFecha, motivo) {
 // ───────────────────────────────────────────────────────────────
 // CONFIRMAR RENDICIÓN (cuando viaje está en estado rindiendo)
 // ───────────────────────────────────────────────────────────────
-async function lzConfirmarRendicionViaje() {
+function lzConfirmarRendicionViaje(){ if (_contBloq('confirmar rendiciones')) return; return _lzConfirmarRendicionViaje.apply(this, arguments); }
+async function _lzConfirmarRendicionViaje() {
   if (!confirm('¿Confirmar rendición del chofer?\n\n' +
                'Esto marca el viaje como cerrado definitivamente.')) return;
 
@@ -33168,7 +33205,8 @@ function xecActualizarBoton(){
   btn.textContent = '✅ Adoptar seleccionadas (' + chks.length + ')';
 }
 
-async function xecAdoptar(){
+function xecAdoptar(){ if (_contBloq('adoptar')) return; return _xecAdoptar.apply(this, arguments); }
+async function _xecAdoptar(){
   var chks = Array.prototype.slice.call(document.querySelectorAll('.fc-xec-chk:checked'));
   if (!chks.length) return;
   var items = chks.map(function(c){ return { pedido_id: c.dataset.pedido, numero: c.dataset.numero }; });
@@ -34080,7 +34118,8 @@ function lzRenderPedidoNoEnt(e) {
   return html;
 }
 
-async function lzNoEntAccion(entregaId, accion) {
+function lzNoEntAccion(){ if (_contBloq('resolver no entregas')) return; return _lzNoEntAccion.apply(this, arguments); }
+async function _lzNoEntAccion(entregaId, accion) {
   // FIX N42 (07/05/2026): nuevo modelo de acciones del admin
   //   'resuelto'  → admin terminó de procesarlo (nota de crédito en Xubio,
   //                 llamó al cliente, etc.). Marca como 'resuelto_admin'.
@@ -34200,7 +34239,8 @@ function lzSzSeleccionar(pid) {
   }, 50);
 }
 
-async function lzSzAsignarCiudad(ciudad) {
+function lzSzAsignarCiudad(){ if (_contBloq('asignar ciudades')) return; return _lzSzAsignarCiudad.apply(this, arguments); }
+async function _lzSzAsignarCiudad(ciudad) {
   if (!_lzSzPedidoSel) { toast('Primero seleccioná un pedido', 'err'); return; }
   const pid = _lzSzPedidoSel;
 
@@ -34260,7 +34300,8 @@ async function lzSzAsignarCiudad(ciudad) {
   }
 }
 
-async function lzSzCancelar(pid) {
+function lzSzCancelar(){ if (_contBloq('cancelar')) return; return _lzSzCancelar.apply(this, arguments); }
+async function _lzSzCancelar(pid) {
   if (!confirm('¿Cancelar este pedido?')) return;
   try {
     await sbFetch('pedidos_zona?pedido_id=eq.' + encodeURIComponent(pid), {
@@ -34381,7 +34422,8 @@ async function lzSvSeleccionar(pid) {
   setTimeout(() => { const w = document.getElementById('lz-sv-grid-wrap'); if (w) w.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, 50);
 }
 
-async function lzSvAsignar(viajeId) {
+function lzSvAsignar(){ if (_contBloq('asignar')) return; return _lzSvAsignar.apply(this, arguments); }
+async function _lzSvAsignar(viajeId) {
   if (!_lzSvPedidoSel) { toast('Primero seleccioná un pedido', 'err'); return; }
   const pid = _lzSvPedidoSel;
   try {
@@ -34492,7 +34534,8 @@ function desasignarChoferBtn(btn, event) {
   desasignarChofer(btn.getAttribute('data-pid'), event);
 }
 
-async function asignarChofer(pedidoId, chofer, event) {
+function asignarChofer(){ if (_contBloq('asignar chofer')) return; return _asignarChofer.apply(this, arguments); }
+async function _asignarChofer(pedidoId, chofer, event) {
   if (event) event.stopPropagation();
   const p = todosLosPedidos.find(x => x.pedidoId === pedidoId);
   if (!p) return;
@@ -34528,7 +34571,8 @@ async function asignarChofer(pedidoId, chofer, event) {
   if (_tabActual === 'logistica') renderLogistica();
 }
 
-async function desasignarChofer(pedidoId, event) {
+function desasignarChofer(){ if (_contBloq('desasignar chofer')) return; return _desasignarChofer.apply(this, arguments); }
+async function _desasignarChofer(pedidoId, event) {
   if (event) event.stopPropagation();
   if (!confirm('¿Desasignar el chofer de este pedido?')) return;
   delete _asignaciones[pedidoId];
@@ -36121,7 +36165,8 @@ function _fotosEntregaRender(rows) {
 }
 
 // Marca / desmarca una transferencia como conciliada.
-async function transferConciliar(id, conciliar) {
+function transferConciliar(){ if (_contBloq('conciliar transferencias')) return; return _transferConciliar.apply(this, arguments); }
+async function _transferConciliar(id, conciliar) {
   try {
     await sbFetch('entregas?id=eq.' + id, {
       method: 'PATCH',
@@ -36702,7 +36747,7 @@ function _ltPintar() {
     }
     s += '<button onclick="transferAjustarMonto(\'' + e.id + '\')" style="flex:1;min-width:120px;padding:9px;background:#fff;color:#283593;border:1.5px solid #283593;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;' + (montoDelta ? 'box-shadow:0 0 0 2px #C5CAE9;' : '') + '">✎ Ajustar monto</button>';
     s += '<button onclick="transferDisputar(\'' + e.id + '\')" style="flex:1;min-width:120px;padding:9px;background:#fff;color:#E65100;border:1.5px solid #E65100;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">⚠️ No acreditó</button>';
-    // v13.190.0 — el descarte también desde PENDIENTE. Hasta hoy "No
+    // v13.191.0 — el descarte también desde PENDIENTE. Hasta hoy "No
     // corresponde cobrar" vivía solo dentro de la tarjeta de disputa: para
     // cerrar una transferencia que se pagó en efectivo o fue NC había que
     // pasar primero por "No acreditó", y nadie lo sabía (Valentina, 04/09:
@@ -36894,7 +36939,8 @@ async function _ltAprenderAlias(entregaId, mov) {
 
 // v13.22: descartar un ingreso que NO es de un cliente (fondeo propio
 // Galicia→MP de Braian, u otro). Sale de la lista de sin-asignar.
-async function ltDescartarMov(mpId) {
+function ltDescartarMov(){ if (_contBloq('descartar movimientos')) return; return _ltDescartarMov.apply(this, arguments); }
+async function _ltDescartarMov(mpId) {
   if (!confirm('¿Seguro que este ingreso NO es de un cliente?\n\n(Ej.: plata que Braian pasó del banco a Mercado Pago.)\nSale de la lista de sin asignar.')) return;
   try {
     await sbFetch('mp_movimientos?mp_id=eq.' + mpId, {
@@ -36953,7 +36999,8 @@ function ltAsignarAbrir(mpId) {
   m.onclick = function(ev) { if (ev.target === m) m.remove(); };
 }
 
-async function ltAsignarElegir(mpId, entregaId) {
+function ltAsignarElegir(){ if (_contBloq('asignar movimientos')) return; return _ltAsignarElegir.apply(this, arguments); }
+async function _ltAsignarElegir(mpId, entregaId) {
   var mov = null, ent = null;
   for (var i = 0; i < _ltState.mp.length; i++) { if (String(_ltState.mp[i].mp_id) === String(mpId)) { mov = _ltState.mp[i]; break; } }
   for (var j = 0; j < _ltState.rows.length; j++) { if (_ltState.rows[j].id === entregaId) { ent = _ltState.rows[j]; break; } }
@@ -36988,7 +37035,8 @@ async function ltAsignarElegir(mpId, entregaId) {
 }
 
 // v13.18: conciliar Y vincular el movimiento MP (match_entrega_id)
-async function transferConciliarConMatch(entregaId, mpId) {
+function transferConciliarConMatch(){ if (_contBloq('conciliar transferencias')) return; return _transferConciliarConMatch.apply(this, arguments); }
+async function _transferConciliarConMatch(entregaId, mpId) {
   try {
     await sbFetch('entregas?id=eq.' + entregaId, {
       method: 'PATCH',
@@ -37103,7 +37151,7 @@ async function _transferDisputarGuardar(id, motivo) {
   // tocar transfer_conciliada.
   var LT_DESCARTE_MOTIVOS = [
     { k:'nota_credito', label:'Nota de credito', pideRef:true,  ph:'N de NC (ej: B-00008-00000224)' },
-    // v13.190.0 — pedido de Valentina (04/09): "terminó pagando en efectivo y
+    // v13.191.0 — pedido de Valentina (04/09): "terminó pagando en efectivo y
     // no sé cómo cerrar esa cobranza". Antes había que usar "Otro". Cierra la
     // TRANSFERENCIA que no va a acreditar; el efectivo se cobra por su circuito.
     { k:'pago_efectivo', label:'Pago en efectivo (no por transferencia)', pideRef:false, ph:'Fecha / quien cobro (opcional)' },
@@ -37147,7 +37195,8 @@ async function _transferDisputarGuardar(id, motivo) {
     var ov = document.getElementById('ltDescOverlay');
     if (ov) ov.remove();
   }
-  async function ltDescartarConfirmar(id) {
+  function ltDescartarConfirmar(){ if (_contBloq('descartar cobros')) return; return _ltDescartarConfirmar.apply(this, arguments); }
+  async function _ltDescartarConfirmar(id) {
     var e = (_ltState.rows || []).filter(function(x){ return x.id === id; })[0];
     var motivo = (document.getElementById('ltDescMotivo')||{}).value || '';
     var ref = ((document.getElementById('ltDescRef')||{}).value || '').trim();
@@ -37179,7 +37228,8 @@ async function _transferDisputarGuardar(id, motivo) {
     }
   }
 
-async function transferDisputaResolver(id, conciliar) {
+function transferDisputaResolver(){ if (_contBloq('resolver disputas')) return; return _transferDisputaResolver.apply(this, arguments); }
+async function _transferDisputaResolver(id, conciliar) {
   // v13.183.0 - GUARD: una entrega descartada NO puede conciliarse, ni desde consola.
   if (conciliar) {
     var _e = (_ltState.rows || []).filter(function(x){ return x.id === id; })[0];
@@ -37211,7 +37261,8 @@ async function transferDisputaResolver(id, conciliar) {
 // fecha serial, números correlativos del Apps Script). Marca
 // transfer_exportada_en para no exportar dos veces. Solo >= 20/06
 // (LT_CORTE_EXPORT): lo anterior ya está a mano en Xubio y duplicaría.
-async function ltExportarConciliadas(btn) {
+function ltExportarConciliadas(){ if (_contBloq('exportar a Xubio')) return; return _ltExportarConciliadas.apply(this, arguments); }
+async function _ltExportarConciliadas(btn) {
   var txtOrig = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Armando Excel...'; }
   try {
@@ -37921,7 +37972,8 @@ var DEV_CICLO_LABELS = {
 };
 
 // v13.29 — Marcar NC emitida (cierre del ciclo de devolución)
-async function devMarcarNC() {
+function devMarcarNC(){ if (_contBloq('marcar notas de credito')) return; return _devMarcarNC.apply(this, arguments); }
+async function _devMarcarNC() {
   var d = _devCache.find(function(x) { return x.id === _devModalId; });
   if (!d) return;
   if (d.estado === 'registrada') {
@@ -37964,7 +38016,8 @@ async function devMarcarNC() {
 }
 
 // v13.70.0 — Completar el N° de una NC ya marcada como emitida (sin cambiar estado)
-async function devCompletarNC() {
+function devCompletarNC(){ if (_contBloq('completar notas de credito')) return; return _devCompletarNC.apply(this, arguments); }
+async function _devCompletarNC() {
   var d = _devCache.find(function(x) { return x.id === _devModalId; });
   if (!d) return;
   if (d.estado !== 'nc_emitida') { toast('Esta devolución todavía no tiene la NC marcada', 'err'); return; }
@@ -38025,7 +38078,8 @@ function ajustesCardHtml(a) {
   return h;
 }
 
-async function ajustesResolver(id) {
+function ajustesResolver(){ if (_contBloq('resolver ajustes')) return; return _ajustesResolver.apply(this, arguments); }
+async function _ajustesResolver(id) {
   var a = _ajfCache.find(function(x) { return x.id === id; });
   if (!a) return;
   var err = document.getElementById('ajf-err-' + id); if (err) err.textContent = '';
@@ -38298,7 +38352,8 @@ function devCerrarModal() {
 
 // ── Auto-save handlers ─────────────────────────────────────────
 
-async function devCambiarCategoria(cat) {
+function devCambiarCategoria(){ if (_contBloq('cambiar categorias')) return; return _devCambiarCategoria.apply(this, arguments); }
+async function _devCambiarCategoria(cat) {
   if (!_devModalId) return;
   try {
     await sbFetch('devoluciones?id=eq.' + _devModalId, {
@@ -38320,7 +38375,8 @@ async function devCambiarCategoria(cat) {
   }
 }
 
-async function devCambiarProveedor(prov) {
+function devCambiarProveedor(){ if (_contBloq('cambiar proveedores')) return; return _devCambiarProveedor.apply(this, arguments); }
+async function _devCambiarProveedor(prov) {
   if (!_devModalId) return;
   try {
     await sbFetch('devoluciones?id=eq.' + _devModalId, {
@@ -38337,7 +38393,8 @@ async function devCambiarProveedor(prov) {
   }
 }
 
-async function devCambiarEstadoReclamo(nuevoEstado) {
+function devCambiarEstadoReclamo(){ if (_contBloq('cambiar reclamos')) return; return _devCambiarEstadoReclamo.apply(this, arguments); }
+async function _devCambiarEstadoReclamo(nuevoEstado) {
   if (!_devModalId) return;
 
   // Si el nuevo estado es "resuelto", pedir monto recuperado primero
@@ -38385,7 +38442,8 @@ async function devCambiarEstadoReclamo(nuevoEstado) {
   }
 }
 
-async function devGuardarNota(nota) {
+function devGuardarNota(){ if (_contBloq('guardar notas')) return; return _devGuardarNota.apply(this, arguments); }
+async function _devGuardarNota(nota) {
   if (!_devModalId) return;
   nota = (nota || '').trim();
   // No guardar si no cambió (evitar PATCH innecesario)
@@ -38737,7 +38795,8 @@ async function devGenerarPDF(devolucionId) {
   }
 }
 
-async function avanzarEstadoCheque(id, nuevoEstado) {
+function avanzarEstadoCheque(){ if (_contBloq('cambiar el estado de cheques')) return; return _avanzarEstadoCheque.apply(this, arguments); }
+async function _avanzarEstadoCheque(id, nuevoEstado) {
   try {
     await sbFetch('cheques_recibidos?id=eq.'+id, { method:'PATCH', body:JSON.stringify({estado:nuevoEstado}) });
     renderLogistica(); toast('✅ Cheque actualizado','ok');
@@ -40205,7 +40264,8 @@ function xubioActualizarBarrasSync() {
 }
 
 // Sync manual disparada por el botón
-function xubioSyncManual(panelId) {
+function xubioSyncManual(){ if (_contBloq('sincronizar con Xubio')) return; return _xubioSyncManual.apply(this, arguments); }
+function _xubioSyncManual(panelId) {
   var btn = document.getElementById('xubio-sync-btn-' + panelId);
   if (btn && btn.disabled) return;
 
@@ -40403,7 +40463,8 @@ function xubioSeleccionarVariante(pedidoId, id, idx, prodId, prodNombre) {
 // ── Crear presupuesto en Xubio (v10) ──────────────────────────────
 // Antes de crear, chequea si el pedido tiene Pollo A/B genéricos
 // que requieren selección de calibre → abre modal.
-function xubioCrearPresupuesto(pedidoId, fila, id) {
+function xubioCrearPresupuesto(){ if (_contBloq('crear presupuestos')) return; return _xubioCrearPresupuesto.apply(this, arguments); }
+function _xubioCrearPresupuesto(pedidoId, fila, id) {
   var sel = _xubioSeleccion[pedidoId];
   if (!sel || !sel.clienteId) { toast('Seleccioná un cliente primero', 'err'); return; }
 
@@ -40691,7 +40752,8 @@ function xubioConfirmarCalibres(pedidoId, fila, id) {
 }
 
 // ── Ejecutar la creación real del presupuesto ─────────────────────
-function xubioEjecutarCrearPresupuesto(pedidoId, fila, id, calibres, fechaPresupuesto) {
+function xubioEjecutarCrearPresupuesto(){ if (_contBloq('crear presupuestos')) return; return _xubioEjecutarCrearPresupuesto.apply(this, arguments); }
+function _xubioEjecutarCrearPresupuesto(pedidoId, fila, id, calibres, fechaPresupuesto) {
   var sel = _xubioSeleccion[pedidoId];
   if (!sel || !sel.clienteId) { toast('Seleccioná un cliente primero', 'err'); return; }
 
@@ -41063,7 +41125,8 @@ async function _dupLogAccion(payload) {
 }
 
 // Marcar como legítimos directamente desde la card (sin abrir modal)
-async function dupMarcarDistintosDirecto(pedidoId) {
+function dupMarcarDistintosDirecto(){ if (_contBloq('resolver duplicados')) return; return _dupMarcarDistintosDirecto.apply(this, arguments); }
+async function _dupMarcarDistintosDirecto(pedidoId) {
   var p = todosLosPedidos.find(function(x){ return x.pedidoId === pedidoId; });
   if (!p) return;
 
@@ -41147,7 +41210,8 @@ async function dupMarcarDistintosDirecto(pedidoId) {
 }
 
 // Marcar como legítimos DESDE el modal abierto
-async function dupMarcarDistintos() {
+function dupMarcarDistintos(){ if (_contBloq('resolver duplicados')) return; return _dupMarcarDistintos.apply(this, arguments); }
+async function _dupMarcarDistintos() {
   var s = _dupModalState;
   if (!s) return;
   var activos = s.grupo.filter(function(x){ return !s.cancelados.has(x.pedidoId); });
@@ -41712,7 +41776,8 @@ async function cargarTopVentasStock() {
  * Dispara accion=stockSyncManual en Apps Script (sync inmediato).
  * Tarda ~30-60s. Bloquea botón durante ejecución.
  */
-async function stockSyncManualAdmin() {
+function stockSyncManualAdmin(){ if (_contBloq('sincronizar stock')) return; return _stockSyncManualAdmin.apply(this, arguments); }
+async function _stockSyncManualAdmin() {
   const btn = document.getElementById('stock-sync-manual-btn');
   if (!btn) return;
   if (!confirm('Esto va a sincronizar el stock con Xubio inmediatamente.\n\nTarda ~30-60 segundos.\n\n¿Confirmás que ya cargaste la factura de compra en Xubio?')) {
@@ -42198,7 +42263,8 @@ async function _ccGestRegistrar(id, accion, nota){
   }catch(e){ console.error('[CC] gestion reg',e); if(typeof toast==='function') toast('Error al registrar','err'); else alert('Error al registrar gestión'); }
 }
 
-async function ccMarcarIncobrable(id){
+function ccMarcarIncobrable(){ if (_contBloq('marcar incobrables')) return; return _ccMarcarIncobrable.apply(this, arguments); }
+async function _ccMarcarIncobrable(id){
   var c=_ccData.find(function(x){ return String(x.cliente_xubio_id)===String(id); });
   var nombre = c ? c.cliente_nombre : '';
   var motivo = prompt('Marcar "'+nombre+'" como INCOBRABLE.\nSale de la cartera real (es reversible).\nMotivo (opcional):', '');
@@ -42214,7 +42280,8 @@ async function ccMarcarIncobrable(id){
     if(typeof toast==='function') toast('⚫ Marcado incobrable','ok');
   }catch(e){ console.error('[CC] marcar',e); if(typeof toast==='function') toast('Error al marcar','err'); else alert('Error al marcar'); }
 }
-async function ccDesmarcar(id){
+function ccDesmarcar(){ if (_contBloq('desmarcar')) return; return _ccDesmarcar.apply(this, arguments); }
+async function _ccDesmarcar(id){
   var c=_ccData.find(function(x){ return String(x.cliente_xubio_id)===String(id); });
   try{
     await sbFetch('cc_cliente_estado?on_conflict=cliente_xubio_id', {
@@ -42830,7 +42897,8 @@ function mgAcuFormToggle(){
   }
 }
 
-async function mgAcuGuardar(){
+function mgAcuGuardar(){ if (_contBloq('guardar acuerdos')) return; return _mgAcuGuardar.apply(this, arguments); }
+async function _mgAcuGuardar(){
   var cli = (document.getElementById('mg-acu-f-cli')||{}).value || '';
   var cid = parseInt((document.getElementById('mg-acu-f-prod')||{}).value) || 0;
   var pr  = Number((document.getElementById('mg-acu-f-precio')||{}).value) || 0;
@@ -42856,7 +42924,8 @@ async function mgAcuGuardar(){
   } catch(e) { if (typeof toast==='function') toast('Error: ' + (e.message||e), 'err'); }
 }
 
-async function mgAcuEditar(acuerdoId, precioActual, canonicoIdNombre){
+function mgAcuEditar(){ if (_contBloq('editar acuerdos')) return; return _mgAcuEditar.apply(this, arguments); }
+async function _mgAcuEditar(acuerdoId, precioActual, canonicoIdNombre){
   var a = (_mgAcuSalud || []).find(function(x){ return x.acuerdo_id === acuerdoId; });
   var nuevo = prompt('Nuevo precio acordado para ' + (a ? a.producto + ' (' + a.cliente + ')' : '') + ':', precioActual);
   if (nuevo === null) return;
@@ -42875,7 +42944,8 @@ async function mgAcuEditar(acuerdoId, precioActual, canonicoIdNombre){
   } catch(e) { if (typeof toast==='function') toast('Error: ' + (e.message||e), 'err'); }
 }
 
-async function mgAcuPausar(acuerdoId, estadoActual){
+function mgAcuPausar(){ if (_contBloq('pausar acuerdos')) return; return _mgAcuPausar.apply(this, arguments); }
+async function _mgAcuPausar(acuerdoId, estadoActual){
   var nuevo = estadoActual === 'activo' ? 'pausado' : 'activo';
   try {
     var r = await sbFetch('acuerdos_precio?id=eq.' + acuerdoId, {
@@ -42952,7 +43022,8 @@ function mgAcuPendRender(){
   }).join('');
 }
 
-async function mgAcuPendAprobar(id){
+function mgAcuPendAprobar(){ if (_contBloq('aprobar acuerdos')) return; return _mgAcuPendAprobar.apply(this, arguments); }
+async function _mgAcuPendAprobar(id){
   try {
     await sbFetch('rpc/fn_acuerdo_aprobar', { method:'POST', body: JSON.stringify({ p_id: id }) });
     if (typeof toast==='function') toast('Acuerdo aprobado y activo');
@@ -42960,7 +43031,8 @@ async function mgAcuPendAprobar(id){
   } catch(e){ if (typeof toast==='function') toast('Error: ' + (e.message||e), 'err'); }
 }
 
-async function mgAcuPendRechazar(id){
+function mgAcuPendRechazar(){ if (_contBloq('rechazar acuerdos')) return; return _mgAcuPendRechazar.apply(this, arguments); }
+async function _mgAcuPendRechazar(id){
   var motivo = prompt('Motivo del rechazo (opcional):', '');
   if (motivo === null) return;
   try {
@@ -43061,7 +43133,8 @@ function mgSugRender(){
 // DE VERDAD (productos_canonicos.precio_actual) por PATCH directo a Supabase; el
 // Sheet + lista Xubio quedan best-effort via actualizarPrecioVenta. Devuelve un
 // objeto {status, producto, precioAnterior, precioNuevo, xubio_lista}.
-async function aplicarPrecioTierAware(canonicoId, producto, precioNuevo, motivo, origen){
+function aplicarPrecioTierAware(){ if (_contBloq('cambiar precios')) return; return _aplicarPrecioTierAware.apply(this, arguments); }
+async function _aplicarPrecioTierAware(canonicoId, producto, precioNuevo, motivo, origen){
   precioNuevo = Math.round(Number(precioNuevo) || 0);
 
   // 1) Tramos — v13.144.0: el ANCLA del delta es el tramo cuyo precio coincide
@@ -43319,7 +43392,8 @@ function mgAcuLogToggle(){
   b.textContent = (abierto ? '\u25B8' : '\u25BE') + ' Ver historial autom\u00E1tico';
 }
 
-async function mgAcuReajustar(){
+function mgAcuReajustar(){ if (_contBloq('reajustar precios')) return; return _mgAcuReajustar.apply(this, arguments); }
+async function _mgAcuReajustar(){
   var btn = document.getElementById('mg-acu-reaj');
   if (btn) { btn.disabled = true; btn.textContent = 'Reajustando\u2026'; }
   try {
@@ -43735,7 +43809,8 @@ function mgRenderSinMapear(){
 
 // v13.146.0 — Ignorar: proveedor entero (Aceptar) o solo el producto.
 // Escribe en compras_map_ignorar (verificado: 0 filas = aviso, no falso ok).
-async function mgSmIgnorar(idx){
+function mgSmIgnorar(){ if (_contBloq('ignorar')) return; return _mgSmIgnorar.apply(this, arguments); }
+async function _mgSmIgnorar(idx){
   var r = (_mgSinMapear || [])[idx];
   if (!r) return;
   var prov = r.proveedor_xubio_nombre || '';
@@ -43879,7 +43954,8 @@ async function mgSmAbrirVincular(idx){
   document.body.appendChild(ov);
 }
 
-async function mgSmConfirmarVinculo(idx){
+function mgSmConfirmarVinculo(){ if (_contBloq('vincular')) return; return _mgSmConfirmarVinculo.apply(this, arguments); }
+async function _mgSmConfirmarVinculo(idx){
   var r = (_mgSinMapear || [])[idx];
   var sel = document.getElementById('mg-sm-sel');
   if (!r || !sel || !sel.value) return;
@@ -43905,7 +43981,8 @@ async function mgSmConfirmarVinculo(idx){
 
 // v13.150.0 — Camino B: crear la ficha proveedor–producto y vincularla.
 // es_proveedor_primario = true solo si el producto no tenía ninguna ficha.
-async function mgSmCrearFicha(idx){
+function mgSmCrearFicha(){ if (_contBloq('crear fichas')) return; return _mgSmCrearFicha.apply(this, arguments); }
+async function _mgSmCrearFicha(idx){
   var r = (_mgSinMapear || [])[idx];
   if (!r) return;
   var selP = document.getElementById('mg-sm-np');
@@ -44155,7 +44232,8 @@ async function mgVarInlineAplicar(btn, rid){
     btn.disabled = false; btn.textContent = '✓ Aplicar';
   }
 }
-async function mgVarVisto(btn){
+function mgVarVisto(){ if (_contBloq('marcar visto')) return; return _mgVarVisto.apply(this, arguments); }
+async function _mgVarVisto(btn){
   var prod = decodeURIComponent(btn.getAttribute('data-prod') || '');
   var prov = decodeURIComponent(btn.getAttribute('data-prov') || '');
   var fc   = btn.getAttribute('data-fc') || '';
@@ -44460,7 +44538,8 @@ async function mgEscValidarFamilia(cid){
   return null;
 }
 
-async function mgEscGuardar(cid){
+function mgEscGuardar(){ if (_contBloq('guardar escalas')) return; return _mgEscGuardar.apply(this, arguments); }
+async function _mgEscGuardar(cid){
   var e = _mgEsc[cid]; if (!e) return;
   var errG = mgEscHayError(cid);
   if (errG){ toast(errG, 'err'); return; }
@@ -46200,7 +46279,8 @@ function fcPendAbrir(pedidoId, producto) {
     '</div></div></div>';
 }
 
-async function fcPendGuardar(pedidoId, producto, estado) {
+function fcPendGuardar(){ if (_contBloq('guardar')) return; return _fcPendGuardar.apply(this, arguments); }
+async function _fcPendGuardar(pedidoId, producto, estado) {
   var via  = (document.getElementById('fc-pend-via')  || {}).value || 'otro';
   var nota = (document.getElementById('fc-pend-nota') || {}).value || '';
   try {
@@ -46228,7 +46308,8 @@ function _fcSustHost() {
 }
 function fcSustCerrar() { var h = document.getElementById('fc-sust-host'); if (h) h.innerHTML = ''; }
 
-async function fcSustAbrir(pedidoId) {
+function fcSustAbrir(){ if (_contBloq('sustituir facturas')) return; return _fcSustAbrir.apply(this, arguments); }
+async function _fcSustAbrir(pedidoId) {
   _fcSustHost().innerHTML =
     '<div class="fc-rc-overlay"><div class="fc-rc">' +
     '<div class="fc-rc-tit">🔄 Cambiar producto</div>' +
@@ -46305,7 +46386,8 @@ function _fcSustPintar(d) {
     '</div></div>';
 }
 
-async function fcSustElegir(pedidoId, origenId, destinoId) {
+function fcSustElegir(){ if (_contBloq('sustituir facturas')) return; return _fcSustElegir.apply(this, arguments); }
+async function _fcSustElegir(pedidoId, origenId, destinoId) {
   try {
     var url = APPS_SCRIPT_URL + '?accion=sustitucionGuardar' +
       '&pedidoId=' + encodeURIComponent(pedidoId) +
@@ -46320,7 +46402,8 @@ async function fcSustElegir(pedidoId, origenId, destinoId) {
   } catch (e) { toast('Error de conexión: ' + e.message, 'err'); }
 }
 
-async function fcSustAnular(id, pedidoId) {
+function fcSustAnular(){ if (_contBloq('anular facturas')) return; return _fcSustAnular.apply(this, arguments); }
+async function _fcSustAnular(id, pedidoId) {
   try {
     var resp = await fetch(APPS_SCRIPT_URL + '?accion=sustitucionAnular&id=' + id +
       '&porQuien=' + encodeURIComponent(usuarioActual || 'admin'));
@@ -47175,7 +47258,8 @@ function _fcSyncPintarBtn() {
   }
 }
 
-async function fcSync() {
+function fcSync(){ if (_contBloq('sincronizar')) return; return _fcSync.apply(this, arguments); }
+async function _fcSync() {
   // Guard duro: si el cooldown sigue vigente (o alguien llama la función a mano),
   // no dispara otro sync — avisa cuánto falta.
   var falta = _fcSyncMsRestante();
@@ -47227,7 +47311,8 @@ async function fcBadgeInit() {
 setTimeout(fcBadgeInit, 5000);
 
 // ═══ CANDADO DE FACTURACIÓN — usado por descargarPlanillaCarga (y vet) ═══
-async function fcCandadoPlanilla(pedidos, ctx) {
+function fcCandadoPlanilla(){ if (_contBloq('bloquear planillas')) return; return _fcCandadoPlanilla.apply(this, arguments); }
+async function _fcCandadoPlanilla(pedidos, ctx) {
   try {
     var ids = (pedidos || []).map(function (p) { return p.pedidoId; }).filter(Boolean);
     if (!ids.length) return { ok: true, facturas: {} };
@@ -47335,7 +47420,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.190.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.191.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
@@ -47661,6 +47746,17 @@ async function fcCandadoPlanilla(pedidos, ctx) {
 .cbr-go{margin-top:14px;width:100%;min-height:50px;border:0;border-radius:12px;background:#B45309;color:#fff;font-weight:900;font-size:15px;letter-spacing:.4px;cursor:pointer}
 .cbr-go:disabled{opacity:.45;cursor:default}
 .cbr-nota{margin-top:8px;font-size:11px;color:#B08968;text-align:center}
+
+/* v13.191.0 — rol contador: las acciones no se muestran */
+body.rol-contador .cbz-go,
+body.rol-contador .ccx-cta,
+body.rol-contador .cbr-ov,
+body.rol-contador .btn-accion,
+body.rol-contador .acc-btn,
+body.rol-contador [data-accion] { display: none !important; }
+body.rol-contador .solo-lectura-badge { display: inline-block; }
+.solo-lectura-badge{display:none;background:#F4EDE2;color:#8A7960;border-radius:999px;
+  padding:2px 9px;font-size:10.5px;font-weight:900;letter-spacing:.4px;margin-left:8px}
 </style>
 <script>
 /* ═══════════════════════════════════════════════════════════════════
@@ -49652,7 +49748,7 @@ function ccxInit(){
     var recarga = (prev==='pendientes') !== (e==='pendientes');
     if (recarga && (_cbz.medio==='todos' || _cbz.medio==='cheques')) cbzCargar(); else cbzRender();
   }
-  // v13.190.0 — el <select> vive FUERA de cbz-cont, asi que cbzRender() no lo
+  // v13.191.0 — el <select> vive FUERA de cbz-cont, asi que cbzRender() no lo
   // toca. El bug era de sincronizacion: el estado y el selector podian quedar
   // apuntando a valores distintos. Ahora se alinean en los dos sentidos.
   function cbzSetDias(d){
@@ -49675,7 +49771,7 @@ function ccxInit(){
     var pideEfe = (m==='todos' || m==='efectivo');
 
     var res = await Promise.allSettled([
-      // v13.190.0 — limit 400 cortaba: en 45 dias hay 607 filas y un pago de
+      // v13.191.0 — limit 400 cortaba: en 45 dias hay 607 filas y un pago de
       // 42 dias caia en la posicion 557, fuera del corte, sin aviso alguno.
       pideMP  ? sbFetch('vw_mp_a_conciliar?fecha=gte.'+desde+'&select=*&order=fecha.desc&limit=1000') : Promise.resolve([]),
       // v13.183.0: un cheque sin cobranza es pendiente sin importar cuando entro.
@@ -49691,7 +49787,7 @@ function ccxInit(){
     var out = [];
     // ── MP
     if (res[0].status === 'fulfilled') {
-      // v13.190.0 — PostgREST topea en 1000: si llegan 1000, faltan datos.
+      // v13.191.0 — PostgREST topea en 1000: si llegan 1000, faltan datos.
       if ((res[0].value||[]).length >= 1000) _cbz.trunc = true;
       (res[0].value||[]).forEach(function(r){
         var est = r.clasificacion==='CONFLICTO' ? 'problemas'
@@ -49835,7 +49931,7 @@ function ccxInit(){
   }
 
   function cbzInit() {
-    // v13.190.0 — el selector refleja el estado real al abrir el tab
+    // v13.191.0 — el selector refleja el estado real al abrir el tab
     var sd = document.getElementById('cbz-dias');
     if (sd && String(sd.value) !== String(_cbz.dias)) sd.value = String(_cbz.dias);
     var q = document.getElementById('cbz-q');
@@ -49874,7 +49970,7 @@ function ccxInit(){
   function cbrCerrar(){ var o=document.getElementById('cbr-ov'); if(o) o.remove(); }
 
   async function cbrBuscarCliente() {
-    if (_cbr._busc) return;                    // v13.190.0 anti doble submit
+    if (_cbr._busc) return;                    // v13.191.0 anti doble submit
     var q=((document.getElementById('cbr-q')||{}).value||'').trim();
     if (q.length<2) { toast('Escribí al menos 2 letras','err'); return; }
     _cbr._busc = true;
@@ -49962,7 +50058,7 @@ function ccxInit(){
         '<div><span>Facturas</span><b>'+Object.keys(_cbr.imput).length+'</b></div>' +
         '<div class="tot"><span>Diferencia</span><b class="'+
           (Math.abs(dif)<0.05?'ok':(dif<0?'err':'warn'))+'">'+_cbzF(dif)+
-          // v13.190.0: MVP-B exige cierre completo. Un sobrante NO queda a cuenta:
+          // v13.191.0: MVP-B exige cierre completo. Un sobrante NO queda a cuenta:
           // el RPC lo rechaza con IMPUTACION_INCOMPLETA. El texto lo refleja.
           (Math.abs(dif)<0.05?' — cierra exacto':(dif<0?' — excede la cobranza':' — falta imputar'))+'</b></div></div>';
       if (dif < -0.05) h += '<div class="cbr-alerta">No se puede imputar más que la cobranza.</div>';
@@ -49976,7 +50072,7 @@ function ccxInit(){
     var ov=document.getElementById('cbr-ov');
     if (!ov) { ov=document.createElement('div'); ov.id='cbr-ov'; ov.className='cbr-ov'; document.body.appendChild(ov); }
     ov.innerHTML=h;
-    // v13.190.0 — _cbrPintar reescribe el modal: se restaura lo tipeado
+    // v13.191.0 — _cbrPintar reescribe el modal: se restaura lo tipeado
     var _qNew = document.getElementById('cbr-q');
     if (_qNew && _qPrev) { _qNew.value = _qPrev; }
   }
@@ -49995,7 +50091,7 @@ function ccxInit(){
     if (!confirm(res)) return;
     _cbr.guardando=true; _cbrPintar();
     try {
-      // v13.190.0 FIX: sbRpc mandaba SIEMPRE la anon key en Authorization,
+      // v13.191.0 FIX: sbRpc mandaba SIEMPRE la anon key en Authorization,
       // asi que PostgREST resolvia el rol como 'anon' y el RPC (GRANT solo a
       // authenticated) devolvia "permission denied for function".
       // sbFetch usa 'Bearer ' + (_JWT || SUPABASE_KEY): con sesion activa
