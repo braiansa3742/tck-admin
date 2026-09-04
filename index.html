@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.186.0 — 04/09/2026
-     v13.186.0: TRANSFERENCIAS — CERRAR LAS QUE NO VAN A CONCILIAR, EN UN PASO.
+     TCK ADMIN — v13.187.0 — 04/09/2026
+     v13.187.0: TRANSFERENCIAS — CERRAR LAS QUE NO VAN A CONCILIAR, EN UN PASO.
      Pedido de Valentina (04/09): "algunas por cercanía coinciden pero las
      pagaron en efectivo y no sé cómo sacarlas de los pendientes" / "tengo
      transferencias que no van a aparecer porque fueron notas de crédito o
@@ -36683,7 +36683,7 @@ function _ltPintar() {
     }
     s += '<button onclick="transferAjustarMonto(\'' + e.id + '\')" style="flex:1;min-width:120px;padding:9px;background:#fff;color:#283593;border:1.5px solid #283593;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;' + (montoDelta ? 'box-shadow:0 0 0 2px #C5CAE9;' : '') + '">✎ Ajustar monto</button>';
     s += '<button onclick="transferDisputar(\'' + e.id + '\')" style="flex:1;min-width:120px;padding:9px;background:#fff;color:#E65100;border:1.5px solid #E65100;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">⚠️ No acreditó</button>';
-    // v13.186.0 — el descarte también desde PENDIENTE. Hasta hoy "No
+    // v13.187.0 — el descarte también desde PENDIENTE. Hasta hoy "No
     // corresponde cobrar" vivía solo dentro de la tarjeta de disputa: para
     // cerrar una transferencia que se pagó en efectivo o fue NC había que
     // pasar primero por "No acreditó", y nadie lo sabía (Valentina, 04/09:
@@ -37084,7 +37084,7 @@ async function _transferDisputarGuardar(id, motivo) {
   // tocar transfer_conciliada.
   var LT_DESCARTE_MOTIVOS = [
     { k:'nota_credito', label:'Nota de credito', pideRef:true,  ph:'N de NC (ej: B-00008-00000224)' },
-    // v13.186.0 — pedido de Valentina (04/09): "terminó pagando en efectivo y
+    // v13.187.0 — pedido de Valentina (04/09): "terminó pagando en efectivo y
     // no sé cómo cerrar esa cobranza". Antes había que usar "Otro". Cierra la
     // TRANSFERENCIA que no va a acreditar; el efectivo se cobra por su circuito.
     { k:'pago_efectivo', label:'Pago en efectivo (no por transferencia)', pideRef:false, ph:'Fecha / quien cobro (opcional)' },
@@ -47315,7 +47315,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.186.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.187.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
@@ -49609,7 +49609,7 @@ function ccxInit(){
   // el UNION ALL en SQL medía 5.104 ms contra ~1.300 ms de la rama MP sola.
   // Con Promise.allSettled, si una fuente falla las otras siguen visibles.
   // CERO PATCH/POST/DELETE · CERO acciones · CERO Xubio · CERO cron.
-  var _cbz = { rows: [], medio: 'todos', estado: 'pendientes', dias: 7, q: '', err: {} };
+  var _cbz = { rows: [], medio: 'todos', estado: 'pendientes', dias: 7, q: '', err: {}, trunc: false };
 
 
 
@@ -49629,13 +49629,21 @@ function ccxInit(){
     var recarga = (prev==='pendientes') !== (e==='pendientes');
     if (recarga && (_cbz.medio==='todos' || _cbz.medio==='cheques')) cbzCargar(); else cbzRender();
   }
-  function cbzSetDias(d){ _cbz.dias=_cbzN(d)||7; cbzCargar(); }
+  // v13.187.0 — el <select> vive FUERA de cbz-cont, asi que cbzRender() no lo
+  // toca. El bug era de sincronizacion: el estado y el selector podian quedar
+  // apuntando a valores distintos. Ahora se alinean en los dos sentidos.
+  function cbzSetDias(d){
+    _cbz.dias = _cbzN(d) || 7;
+    var sel = document.getElementById('cbz-dias');
+    if (sel && String(sel.value) !== String(_cbz.dias)) sel.value = String(_cbz.dias);
+    cbzCargar();
+  }
   function cbzBuscar(){ _cbz.q=((document.getElementById('cbz-q')||{}).value||'').trim().toLowerCase(); cbzRender(); }
 
   async function cbzCargar() {
     var el = document.getElementById('cbz-cont'); if (!el) return;
     el.innerHTML = '<div class="rv-empty">Cargando…</div>';
-    _cbz.err = {};
+    _cbz.err = {}; _cbz.trunc = false;
     var desde = new Date(Date.now() - _cbz.dias*86400000).toISOString().slice(0,10);
     var m = _cbz.medio;
     // si se filtra un medio, no se consultan los otros
@@ -49644,7 +49652,9 @@ function ccxInit(){
     var pideEfe = (m==='todos' || m==='efectivo');
 
     var res = await Promise.allSettled([
-      pideMP  ? sbFetch('vw_mp_a_conciliar?fecha=gte.'+desde+'&select=*&order=fecha.desc&limit=400') : Promise.resolve([]),
+      // v13.187.0 — limit 400 cortaba: en 45 dias hay 607 filas y un pago de
+      // 42 dias caia en la posicion 557, fuera del corte, sin aviso alguno.
+      pideMP  ? sbFetch('vw_mp_a_conciliar?fecha=gte.'+desde+'&select=*&order=fecha.desc&limit=1000') : Promise.resolve([]),
       // v13.183.0: un cheque sin cobranza es pendiente sin importar cuando entro.
       pideChq ? sbFetch('cheques_recibidos?' +
                  (_cbz.estado==='pendientes'
@@ -49652,12 +49662,14 @@ function ccxInit(){
                    : 'created_at=gte.'+desde+'&select=*&order=created_at.desc&limit=300'))
               : Promise.resolve([]),
       pideEfe ? sbFetch('cta_cte_cobranzas?origen=eq.entrega&origen_ref=like.*:efe&fecha=gte.'+desde+
-                        '&select=id,cobranza_id,fecha,monto,cliente_nombre,cliente_xubio_id,origen_ref,xubio_estado,xubio_numero_recibo,creado_por&order=fecha.desc&limit=400')
+                        '&select=id,cobranza_id,fecha,monto,cliente_nombre,cliente_xubio_id,origen_ref,xubio_estado,xubio_numero_recibo,creado_por&order=fecha.desc&limit=1000')
               : Promise.resolve([])
     ]);
     var out = [];
     // ── MP
     if (res[0].status === 'fulfilled') {
+      // v13.187.0 — PostgREST topea en 1000: si llegan 1000, faltan datos.
+      if ((res[0].value||[]).length >= 1000) _cbz.trunc = true;
       (res[0].value||[]).forEach(function(r){
         var est = r.clasificacion==='CONFLICTO' ? 'problemas'
                 : r.clasificacion==='REQUIERE_REVISION' ? 'revisar' : 'pendientes';
@@ -49703,6 +49715,7 @@ function ccxInit(){
     } else { _cbz.err.cheques = String(res[1].reason && res[1].reason.message || res[1].reason).slice(0,140); }
     // ── EFECTIVO
     if (res[2].status === 'fulfilled') {
+      if ((res[2].value||[]).length >= 1000) _cbz.trunc = true;
       (res[2].value||[]).forEach(function(k){
         var est = k.xubio_estado==='ok' ? 'confirmadas'
                 : (k.xubio_estado==='error'||k.xubio_estado==='indeterminada') ? 'problemas' : 'pendientes';
@@ -49737,6 +49750,11 @@ function ccxInit(){
   function cbzRender() {
     var el = document.getElementById('cbz-cont'); if (!el) return;
     var h = '';
+    if (_cbz.trunc) {
+      h += '<div class="cbz-alert">Se alcanz&oacute; el l&iacute;mite de 1000 movimientos: ' +
+           '<b>puede haber m&aacute;s que no se muestran</b>. Reduc&iacute; el rango de d&iacute;as ' +
+           'o filtr&aacute; por medio para verlos todos.</div>';
+    }
     // avisos por fuente caida
     Object.keys(_cbz.err).forEach(function(k){
       h += '<div class="cbz-alert">No se pudo cargar <b>'+_cbzE(k)+'</b>. Las otras fuentes siguen visibles.' +
@@ -49793,6 +49811,9 @@ function ccxInit(){
   }
 
   function cbzInit() {
+    // v13.187.0 — el selector refleja el estado real al abrir el tab
+    var sd = document.getElementById('cbz-dias');
+    if (sd && String(sd.value) !== String(_cbz.dias)) sd.value = String(_cbz.dias);
     var q = document.getElementById('cbz-q');
     if (q && !q._b) { q._b = true;
       q.addEventListener('keydown', function(ev){ if (ev.key==='Enter') cbzBuscar(); }); }
@@ -49937,7 +49958,7 @@ function ccxInit(){
     if (!confirm(res)) return;
     _cbr.guardando=true; _cbrPintar();
     try {
-      // v13.186.0 FIX: sbRpc mandaba SIEMPRE la anon key en Authorization,
+      // v13.187.0 FIX: sbRpc mandaba SIEMPRE la anon key en Authorization,
       // asi que PostgREST resolvia el rol como 'anon' y el RPC (GRANT solo a
       // authenticated) devolvia "permission denied for function".
       // sbFetch usa 'Bearer ' + (_JWT || SUPABASE_KEY): con sesion activa
