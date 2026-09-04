@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.185.0 — 04/09/2026
-     v13.185.0: TRANSFERENCIAS — CERRAR LAS QUE NO VAN A CONCILIAR, EN UN PASO.
+     TCK ADMIN — v13.186.0 — 04/09/2026
+     v13.186.0: TRANSFERENCIAS — CERRAR LAS QUE NO VAN A CONCILIAR, EN UN PASO.
      Pedido de Valentina (04/09): "algunas por cercanía coinciden pero las
      pagaron en efectivo y no sé cómo sacarlas de los pendientes" / "tengo
      transferencias que no van a aparecer porque fueron notas de crédito o
@@ -36683,7 +36683,7 @@ function _ltPintar() {
     }
     s += '<button onclick="transferAjustarMonto(\'' + e.id + '\')" style="flex:1;min-width:120px;padding:9px;background:#fff;color:#283593;border:1.5px solid #283593;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;' + (montoDelta ? 'box-shadow:0 0 0 2px #C5CAE9;' : '') + '">✎ Ajustar monto</button>';
     s += '<button onclick="transferDisputar(\'' + e.id + '\')" style="flex:1;min-width:120px;padding:9px;background:#fff;color:#E65100;border:1.5px solid #E65100;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">⚠️ No acreditó</button>';
-    // v13.185.0 — el descarte también desde PENDIENTE. Hasta hoy "No
+    // v13.186.0 — el descarte también desde PENDIENTE. Hasta hoy "No
     // corresponde cobrar" vivía solo dentro de la tarjeta de disputa: para
     // cerrar una transferencia que se pagó en efectivo o fue NC había que
     // pasar primero por "No acreditó", y nadie lo sabía (Valentina, 04/09:
@@ -37084,7 +37084,7 @@ async function _transferDisputarGuardar(id, motivo) {
   // tocar transfer_conciliada.
   var LT_DESCARTE_MOTIVOS = [
     { k:'nota_credito', label:'Nota de credito', pideRef:true,  ph:'N de NC (ej: B-00008-00000224)' },
-    // v13.185.0 — pedido de Valentina (04/09): "terminó pagando en efectivo y
+    // v13.186.0 — pedido de Valentina (04/09): "terminó pagando en efectivo y
     // no sé cómo cerrar esa cobranza". Antes había que usar "Otro". Cierra la
     // TRANSFERENCIA que no va a acreditar; el efectivo se cobra por su circuito.
     { k:'pago_efectivo', label:'Pago en efectivo (no por transferencia)', pideRef:false, ph:'Fecha / quien cobro (opcional)' },
@@ -47315,7 +47315,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.185.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.186.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
@@ -49611,22 +49611,7 @@ function ccxInit(){
   // CERO PATCH/POST/DELETE · CERO acciones · CERO Xubio · CERO cron.
   var _cbz = { rows: [], medio: 'todos', estado: 'pendientes', dias: 7, q: '', err: {} };
 
-  // v13.183.0 — llamada a funciones RPC de Supabase (no existia helper)
-  async function sbRpc(fn, args) {
-    var r = await fetch(SUPABASE_URL + '/rest/v1/rpc/' + fn, {
-      method: 'POST',
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
-                 'Content-Type': 'application/json' },
-      body: JSON.stringify(args || {})
-    });
-    var txt = await r.text();
-    var data = null; try { data = txt ? JSON.parse(txt) : null; } catch (e) { data = txt; }
-    if (!r.ok) {
-      var msg = (data && (data.message || data.hint)) || ('HTTP ' + r.status);
-      throw new Error(msg);
-    }
-    return data;
-  }
+
 
   var CBZ_MEDIOS  = [['todos','Todos'],['mp','MP'],['efectivo','Efectivo'],['cheques','Cheques']];
   var CBZ_ESTADOS = [['pendientes','Pendientes'],['revisar','Para revisar'],
@@ -49952,10 +49937,19 @@ function ccxInit(){
     if (!confirm(res)) return;
     _cbr.guardando=true; _cbrPintar();
     try {
-      var out = await sbRpc('ctacte_registrar_cobranza_mp', {
-        p_mp_id: Number(m.ref), p_cliente: Number(_cbr.cliente),
-        p_facturas: fs, p_montos: ms,
-        p_por: (typeof usuarioActual!=='undefined' && usuarioActual) ? usuarioActual : 'admin'
+      // v13.186.0 FIX: sbRpc mandaba SIEMPRE la anon key en Authorization,
+      // asi que PostgREST resolvia el rol como 'anon' y el RPC (GRANT solo a
+      // authenticated) devolvia "permission denied for function".
+      // sbFetch usa 'Bearer ' + (_JWT || SUPABASE_KEY): con sesion activa
+      // manda el JWT de login_vendedor, que declara role='authenticated'.
+      // Es el mismo mecanismo de las otras 11 RPC del sistema.
+      // p_por ya no se manda: el RPC toma la identidad del claim 'vendedor'.
+      var out = await sbFetch('rpc/ctacte_registrar_cobranza_mp', {
+        method: 'POST',
+        body: JSON.stringify({
+          p_mp_id: Number(m.ref), p_cliente: Number(_cbr.cliente),
+          p_facturas: fs, p_montos: ms
+        })
       });
       _cbr.guardando=false;
       var st = (out && (out.status || (out[0]&&out[0].status))) || '';
