@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.189.0 — 04/09/2026
-     v13.189.0: TRANSFERENCIAS — CERRAR LAS QUE NO VAN A CONCILIAR, EN UN PASO.
+     TCK ADMIN — v13.190.0 — 04/09/2026
+     v13.190.0: TRANSFERENCIAS — CERRAR LAS QUE NO VAN A CONCILIAR, EN UN PASO.
      Pedido de Valentina (04/09): "algunas por cercanía coinciden pero las
      pagaron en efectivo y no sé cómo sacarlas de los pendientes" / "tengo
      transferencias que no van a aparecer porque fueron notas de crédito o
@@ -19243,6 +19243,10 @@ const ROL_TABS = {
   operaciones: 'ALL',
   admin:       'ALL',
   cobranzas:   ['pedidos','logistica','clientes','facturacion','cc','tesoreria','rendiciones','acc-dup','buffet','ccprod','pulso','foodconcil'],
+  // v13.190.0 — Contadores (Gaston + Ricardo): VER TODO, MODIFICAR NADA.
+  // 'ALL' a proposito: enumerando tabs, uno nuevo quedaria invisible sin que
+  // nadie se entere. El control esta en esContador(), no en la lista.
+  contador:    'ALL',
   tckfood:     ['buffet'],
   // v13.157.0 — Chan (recepción/depósito): logística para abrir/cerrar
   // viajes y sumar pedidos de última hora. Nunca 'ALL': sin márgenes,
@@ -19252,7 +19256,7 @@ const ROL_TABS = {
 
 // v13.175.0 — TABS EN PILOTO: lista blanca de roles, se evalua ANTES del 'ALL'.
 // Para abrirlo a Administracion: agregar 'cobranzas'. Para liberarlo: borrar la entrada.
-const TABS_PILOTO = { ctacte: ['dueno'], mpconc: ['dueno'], cobranzas: ['dueno'] };
+const TABS_PILOTO = { ctacte: ['dueno','contador'], mpconc: ['dueno','contador'], cobranzas: ['dueno','contador'] };
 function puedeVer(tab) {
   var soloRoles = TABS_PILOTO[tab];
   if (soloRoles) return soloRoles.indexOf(rolActual) !== -1;   // gate duro del piloto
@@ -19266,6 +19270,17 @@ function puedeVer(tab) {
 
 // Cobranzas no ve costos ni márgenes (cards de pedidos, panel Acuerdos VIP)
 function esCobranzas() { return rolActual === 'cobranzas'; }
+// v13.190.0 — rol de auditoria. El guard va DENTRO de cada handler, no solo
+// ocultando botones: desde la consola se los llama igual.
+function esContador() { return (typeof rolActual !== 'undefined' && rolActual === 'contador'); }
+function _contBloq(que) {
+  if (esContador()) {
+    try { toast('Usuario de auditoria: solo lectura. No podes ' + (que || 'ejecutar esta accion') + '.', 'err'); }
+    catch (e) { alert('Usuario de auditoria: solo lectura.'); }
+    return true;
+  }
+  return false;
+}
 
 function _tckSetDisp(id, vis) {
   var el = document.getElementById(id);
@@ -20602,7 +20617,8 @@ function dupSeleccionarVendedor(v) {
 }
 
 // Cancelar un pedido específico del grupo
-async function dupCancelarPedido(pedidoId) {
+function dupCancelarPedido(){ if (_contBloq('cancelar pedidos')) return; return _dupCancelarPedido.apply(this, arguments); }
+async function _dupCancelarPedido(pedidoId) {
   // v10: usar dupConfirmModal en vez de confirm() nativo
   var p = todosLosPedidos.find(function(x){ return x.pedidoId === pedidoId; });
   if (!p) return;
@@ -21918,7 +21934,8 @@ function toggleCard(id) {
 }
 
 // ── NOTAS ─────────────────────────────────────────────────────────
-function guardarRemito(pedidoId) {
+function guardarRemito(){ if (_contBloq('guardar remitos')) return; return _guardarRemito.apply(this, arguments); }
+function _guardarRemito(pedidoId) {
   var id = pedidoId.replace(/[^a-zA-Z0-9]/g,'-');
   var el = document.getElementById('remito-'+id);
   if (!el) return;
@@ -22225,7 +22242,8 @@ function confirmarCancelar(pedidoId, fila, event) {
   }
 }
 
-async function cambiarEstado(pedidoId, fila, nuevoEstado, event) {
+function cambiarEstado(){ if (_contBloq('cambiar el estado de un pedido')) return; return _cambiarEstado.apply(this, arguments); }
+async function _cambiarEstado(pedidoId, fila, nuevoEstado, event) {
   event.stopPropagation();
   var btn = event.target;
   var txtOrig = btn.textContent;
@@ -36684,7 +36702,7 @@ function _ltPintar() {
     }
     s += '<button onclick="transferAjustarMonto(\'' + e.id + '\')" style="flex:1;min-width:120px;padding:9px;background:#fff;color:#283593;border:1.5px solid #283593;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;' + (montoDelta ? 'box-shadow:0 0 0 2px #C5CAE9;' : '') + '">✎ Ajustar monto</button>';
     s += '<button onclick="transferDisputar(\'' + e.id + '\')" style="flex:1;min-width:120px;padding:9px;background:#fff;color:#E65100;border:1.5px solid #E65100;border-radius:9px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">⚠️ No acreditó</button>';
-    // v13.189.0 — el descarte también desde PENDIENTE. Hasta hoy "No
+    // v13.190.0 — el descarte también desde PENDIENTE. Hasta hoy "No
     // corresponde cobrar" vivía solo dentro de la tarjeta de disputa: para
     // cerrar una transferencia que se pagó en efectivo o fue NC había que
     // pasar primero por "No acreditó", y nadie lo sabía (Valentina, 04/09:
@@ -37085,7 +37103,7 @@ async function _transferDisputarGuardar(id, motivo) {
   // tocar transfer_conciliada.
   var LT_DESCARTE_MOTIVOS = [
     { k:'nota_credito', label:'Nota de credito', pideRef:true,  ph:'N de NC (ej: B-00008-00000224)' },
-    // v13.189.0 — pedido de Valentina (04/09): "terminó pagando en efectivo y
+    // v13.190.0 — pedido de Valentina (04/09): "terminó pagando en efectivo y
     // no sé cómo cerrar esa cobranza". Antes había que usar "Otro". Cierra la
     // TRANSFERENCIA que no va a acreditar; el efectivo se cobra por su circuito.
     { k:'pago_efectivo', label:'Pago en efectivo (no por transferencia)', pideRef:false, ph:'Fecha / quien cobro (opcional)' },
@@ -46347,7 +46365,8 @@ function _fcMotivoOmitido(r) {
   }
 }
 
-async function fcSustFacturar(pedidoId) {
+function fcSustFacturar(){ if (_contBloq('facturar')) return; return _fcSustFacturar.apply(this, arguments); }
+async function _fcSustFacturar(pedidoId) {
   fcSustCerrar();
   toast('Facturando ' + pedidoId + '…'); // sin tipo: solo existen .toast.ok y .toast.err
   try {
@@ -47316,7 +47335,7 @@ async function fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.189.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.190.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
@@ -49315,7 +49334,8 @@ function ccxPintarSel(){
     if(cb) cb.checked=sel;
   });
 }
-function ccxAutoImputar(force){
+function ccxAutoImputar(){ if (_contBloq('imputar')) return; return _ccxAutoImputar.apply(this, arguments); }
+function _ccxAutoImputar(force){
   var imp=_ccxN((document.getElementById('ccx-importe')||{}).value);
   if(!imp){ ccxRenderImput(); return; }
   if(!force && !Object.keys(_ccxImput).length && imp<=0){ ccxRenderImput(); return; }
@@ -49353,7 +49373,8 @@ function ccxRenderImput(){
   el.innerHTML=h;
 }
 
-function ccxSetImput(k,v){
+function ccxSetImput(){ if (_contBloq('imputar')) return; return _ccxSetImput.apply(this, arguments); }
+function _ccxSetImput(k,v){
   var n=_ccxN(v);
   if(n<=0) delete _ccxImput[k]; else _ccxImput[k]=Math.round(n*100)/100;
   ccxPintarSel(); ccxRenderImput();
@@ -49362,7 +49383,8 @@ function ccxSetImput(k,v){
 // ── Guardar · Supabase únicamente ────────────────────────────────────────
 // Paso 1: INSERT cobranza SIN id -> IDENTITY lo genera -> return=representation
 // Paso 2: INSERT imputaciones con cobranza_id = id BIGINT devuelto
-async function ccxGuardar(){
+function ccxGuardar(){ if (_contBloq('guardar cobranzas')) return; return _ccxGuardar.apply(this, arguments); }
+async function _ccxGuardar(){
   if(_ccxGuardando||!_ccxCli||_ccxCli.bloqueado) return;
   var imp=_ccxN((document.getElementById('ccx-importe')||{}).value);
   var fecha=(document.getElementById('ccx-fecha')||{}).value||'';
@@ -49630,7 +49652,7 @@ function ccxInit(){
     var recarga = (prev==='pendientes') !== (e==='pendientes');
     if (recarga && (_cbz.medio==='todos' || _cbz.medio==='cheques')) cbzCargar(); else cbzRender();
   }
-  // v13.189.0 — el <select> vive FUERA de cbz-cont, asi que cbzRender() no lo
+  // v13.190.0 — el <select> vive FUERA de cbz-cont, asi que cbzRender() no lo
   // toca. El bug era de sincronizacion: el estado y el selector podian quedar
   // apuntando a valores distintos. Ahora se alinean en los dos sentidos.
   function cbzSetDias(d){
@@ -49653,7 +49675,7 @@ function ccxInit(){
     var pideEfe = (m==='todos' || m==='efectivo');
 
     var res = await Promise.allSettled([
-      // v13.189.0 — limit 400 cortaba: en 45 dias hay 607 filas y un pago de
+      // v13.190.0 — limit 400 cortaba: en 45 dias hay 607 filas y un pago de
       // 42 dias caia en la posicion 557, fuera del corte, sin aviso alguno.
       pideMP  ? sbFetch('vw_mp_a_conciliar?fecha=gte.'+desde+'&select=*&order=fecha.desc&limit=1000') : Promise.resolve([]),
       // v13.183.0: un cheque sin cobranza es pendiente sin importar cuando entro.
@@ -49669,7 +49691,7 @@ function ccxInit(){
     var out = [];
     // ── MP
     if (res[0].status === 'fulfilled') {
-      // v13.189.0 — PostgREST topea en 1000: si llegan 1000, faltan datos.
+      // v13.190.0 — PostgREST topea en 1000: si llegan 1000, faltan datos.
       if ((res[0].value||[]).length >= 1000) _cbz.trunc = true;
       (res[0].value||[]).forEach(function(r){
         var est = r.clasificacion==='CONFLICTO' ? 'problemas'
@@ -49803,6 +49825,7 @@ function ccxInit(){
         (r.accion && r.accion!=='—' ? '<div class="l5"><span>Falta</span>'+_cbzE(r.accion)+'</div>' : '') +
         // v13.183.0: accion primaria solo para MP, solo dueno, nunca CONFLICTO
         ((r.medio==='mp' && typeof cbrPuede==='function' && cbrPuede() &&
+          !(typeof esContador==='function' && esContador()) &&
           r.det && r.det.clasificacion!=='CONFLICTO')
           ? '<button class="cbz-go" onclick="cbrAbrir(\''+_cbzE(r.ref)+'\')">Revisar y confirmar</button>' : '') +
         (det ? '<details class="cbz-det"><summary>Detalles</summary><div class="dd">'+det+'</div></details>' : '') +
@@ -49812,7 +49835,7 @@ function ccxInit(){
   }
 
   function cbzInit() {
-    // v13.189.0 — el selector refleja el estado real al abrir el tab
+    // v13.190.0 — el selector refleja el estado real al abrir el tab
     var sd = document.getElementById('cbz-dias');
     if (sd && String(sd.value) !== String(_cbz.dias)) sd.value = String(_cbz.dias);
     var q = document.getElementById('cbz-q');
@@ -49831,6 +49854,7 @@ function ccxInit(){
   function cbrPuede(){ return (typeof rolActual!=='undefined' && rolActual==='dueno'); }
 
   function cbrAbrir(mpId) {
+    if (_contBloq('registrar cobranzas')) return;
     if (!cbrPuede()) { toast('Solo el dueño puede confirmar cobranzas', 'err'); return; }
     var r = (_cbz.rows||[]).filter(function(x){ return x.medio==='mp' && String(x.ref)===String(mpId); })[0];
     if (!r) { toast('No encontré el movimiento', 'err'); return; }
@@ -49850,7 +49874,7 @@ function ccxInit(){
   function cbrCerrar(){ var o=document.getElementById('cbr-ov'); if(o) o.remove(); }
 
   async function cbrBuscarCliente() {
-    if (_cbr._busc) return;                    // v13.189.0 anti doble submit
+    if (_cbr._busc) return;                    // v13.190.0 anti doble submit
     var q=((document.getElementById('cbr-q')||{}).value||'').trim();
     if (q.length<2) { toast('Escribí al menos 2 letras','err'); return; }
     _cbr._busc = true;
@@ -49938,7 +49962,7 @@ function ccxInit(){
         '<div><span>Facturas</span><b>'+Object.keys(_cbr.imput).length+'</b></div>' +
         '<div class="tot"><span>Diferencia</span><b class="'+
           (Math.abs(dif)<0.05?'ok':(dif<0?'err':'warn'))+'">'+_cbzF(dif)+
-          // v13.189.0: MVP-B exige cierre completo. Un sobrante NO queda a cuenta:
+          // v13.190.0: MVP-B exige cierre completo. Un sobrante NO queda a cuenta:
           // el RPC lo rechaza con IMPUTACION_INCOMPLETA. El texto lo refleja.
           (Math.abs(dif)<0.05?' — cierra exacto':(dif<0?' — excede la cobranza':' — falta imputar'))+'</b></div></div>';
       if (dif < -0.05) h += '<div class="cbr-alerta">No se puede imputar más que la cobranza.</div>';
@@ -49952,12 +49976,13 @@ function ccxInit(){
     var ov=document.getElementById('cbr-ov');
     if (!ov) { ov=document.createElement('div'); ov.id='cbr-ov'; ov.className='cbr-ov'; document.body.appendChild(ov); }
     ov.innerHTML=h;
-    // v13.189.0 — _cbrPintar reescribe el modal: se restaura lo tipeado
+    // v13.190.0 — _cbrPintar reescribe el modal: se restaura lo tipeado
     var _qNew = document.getElementById('cbr-q');
     if (_qNew && _qPrev) { _qNew.value = _qPrev; }
   }
 
   async function cbrConfirmar() {
+    if (_contBloq('registrar cobranzas')) return;
     if (_cbr.guardando) return;
     var m=_cbr.mp, sum=_cbrSuma(), tot=Number(m.monto), dif=Math.round((tot-sum)*100)/100;
     var fs=Object.keys(_cbr.imput), ms=fs.map(function(f){ return Number(_cbr.imput[f]); });
@@ -49970,7 +49995,7 @@ function ccxInit(){
     if (!confirm(res)) return;
     _cbr.guardando=true; _cbrPintar();
     try {
-      // v13.189.0 FIX: sbRpc mandaba SIEMPRE la anon key en Authorization,
+      // v13.190.0 FIX: sbRpc mandaba SIEMPRE la anon key en Authorization,
       // asi que PostgREST resolvia el rol como 'anon' y el RPC (GRANT solo a
       // authenticated) devolvia "permission denied for function".
       // sbFetch usa 'Bearer ' + (_JWT || SUPABASE_KEY): con sesion activa
