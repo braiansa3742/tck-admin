@@ -1,5 +1,32 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.194.2 — 05/09/2026
+     v13.194.2: COBRANZAS — CONCILIACION Y POSTEO XUBIO SON DOS EJES.
+
+     Smoke de la 13.194.1: buscar A-00008-00002922 traia la cobranza 3147
+     (creada, imputada, cliente Utello) rotulada 'Pendiente' y con el boton
+     'Revisar y confirmar'. Dos errores encadenados:
+
+     (a) _cbzHitCob derivaba el estado de xubio_estado. Una cobranza en
+         piloto/pendiente caia en 'pendientes' como si faltara conciliarla.
+         estado='piloto' significa que NO se postea, no que falte imputar.
+     (b) El boton se mostraba con r.medio==='mp' y det.clasificacion
+         distinto de CONFLICTO. Una cobranza de instrumento transferencia
+         resuelve medio 'mp' y su det NO trae 'clasificacion', asi que
+         undefined!=='CONFLICTO' daba true y el boton aparecia.
+
+     (1) Todo lo que sale de cta_cte_cobranzas es estado 'registrada'. El
+         estado de Xubio va en un chip aparte: 'Piloto - no posteada',
+         'En Xubio', 'Error Xubio', 'Anulada por duplicado'.
+     (2) Un MP o un cheque con cobranza_id tambien pasan a 'registrada'.
+     (3) El agrupado SIN RESOLVER / YA REGISTRADAS lo decide la existencia
+         de cobranza, no el estado de posteo.
+     (4) 'Revisar y confirmar' exige ahora: sin cobranza + det.clasificacion
+         presente y distinta de CONFLICTO y de 'fuera de la vista'.
+     (5) Dedup: si el mismo cobro llega por el instrumento y por su
+         cobranza, gana la fila del instrumento (tiene la evidencia).
+     NO cambia el listado operativo, ni carga, ni conciliacion, ni RPC.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.194.1 — 05/09/2026
      v13.194.1: COBRANZAS — EVIDENCIA vs DATO TECNICO + RESULTADOS AGRUPADOS.
 
@@ -15140,6 +15167,7 @@ input.canales-exp-input[type="date"] {
         .chip.cbz-est.e-confirmadas{border-color:#1E8449;color:#7fd6a4}
         .chip.cbz-est.e-problemas{border-color:#b3261e;color:#e8a49e}
         .chip.cbz-est.e-fuera{border-color:#666;color:#aaa}
+        .chip.cbz-est.e-registrada{border-color:#1E8449;color:#7fd6a4}
         /* v13.194.1 — separador de grupos en busqueda */
         .cbz-grp{margin:14px 0 6px;font-size:11px;letter-spacing:.10em;font-weight:700;
           padding:4px 8px;border-radius:4px;display:inline-block}
@@ -49875,9 +49903,30 @@ function ccxInit(){
 
   function _cbzEsc(v){ return encodeURIComponent(String(v == null ? '' : v)); }
 
+  // ── v13.194.2 — DOS EJES DISTINTOS ───────────────────────────────────
+  // ESTADO DE CONCILIACION : hay o no hay cobranza para este cobro
+  // ESTADO DE POSTEO XUBIO : esa cobranza ya viajo a Xubio o no
+  // Mezclarlos hacia que la cobranza 3147 (creada, imputada, en piloto)
+  // apareciera como 'Pendiente' con boton 'Revisar y confirmar', como si
+  // fuera un movimiento sin resolver. estado='piloto' significa que NO se
+  // postea, no que falte conciliar.
+  function _cbzYaRegistrada(r) {
+    return !!(r.registrada || r.estado === 'registrada' || r.estado === 'confirmadas');
+  }
+
+  function _cbzXubioLbl(k) {
+    if (k.estado === 'piloto') return 'Piloto \u00b7 no posteada a Xubio';
+    if (k.xubio_estado === 'ok') return 'En Xubio' +
+      (k.xubio_numero_recibo ? ' \u00b7 ' + k.xubio_numero_recibo : '');
+    if (k.xubio_estado === 'error' || k.xubio_estado === 'indeterminada')
+      return 'Error Xubio' + (k.xubio_error ? ' \u00b7 ' + String(k.xubio_error).slice(0,40) : '');
+    if (k.xubio_estado === 'anulado_duplicado') return 'Anulada por duplicado';
+    return 'Registrada \u00b7 falta postear';
+  }
+
   var CBZ_EST_LBL = { pendientes:'Pendiente', revisar:'Para revisar',
                       confirmadas:'Confirmada', problemas:'Problema',
-                      fuera:'Fuera de bandeja' };
+                      fuera:'Fuera de bandeja', registrada:'Ya registrada' };
 
   // ── por que un movimiento MP no esta en la bandeja ───────────────────
   function _cbzMotivoFuera(m) {
@@ -49927,8 +49976,9 @@ function ccxInit(){
     var v = vista || null;
     var est, etiqueta, motivo;
     if (m.cobranza_id) {
-      est = 'confirmadas'; etiqueta = 'Registrada';
-      motivo = 'cobranza ' + m.cobranza_id;
+      // v13.194.2 — ya tiene cobranza: no vuelve a la bandeja nunca mas
+      est = 'registrada'; etiqueta = 'Cobranza ' + m.cobranza_id;
+      motivo = 'el movimiento ya fue consumido por la cobranza ' + m.cobranza_id;
     } else if (v) {
       est = v.clasificacion === 'CONFLICTO' ? 'problemas'
           : v.clasificacion === 'REQUIERE_REVISION' ? 'revisar' : 'pendientes';
@@ -49941,6 +49991,7 @@ function ccxInit(){
       factura: (v && v.factura_sugerida) || null,
       residual: (v && v.residual_sugerido) || null,
       estado: est, etiqueta: etiqueta, accion: '\u2014', motivo: motivo,
+      registrada: !!m.cobranza_id,
       confianza: (v && v.confianza) || 'baja',
       det: _cbzDetMP(m, v) };
   }
@@ -49948,8 +49999,10 @@ function ccxInit(){
   function _cbzHitChq(c) {
     return { medio:'cheques', icono:'CHQ', ref:c.numero_cheque, fecha:c.created_at,
       monto:c.monto, cliente:c.cliente, factura:null, residual:null,
-      estado: c.estado === 'rechazado' ? 'problemas' : (c.cobranza_id ? 'confirmadas' : 'pendientes'),
-      etiqueta: c.cobranza_id ? 'Registrado' : 'Sin registrar', accion:'\u2014',
+      // v13.194.2 — con cobranza_id el cheque ya esta imputado
+      estado: c.cobranza_id ? 'registrada' : (c.estado === 'rechazado' ? 'problemas' : 'pendientes'),
+      registrada: !!c.cobranza_id,
+      etiqueta: c.cobranza_id ? ('Cobranza ' + c.cobranza_id) : 'Sin registrar', accion:'\u2014',
       motivo: (c.banco||'?') + ' ' + (c.numero_cheque||'?') +
               (c.fecha_vencimiento ? ' \u00b7 vence ' + _cbzD(c.fecha_vencimiento) : '') +
               ' \u00b7 cartera: ' + (c.estado||'?'),
@@ -49965,14 +50018,16 @@ function ccxInit(){
     return { medio: med, icono: esEfe ? 'EFE' : (k.instrumento === 'cheque' ? 'CHQ' : 'MP'),
       ref: k.referencia || k.origen_ref, fecha: k.fecha, monto: k.monto,
       cliente: k.cliente_nombre, factura: (facturas && facturas.join(' + ')) || null, residual: null,
-      estado: k.xubio_estado === 'ok' ? 'confirmadas'
-            : (k.xubio_estado === 'error' || k.xubio_estado === 'indeterminada') ? 'problemas'
-            : 'pendientes',
-      etiqueta: k.estado === 'piloto' ? 'Piloto (no posteada)'
-              : (k.xubio_estado === 'ok' ? 'En Xubio' : (k.xubio_estado || 'pendiente')),
+      // v13.194.2 — todo lo que sale de cta_cte_cobranzas YA es una
+      // cobranza creada e imputada. El estado de Xubio va aparte.
+      estado: 'registrada',
+      registrada: true,
+      cobId: k.id,
+      etiqueta: _cbzXubioLbl(k),
       accion: '\u2014',
       motivo: 'cobranza ' + k.id + ' \u00b7 ' + (k.instrumento||'?') +
-              (k.xubio_numero_recibo ? ' \u00b7 recibo ' + k.xubio_numero_recibo : ''),
+              ' \u00b7 creada e imputada' +
+              (k.estado === 'piloto' ? ' \u00b7 en piloto: no se postea a Xubio' : ''),
       confianza: 'alta',
       det: { 'cobranza': k.id, 'instrumento': k.instrumento, 'estado local': k.estado,
              'estado Xubio': k.xubio_estado, 'recibo Xubio': k.xubio_numero_recibo,
@@ -50105,9 +50160,15 @@ function ccxInit(){
     Object.keys(chq).forEach(function(k){ out.push(_cbzHitChq(chq[k])); });
     Object.keys(cob).forEach(function(k){ out.push(_cbzHitCob(cob[k], impDe[k])); });
 
-    // un cheque ya imputado aparece por la tabla y por su cobranza: se deduplica
+    // v13.194.2 — el mismo cobro puede llegar por el instrumento y por su
+    // cobranza (un cheque imputado esta en cheques_recibidos Y en
+    // cta_cte_cobranzas). Gana la fila del instrumento: tiene la evidencia.
+    var cobsDeInstrumento = {};
+    Object.keys(chq).forEach(function(k){ if (chq[k].cobranza_id) cobsDeInstrumento[chq[k].cobranza_id] = true; });
+    Object.keys(mp).forEach(function(k){ if (mp[k].cobranza_id) cobsDeInstrumento[mp[k].cobranza_id] = true; });
     var vistos = {}, dedup = [];
     out.forEach(function(r){
+      if (r.cobId && cobsDeInstrumento[r.cobId]) return;
       var key = r.medio + '|' + r.ref + '|' + _cbzN(r.monto);
       if (vistos[key]) return; vistos[key] = true; dedup.push(r);
     });
@@ -50275,7 +50336,11 @@ function ccxInit(){
       // v13.194.1 — coincidir por importe NO es corresponderse. Se separan
       // los que siguen abiertos de los que ya estan registrados, y si la
       // busqueda trajo de los dos lados se avisa explicitamente.
-      rows.forEach(function(r){ r._grp = (r.estado === 'confirmadas') ? 2 : 1; });
+      // v13.194.2 — el grupo lo decide si EXISTE cobranza, no el estado de
+      // posteo. 'confirmadas' del listado operativo tambien es registrada.
+      rows.forEach(function(r){
+        r._grp = (r.registrada || r.estado === 'registrada' || r.estado === 'confirmadas') ? 2 : 1;
+      });
       var _nAb = rows.filter(function(r){ return r._grp === 1; }).length;
       var _nCf = rows.length - _nAb;
       rows.sort(function(a, b){
@@ -50286,7 +50351,9 @@ function ccxInit(){
         h += '<div class="cbz-alert">La b&uacute;squeda trajo <b>' + _nAb + ' sin resolver</b> y ' +
              '<b>' + _nCf + ' ya registrada' + (_nCf === 1 ? '' : 's') + '</b>. ' +
              'Coinciden por el criterio buscado (por ejemplo el importe): ' +
-             '<b>eso no significa que sean el mismo cobro</b>.</div>';
+             '<b>eso no significa que sean el mismo cobro</b>. Una cobranza ya ' +
+             'registrada puede estar todav&iacute;a sin postear a Xubio: eso es ' +
+             'estado de posteo, no de conciliaci&oacute;n.</div>';
       }
       (_cbz.busq.err||[]).forEach(function(e){
         h += '<div class="cbz-alert">Una fuente de la b\u00fasqueda fall\u00f3: '+_cbzE(e)+'</div>';
@@ -50331,9 +50398,14 @@ function ccxInit(){
         '<div class="l4">'+_cbzE(r.motivo)+'</div>' +
         (r.accion && r.accion!=='—' ? '<div class="l5"><span>Falta</span>'+_cbzE(r.accion)+'</div>' : '') +
         // v13.183.0: accion primaria solo para MP, solo dueno, nunca CONFLICTO
-        ((r.medio==='mp' && typeof cbrPuede==='function' && cbrPuede() &&
+        // v13.194.2 — 'Revisar y confirmar' es para movimientos SIN cobranza.
+        // Antes una cobranza ya creada (medio 'mp' por instrumento
+        // transferencia, sin clave 'clasificacion' en det) pasaba el filtro y
+        // ofrecia resolver algo que ya estaba resuelto.
+        ((r.medio==='mp' && !_cbzYaRegistrada(r) && typeof cbrPuede==='function' && cbrPuede() &&
           !(typeof esContador==='function' && esContador()) &&
-          r.det && r.det.clasificacion!=='CONFLICTO')
+          r.det && r.det.clasificacion && r.det.clasificacion!=='CONFLICTO' &&
+          r.det.clasificacion!=='fuera de la vista')
           ? '<button class="cbz-go" onclick="cbrAbrir(\''+_cbzE(r.ref)+'\')">Revisar y confirmar</button>' : '') +
         (det ? '<details class="cbz-det"><summary>Detalles</summary><div class="dd">'+det+'</div></details>' : '') +
       '</div>';
