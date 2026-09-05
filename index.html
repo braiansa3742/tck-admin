@@ -1,5 +1,31 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.194.0 — 05/09/2026
+     v13.194.0: COBRANZAS — BUSQUEDA GLOBAL ENTRE ESTADOS + SERVER-SIDE.
+
+     El problema no era el filtro: era que la busqueda miraba _cbz.rows, y
+     _cbz.rows nunca tuvo el universo completo. vw_mp_a_conciliar recorta a
+     45 dias (2.506 de 4.661 movimientos quedan afuera), el listado ademas
+     recorta a _cbz.dias, y PostgREST topea en 1000 (Efectivo ya llego).
+     Buscar un mp_id fuera de ventana era imposible por diseno.
+
+     (1) LISTADO OPERATIVO != BUSQUEDA. _cbzFiltradas() ya no filtra por
+         texto. La busqueda vive en _cbz.busq y consulta al servidor.
+     (2) Con q!='' se muestran resultados de TODOS los estados del medio
+         elegido, y cada card declara su estado real. Limpiar vuelve al
+         estado previo (nunca se toco _cbz.estado).
+     (3) Montos normalizados: 53600 / 53.600 / $53.600 / 53,600 / 53600.00
+         son el mismo importe. Un token de 10+ digitos (mp_id 173444845846)
+         es SIEMPRE referencia, nunca importe.
+     (4) Campos: importe, mp_id, referencia, CUIT/payer_doc, payer_email,
+         cliente, factura (via cta_cte_imputaciones), numero de cheque,
+         banco, emisor. payer_nombre esta NULL en los 4.661 movimientos:
+         se muestra 'MP no informa remitente' en vez de vacio.
+     (5) MP fuera de la bandeja: se explica POR QUE (fuera de 45 dias,
+         status, descartado, ya asignado, importe < 1000, operation_type).
+     NO cambia carga, conciliacion, match, export, disputa ni ningun RPC.
+     Enter sigue funcionando como Buscar.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.193.0 — 04/09/2026
      v13.193.0: TRANSFERENCIAS — CERRAR LAS QUE NO VAN A CONCILIAR, EN UN PASO.
      Pedido de Valentina (04/09): "algunas por cercanía coinciden pero las
@@ -15086,6 +15112,15 @@ input.canales-exp-input[type="date"] {
       <input type="text" id="cbz-q" placeholder="Cliente, factura, referencia..." autocomplete="off"
              onkeydown="if(event.key==='Enter'){event.preventDefault();cbzBuscar();}">
       <button class="btn1" onclick="cbzBuscar()">Buscar</button>
+      <style>
+        /* v13.194.0 — chip de estado real en resultados de busqueda */
+        .chip.cbz-est{background:#2b2b2b;border:1px solid #555;color:#ddd;margin-right:6px}
+        .chip.cbz-est.e-pendientes{border-color:#b8860b;color:#e8c06a}
+        .chip.cbz-est.e-revisar{border-color:#8a6d3b;color:#d6b06a}
+        .chip.cbz-est.e-confirmadas{border-color:#1E8449;color:#7fd6a4}
+        .chip.cbz-est.e-problemas{border-color:#b3261e;color:#e8a49e}
+        .chip.cbz-est.e-fuera{border-color:#666;color:#aaa}
+      </style>
       <select id="cbz-dias" onchange="cbzSetDias(this.value)" style="min-height:44px;padding:0 10px;border:1px solid #EEE3D2;border-radius:10px;font-size:15px">
         <option value="7" selected>7 d&iacute;as</option><option value="15">15 d&iacute;as</option>
         <option value="30">30 d&iacute;as</option><option value="45">45 d&iacute;as</option>
@@ -49736,7 +49771,7 @@ function ccxInit(){
   // el UNION ALL en SQL medía 5.104 ms contra ~1.300 ms de la rama MP sola.
   // Con Promise.allSettled, si una fuente falla las otras siguen visibles.
   // CERO PATCH/POST/DELETE · CERO acciones · CERO Xubio · CERO cron.
-  var _cbz = { rows: [], medio: 'todos', estado: 'pendientes', dias: 7, q: '', err: {}, trunc: false };
+  var _cbz = { rows: [], medio: 'todos', estado: 'pendientes', dias: 7, q: '', err: {}, trunc: false, busq: null };
 
 
 
@@ -49750,7 +49785,12 @@ function ccxInit(){
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function _cbzD(d){ return String(d||'').slice(0,10); }
 
-  function cbzSetMedio(m){ _cbz.medio=m; cbzCargar(); }
+  function cbzSetMedio(m){
+    _cbz.medio = m;
+    // v13.194.0: si hay busqueda activa se re-busca en el nuevo medio
+    if (_cbz.busq && _cbz.busq.activa) { cbzBuscar(); return; }
+    cbzCargar();
+  }
   function cbzSetEstado(e){
     var prev = _cbz.estado; _cbz.estado = e;
     var recarga = (prev==='pendientes') !== (e==='pendientes');
@@ -49765,7 +49805,263 @@ function ccxInit(){
     if (sel && String(sel.value) !== String(_cbz.dias)) sel.value = String(_cbz.dias);
     cbzCargar();
   }
-  function cbzBuscar(){ _cbz.q=((document.getElementById('cbz-q')||{}).value||'').trim().toLowerCase(); cbzRender(); }
+  // ═══ v13.194.0 — BUSQUEDA GLOBAL ENTRE ESTADOS + SERVER-SIDE ══════════
+  // El problema que resolvia mal: _cbzFiltradas() filtraba _cbz.rows, y
+  // _cbz.rows son solo las filas del listado operativo (ventana _cbz.dias,
+  // vw_mp_a_conciliar recorta a 45 dias, cap 1000 de PostgREST). Un
+  // movimiento fuera de eso era INENCONTRABLE por mas que se subiera limit.
+  // Ahora: listado operativo != busqueda. Con q!='' se consulta el servidor
+  // y se muestran resultados de TODOS los estados del medio elegido.
+
+  // ── normalizador de token: separa montos de referencias ──────────────
+  // 53600 / 53.600 / $53.600 / 53,600 / 53600.00  -> monto 53600
+  // 173444845846 (>=10 digitos) -> SIEMPRE referencia, nunca monto
+  function _cbzParseQ(q) {
+    var out = { texto: [], montos: [], refs: [], raw: q };
+    String(q || '').split(/\s+/).forEach(function (tok) {
+      if (!tok) return;
+      var t = tok.replace(/[$\s]/g, '');
+      if (/^[\d.,]+$/.test(t) && /\d/.test(t)) {
+        var soloDig = t.replace(/[.,]/g, '');
+        // 10+ digitos = mp_id / referencia bancaria. No compite como importe.
+        if (soloDig.length >= 10) { out.refs.push(soloDig); return; }
+        var m = t.match(/[.,](\d+)$/);
+        var val;
+        if (m && m[1].length <= 2) {
+          // ultimo grupo de 1-2 digitos = decimales
+          var ent = t.slice(0, t.length - m[1].length - 1).replace(/[.,]/g, '');
+          val = Number(ent + '.' + m[1]);
+        } else {
+          // ultimo grupo de 3 digitos (o sin separador) = miles
+          val = Number(soloDig);
+        }
+        if (isFinite(val) && val > 0) out.montos.push(Math.round(val * 100) / 100);
+        out.refs.push(soloDig);
+      } else {
+        out.texto.push(t.toLowerCase());
+      }
+    });
+    return out;
+  }
+
+  function _cbzEsc(v){ return encodeURIComponent(String(v == null ? '' : v)); }
+
+  var CBZ_EST_LBL = { pendientes:'Pendiente', revisar:'Para revisar',
+                      confirmadas:'Confirmada', problemas:'Problema',
+                      fuera:'Fuera de bandeja' };
+
+  // ── por que un movimiento MP no esta en la bandeja ───────────────────
+  function _cbzMotivoFuera(m) {
+    var d = new Date(Date.now() - 45 * 86400000).toISOString().slice(0, 10);
+    if (m.cobranza_id) return 'ya tiene cobranza registrada';
+    if (m.status !== 'approved') return 'status del pago: ' + (m.status || '?');
+    if (m.descartado_motivo) return 'descartado: ' + m.descartado_motivo;
+    if (m.match_entrega_id) return 'ya asignado a una entrega';
+    if (m.operation_type !== 'money_transfer' && m.operation_type !== 'account_fund')
+      return 'operation_type ' + (m.operation_type || '?') + ': la bandeja solo trae transferencias';
+    if (_cbzN(m.monto) < 1000) return 'importe menor a $1.000: la vista lo excluye';
+    if (String(m.fecha || '').slice(0, 10) < d) return 'anterior a 45 dias: fuera de la ventana de la bandeja';
+    return 'fuera de la vista de conciliacion';
+  }
+
+  function _cbzHitMP(m, vista) {
+    var v = vista || null;
+    var est, etiqueta, motivo;
+    if (m.cobranza_id) {
+      est = 'confirmadas'; etiqueta = 'Registrada';
+      motivo = 'cobranza ' + m.cobranza_id;
+    } else if (v) {
+      est = v.clasificacion === 'CONFLICTO' ? 'problemas'
+          : v.clasificacion === 'REQUIERE_REVISION' ? 'revisar' : 'pendientes';
+      etiqueta = v.clasificacion; motivo = v.motivo_clasificacion;
+    } else {
+      est = 'fuera'; etiqueta = 'Fuera de bandeja'; motivo = _cbzMotivoFuera(m);
+    }
+    return { medio:'mp', icono:'MP', ref:String(m.mp_id), fecha:m.fecha, monto:m.monto,
+      cliente: (v && v.cliente_nombre_sugerido) || null,
+      factura: (v && v.factura_sugerida) || null,
+      residual: (v && v.residual_sugerido) || null,
+      estado: est, etiqueta: etiqueta, accion: '\u2014', motivo: motivo,
+      confianza: (v && v.confianza) || 'baja',
+      det: { 'mp_id': m.mp_id, 'tipo': m.operation_type, 'status': m.status,
+             'pagador (email)': m.payer_email, 'doc': m.payer_doc,
+             'payer_nombre': m.payer_nombre || 'MP no informa remitente',
+             'cobranza': m.cobranza_id, 'entrega': m.match_entrega_id,
+             'clasificacion': v ? v.clasificacion : 'fuera de la vista' } };
+  }
+
+  function _cbzHitChq(c) {
+    return { medio:'cheques', icono:'CHQ', ref:c.numero_cheque, fecha:c.created_at,
+      monto:c.monto, cliente:c.cliente, factura:null, residual:null,
+      estado: c.estado === 'rechazado' ? 'problemas' : (c.cobranza_id ? 'confirmadas' : 'pendientes'),
+      etiqueta: c.cobranza_id ? 'Registrado' : 'Sin registrar', accion:'\u2014',
+      motivo: (c.banco||'?') + ' ' + (c.numero_cheque||'?') +
+              (c.fecha_vencimiento ? ' \u00b7 vence ' + _cbzD(c.fecha_vencimiento) : '') +
+              ' \u00b7 cartera: ' + (c.estado||'?'),
+      confianza: c.cobranza_id ? 'alta' : 'media',
+      det: { 'banco': c.banco, 'numero': c.numero_cheque, 'emisor': c.emisor,
+             'vencimiento': _cbzD(c.fecha_vencimiento), 'estado cartera': c.estado,
+             'pedido': c.pedido_id, 'chofer': c.chofer, 'cobranza_id': c.cobranza_id } };
+  }
+
+  function _cbzHitCob(k, facturas) {
+    var esEfe = String(k.origen_ref||'').indexOf(':efe') >= 0;
+    var med = esEfe ? 'efectivo' : (k.instrumento === 'cheque' ? 'cheques' : 'mp');
+    return { medio: med, icono: esEfe ? 'EFE' : (k.instrumento === 'cheque' ? 'CHQ' : 'MP'),
+      ref: k.referencia || k.origen_ref, fecha: k.fecha, monto: k.monto,
+      cliente: k.cliente_nombre, factura: (facturas && facturas.join(' + ')) || null, residual: null,
+      estado: k.xubio_estado === 'ok' ? 'confirmadas'
+            : (k.xubio_estado === 'error' || k.xubio_estado === 'indeterminada') ? 'problemas'
+            : 'pendientes',
+      etiqueta: k.estado === 'piloto' ? 'Piloto (no posteada)'
+              : (k.xubio_estado === 'ok' ? 'En Xubio' : (k.xubio_estado || 'pendiente')),
+      accion: '\u2014',
+      motivo: 'cobranza ' + k.id + ' \u00b7 ' + (k.instrumento||'?') +
+              (k.xubio_numero_recibo ? ' \u00b7 recibo ' + k.xubio_numero_recibo : ''),
+      confianza: 'alta',
+      det: { 'cobranza': k.id, 'instrumento': k.instrumento, 'estado local': k.estado,
+             'estado Xubio': k.xubio_estado, 'recibo Xubio': k.xubio_numero_recibo,
+             'origen': k.origen, 'origen_ref': k.origen_ref, 'referencia': k.referencia,
+             'cliente_xubio_id': k.cliente_xubio_id, 'creado por': k.creado_por } };
+  }
+
+  // ── BUSQUEDA: entra por Enter o por el boton ─────────────────────────
+  async function cbzBuscar() {
+    var raw = ((document.getElementById('cbz-q')||{}).value || '').trim();
+    _cbz.q = raw.toLowerCase();
+    if (!raw) { _cbz.busq = null; cbzRender(); return; }   // limpiar = volver al estado previo
+    _cbz.busq = { activa:true, cargando:true, hits:[], err:[], q:raw };
+    cbzRender();
+    try { _cbz.busq.hits = await _cbzBuscarServidor(_cbzParseQ(raw)); }
+    catch (e) { _cbz.busq.err.push(String(e && e.message || e).slice(0,140)); }
+    _cbz.busq.cargando = false;
+    cbzRender();
+  }
+
+  async function _cbzBuscarServidor(p) {
+    var m = _cbz.medio;
+    var pideMP  = (m === 'todos' || m === 'mp');
+    var pideChq = (m === 'todos' || m === 'cheques');
+    var pideEfe = (m === 'todos' || m === 'efectivo');
+    var qs = [];
+    var L = '&limit=50';
+
+    // ── MP: la tabla completa, no la vista. 4.661 filas, PK mp_id + idx monto.
+    if (pideMP) {
+      p.refs.forEach(function(r){
+        if (r.length >= 8) qs.push(['mp', 'mp_movimientos?mp_id=eq.' + r + '&select=*' + L]);
+      });
+      p.montos.forEach(function(v){
+        qs.push(['mp', 'mp_movimientos?monto=eq.' + v + '&select=*&order=fecha.desc' + L]);
+      });
+      p.texto.forEach(function(t){
+        if (t.length < 3) return;
+        qs.push(['mp', 'mp_movimientos?payer_email=ilike.*' + _cbzEsc(t) + '*&select=*&order=fecha.desc' + L]);
+        qs.push(['mp', 'mp_movimientos?payer_doc=ilike.*' + _cbzEsc(t) + '*&select=*&order=fecha.desc' + L]);
+      });
+      p.refs.forEach(function(r){
+        qs.push(['mp', 'mp_movimientos?payer_doc=ilike.*' + r + '*&select=*&order=fecha.desc' + L]);
+      });
+    }
+
+    // ── CHEQUES: 82 filas. Numero, banco, emisor, cliente, monto.
+    if (pideChq) {
+      p.texto.forEach(function(t){
+        if (t.length < 3) return;
+        ['numero_cheque','banco','emisor','cliente','comercio'].forEach(function(c){
+          qs.push(['chq', 'cheques_recibidos?' + c + '=ilike.*' + _cbzEsc(t) + '*&select=*' + L]);
+        });
+      });
+      p.refs.forEach(function(r){
+        qs.push(['chq', 'cheques_recibidos?numero_cheque=ilike.*' + r + '*&select=*' + L]);
+      });
+      p.montos.forEach(function(v){
+        qs.push(['chq', 'cheques_recibidos?monto=eq.' + v + '&select=*' + L]);
+      });
+    }
+
+    // ── COBRANZAS REGISTRADAS (efectivo, transferencia, cheque ya imputado)
+    if (pideEfe || pideChq || pideMP) {
+      p.montos.forEach(function(v){
+        qs.push(['cob', 'cta_cte_cobranzas?monto=eq.' + v + '&select=*&order=fecha.desc' + L]);
+      });
+      p.refs.forEach(function(r){
+        qs.push(['cob', 'cta_cte_cobranzas?referencia=ilike.*' + r + '*&select=*&order=fecha.desc' + L]);
+      });
+      p.texto.forEach(function(t){
+        if (t.length < 3) return;
+        qs.push(['cob', 'cta_cte_cobranzas?cliente_nombre=ilike.*' + _cbzEsc(t) + '*&select=*&order=fecha.desc' + L]);
+        qs.push(['cob', 'cta_cte_cobranzas?referencia=ilike.*' + _cbzEsc(t) + '*&select=*&order=fecha.desc' + L]);
+        // por numero de factura -> imputaciones -> cobranza
+        qs.push(['imp', 'cta_cte_imputaciones?debito_key=ilike.*' + _cbzEsc(t) + '*&select=cobranza_id,debito_key' + L]);
+      });
+      p.refs.forEach(function(r){
+        qs.push(['imp', 'cta_cte_imputaciones?debito_key=ilike.*' + r + '*&select=cobranza_id,debito_key' + L]);
+      });
+    }
+
+    if (!qs.length) return [];
+    var res = await Promise.allSettled(qs.map(function(x){ return sbFetch(x[1]); }));
+
+    var mp = {}, chq = {}, cob = {}, impDe = {}, impIds = {};
+    res.forEach(function(r, i){
+      if (r.status !== 'fulfilled') {
+        _cbz.busq.err.push(qs[i][0] + ': ' + String(r.reason && r.reason.message || r.reason).slice(0,90));
+        return;
+      }
+      (r.value || []).forEach(function(row){
+        if (qs[i][0] === 'mp')  mp[row.mp_id] = row;
+        if (qs[i][0] === 'chq') chq[row.id] = row;
+        if (qs[i][0] === 'cob') cob[row.id] = row;
+        if (qs[i][0] === 'imp') {
+          impIds[row.cobranza_id] = true;
+          (impDe[row.cobranza_id] = impDe[row.cobranza_id] || []).push(row.debito_key);
+        }
+      });
+    });
+
+    // segunda vuelta acotada: cobranzas alcanzadas por numero de factura
+    var faltan = Object.keys(impIds).filter(function(id){ return !cob[id]; });
+    if (faltan.length) {
+      try {
+        var extra = await sbFetch('cta_cte_cobranzas?id=in.(' + faltan.slice(0,50).join(',') + ')&select=*');
+        (extra || []).forEach(function(k){ cob[k.id] = k; });
+      } catch (e) { _cbz.busq.err.push('cobranzas por factura: ' + String(e && e.message || e).slice(0,90)); }
+    }
+
+    // estado real de los MP encontrados: se consulta la vista solo por esos ids
+    var vista = {};
+    var ids = Object.keys(mp);
+    if (ids.length) {
+      try {
+        var vv = await sbFetch('vw_mp_a_conciliar?mp_id=in.(' + ids.slice(0,100).join(',') + ')&select=*');
+        (vv || []).forEach(function(v){ vista[v.mp_id] = v; });
+      } catch (e) { _cbz.busq.err.push('vista MP: ' + String(e && e.message || e).slice(0,90)); }
+    }
+
+    var out = [];
+    Object.keys(mp).forEach(function(k){ out.push(_cbzHitMP(mp[k], vista[k])); });
+    Object.keys(chq).forEach(function(k){ out.push(_cbzHitChq(chq[k])); });
+    Object.keys(cob).forEach(function(k){ out.push(_cbzHitCob(cob[k], impDe[k])); });
+
+    // un cheque ya imputado aparece por la tabla y por su cobranza: se deduplica
+    var vistos = {}, dedup = [];
+    out.forEach(function(r){
+      var key = r.medio + '|' + r.ref + '|' + _cbzN(r.monto);
+      if (vistos[key]) return; vistos[key] = true; dedup.push(r);
+    });
+
+    if (_cbz.medio !== 'todos') {
+      dedup = dedup.filter(function(r){ return r.medio === _cbz.medio; });
+    }
+    dedup.sort(function(a,b){ return String(b.fecha).localeCompare(String(a.fecha)); });
+    return dedup;
+  }
+
+  function cbzLimpiarBusq() {
+    var q = document.getElementById('cbz-q'); if (q) q.value = '';
+    _cbz.q = ''; _cbz.busq = null; cbzRender();
+  }
 
   async function cbzCargar() {
     var el = document.getElementById('cbz-cont'); if (!el) return;
@@ -49863,14 +50159,13 @@ function ccxInit(){
     cbzRender();
   }
 
+  // v13.194.0 — el listado operativo NO filtra por texto: la busqueda es
+  // otra cosa y vive en _cbz.busq. Antes filtrar aca daba falsos negativos
+  // porque _cbz.rows nunca tuvo el universo completo.
   function _cbzFiltradas() {
-    var q = _cbz.q;
     return _cbz.rows.filter(function(r){
       if (_cbz.medio !== 'todos' && r.medio !== _cbz.medio) return false;
-      if (r.estado !== _cbz.estado) return false;
-      if (!q) return true;
-      return [r.cliente, r.ref, r.factura, r.motivo].some(function(v){
-        return String(v==null?'':v).toLowerCase().indexOf(q) >= 0; });
+      return r.estado === _cbz.estado;
     });
   }
 
@@ -49908,11 +50203,32 @@ function ccxInit(){
     });
     h += '</div>';
 
-    var rows = _cbzFiltradas();
-    var _chqFull = (_cbz.estado==='pendientes' && (_cbz.medio==='todos'||_cbz.medio==='cheques'));
-    h += '<div class="cbz-sub">'+rows.length+' movimientos · últimos '+_cbz.dias+' días' +
-         (_chqFull ? ' · <b>cheques sin registrar: historial completo</b>' : '') + '</div>';
-    if (!rows.length) { h += '<div class="rv-empty">Sin movimientos en esta vista.</div>'; el.innerHTML=h; return; }
+    // ── v13.194.0 — con busqueda activa se muestran TODOS los estados ────
+    var rows, _busq = _cbz.busq && _cbz.busq.activa;
+    if (_busq) {
+      if (_cbz.busq.cargando) {
+        h += '<div class="cbz-sub">Buscando \u00ab'+_cbzE(_cbz.busq.q)+'\u00bb en todos los estados\u2026</div>';
+        el.innerHTML = h; return;
+      }
+      rows = _cbz.busq.hits || [];
+      (_cbz.busq.err||[]).forEach(function(e){
+        h += '<div class="cbz-alert">Una fuente de la b\u00fasqueda fall\u00f3: '+_cbzE(e)+'</div>';
+      });
+      h += '<div class="cbz-sub"><b>B\u00fasqueda global</b> \u00ab'+_cbzE(_cbz.busq.q)+'\u00bb \u00b7 ' +
+           rows.length + ' resultado' + (rows.length===1?'':'s') + ' en todos los estados' +
+           ' <button class="cbz-mini" onclick="cbzLimpiarBusq()">Limpiar</button></div>';
+      if (!rows.length) {
+        h += '<div class="rv-empty">Sin coincidencias. Se busc\u00f3 por importe, referencia, ' +
+             'mp_id, CUIT, email, cliente, factura, cheque, banco y emisor.</div>';
+        el.innerHTML = h; return;
+      }
+    } else {
+      rows = _cbzFiltradas();
+      var _chqFull = (_cbz.estado==='pendientes' && (_cbz.medio==='todos'||_cbz.medio==='cheques'));
+      h += '<div class="cbz-sub">'+rows.length+' movimientos \u00b7 \u00faltimos '+_cbz.dias+' d\u00edas' +
+           (_chqFull ? ' \u00b7 <b>cheques sin registrar: historial completo</b>' : '') + '</div>';
+      if (!rows.length) { h += '<div class="rv-empty">Sin movimientos en esta vista.</div>'; el.innerHTML=h; return; }
+    }
 
     rows.forEach(function(r){
       var det = Object.keys(r.det||{}).filter(function(k){
@@ -49922,6 +50238,9 @@ function ccxInit(){
         '<div class="l1"><b>'+_cbzF(r.monto)+'</b><span class="med">'+r.icono+'</span>' +
           '<span class="d">'+_cbzE(_cbzD(r.fecha))+'</span></div>' +
         '<div class="l2">'+(r.cliente ? '<b>'+_cbzE(r.cliente)+'</b>' : '<i>sin cliente identificado</i>') +
+          // v13.194.0: en busqueda cada card declara su estado real
+          (_busq ? '<span class="chip cbz-est e-'+_cbzE(r.estado)+'">'+
+                   _cbzE(CBZ_EST_LBL[r.estado]||r.estado)+'</span>' : '') +
           '<span class="chip c-'+_cbzE(r.confianza)+'">'+_cbzE(r.etiqueta)+'</span></div>' +
         (r.factura ? '<div class="l3">'+_cbzE(r.factura)+
            (r.residual ? ' · '+_cbzF(r.residual) : '')+'</div>' : '') +
