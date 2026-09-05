@@ -1,5 +1,25 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.194.1 — 05/09/2026
+     v13.194.1: COBRANZAS — EVIDENCIA vs DATO TECNICO + RESULTADOS AGRUPADOS.
+
+     Smoke de la 13.194.0 en produccion: buscar emmasavy37@gmail.com devolvia
+     muchos account_fund sin identificar. Verificado contra la base:
+     ese email esta en 720 de 720 account_fund, con un solo payer_id, y el
+     payer_doc de todos ellos es 33717416959 (CUIT de TCK). No es el pagador:
+     es la cuenta receptora. Presentarlo como "pagador" hacia identificar mal.
+
+     (1) En account_fund el email y el CUIT se muestran rotulados como DATO
+         TECNICO, y aparece "MP no informa el remitente". En money_transfer
+         siguen siendo evidencia y se muestran como pagador.
+     (2) La busqueda por email/doc excluye account_fund: ahi no son
+         identidad y solo entierran los resultados reales. El mp_id exacto
+         y el importe siguen encontrando esos movimientos igual.
+     (3) Los resultados se separan en SIN RESOLVER y YA REGISTRADAS. Si la
+         busqueda trae de los dos lados, se avisa que coincidir por importe
+         no significa que sean el mismo cobro.
+     NO cambia carga, conciliacion, match, export, disputa ni ningun RPC.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.194.0 — 05/09/2026
      v13.194.0: COBRANZAS — BUSQUEDA GLOBAL ENTRE ESTADOS + SERVER-SIDE.
 
@@ -15120,6 +15140,11 @@ input.canales-exp-input[type="date"] {
         .chip.cbz-est.e-confirmadas{border-color:#1E8449;color:#7fd6a4}
         .chip.cbz-est.e-problemas{border-color:#b3261e;color:#e8a49e}
         .chip.cbz-est.e-fuera{border-color:#666;color:#aaa}
+        /* v13.194.1 — separador de grupos en busqueda */
+        .cbz-grp{margin:14px 0 6px;font-size:11px;letter-spacing:.10em;font-weight:700;
+          padding:4px 8px;border-radius:4px;display:inline-block}
+        .cbz-grp.g-1{background:#3a2a12;color:#e8c06a;border:1px solid #b8860b}
+        .cbz-grp.g-2{background:#12291c;color:#7fd6a4;border:1px solid #1E8449}
       </style>
       <select id="cbz-dias" onchange="cbzSetDias(this.value)" style="min-height:44px;padding:0 10px;border:1px solid #EEE3D2;border-radius:10px;font-size:15px">
         <option value="7" selected>7 d&iacute;as</option><option value="15">15 d&iacute;as</option>
@@ -49821,13 +49846,15 @@ function ccxInit(){
     String(q || '').split(/\s+/).forEach(function (tok) {
       if (!tok) return;
       var t = tok.replace(/[$\s]/g, '');
+      if (!t) return;                       // v13.194.1: '$' suelto no es token
       if (/^[\d.,]+$/.test(t) && /\d/.test(t)) {
         var soloDig = t.replace(/[.,]/g, '');
         // 10+ digitos = mp_id / referencia bancaria. No compite como importe.
         if (soloDig.length >= 10) { out.refs.push(soloDig); return; }
         var m = t.match(/[.,](\d+)$/);
         var val;
-        if (m && m[1].length <= 2) {
+        var esDec = !!(m && m[1].length <= 2);
+        if (esDec) {
           // ultimo grupo de 1-2 digitos = decimales
           var ent = t.slice(0, t.length - m[1].length - 1).replace(/[.,]/g, '');
           val = Number(ent + '.' + m[1]);
@@ -49836,7 +49863,9 @@ function ccxInit(){
           val = Number(soloDig);
         }
         if (isFinite(val) && val > 0) out.montos.push(Math.round(val * 100) / 100);
-        out.refs.push(soloDig);
+        // v13.194.1: si el token traia decimales, la sarta de digitos no
+        // es una referencia real (53600.00 no es la referencia 5360000)
+        if (!esDec) out.refs.push(soloDig);
       } else {
         out.texto.push(t.toLowerCase());
       }
@@ -49864,6 +49893,36 @@ function ccxInit(){
     return 'fuera de la vista de conciliacion';
   }
 
+  // ── v13.194.1 — EVIDENCIA vs DATO TECNICO ────────────────────────────
+  // En account_fund (transferencia bancaria al CVU) MP informa al TITULAR
+  // DE LA CUENTA RECEPTORA, no al remitente. Verificado sobre la tabla:
+  //   payer_doc  = 33717416959 (CUIT de TCK) en el 100% de los account_fund
+  //   payer_email = emmasavy37@gmail.com en 720 de 720, un solo payer_id
+  //   payer_nombre = NULL en los 4.661 movimientos, sin excepcion
+  // Presentar eso como "pagador" induce a identificar mal al cliente.
+  // En money_transfer si son evidencia: cada cliente trae su propio email.
+  function _cbzAnon(m) {
+    return m.operation_type === 'account_fund' ||
+           String(m.payer_doc || '').replace(/\D/g, '') === '33717416959';
+  }
+
+  function _cbzDetMP(m, v) {
+    var d = { 'mp_id': m.mp_id, 'tipo': m.operation_type, 'status': m.status };
+    if (_cbzAnon(m)) {
+      d['remitente'] = 'MP no informa el remitente en transferencias al CVU';
+      d['cuenta receptora (dato tecnico)'] = m.payer_email || '-';
+      d['CUIT informado (dato tecnico)'] = (m.payer_doc || '-') + ' = CUIT de TCK, no del cliente';
+    } else {
+      d['pagador (email)'] = m.payer_email;
+      d['doc del pagador'] = m.payer_doc;
+      d['payer_nombre'] = m.payer_nombre || 'MP no informa nombre';
+    }
+    d['cobranza'] = m.cobranza_id;
+    d['entrega'] = m.match_entrega_id;
+    d['clasificacion'] = v ? v.clasificacion : 'fuera de la vista';
+    return d;
+  }
+
   function _cbzHitMP(m, vista) {
     var v = vista || null;
     var est, etiqueta, motivo;
@@ -49883,11 +49942,7 @@ function ccxInit(){
       residual: (v && v.residual_sugerido) || null,
       estado: est, etiqueta: etiqueta, accion: '\u2014', motivo: motivo,
       confianza: (v && v.confianza) || 'baja',
-      det: { 'mp_id': m.mp_id, 'tipo': m.operation_type, 'status': m.status,
-             'pagador (email)': m.payer_email, 'doc': m.payer_doc,
-             'payer_nombre': m.payer_nombre || 'MP no informa remitente',
-             'cobranza': m.cobranza_id, 'entrega': m.match_entrega_id,
-             'clasificacion': v ? v.clasificacion : 'fuera de la vista' } };
+      det: _cbzDetMP(m, v) };
   }
 
   function _cbzHitChq(c) {
@@ -49954,13 +50009,19 @@ function ccxInit(){
       p.montos.forEach(function(v){
         qs.push(['mp', 'mp_movimientos?monto=eq.' + v + '&select=*&order=fecha.desc' + L]);
       });
+      // v13.194.1 — email y doc SOLO se buscan donde son evidencia real.
+      // En account_fund el email es la cuenta receptora de TCK (720 filas
+      // identicas) y el doc es el CUIT de TCK: buscar ahi devuelve ruido
+      // que entierra los resultados verdaderos. El mp_id exacto y el
+      // importe siguen encontrando los account_fund igual.
+      var NOAF = '&operation_type=neq.account_fund';
       p.texto.forEach(function(t){
         if (t.length < 3) return;
-        qs.push(['mp', 'mp_movimientos?payer_email=ilike.*' + _cbzEsc(t) + '*&select=*&order=fecha.desc' + L]);
-        qs.push(['mp', 'mp_movimientos?payer_doc=ilike.*' + _cbzEsc(t) + '*&select=*&order=fecha.desc' + L]);
+        qs.push(['mp', 'mp_movimientos?payer_email=ilike.*' + _cbzEsc(t) + '*' + NOAF + '&select=*&order=fecha.desc' + L]);
+        qs.push(['mp', 'mp_movimientos?payer_doc=ilike.*' + _cbzEsc(t) + '*' + NOAF + '&select=*&order=fecha.desc' + L]);
       });
       p.refs.forEach(function(r){
-        qs.push(['mp', 'mp_movimientos?payer_doc=ilike.*' + r + '*&select=*&order=fecha.desc' + L]);
+        qs.push(['mp', 'mp_movimientos?payer_doc=ilike.*' + r + '*' + NOAF + '&select=*&order=fecha.desc' + L]);
       });
     }
 
@@ -50210,7 +50271,23 @@ function ccxInit(){
         h += '<div class="cbz-sub">Buscando \u00ab'+_cbzE(_cbz.busq.q)+'\u00bb en todos los estados\u2026</div>';
         el.innerHTML = h; return;
       }
-      rows = _cbz.busq.hits || [];
+      rows = (_cbz.busq.hits || []).slice();
+      // v13.194.1 — coincidir por importe NO es corresponderse. Se separan
+      // los que siguen abiertos de los que ya estan registrados, y si la
+      // busqueda trajo de los dos lados se avisa explicitamente.
+      rows.forEach(function(r){ r._grp = (r.estado === 'confirmadas') ? 2 : 1; });
+      var _nAb = rows.filter(function(r){ return r._grp === 1; }).length;
+      var _nCf = rows.length - _nAb;
+      rows.sort(function(a, b){
+        if (a._grp !== b._grp) return a._grp - b._grp;
+        return String(b.fecha).localeCompare(String(a.fecha));
+      });
+      if (_nAb && _nCf) {
+        h += '<div class="cbz-alert">La b&uacute;squeda trajo <b>' + _nAb + ' sin resolver</b> y ' +
+             '<b>' + _nCf + ' ya registrada' + (_nCf === 1 ? '' : 's') + '</b>. ' +
+             'Coinciden por el criterio buscado (por ejemplo el importe): ' +
+             '<b>eso no significa que sean el mismo cobro</b>.</div>';
+      }
       (_cbz.busq.err||[]).forEach(function(e){
         h += '<div class="cbz-alert">Una fuente de la b\u00fasqueda fall\u00f3: '+_cbzE(e)+'</div>';
       });
@@ -50230,7 +50307,14 @@ function ccxInit(){
       if (!rows.length) { h += '<div class="rv-empty">Sin movimientos en esta vista.</div>'; el.innerHTML=h; return; }
     }
 
+    var _grpPrev = 0;
     rows.forEach(function(r){
+      // v13.194.1 — separador visible entre abiertas y registradas
+      if (_busq && r._grp !== _grpPrev) {
+        _grpPrev = r._grp;
+        h += '<div class="cbz-grp g-' + r._grp + '">' +
+             (r._grp === 1 ? 'SIN RESOLVER' : 'YA REGISTRADAS') + '</div>';
+      }
       var det = Object.keys(r.det||{}).filter(function(k){
         return r.det[k]!==null && r.det[k]!==undefined && r.det[k]!==''; })
         .map(function(k){ return '<span>'+_cbzE(k)+': <b>'+_cbzE(r.det[k])+'</b></span>'; }).join('');
