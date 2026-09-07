@@ -1,5 +1,48 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.196.0 — 07/09/2026
+     v13.196.0: COBRANZAS — + NUEVA COBRANZA -> CHEQUE + MODO AUDITORIA.
+
+     Backend aprobado antes de tocar esto: harness de
+     ctacte_registrar_cobranza_cheque_v2 en 25/25 PASS, rollback OK,
+     residuos 0/0, y colas del cron sin moverse (efectivo 57->57,
+     transferencia 0->0).
+
+     (1) BOTON + NUEVA COBRANZA en el panel. Medio Cheque habilitado.
+         Efectivo, Transferencia y MP aparecen listados pero desactivados,
+         con el motivo escrito: efectivo y transferencia ya tienen circuito
+         automatico desde entrega/rendicion y darlos de alta a mano seria
+         una cobranza duplicada; MP se resuelve por su bandeja.
+     (2) FLUJO CHEQUE: se elige un cheque con cobranza_id NULL y estado
+         distinto de rechazado. Banco, numero, emisor, importe, recepcion,
+         vencimiento, estado, chofer, pedido y foto se muestran como
+         evidencia read-only: no se tipean.
+     (3) CLIENTE: si el pedido del cheque resuelve cliente, queda
+         precargado y bloqueado con el badge "desde el pedido". Si no
+         resuelve, hay busqueda manual detras de una advertencia fuerte y
+         una confirmacion explicita; el RPC lo registra como
+         metodo=manual_sin_pedido.
+     (4) FACTURAS 1..N con monto por linea, sugerencia que completa hasta
+         agotar el cheque sin pasar el residual, y REGISTRAR habilitado
+         solo con diferencia $0 +/- 0,05.
+     (5) RPC: sbFetch('rpc/ctacte_registrar_cobranza_cheque_v2'). NO se
+         manda p_por: la identidad sale del claim 'vendedor' del JWT.
+         Queda estado=piloto, xubio_estado=pendiente. Cero posteo.
+     (6) MODO AUDITORIA para rol contador: abre el modal de Nueva cobranza
+         Y el de Revisar cobranza MP, elige, simula cliente y facturas y ve
+         la diferencia recalcularse. El boton final dice "Solo lectura —
+         rol contador" y esta deshabilitado. Tres capas: UI deshabilitada,
+         _contBloq en el handler, y el RPC que devuelve NO_AUTORIZADO.
+         Para eso .cbr-ov sale de la lista que apaga body.rol-contador, y
+         la card ofrece "Auditar (solo lectura)" en vez del boton de
+         confirmar. _cbzAccionable se parte en _cbzAuditable (el caso esta
+         abierto) + rol (puede escribir); la condicion de origen
+         fuente==='mp_mov' no se relaja.
+     (7) TCK_UPD_LOCAL a 13.196.0. Acordate de version.json en el repo.
+
+     NO TOCA: efectivo, transferencias, la bandeja MP, el posteo a Xubio,
+     el rol cobranzas (Valentina sigue bloqueada en el RPC), ni RLS.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.195.1 — 07/09/2026
      v13.195.1: COBRANZAS — ACCIONABILIDAD POSITIVA + MARCADOR DE VERSION.
      Merge conservador: BASE = 13.195.0 de main (planilla delta + fix banner
@@ -15236,6 +15279,10 @@ input.canales-exp-input[type="date"] {
       <input type="text" id="cbz-q" placeholder="Importe, cliente, factura, mp_id, CUIT, cheque, banco..." autocomplete="off"
              onkeydown="if(event.key==='Enter'){event.preventDefault();cbzBuscar();}">
       <button class="btn1" onclick="cbzBuscar()">Buscar</button>
+      <!-- v13.196.0 - clase propia: NO usa cbz-go / ccx-cta / btn-accion,
+           que el CSS de rol-contador apaga. El contador tiene que poder
+           abrir el modal para auditar; lo que no puede es registrar. -->
+      <button class="cbz-new" onclick="cncAbrir()">+ Nueva cobranza</button>
       <style>
         /* v13.194.0 — chip de estado real en resultados de busqueda */
         .chip.cbz-est{background:#2b2b2b;border:1px solid #555;color:#ddd;margin-right:6px}
@@ -15245,6 +15292,60 @@ input.canales-exp-input[type="date"] {
         .chip.cbz-est.e-problemas{border-color:#b3261e;color:#e8a49e}
         .chip.cbz-est.e-fuera{border-color:#666;color:#aaa}
         .chip.cbz-est.e-registrada{border-color:#1E8449;color:#7fd6a4}
+        /* v13.196.0 - Nueva cobranza (cheque) */
+        .cbz-new{min-height:44px;padding:0 14px;border:1.5px solid #B45309;border-radius:10px;
+          background:#fff;color:#B45309;font-weight:900;font-size:13px;letter-spacing:.3px;cursor:pointer;white-space:nowrap}
+        .cbz-audit{margin-top:8px;padding:8px 12px;border:1px solid #8A7960;border-radius:9px;
+          background:#FCF8F1;color:#8A7960;font-weight:800;font-size:12px;cursor:pointer}
+        .cnc-ov{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.5);display:flex;
+          align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto}
+        .cnc-box{background:#fff;border-radius:16px;max-width:560px;width:100%;padding:16px;margin:auto}
+        .cnc-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+        .cnc-hd b{font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:900;color:#1A0800}
+        .cnc-x{border:0;background:none;font-size:26px;line-height:1;color:#9C8A72;cursor:pointer}
+        .cnc-sec{font-size:10.5px;font-weight:900;letter-spacing:.5px;text-transform:uppercase;
+          color:#8A7960;margin:14px 0 6px}
+        .cnc-op{display:block;width:100%;text-align:left;padding:10px 12px;margin-top:6px;
+          border:1px solid #EEE3D2;border-radius:10px;background:#fff;cursor:pointer;font-size:13px}
+        .cnc-op b{display:block;color:#1A0800;font-size:13.5px}
+        .cnc-op span{font-size:11px;color:#9C8A72}
+        .cnc-ev{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:7px}
+        .cnc-ev div{background:#FCF8F1;border:1px solid #EEE3D2;border-radius:8px;padding:7px 9px}
+        .cnc-ev span{display:block;font-size:9.5px;letter-spacing:.5px;text-transform:uppercase;color:#9C8A72}
+        .cnc-ev b{font-size:13px;color:#1A0800}
+        .cnc-foto{display:inline-block;margin-top:8px;font-size:12px;color:#B45309;font-weight:800}
+        .cnc-cli{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;
+          background:#FFFBF5;border:1px solid #EEE3D2;border-radius:10px;font-size:14px}
+        .cnc-badge{font-size:10px;font-weight:900;letter-spacing:.4px;text-transform:uppercase;
+          padding:3px 7px;border-radius:20px;border:1px solid #1E8449;color:#1E8449;white-space:nowrap}
+        .cnc-warn{background:#FFF4F3;border:1.5px solid #B71C1C;border-radius:10px;padding:11px 12px;
+          font-size:12.5px;color:#7A1512;line-height:1.5;margin-bottom:8px}
+        .cnc-warn b{color:#B71C1C}
+        .cnc-warn label{display:flex;gap:8px;align-items:flex-start;margin-top:9px;cursor:pointer;color:#1A0800}
+        .cnc-warn input{width:19px;height:19px;flex:0 0 auto;margin-top:1px}
+        .cnc-row{display:flex;gap:8px}
+        .cnc-row input{flex:1;min-height:44px;padding:0 11px;border:1px solid #EEE3D2;border-radius:10px;font-size:16px}
+        .cnc-doc{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #EEE3D2;
+          border-radius:9px;margin-bottom:5px}
+        .cnc-doc.on{border-color:#B45309;background:#FFFBF5}
+        .cnc-doc label{display:flex;align-items:center;gap:9px;flex:1;cursor:pointer;min-width:0}
+        .cnc-doc input[type=checkbox]{width:19px;height:19px;flex:0 0 auto}
+        .cnc-doc b{display:block;font-size:12.5px;color:#1A0800}
+        .cnc-doc i{font-style:normal;font-size:11px;color:#9C8A72}
+        .cnc-imp{width:112px;min-height:38px;padding:0 9px;border:1.5px solid #B45309;border-radius:8px;
+          font-size:15px;font-weight:800;text-align:right;color:#B45309}
+        .cnc-res{margin-top:12px;padding:10px 12px;background:#FCF8F1;border-radius:10px}
+        .cnc-res div{display:flex;justify-content:space-between;font-size:13px;padding:2px 0}
+        .cnc-res b.ok{color:#1E8449}.cnc-res b.warn{color:#B45309}.cnc-res b.err{color:#B71C1C}
+        .cnc-alerta{margin-top:8px;font-size:12px;color:#B71C1C;background:#FFF4F3;
+          border-radius:8px;padding:8px 10px}
+        .cnc-go{width:100%;min-height:50px;margin-top:14px;border:0;border-radius:12px;
+          background:#B45309;color:#fff;font-weight:900;font-size:14px;letter-spacing:.4px;cursor:pointer}
+        .cnc-go:disabled{background:#E4DAC9;color:#9C8A72;cursor:not-allowed}
+        .cnc-nota{margin-top:8px;font-size:11px;color:#8A7960;text-align:center}
+        .cnc-ok{background:#F1FBF5;border:1.5px solid #1E8449;border-radius:10px;padding:12px;
+          font-size:13px;color:#14532d;line-height:1.6}
+        .cnc-vacio{font-size:12.5px;color:#9C8A72;padding:8px 0}
         /* v13.194.3 */
         .cbz-ver{font-size:10px;opacity:.55;border:1px solid currentColor;border-radius:3px;
           padding:1px 5px;margin-left:8px;letter-spacing:.04em}
@@ -47603,7 +47704,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.195.1';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.196.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
@@ -47933,7 +48034,10 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
 /* v13.193.0 — rol contador: las acciones no se muestran */
 body.rol-contador .cbz-go,
 body.rol-contador .ccx-cta,
-body.rol-contador .cbr-ov,
+/* v13.196.0 — .cbr-ov SALE de esta lista: el contador tiene que poder
+   abrir el modal MP para auditarlo. El boton de confirmar queda
+   deshabilitado con "Solo lectura", cbrConfirmar sigue frenado por
+   _contBloq, y el RPC rechaza al contador server-side. Tres capas. */
 body.rol-contador .btn-accion,
 body.rol-contador .acc-btn,
 body.rol-contador [data-accion] { display: none !important; }
@@ -50164,12 +50268,22 @@ function ccxInit(){
   var CBZ_CLASIF_OK = { CANDIDATO:1, MATCH_AUTOMATICO:1, REQUIERE_REVISION:1,
                         CANDIDATO_MULTI:1, SIN_CANDIDATO:1 };
 
-  function _cbzAccionable(r) {
+  // v13.196.0 — se separan las dos preguntas, que antes iban juntas:
+  //   _cbzAuditable : ¿este movimiento es un caso abierto de la bandeja MP?
+  //   _cbzAccionable: ademas, ¿este usuario puede escribir?
+  // El contador cumple la primera y no la segunda: abre el modal en modo
+  // auditoria. La condicion de origen ('mp_mov') no se relaja.
+  function _cbzAuditable(r) {
     if (!r || r.fuente !== 'mp_mov') return false;
     if (r.cobranzaId) return false;
     if (_cbzYaRegistrada(r)) return false;
     var c = r.det && r.det.clasificacion;
     if (!c || !CBZ_CLASIF_OK[c]) return false;
+    return true;
+  }
+
+  function _cbzAccionable(r) {
+    if (!_cbzAuditable(r)) return false;
     if (typeof cbrPuede !== 'function' || !cbrPuede()) return false;
     return true;
   }
@@ -50665,8 +50779,15 @@ function ccxInit(){
         (r.accion && r.accion!=='—' ? '<div class="l5"><span>Falta</span>'+_cbzE(r.accion)+'</div>' : '') +
         // v13.183.0: accion primaria solo para MP, solo dueno, nunca CONFLICTO
         // v13.194.3 — una sola puerta: _cbzAccionable() exige fuente 'mp_mov'.
-        (( _cbzAccionable(r) && !(typeof esContador==='function' && esContador()) )
-          ? '<button class="cbz-go" onclick="cbrAbrir(\''+_cbzE(r.ref)+'\')">Revisar y confirmar</button>' : '') +
+        // v13.196.0 — el contador ve el mismo movimiento con un boton de
+        // auditoria: abre el modal, simula, y no puede confirmar.
+        ( _cbzAuditable(r)
+          ? ((typeof esContador==='function' && esContador())
+              ? '<button class="cbz-audit" onclick="cbrAbrir(\''+_cbzE(r.ref)+'\')">Auditar (solo lectura)</button>'
+              : (_cbzAccionable(r)
+                  ? '<button class="cbz-go" onclick="cbrAbrir(\''+_cbzE(r.ref)+'\')">Revisar y confirmar</button>'
+                  : ''))
+          : '') +
         (det ? '<details class="cbz-det"><summary>Detalles</summary><div class="dd">'+det+'</div></details>' : '') +
       '</div>';
     });
@@ -50693,15 +50814,20 @@ function ccxInit(){
   function cbrPuede(){ return (typeof rolActual!=='undefined' && rolActual==='dueno'); }
 
   function cbrAbrir(mpId) {
-    if (_contBloq('registrar cobranzas')) return;
-    if (!cbrPuede()) { toast('Solo el dueño puede confirmar cobranzas', 'err'); return; }
+    // v13.196.0 — el contador entra en modo auditoria: ve el movimiento,
+    // el cliente sugerido, las facturas y la diferencia. No puede confirmar.
+    var _aud = (typeof esContador === 'function' && esContador());
+    if (!_aud) {
+      if (_contBloq('registrar cobranzas')) return;
+      if (!cbrPuede()) { toast('Solo el dueño puede confirmar cobranzas', 'err'); return; }
+    }
     var r = (_cbz.rows||[]).filter(function(x){ return x.medio==='mp' && String(x.ref)===String(mpId); })[0];
     if (!r) { toast('No encontré el movimiento', 'err'); return; }
-    if (r.det && r.det.clasificacion === 'CONFLICTO') {
+    if (!_aud && r.det && r.det.clasificacion === 'CONFLICTO') {
       toast('Este pago requiere una decisión explícita. No se puede confirmar desde acá.', 'err'); return;
     }
     _cbr = { mp:r, cliente:(r.det&&r.det['clientes por doc']>1)?null:_cbrCli(r),
-             cliNom:r.cliente||'', docs:[], imput:{}, guardando:false, busq:[] };
+             cliNom:r.cliente||'', docs:[], imput:{}, guardando:false, busq:[], audit:_aud };
     _cbrPintar();
     if (_cbr.cliente) cbrCargarDocs();
   }
@@ -50808,9 +50934,14 @@ function ccxInit(){
       else if (dif > 0.05) h += '<div class="cbr-alerta">Faltan imputar '+_cbzF(dif)+
         '. En esta fase la cobranza debe cerrar exacto: no se admiten pagos a cuenta.</div>';
     }
-    h += '<button class="cbr-go" onclick="cbrConfirmar()"'+(ok&&!_cbr.guardando?'':' disabled')+'>' +
-         (_cbr.guardando?'Guardando…':'CONFIRMAR COBRANZA')+'</button>' +
-         '<div class="cbr-nota">Queda en estado <b>piloto</b>. No se postea a Xubio.</div></div>';
+    // v13.196.0 — modo auditoria: el boton existe, se ve, y no escribe.
+    h += _cbr.audit
+      ? '<button class="cbr-go" disabled>Solo lectura — rol contador</button>' +
+        '<div class="cbr-nota">Auditoría: podés simular la imputación y ver la diferencia. ' +
+        'El registro está reservado al dueño y el RPC lo valida del lado del servidor.</div></div>'
+      : '<button class="cbr-go" onclick="cbrConfirmar()"'+(ok&&!_cbr.guardando?'':' disabled')+'>' +
+        (_cbr.guardando?'Guardando…':'CONFIRMAR COBRANZA')+'</button>' +
+        '<div class="cbr-nota">Queda en estado <b>piloto</b>. No se postea a Xubio.</div></div>';
     var _qPrev = (document.getElementById('cbr-q')||{}).value || '';
     var ov=document.getElementById('cbr-ov');
     if (!ov) { ov=document.createElement('div'); ov.id='cbr-ov'; ov.className='cbr-ov'; document.body.appendChild(ov); }
@@ -50859,6 +50990,382 @@ function ccxInit(){
       toast('No se pudo registrar: '+String(e&&e.message||e).slice(0,90),'err');
     }
   }
+
+  // ══════════════════════════════════════════════════════════════════
+  // v13.196.0 · + NUEVA COBRANZA -> CHEQUE
+  //
+  // Motor unico: ctacte_registrar_cobranza_cheque_v2
+  //   SECURITY DEFINER · search_path fijo · identidad desde el claim
+  //   'vendedor' del JWT · rol validado server-side (piloto = solo dueno)
+  //   FOR UPDATE del cheque · idempotencia por idem_key cheque:<uuid>
+  //   multi-imputacion 1..N · sin sobreimputacion · cierre exacto
+  //   estado=piloto · xubio_estado=pendiente · cero posteo a Xubio.
+  //   Harness: 25/25 PASS, rollback OK, residuos 0/0.
+  //
+  // NO se manda p_por: el RPC viejo tomaba la identidad de un parametro,
+  // v2 la toma del JWT. Mandarla seria darle a elegir quien firma.
+  //
+  // El pedido del cheque es EVIDENCIA, no autorizacion contable: sugiere
+  // el cliente y lo bloquea, pero no impone la factura. Si el pedido no
+  // resuelve, hay seleccion manual con advertencia y confirmacion.
+  //
+  // Contador: abre, elige cheque, simula cliente y facturas, ve la
+  // diferencia. El boton final queda deshabilitado y el RPC lo rechaza.
+  // ══════════════════════════════════════════════════════════════════
+
+  var _cnc = null;
+
+  function cncAuditoria(){ return (typeof esContador === 'function' && esContador()); }
+
+  function cncAbrir() {
+    var aud = cncAuditoria();
+    if (!aud && !(typeof cbrPuede === 'function' && cbrPuede())) {
+      toast('Solo el dueño puede registrar cobranzas en esta fase', 'err'); return;
+    }
+    _cnc = { paso:'medio', audit:aud, cheques:null, ch:null, ped:null,
+             cliente:null, cliNom:'', metodo:null, confirmoSinPedido:false,
+             docs:[], imput:{}, busq:[], guardando:false, cargando:false,
+             err:null, hecho:null, _busc:false };
+    _cncPintar();
+  }
+
+  function cncCerrar(){ var o=document.getElementById('cnc-ov'); if(o) o.remove(); _cnc=null; }
+
+  function cncVolver() {
+    if (!_cnc) return;
+    _cnc.paso = 'cheque'; _cnc.ch = null; _cnc.ped = null; _cnc.cliente = null;
+    _cnc.cliNom = ''; _cnc.docs = []; _cnc.imput = {}; _cnc.busq = [];
+    _cnc.metodo = null; _cnc.confirmoSinPedido = false; _cnc.err = null;
+    _cncPintar();
+  }
+
+  // ── medio ──────────────────────────────────────────────────────────
+  async function cncMedio(m) {
+    if (!_cnc || m !== 'cheque') return;
+    _cnc.paso = 'cheque'; _cnc.cargando = true; _cnc.err = null; _cncPintar();
+    try {
+      var rows = await sbFetch('cheques_recibidos?cobranza_id=is.null' +
+        '&select=id,numero_cheque,banco,emisor,monto,estado,pedido_id,chofer,' +
+        'foto_url,fecha_vencimiento,created_at,cliente&order=created_at.desc&limit=300') || [];
+      // los rechazados no se imputan: el RPC los frena con CHEQUE_RECHAZADO
+      _cnc.cheques = rows.filter(function(c){ return String(c.estado||'') !== 'rechazado'; });
+    } catch(e) {
+      _cnc.cheques = [];
+      _cnc.err = 'No se pudieron cargar los cheques: ' + String(e && e.message || e).slice(0,90);
+    }
+    _cnc.cargando = false; _cncPintar();
+  }
+
+  // ── cheque elegido: el pedido sugiere el cliente ────────────────────
+  async function cncElegirCheque(id) {
+    if (!_cnc) return;
+    var c = (_cnc.cheques||[]).filter(function(x){ return String(x.id) === String(id); })[0];
+    if (!c) { toast('No encontré el cheque', 'err'); return; }
+    _cnc.ch = c; _cnc.ped = null; _cnc.cliente = null; _cnc.cliNom = '';
+    _cnc.docs = []; _cnc.imput = {}; _cnc.busq = []; _cnc.metodo = null;
+    _cnc.confirmoSinPedido = false; _cnc.err = null;
+    _cnc.paso = 'detalle'; _cnc.cargando = true; _cncPintar();
+    try {
+      if (c.pedido_id) {
+        var p = await sbFetch('pedidos_zona?pedido_id=eq.' + encodeURIComponent(c.pedido_id) +
+          '&select=pedido_id,cliente,cliente_xubio_id,xubio_factura_nro&limit=1');
+        _cnc.ped = (p && p[0]) || null;
+      }
+      if (_cnc.ped && _cnc.ped.cliente_xubio_id) {
+        _cnc.cliente = Number(_cnc.ped.cliente_xubio_id);
+        _cnc.cliNom  = _cnc.ped.cliente || c.cliente || '';
+        _cnc.metodo  = 'pedido';
+        await cncCargarFacturas();
+      } else {
+        // el RPC lo registra como metodo=manual_sin_pedido
+        _cnc.metodo = 'manual_sin_pedido';
+      }
+    } catch(e) {
+      _cnc.err = 'No se pudo resolver el pedido: ' + String(e && e.message || e).slice(0,90);
+      _cnc.metodo = 'manual_sin_pedido';
+    }
+    _cnc.cargando = false; _cncPintar();
+  }
+
+  // ── cliente manual (solo si el pedido no resuelve) ──────────────────
+  async function cncBuscarCliente() {
+    if (!_cnc || _cnc._busc) return;
+    var q = ((document.getElementById('cnc-q')||{}).value||'').trim();
+    if (q.length < 2) { toast('Escribí al menos 2 letras','err'); return; }
+    _cnc._busc = true;
+    try {
+      _cnc.busq = await sbFetch('clientes_xubio?or=(nombre.ilike.*' + encodeURIComponent(q) +
+        '*,cuit.ilike.*' + encodeURIComponent(q) + '*)&select=id,nombre,cuit&limit=20') || [];
+      if (!_cnc.busq.length) toast('Sin resultados','err');
+    } catch(e) { toast('Error al buscar cliente','err'); }
+    _cnc._busc = false; _cncPintar();
+  }
+
+  async function cncElegirCliente(id, nom) {
+    if (!_cnc) return;
+    _cnc.cliente = Number(id); _cnc.cliNom = nom || ''; _cnc.busq = []; _cnc.imput = {};
+    _cnc.cargando = true; _cncPintar();
+    await cncCargarFacturas();
+    _cnc.cargando = false; _cncPintar();
+  }
+
+  async function cncCargarFacturas() {
+    try {
+      _cnc.docs = await sbFetch('vw_facturas_abiertas?cliente_xubio_id=eq.' + _cnc.cliente +
+        '&select=factura_numero,saldo_residual,factura_fecha,dias&order=factura_fecha.asc&limit=100') || [];
+    } catch(e) {
+      _cnc.docs = [];
+      _cnc.err = 'No se pudieron cargar las facturas: ' + String(e && e.message || e).slice(0,90);
+    }
+  }
+
+  // ── imputacion ─────────────────────────────────────────────────────
+  function _cncSuma() {
+    var t = 0;
+    Object.keys(_cnc.imput).forEach(function(k){ t += Number(_cnc.imput[k]) || 0; });
+    return Math.round(t * 100) / 100;
+  }
+
+  function cncToggleDoc(f, resid) {
+    if (!_cnc) return;
+    if (_cnc.imput[f] !== undefined) { delete _cnc.imput[f]; }
+    else {
+      // sugerencia: completar hasta agotar el cheque, sin pasar el residual
+      var falta = Number(_cnc.ch.monto) - _cncSuma();
+      _cnc.imput[f] = Math.max(0, Math.round(Math.min(falta, Number(resid)) * 100) / 100);
+    }
+    _cncPintar();
+  }
+
+  function cncMonto(f, v) {
+    if (!_cnc) return;
+    var n = Number(String(v).replace(/[^\d.,-]/g,'').replace(/\.(?=\d{3}\b)/g,'').replace(',','.'));
+    _cnc.imput[f] = isFinite(n) ? Math.round(n * 100) / 100 : 0;
+    _cncPintar();
+  }
+
+  // ── registrar ──────────────────────────────────────────────────────
+  async function cncConfirmar() {
+    if (!_cnc || _cnc.guardando) return;
+    if (_cnc.audit) { toast('Usuario de auditoría: solo lectura.','err'); return; }
+    if (_contBloq('registrar cobranzas')) return;
+    var ch = _cnc.ch, tot = Number(ch.monto), sum = _cncSuma();
+    var dif = Math.round((tot - sum) * 100) / 100;
+    var fs = Object.keys(_cnc.imput).filter(function(f){ return Number(_cnc.imput[f]) > 0; });
+    var ms = fs.map(function(f){ return Number(_cnc.imput[f]); });
+    if (!_cnc.cliente || !fs.length) { toast('Falta cliente o factura','err'); return; }
+    if (Math.abs(dif) > 0.05) { toast('La imputación tiene que cerrar exacto','err'); return; }
+    if (_cnc.metodo === 'manual_sin_pedido' && !_cnc.confirmoSinPedido) {
+      toast('Falta confirmar la verificación manual del cheque sin pedido','err'); return;
+    }
+    var txt = 'Registrar cobranza\n\n' + (_cnc.cliNom||'(cliente '+_cnc.cliente+')') + '\n' +
+      _cbzF(tot) + ' · cheque ' + (ch.banco||'?') + ' ' + (ch.numero_cheque||'?') + '\n\n' +
+      fs.map(function(f,i){ return '  ' + f + '  ' + _cbzF(ms[i]); }).join('\n') +
+      '\n\nImputado: ' + _cbzF(sum) + '  (cierra exacto)' +
+      '\n\nQueda en piloto. No se postea a Xubio.';
+    if (!confirm(txt)) return;
+    _cnc.guardando = true; _cnc.err = null; _cncPintar();
+    try {
+      // sbFetch manda 'Bearer ' + (_JWT || SUPABASE_KEY): con sesion activa
+      // viaja el JWT de login_vendedor, con role=authenticated y el claim
+      // 'vendedor'. De ahi sale creado_por. p_por NO se manda.
+      var out = await sbFetch('rpc/ctacte_registrar_cobranza_cheque_v2', {
+        method: 'POST',
+        body: JSON.stringify({
+          p_cheque_id: String(ch.id),
+          p_cliente:   Number(_cnc.cliente),
+          p_facturas:  fs,
+          p_montos:    ms
+        })
+      });
+      _cnc.guardando = false;
+      var r  = (out && out.status) ? out : (out && out[0]) || {};
+      var st = r.status || '';
+      if (st === 'CREADA' || st === 'YA_EXISTIA') {
+        _cnc.hecho = r; _cnc.paso = 'ok'; _cncPintar();
+        toast(st === 'CREADA' ? 'Cobranza registrada' : 'Ya estaba registrada', 'ok');
+        if (typeof cbzCargar === 'function') cbzCargar();
+      } else {
+        _cnc.err = 'Respuesta inesperada del servidor'; _cncPintar();
+        console.error('[cnc]', out);
+      }
+    } catch(e) {
+      _cnc.guardando = false;
+      _cnc.err = String(e && e.message || e).slice(0,160);
+      _cncPintar();
+      console.error('[cnc] confirmar', e);
+    }
+  }
+
+  // ── render ─────────────────────────────────────────────────────────
+  function _cncPintar() {
+    if (!_cnc) return;
+    var h = '<div class="cnc-box">' +
+      '<div class="cnc-hd"><b>+ Nueva cobranza' +
+        (_cnc.paso !== 'medio' && _cnc.paso !== 'ok' ? ' · Cheque' : '') + '</b>' +
+        '<button onclick="cncCerrar()" class="cnc-x">&times;</button></div>';
+
+    if (_cnc.audit) {
+      h += '<div class="cnc-nota" style="text-align:left;margin:0 0 8px">' +
+           'Modo auditoría: podés recorrer todo el flujo y simular la imputación. ' +
+           'El registro está reservado al dueño.</div>';
+    }
+    if (_cnc.err) h += '<div class="cnc-alerta">' + _cbzE(_cnc.err) + '</div>';
+
+    // ── paso OK ──
+    if (_cnc.paso === 'ok') {
+      var d = _cnc.hecho || {}, ev = d.evidencia || {};
+      h += '<div class="cnc-ok"><b>Cobranza ' + _cbzE(String(d.cobranza_id||'')) + '</b> registrada.<br>' +
+           _cbzE(String(d.facturas||0)) + ' factura(s) · imputado ' + _cbzF(d.imputado||0) + '<br>' +
+           'cheque ' + _cbzE(ev.banco||'') + ' ' + _cbzE(ev.numero_cheque||'') + '<br>' +
+           'método: ' + _cbzE(d.metodo||'') + ' · registrado por ' + _cbzE(d.registrado_por||'') + '<br>' +
+           'Estado <b>piloto</b> · Xubio <b>pendiente</b>: no se posteó nada.</div>';
+      h += '<button class="cnc-go" onclick="cncCerrar()">CERRAR</button></div>';
+      _cncMontar(h); return;
+    }
+
+    // ── paso 1: medio ──
+    if (_cnc.paso === 'medio') {
+      h += '<div class="cnc-sec">Medio</div>' +
+        '<button class="cnc-op" onclick="cncMedio(\'cheque\')"><b>Cheque</b>' +
+          '<span>Elegís un cheque ya cargado por el chofer y lo imputás a facturas abiertas.</span></button>' +
+        '<button class="cnc-op" disabled style="opacity:.5;cursor:not-allowed"><b>Efectivo</b>' +
+          '<span>Automático desde entrega y rendición. Cargarlo a mano duplicaría la cobranza.</span></button>' +'' +
+        '<button class="cnc-op" disabled style="opacity:.5;cursor:not-allowed"><b>Transferencia</b>' +
+          '<span>Circuito existente de entrega. No hay fuente bancaria para darla de alta acá.</span></button>' +
+        '<button class="cnc-op" disabled style="opacity:.5;cursor:not-allowed"><b>Mercado Pago</b>' +
+          '<span>Se resuelve desde la bandeja MP. No se da de alta a mano.</span></button>';
+      _cncMontar(h); return;
+    }
+
+    // ── paso 2: elegir cheque ──
+    if (_cnc.paso === 'cheque') {
+      h += '<div class="cnc-sec">Cheque sin cobranza</div>';
+      if (_cnc.cargando) h += '<div class="cnc-vacio">Cargando cheques…</div>';
+      else if (!(_cnc.cheques||[]).length) h += '<div class="cnc-vacio">No hay cheques pendientes de imputar.</div>';
+      else (_cnc.cheques||[]).forEach(function(c){
+        h += '<button class="cnc-op" onclick="cncElegirCheque(\'' + _cbzE(String(c.id)) + '\')">' +
+          '<b>' + _cbzE(c.banco||'?') + ' ' + _cbzE(c.numero_cheque||'?') + ' · ' + _cbzF(c.monto) + '</b>' +
+          '<span>' + (c.cliente ? _cbzE(c.cliente) + ' · ' : '') +
+          (c.pedido_id ? 'pedido ' + _cbzE(c.pedido_id) : 'sin pedido') +
+          (c.fecha_vencimiento ? ' · vence ' + _cbzE(_cbzD(c.fecha_vencimiento)) : '') +
+          '</span></button>';
+      });
+      _cncMontar(h); return;
+    }
+
+    // ── paso 3: detalle ──
+    var ch  = _cnc.ch || {};
+    var tot = Number(ch.monto) || 0;
+    var sum = _cncSuma();
+    var dif = Math.round((tot - sum) * 100) / 100;
+
+    h += '<div class="cnc-sec">Cheque <span style="text-transform:none;font-weight:600">' +
+         '(evidencia · no se edita)</span></div><div class="cnc-ev">';
+    [['Banco', ch.banco], ['Número', ch.numero_cheque], ['Emisor', ch.emisor],
+     ['Importe', _cbzF(ch.monto)], ['Recepción', _cbzD(ch.created_at)],
+     ['Vencimiento', _cbzD(ch.fecha_vencimiento)], ['Estado', ch.estado],
+     ['Chofer', ch.chofer], ['Pedido', ch.pedido_id]].forEach(function(f){
+      h += '<div><span>' + f[0] + '</span><b>' + _cbzE(f[1] || '—') + '</b></div>';
+    });
+    h += '</div>';
+    if (ch.foto_url) h += '<a class="cnc-foto" href="' + _cbzE(ch.foto_url) + '" target="_blank" rel="noopener">Ver foto del cheque</a>';
+    h += '<button class="cbr-lnk" style="display:block;margin-top:8px" onclick="cncVolver()">elegir otro cheque</button>';
+
+    // cliente
+    h += '<div class="cnc-sec">Cliente</div>';
+    if (_cnc.metodo === 'pedido') {
+      h += '<div class="cnc-cli"><b>' + _cbzE(_cnc.cliNom || ('cliente ' + _cnc.cliente)) + '</b>' +
+           '<span class="cnc-badge">desde el pedido</span></div>' +
+           '<div class="cnc-nota" style="text-align:left">El pedido del cheque resuelve este cliente. ' +
+           'El RPC rechaza cualquier otro con CLIENTE_NO_COINCIDE.</div>';
+    } else {
+      h += '<div class="cnc-warn"><b>⚠ Cheque sin evidencia de pedido.</b> ' +
+        (ch.pedido_id
+          ? 'El pedido <b>' + _cbzE(ch.pedido_id) + '</b> no existe en pedidos_zona o no resuelve un cliente.'
+          : 'Este cheque no tiene pedido asociado.') +
+        ' No hay nada en el sistema que lo vincule con un cliente. La imputación queda bajo ' +
+        'tu criterio y se registra como <b>metodo = manual_sin_pedido</b>.' +
+        '<label><input type="checkbox" ' + (_cnc.confirmoSinPedido ? 'checked' : '') +
+        ' onchange="_cnc.confirmoSinPedido=this.checked;_cncPintar()">' +
+        '<span>Confirmo que verifiqué a mano a quién corresponde este cheque.</span></label></div>';
+      if (_cnc.cliente) {
+        h += '<div class="cnc-cli"><b>' + _cbzE(_cnc.cliNom || '(sin nombre)') + '</b>' +
+             '<button class="cbr-lnk" onclick="_cnc.cliente=null;_cnc.docs=[];_cnc.imput={};_cncPintar()">cambiar</button></div>';
+      } else {
+        h += '<div class="cnc-row"><input type="text" id="cnc-q" placeholder="Buscar por nombre o CUIT..." ' +
+             'autocomplete="off" onkeydown="if(event.key===\'Enter\'){event.preventDefault();cncBuscarCliente();}">' +
+             '<button class="btn1" onclick="cncBuscarCliente()">Buscar</button></div>';
+        (_cnc.busq||[]).forEach(function(c){
+          h += '<button class="cnc-op" onclick="cncElegirCliente(\'' + _cbzE(String(c.id)) + '\',\'' +
+               _cbzE(String(c.nombre||'').replace(/\'/g,'')) + '\')"><b>' + _cbzE(c.nombre) + '</b>' +
+               (c.cuit ? '<span>' + _cbzE(c.cuit) + '</span>' : '') + '</button>';
+        });
+      }
+    }
+
+    // facturas
+    if (_cnc.cliente) {
+      h += '<div class="cnc-sec">Facturas abiertas</div>';
+      if (_cnc.cargando) h += '<div class="cnc-vacio">Cargando facturas…</div>';
+      else if (!(_cnc.docs||[]).length) h += '<div class="cnc-vacio">Este cliente no tiene facturas abiertas. Sin factura no hay imputación posible.</div>';
+      (_cnc.docs||[]).forEach(function(d){
+        var on = _cnc.imput[d.factura_numero] !== undefined;
+        h += '<div class="cnc-doc' + (on ? ' on' : '') + '">' +
+          '<label><input type="checkbox" ' + (on ? 'checked' : '') +
+            ' onchange="cncToggleDoc(\'' + d.factura_numero + '\',' + Number(d.saldo_residual) + ')">' +
+          '<span><b>' + _cbzE(d.factura_numero) + '</b><i>' + _cbzF(d.saldo_residual) +
+          (d.dias != null ? ' &middot; ' + d.dias + 'd' : '') + '</i></span></label>' +
+          (on ? '<input class="cnc-imp" type="text" inputmode="decimal" value="' + _cnc.imput[d.factura_numero] +
+                '" onchange="cncMonto(\'' + d.factura_numero + '\',this.value)">' : '') + '</div>';
+      });
+
+      h += '<div class="cnc-res">' +
+        '<div><span>Cobranza (cheque)</span><b>' + _cbzF(tot) + '</b></div>' +
+        '<div><span>Imputado</span><b>' + _cbzF(sum) + '</b></div>' +
+        '<div><span>Facturas</span><b>' + Object.keys(_cnc.imput).length + '</b></div>' +
+        '<div><span>Diferencia</span><b class="' +
+          (Math.abs(dif) < 0.05 ? 'ok' : (dif < 0 ? 'err' : 'warn')) + '">' + _cbzF(dif) +
+          (Math.abs(dif) < 0.05 ? ' — cierra exacto' : (dif < 0 ? ' — excede el cheque' : ' — falta imputar')) +
+        '</b></div></div>';
+
+      if (dif < -0.05) h += '<div class="cnc-alerta">No se puede imputar más que el importe del cheque.</div>';
+      else if (dif > 0.05) h += '<div class="cnc-alerta">Faltan imputar ' + _cbzF(dif) +
+        '. En esta fase la cobranza debe cerrar exacto: el RPC rechaza IMPUTACION_INCOMPLETA.</div>';
+    }
+
+    // boton
+    var sobre = false;
+    (_cnc.docs||[]).forEach(function(d){
+      var v = _cnc.imput[d.factura_numero];
+      if (v !== undefined && Number(v) > Number(d.saldo_residual) + 0.05) sobre = true;
+    });
+    var listo = !!_cnc.cliente && Object.keys(_cnc.imput).length > 0 && sum > 0 &&
+                Math.abs(dif) < 0.05 && !sobre &&
+                (_cnc.metodo !== 'manual_sin_pedido' || _cnc.confirmoSinPedido);
+    if (sobre) h += '<div class="cnc-alerta">Hay una línea por encima del residual de su factura: el RPC la rechaza con SOBREIMPUTACION.</div>';
+
+    h += _cnc.audit
+      ? '<button class="cnc-go" disabled>Solo lectura — rol contador</button>' +
+        '<div class="cnc-nota">Auditoría: la simulación es completa, el registro no. ' +
+        'El RPC valida el rol del lado del servidor y devuelve NO_AUTORIZADO.</div>'
+      : '<button class="cnc-go" onclick="cncConfirmar()"' + (listo && !_cnc.guardando ? '' : ' disabled') + '>' +
+        (_cnc.guardando ? 'Guardando…' : 'REGISTRAR COBRANZA') + '</button>' +
+        '<div class="cnc-nota">Queda en estado <b>piloto</b>. No se postea a Xubio.</div>';
+
+    h += '</div>';
+    _cncMontar(h);
+  }
+
+  function _cncMontar(h) {
+    var prev = (document.getElementById('cnc-q')||{}).value || '';
+    var ov = document.getElementById('cnc-ov');
+    if (!ov) { ov = document.createElement('div'); ov.id = 'cnc-ov'; ov.className = 'cnc-ov'; document.body.appendChild(ov); }
+    ov.innerHTML = h;
+    var q = document.getElementById('cnc-q');
+    if (q && prev) q.value = prev;
+  }
+
 
 </script>
 
