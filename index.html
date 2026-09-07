@@ -1,5 +1,23 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.196.1 — 07/09/2026
+     v13.196.1: FIX — VER FOTO DEL CHEQUE (404 de GitHub Pages).
+
+     Smoke real de la 13.196.0: la cobranza 3225 quedo bien registrada
+     (cheque Banco Provincia 23501088653, $728.100, ERIC DAMIAN PEREZ,
+     factura A-00008-00002871, piloto / Xubio pendiente). El unico defecto
+     fue 'Ver foto del cheque': abria tckadmin.lat/cheques/...jpg -> 404.
+
+     CAUSA: cheques_recibidos.foto_url no es una URL, es el path dentro del
+     bucket PRIVADO 'comprobantes' (70 objetos bajo cheques/). Al meterlo en
+     un href se resolvia como ruta relativa del sitio de Pages.
+
+     FIX: se reutiliza el visor que ya existe desde la v13.12 y que usa el
+     modulo de Cheques — _verComprobanteAdmin(path, btn) baja los bytes con
+     la anon key (la policy del bucket es para rol anon), arma un blob URL,
+     lo cachea y lo abre en el lightbox. No se crea un segundo sistema de
+     fotos ni se toca el bucket, la policy ni el dato.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.196.0 — 07/09/2026
      v13.196.0: COBRANZAS — + NUEVA COBRANZA -> CHEQUE + MODO AUDITORIA.
 
@@ -15313,7 +15331,8 @@ input.canales-exp-input[type="date"] {
         .cnc-ev div{background:#FCF8F1;border:1px solid #EEE3D2;border-radius:8px;padding:7px 9px}
         .cnc-ev span{display:block;font-size:9.5px;letter-spacing:.5px;text-transform:uppercase;color:#9C8A72}
         .cnc-ev b{font-size:13px;color:#1A0800}
-        .cnc-foto{display:inline-block;margin-top:8px;font-size:12px;color:#B45309;font-weight:800}
+        .cnc-foto{display:inline-block;margin-top:8px;font-size:12px;color:#B45309;font-weight:800;
+          background:#FFFBF5;border:1px solid #EEE3D2;border-radius:9px;padding:7px 11px;cursor:pointer}
         .cnc-cli{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;
           background:#FFFBF5;border:1px solid #EEE3D2;border-radius:10px;font-size:14px}
         .cnc-badge{font-size:10px;font-weight:900;letter-spacing:.4px;text-transform:uppercase;
@@ -47704,7 +47723,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.196.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.196.1';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
@@ -51269,7 +51288,15 @@ function ccxInit(){
       h += '<div><span>' + f[0] + '</span><b>' + _cbzE(f[1] || '—') + '</b></div>';
     });
     h += '</div>';
-    if (ch.foto_url) h += '<a class="cnc-foto" href="' + _cbzE(ch.foto_url) + '" target="_blank" rel="noopener">Ver foto del cheque</a>';
+    // v13.196.1 FIX — cheques_recibidos.foto_url NO es una URL: es el path
+    // dentro del bucket PRIVADO 'comprobantes'
+    // (p.ej. cheques/2026-09/TCK-...-CJNPS_ch1_1788283356378.jpg).
+    // Ponerlo en un href lo resolvia contra tckadmin.lat -> 404 de Pages.
+    // Se reutiliza el visor que ya usa el modulo de Cheques desde la v13.12:
+    // _verComprobanteAdmin() baja los bytes con la anon key, arma un blob
+    // URL y lo abre en el lightbox. Mismo escapado de comilla simple.
+    if (ch.foto_url) h += '<button class="cnc-foto" onclick="_verComprobanteAdmin(\'' +
+      String(ch.foto_url).replace(/\x27/g, '%27') + '\',this)">Ver foto del cheque</button>';
     h += '<button class="cbr-lnk" style="display:block;margin-top:8px" onclick="cncVolver()">elegir otro cheque</button>';
 
     // cliente
