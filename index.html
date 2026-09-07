@@ -1,5 +1,32 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.195.0 — 07/09/2026
+     v13.195.0: LA PLANILLA MUESTRA QUÉ CAMBIÓ DESDE LA VERSIÓN ANTERIOR.
+     Pedido de Braian (07/09), caso del viaje 1A de hoy: Pancho ya había
+     empezado a subir con la v2 (223 bultos), entraron dos pedidos y una
+     edición, se regeneró la v3 (239) y se imprimió. La v3 muestra el
+     consolidado FINAL, no lo que cambió: con ese papel en la mano, la única
+     forma de saber qué falta subir era recontar 239 bultos desde cero.
+     El dato ya estaba: viajes_planillas guarda consolidado y pedidos en
+     jsonb por versión. Nadie calculaba el diff.
+     AHORA: si la versión es > 1, la vista previa abre con un bloque
+     "CAMBIOS DESDE LA v(n-1)" en tres columnas — SUBIR DE MÁS · BAJAR ·
+     PEDIDOS NUEVOS/EDITADOS — con el neto en bultos arriba.
+     Verificado contra el viaje 1A del 07/09 (v2 -> v3): da +16 bultos
+     (5 Ravioles Ricota Jamón, 2 McCain Smiles, y 1 de Formitas Pollo JyQ,
+     Gnoquis de Espinaca, Hamburguesa Original 4u, McCain Crinkle, Medallón
+     c/Cheddar, Ravioles de Calabaza, Sorrentinos JyQ, Sorrentinos Ricota 4Q
+     y Suprema) — el mismo número que sacó Braian contando a mano.
+     CÓMO: plvCalcularDelta() lee las dos versiones de viajes_planillas por
+     sbFetch y compara. Se antepone con insertAdjacentHTML DESPUÉS de pintar
+     la hoja: si falla, la planilla queda exactamente como antes — el delta
+     nunca puede impedir ver o imprimir la planilla.
+     NO TOCA: el snapshot, el consolidado, el PDF de jsPDF (queda pendiente
+     llevar el bloque también ahí), ni Apps Script.
+     + FIX BANNER: TCK_UPD_LOCAL venía en 13.193.0 con version.json ya en
+       13.194.2 → banner "Nueva versión" permanente. Los tres alineados en
+       13.195.0.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.194.2 — 05/09/2026
      v13.194.2: COBRANZAS — CONCILIACION Y POSTEO XUBIO SON DOS EJES.
 
@@ -47516,7 +47543,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.193.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.195.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
@@ -49291,6 +49318,25 @@ function htmlHoja(pv) {
       (sinFC.length > 8 ? ' y ' + (sinFC.length - 8) + ' más' : '') + '.</div>';
   }
 
+  // ── v13.195.0 — CAE INDETERMINADO NO ES UNA FACTURA VÁLIDA ──────────
+  // Estos pedidos SÍ tienen número de comprobante, así que vienen con
+  // facturado = true y no entran en sin_factura: la planilla los imprimía
+  // como facturados normales. El chofer los entregaba contra un papel que no
+  // sabemos si existe en AFIP. Caso del 07/09: Florencia Martínez $35.500,
+  // B-00010-00002440. Van aparte, en rojo, y sin sumarse al aviso de arriba.
+  var _cae = (pv.pedidos || []).filter(function (p) {
+    return String(p.facturacion_estado || '') === 'cae_indeterminado';
+  });
+  if (_cae.length) {
+    h += '<div class="plv-aviso rojo"><b>⚠ ' + _cae.length + ' pedido(s) con CAE SIN CONFIRMAR</b> por ' +
+      mon(_cae.reduce(function (a, x) { return a + (Number(x.total) || 0); }, 0)) + '. ' +
+      'Tienen número de comprobante pero <b>no está confirmado en AFIP</b>: no cuentan como ' +
+      'factura válida. Antes de entregar, verificar en Xubio. ' +
+      esc(_cae.map(function (x) {
+        return (x.cliente || '') + (x.factura_nro ? ' (' + x.factura_nro + ')' : '');
+      }).join(' · ')) + '.</div>';
+  }
+
   h += htmlConsolidado(pv);
   h += htmlReparto(pv);
   h += '<div class="plv-pie">Conformidad del chofer: _______________________________ ' +
@@ -49301,6 +49347,122 @@ function htmlHoja(pv) {
 }
 
 /* ── API pública ───────────────────────────────────────────────────── */
+/* ── v13.195.0 — CAMBIOS DESDE LA VERSION ANTERIOR ──────────────────────
+   Pedido de Braian (07/09): "la v3 muestra el consolidado final, no lo que
+   cambio. Pancho, con ese papel en la mano, no tiene forma de saber que le
+   falta subir salvo recontar 239 bultos desde cero."
+   El dato ya estaba: viajes_planillas guarda consolidado y pedidos en jsonb
+   por version. Esto solo calcula el diff v(n) vs v(n-1) y lo pinta arriba
+   de la hoja. No recalcula nada del snapshot ni toca el PDF.
+   Caso testigo (viaje 1A 07/09, v2 -> v3): +16 bultos y un swap en Berutti
+   que da neto cero en bultos pero son dos cajas que mover.
+   ─────────────────────────────────────────────────────────────────────── */
+function _plvClave(x) {
+  return String(x.producto || '').trim().toLowerCase() + '|' + String(x.calibre || '').trim().toLowerCase();
+}
+function _plvMapaConsolidado(arr) {
+  var m = {};
+  (arr || []).forEach(function (l) {
+    var k = _plvClave(l);
+    m[k] = { producto: l.producto, calibre: l.calibre, req: Number(l.requerido) || 0 };
+  });
+  return m;
+}
+function _plvIdPedido(p) { return String(p.pedido_id || p.id || p.cliente || ''); }
+function _plvFirmaItems(p) {
+  return (p.items || []).map(function (it) {
+    return String(it.producto || '').trim().toLowerCase() + 'x' + (Number(it.cantidad) || 0) +
+           '/' + String(it.calibre || '').trim().toLowerCase();
+  }).sort().join(';');
+}
+
+async function plvCalcularDelta(viajeId, version) {
+  if (!viajeId || !(version > 1)) return null;
+  var rows;
+  try {
+    rows = await sbFetch('viajes_planillas?viaje_id=eq.' + encodeURIComponent(viajeId) +
+      '&version=in.(' + (version - 1) + ',' + version + ')' +
+      '&select=version,consolidado,pedidos&order=version.asc');
+  } catch (e) { return null; }
+  if (!rows || rows.length < 2) return null;
+  var ant = rows[0], act = rows[1];
+  if (Number(ant.version) !== version - 1 || Number(act.version) !== version) return null;
+
+  var mA = _plvMapaConsolidado(ant.consolidado), mB = _plvMapaConsolidado(act.consolidado);
+  var subir = [], bajar = [];
+  Object.keys(mB).forEach(function (k) {
+    var d = mB[k].req - (mA[k] ? mA[k].req : 0);
+    if (d > 0) subir.push({ producto: mB[k].producto, calibre: mB[k].calibre, delta: d, total: mB[k].req, nuevo: !mA[k] });
+  });
+  Object.keys(mA).forEach(function (k) {
+    var d = (mB[k] ? mB[k].req : 0) - mA[k].req;
+    if (d < 0) bajar.push({ producto: mA[k].producto, calibre: mA[k].calibre, delta: -d, total: mB[k] ? mB[k].req : 0, fuera: !mB[k] });
+  });
+
+  var pA = {}, pB = {};
+  (ant.pedidos || []).forEach(function (p) { pA[_plvIdPedido(p)] = p; });
+  (act.pedidos || []).forEach(function (p) { pB[_plvIdPedido(p)] = p; });
+  var nuevos = [], editados = [], salieron = [];
+  Object.keys(pB).forEach(function (k) {
+    if (!pA[k]) nuevos.push(pB[k]);
+    else if (_plvFirmaItems(pA[k]) !== _plvFirmaItems(pB[k])) editados.push(pB[k]);
+  });
+  Object.keys(pA).forEach(function (k) { if (!pB[k]) salieron.push(pA[k]); });
+
+  var ord = function (a, b) { return b.delta - a.delta; };
+  subir.sort(ord); bajar.sort(ord);
+  if (!subir.length && !bajar.length && !nuevos.length && !editados.length && !salieron.length) return null;
+  return { desde: version - 1, hasta: version, subir: subir, bajar: bajar,
+           nuevos: nuevos, editados: editados, salieron: salieron,
+           bultosNeto: subir.reduce(function (a, x) { return a + x.delta; }, 0) -
+                       bajar.reduce(function (a, x) { return a + x.delta; }, 0) };
+}
+
+function _plvLinea(x, signo) {
+  return '<li style="margin:2px 0;"><b>' + signo + x.delta + '</b> ' + esc(x.producto) +
+    (x.calibre ? ' <span style="color:#6b6b6b;">(' + esc(x.calibre) + ')</span>' : '') +
+    ' <span style="color:#6b6b6b;font-size:11px;">total ahora: ' + x.total + '</span>' +
+    (x.nuevo ? ' <b style="color:#1B5E20;">NUEVO</b>' : '') +
+    (x.fuera ? ' <b style="color:#8B0000;">YA NO VA</b>' : '') + '</li>';
+}
+function _plvPedidoLinea(p) {
+  return '<li style="margin:2px 0;">' + esc(p.cliente || '(sin nombre)') +
+    (p.localidad ? ' <span style="color:#6b6b6b;">· ' + esc(p.localidad) + '</span>' : '') +
+    (p.total ? ' <span style="color:#6b6b6b;font-size:11px;">' + mon(p.total) + '</span>' : '') + '</li>';
+}
+
+function plvHtmlDelta(d) {
+  var col = function (titulo, color, items) {
+    return '<div style="flex:1;min-width:180px;">' +
+      '<div style="font-weight:900;font-size:12px;text-transform:uppercase;color:' + color + ';margin-bottom:4px;">' +
+      titulo + '</div>' + (items || '<div style="color:#6b6b6b;font-size:12px;">— sin cambios —</div>') + '</div>';
+  };
+  var lSubir = d.subir.length ? '<ul style="margin:0;padding-left:16px;font-size:13px;">' +
+        d.subir.map(function (x) { return _plvLinea(x, '+'); }).join('') + '</ul>' : '';
+  var lBajar = d.bajar.length ? '<ul style="margin:0;padding-left:16px;font-size:13px;">' +
+        d.bajar.map(function (x) { return _plvLinea(x, '−'); }).join('') + '</ul>' : '';
+  var lPed = (d.nuevos.length || d.salieron.length || d.editados.length)
+    ? '<ul style="margin:0;padding-left:16px;font-size:13px;">' +
+      d.nuevos.map(function (p) { return _plvPedidoLinea(p).replace('<li ', '<li data-t="n" '); }).join('') +
+      (d.editados.length ? '<li style="margin:6px 0 2px;font-weight:800;">Editados</li>' +
+        d.editados.map(_plvPedidoLinea).join('') : '') +
+      (d.salieron.length ? '<li style="margin:6px 0 2px;font-weight:800;color:#8B0000;">Ya no van</li>' +
+        d.salieron.map(_plvPedidoLinea).join('') : '') + '</ul>'
+    : '';
+
+  return '<div class="plv-delta" style="border:2px solid #8B0000;border-radius:10px;padding:10px 12px;margin:0 0 14px;background:#FFF8F0;">' +
+    '<div style="font-family:Barlow Condensed,sans-serif;font-size:17px;font-weight:900;color:#8B0000;margin-bottom:2px;">' +
+      'CAMBIOS DESDE LA v' + d.desde + '</div>' +
+    '<div style="font-size:12px;color:#5a3838;margin-bottom:8px;">' +
+      'Si ya cargaste con la v' + d.desde + ', esto es lo único que falta tocar. ' +
+      'Neto: <b>' + (d.bultosNeto >= 0 ? '+' : '') + d.bultosNeto + ' bultos</b>.</div>' +
+    '<div style="display:flex;gap:14px;flex-wrap:wrap;">' +
+      col('Subir de más', '#1B5E20', lSubir) +
+      col('Bajar', '#8B0000', lBajar) +
+      col('Pedidos nuevos / editados', '#6D4C2D', lPed) +
+    '</div></div>';
+}
+
 window.plvVistaPrevia = async function (viajeId, version) {
   if (!viajeId) return;
   inyectarCSS();
@@ -49345,6 +49507,16 @@ window.plvVistaPrevia = async function (viajeId, version) {
     '<button class="plv-btn" id="plv-pdf">⬇ Descargar PDF</button>';
   document.getElementById('plv-cont').removeAttribute('style');
   document.getElementById('plv-cont').innerHTML = htmlHoja(pv);
+
+  // v13.195.0 — el delta se calcula aparte y se antepone. Si falla, la hoja
+  // queda igual que antes: nunca puede impedir ver la planilla.
+  if (Number(pv.version) > 1) {
+    plvCalcularDelta(viajeId, Number(pv.version)).then(function (d) {
+      var cont = document.getElementById('plv-cont');
+      if (!d || !cont) return;
+      cont.insertAdjacentHTML('afterbegin', plvHtmlDelta(d));
+    }).catch(function () {});
+  }
 
   document.getElementById('plv-volver').onclick = cerrar;
   document.getElementById('plv-print').onclick = function () { window.print(); };
