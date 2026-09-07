@@ -1,5 +1,35 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.195.1 — 07/09/2026
+     v13.195.1: COBRANZAS — ACCIONABILIDAD POSITIVA + MARCADOR DE VERSION.
+     Merge conservador: BASE = 13.195.0 de main (planilla delta + fix banner
+     intactos). Se traslada UNICAMENTE el delta de FASE B que faltaba, el
+     que iba a ser 13.194.3. Nada de 13.195.0 fue removido ni reescrito.
+
+     La 13.194.2 ya construia bien el objeto: reproducido con los datos
+     reales de produccion, la cobranza 3147 salia registrada / _grp=2 /
+     sin boton. El smoke la vio mal porque el navegador servia la 194.1
+     (el chip decia 'Piloto (no posteada)', string inexistente en 194.2).
+     Por eso ahora la version del buscador se imprime en pantalla.
+
+     (1) MARCADOR: la linea de resultados muestra 'buscador vX.Y.Z'. Si no
+         dice 13.195.1, lo que corre es cache vieja, no un bug.
+     (2) ACCIONABILIDAD POSITIVA: _cbzAccionable() exige fuente==='mp_mov'
+         (la fila viene de mp_movimientos), sin cobranzaId, no registrada,
+         clasificacion presente y dentro de la lista blanca, y rol dueno.
+         Antes se decidia por descarte y una fila de cta_cte_cobranzas
+         (medio 'mp', sin 'clasificacion') pasaba por el agujero.
+     (3) Cada constructor declara su origen: 'mp_mov' | 'cheque' |
+         'cobranza'. Una fila de cta_cte_cobranzas no puede ser accionable
+         por construccion, no por chequeo.
+     (4) Explicacion de los cuatro medios en el panel: MP por bandeja,
+         Cheque por Nueva cobranza, Efectivo automatico desde rendicion,
+         Transferencia por el circuito de entrega.
+     (5) Placeholder del buscador actualizado a lo que realmente busca.
+     (6) TCK_UPD_LOCAL a 13.195.1. Acordate de version.json en el repo.
+     NO cambia el listado operativo, ni carga, ni conciliacion, ni RPC,
+     ni la planilla, ni plvCalcularDelta.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.195.0 — 07/09/2026
      v13.195.0: LA PLANILLA MUESTRA QUÉ CAMBIÓ DESDE LA VERSIÓN ANTERIOR.
      Pedido de Braian (07/09), caso del viaje 1A de hoy: Pancho ya había
@@ -15182,8 +15212,28 @@ input.canales-exp-input[type="date"] {
   <!-- v13.183.0 - PANEL COBRANZAS (MVP-A, solo lectura) -->
   <div class="view" id="view-cobranzas">
     <div class="ccx-head"><h2>Cobranzas <span class="ccx-badge">SOLO LECTURA</span></h2></div>
+    <!-- v13.194.3 - como entra cada medio. Que nadie interprete que faltan funciones. -->
+    <details class="cbz-medios">
+      <summary>C&oacute;mo se registra cada medio de cobro</summary>
+      <table>
+        <tr><th>MP</th><td><b>Por la bandeja de este panel.</b> El movimiento llega de Mercado Pago,
+            se identifica el cliente, se imputan las facturas y se registra. No se da de alta a mano:
+            si el movimiento existe, se resuelve ac&aacute;.</td></tr>
+        <tr><th>Cheque</th><td><b>Por &laquo;+ Nueva cobranza &rarr; Cheque&raquo;.</b> El cheque ya fue
+            cargado por el chofer en la entrega; ac&aacute; se elige el cheque, se confirman cliente y
+            facturas, y se imputa. El monto, banco, n&uacute;mero y emisor vienen del cheque, no se tipean.</td></tr>
+        <tr><th>Efectivo</th><td><b>Autom&aacute;tico desde entrega y rendici&oacute;n.</b> El circuito
+            existente lo toma de la rendici&oacute;n y lo postea solo. No hay ni debe haber alta manual:
+            registrarlo dos veces generar&iacute;a una cobranza duplicada.</td></tr>
+        <tr><th>Transferencia</th><td><b>Circuito existente de entrega, sin alta manual.</b> Se cobra en la
+            entrega con comprobante y sigue su curso. No hay conexi&oacute;n con los bancos, as&iacute; que
+            no existe una fuente independiente para darla de alta desde ac&aacute;.</td></tr>
+      </table>
+      <div class="nota">Si un cobro no aparece por ninguna de estas cuatro v&iacute;as, el dato todav&iacute;a
+        no existe en el sistema. No se inventa desde este panel.</div>
+    </details>
     <div class="ccx-search">
-      <input type="text" id="cbz-q" placeholder="Cliente, factura, referencia..." autocomplete="off"
+      <input type="text" id="cbz-q" placeholder="Importe, cliente, factura, mp_id, CUIT, cheque, banco..." autocomplete="off"
              onkeydown="if(event.key==='Enter'){event.preventDefault();cbzBuscar();}">
       <button class="btn1" onclick="cbzBuscar()">Buscar</button>
       <style>
@@ -15195,6 +15245,16 @@ input.canales-exp-input[type="date"] {
         .chip.cbz-est.e-problemas{border-color:#b3261e;color:#e8a49e}
         .chip.cbz-est.e-fuera{border-color:#666;color:#aaa}
         .chip.cbz-est.e-registrada{border-color:#1E8449;color:#7fd6a4}
+        /* v13.194.3 */
+        .cbz-ver{font-size:10px;opacity:.55;border:1px solid currentColor;border-radius:3px;
+          padding:1px 5px;margin-left:8px;letter-spacing:.04em}
+        .cbz-medios{margin:8px 0 10px;font-size:12.5px}
+        .cbz-medios summary{cursor:pointer;opacity:.75;padding:4px 0}
+        .cbz-medios table{width:100%;border-collapse:collapse;margin-top:6px}
+        .cbz-medios th{text-align:left;vertical-align:top;width:110px;padding:6px 8px;
+          font-weight:700;opacity:.85;border-bottom:1px solid rgba(128,128,128,.25)}
+        .cbz-medios td{padding:6px 8px;border-bottom:1px solid rgba(128,128,128,.25);line-height:1.45}
+        .cbz-medios .nota{margin-top:8px;opacity:.7;font-style:italic}
         /* v13.194.1 — separador de grupos en busqueda */
         .cbz-grp{margin:14px 0 6px;font-size:11px;letter-spacing:.10em;font-weight:700;
           padding:4px 8px;border-radius:4px;display:inline-block}
@@ -47543,7 +47603,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.195.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.195.1';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
@@ -50082,8 +50142,36 @@ function ccxInit(){
   // apareciera como 'Pendiente' con boton 'Revisar y confirmar', como si
   // fuera un movimiento sin resolver. estado='piloto' significa que NO se
   // postea, no que falte conciliar.
+  var CBZ_BUSQ_VER = '13.195.1';   // marcador visible: si no se ve, el navegador tiene cache vieja
+
   function _cbzYaRegistrada(r) {
-    return !!(r.registrada || r.estado === 'registrada' || r.estado === 'confirmadas');
+    return !!(r.registrada || r.cobId || r.fuente === 'cobranza' ||
+              r.estado === 'registrada' || r.estado === 'confirmadas');
+  }
+
+  // ── v13.194.3 — ACCIONABILIDAD POR CONDICION POSITIVA ────────────────
+  // Antes el boton se mostraba por ausencia de valores (medio 'mp' y
+  // clasificacion != CONFLICTO). Una fila construida desde
+  // cta_cte_cobranzas resuelve medio='mp' y no trae 'clasificacion', asi
+  // que pasaba por descarte. Ahora hay que cumplir TODAS estas y el
+  // origen tiene que declararse explicitamente como movimiento MP:
+  //   fuente === 'mp_mov'          la fila viene de mp_movimientos
+  //   sin cobranza_id              el movimiento no fue consumido
+  //   !_cbzYaRegistrada(r)         doble red
+  //   clasificacion presente       vino de vw_mp_a_conciliar
+  //   clasificacion resoluble      ni CONFLICTO ni fuera de la vista
+  // Una fila de cta_cte_cobranzas NUNCA puede cumplir la primera.
+  var CBZ_CLASIF_OK = { CANDIDATO:1, MATCH_AUTOMATICO:1, REQUIERE_REVISION:1,
+                        CANDIDATO_MULTI:1, SIN_CANDIDATO:1 };
+
+  function _cbzAccionable(r) {
+    if (!r || r.fuente !== 'mp_mov') return false;
+    if (r.cobranzaId) return false;
+    if (_cbzYaRegistrada(r)) return false;
+    var c = r.det && r.det.clasificacion;
+    if (!c || !CBZ_CLASIF_OK[c]) return false;
+    if (typeof cbrPuede !== 'function' || !cbrPuede()) return false;
+    return true;
   }
 
   function _cbzXubioLbl(k) {
@@ -50163,6 +50251,7 @@ function ccxInit(){
       factura: (v && v.factura_sugerida) || null,
       residual: (v && v.residual_sugerido) || null,
       estado: est, etiqueta: etiqueta, accion: '\u2014', motivo: motivo,
+      fuente: 'mp_mov', cobranzaId: m.cobranza_id || null,
       registrada: !!m.cobranza_id,
       confianza: (v && v.confianza) || 'baja',
       det: _cbzDetMP(m, v) };
@@ -50173,6 +50262,7 @@ function ccxInit(){
       monto:c.monto, cliente:c.cliente, factura:null, residual:null,
       // v13.194.2 — con cobranza_id el cheque ya esta imputado
       estado: c.cobranza_id ? 'registrada' : (c.estado === 'rechazado' ? 'problemas' : 'pendientes'),
+      fuente: 'cheque', cobranzaId: c.cobranza_id || null,
       registrada: !!c.cobranza_id,
       etiqueta: c.cobranza_id ? ('Cobranza ' + c.cobranza_id) : 'Sin registrar', accion:'\u2014',
       motivo: (c.banco||'?') + ' ' + (c.numero_cheque||'?') +
@@ -50193,8 +50283,10 @@ function ccxInit(){
       // v13.194.2 — todo lo que sale de cta_cte_cobranzas YA es una
       // cobranza creada e imputada. El estado de Xubio va aparte.
       estado: 'registrada',
+      fuente: 'cobranza',
       registrada: true,
       cobId: k.id,
+      cobranzaId: k.id,
       etiqueta: _cbzXubioLbl(k),
       accion: '\u2014',
       motivo: 'cobranza ' + k.id + ' \u00b7 ' + (k.instrumento||'?') +
@@ -50501,7 +50593,8 @@ function ccxInit(){
     var rows, _busq = _cbz.busq && _cbz.busq.activa;
     if (_busq) {
       if (_cbz.busq.cargando) {
-        h += '<div class="cbz-sub">Buscando \u00ab'+_cbzE(_cbz.busq.q)+'\u00bb en todos los estados\u2026</div>';
+        h += '<div class="cbz-sub">Buscando \u00ab'+_cbzE(_cbz.busq.q)+'\u00bb en todos los estados\u2026' +
+             ' <span class="cbz-ver">buscador v'+CBZ_BUSQ_VER+'</span></div>';
         el.innerHTML = h; return;
       }
       rows = (_cbz.busq.hits || []).slice();
@@ -50532,6 +50625,7 @@ function ccxInit(){
       });
       h += '<div class="cbz-sub"><b>B\u00fasqueda global</b> \u00ab'+_cbzE(_cbz.busq.q)+'\u00bb \u00b7 ' +
            rows.length + ' resultado' + (rows.length===1?'':'s') + ' en todos los estados' +
+           ' <span class="cbz-ver">buscador v'+CBZ_BUSQ_VER+'</span>' +
            ' <button class="cbz-mini" onclick="cbzLimpiarBusq()">Limpiar</button></div>';
       if (!rows.length) {
         h += '<div class="rv-empty">Sin coincidencias. Se busc\u00f3 por importe, referencia, ' +
@@ -50570,14 +50664,8 @@ function ccxInit(){
         '<div class="l4">'+_cbzE(r.motivo)+'</div>' +
         (r.accion && r.accion!=='—' ? '<div class="l5"><span>Falta</span>'+_cbzE(r.accion)+'</div>' : '') +
         // v13.183.0: accion primaria solo para MP, solo dueno, nunca CONFLICTO
-        // v13.194.2 — 'Revisar y confirmar' es para movimientos SIN cobranza.
-        // Antes una cobranza ya creada (medio 'mp' por instrumento
-        // transferencia, sin clave 'clasificacion' en det) pasaba el filtro y
-        // ofrecia resolver algo que ya estaba resuelto.
-        ((r.medio==='mp' && !_cbzYaRegistrada(r) && typeof cbrPuede==='function' && cbrPuede() &&
-          !(typeof esContador==='function' && esContador()) &&
-          r.det && r.det.clasificacion && r.det.clasificacion!=='CONFLICTO' &&
-          r.det.clasificacion!=='fuera de la vista')
+        // v13.194.3 — una sola puerta: _cbzAccionable() exige fuente 'mp_mov'.
+        (( _cbzAccionable(r) && !(typeof esContador==='function' && esContador()) )
           ? '<button class="cbz-go" onclick="cbrAbrir(\''+_cbzE(r.ref)+'\')">Revisar y confirmar</button>' : '') +
         (det ? '<details class="cbz-det"><summary>Detalles</summary><div class="dd">'+det+'</div></details>' : '') +
       '</div>';
