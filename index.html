@@ -1,5 +1,30 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.196.2 — 07/09/2026
+     v13.196.2: FIX — EL LIGHTBOX DE FOTOS QUEDABA DEBAJO DE LOS MODALES.
+
+     Smoke de la 13.196.1: la foto ya baja bien del bucket, pero abierta
+     desde + Nueva cobranza se veia solo el fondo negro; la imagen recien
+     aparecia al cerrar el modal.
+
+     CAUSA: _verImgAdminLightbox tenia z-index:5000 desde la v13.12, cuando
+     era el unico overlay. Hoy conviven cbr-ov y cnc-ov en 9999,
+     lz-cob-overlay y otros tres modales en 100000, y pdc-overlay en 100050.
+     El lightbox quedaba al fondo de todos.
+
+     FIX (un solo visor, el que ya existe):
+       z-index 2147482000 — arriba de todos los overlays, abajo del banner
+         de actualizacion (2147483000), que es lo unico que debe tapar todo.
+       boton X arriba a la derecha.
+       ESC cierra (listener en captura, se remueve al cerrar).
+       click fuera cierra; click SOBRE la imagen ya no cierra (antes
+         burbujeaba al overlay y se cerraba sola al querer mirarla).
+     Al cerrar solo se saca el nodo del DOM: no se repinta ningun modal, asi
+     que + Nueva cobranza vuelve con el cheque, el cliente, las facturas y
+     los importes tal como estaban.
+     Beneficia igual a comprobantes de transferencia y fotos de entrega:
+     es el mismo visor, no se creo ninguno nuevo.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.196.1 — 07/09/2026
      v13.196.1: FIX — VER FOTO DEL CHEQUE (404 de GitHub Pages).
 
@@ -36325,20 +36350,54 @@ async function _comprobanteBlobURL(path) {
 }
 
 // Lightbox simple (tocá para cerrar).
+// v13.196.2 — el lightbox va POR ENCIMA de cualquier modal.
+//   Tenia z-index:5000 y los modales del sistema estan en 9999 (cbr-ov,
+//   cnc-ov) y 100000/100050 (lz-cob-overlay, pdc-overlay). Abierto desde
+//   + Nueva cobranza, la imagen quedaba DEBAJO del modal: se veia el fondo
+//   negro y nada mas, y recien aparecia al cerrar el modal.
+//   Ahora 2147482000: arriba de todos los overlays y abajo del banner de
+//   actualizacion (2147483000), que es lo unico que debe tapar cualquier cosa.
+//   Ademas: boton X visible, ESC cierra, y el click sobre la imagen ya NO
+//   cierra (antes burbujeaba al overlay y se cerraba sola al hacer zoom).
+//   Se saca del DOM al cerrar; no toca el estado de ningun modal.
 function _verImgAdminLightbox(url) {
   if (!url) return;
   var ov = document.createElement('div');
-  ov.style.cssText = 'position:fixed;inset:0;z-index:5000;background:rgba(0,0,0,.92);display:flex;align-items:center;justify-content:center;padding:18px;';
-  ov.onclick = function() { ov.remove(); };
+  ov.style.cssText = 'position:fixed;inset:0;z-index:2147482000;background:rgba(0,0,0,.92);display:flex;align-items:center;justify-content:center;padding:18px;';
+
+  function cerrar() {
+    try { document.removeEventListener('keydown', onKey, true); } catch (e) {}
+    if (ov && ov.parentNode) ov.remove();
+  }
+  function onKey(ev) {
+    if (ev.key === 'Escape' || ev.key === 'Esc') { ev.preventDefault(); ev.stopPropagation(); cerrar(); }
+  }
+
+  ov.onclick = cerrar;                       // click fuera de la imagen
+
   var img = document.createElement('img');
   img.src = url;
   img.style.cssText = 'max-width:100%;max-height:100%;border-radius:10px;box-shadow:0 12px 44px rgba(0,0,0,.55);';
+  img.onclick = function (ev) { ev.stopPropagation(); };   // la imagen no cierra
   ov.appendChild(img);
+
+  var x = document.createElement('button');
+  x.type = 'button';
+  x.innerHTML = '&times;';
+  x.setAttribute('aria-label', 'Cerrar');
+  x.style.cssText = 'position:absolute;top:14px;right:16px;width:44px;height:44px;border:0;' +
+    'border-radius:50%;background:rgba(255,255,255,.16);color:#fff;font-size:30px;line-height:1;' +
+    'cursor:pointer;display:flex;align-items:center;justify-content:center;';
+  x.onclick = function (ev) { ev.stopPropagation(); cerrar(); };
+  ov.appendChild(x);
+
   var hint = document.createElement('div');
-  hint.textContent = 'Tocá para cerrar';
+  hint.textContent = 'Tocá fuera de la imagen, la X o ESC para volver';
   hint.style.cssText = "position:absolute;bottom:18px;left:0;right:0;text-align:center;color:#fff;font-family:'Barlow Condensed',sans-serif;font-size:14px;opacity:.85;";
   ov.appendChild(hint);
+
   document.body.appendChild(ov);
+  document.addEventListener('keydown', onKey, true);
 }
 
 // Carga (con estado de "Cargando…" en el botón) y abre el comprobante.
@@ -47723,7 +47782,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.196.1';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.196.2';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
