@@ -1,5 +1,35 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.196.3 — 07/09/2026
+     v13.196.3: FIX — 'No encontré el movimiento' al abrir un MP hallado
+     por la busqueda global.
+
+     Smoke con Contadores: buscar 173444845846 mostraba la card y el boton
+     'Auditar (solo lectura)', pero al pulsarlo saltaba el toast y el modal
+     no abria.
+
+     CAUSA: cbrAbrir() resolvia el movimiento con
+         (_cbz.rows||[]).filter(...)
+     y _cbz.rows es SOLO el listado operativo: ventana de _cbz.dias (7 por
+     defecto) sobre vw_mp_a_conciliar, que ademas recorta a 45 dias. La card
+     venia de _cbz.busq.hits, que se arma server-side y no pasa por rows.
+     La card existia y su objeto no. NO es un problema de rol: al dueño le
+     pasaba igual con cualquier MP historico encontrado por busqueda.
+
+     FIX: _cbzResolverMP(mpId) resuelve en tres pasos, sin duplicar modal ni
+     logica: (1) resultados de la busqueda global, (2) listado operativo,
+     (3) consulta server-side por mp_id EXACTO contra mp_movimientos (PK) +
+     vw_mp_a_conciliar, sin ninguna ventana de fechas. cbrAbrir pasa a async.
+     Ademas _cbzDetMP agrega las mismas claves que arma el listado (match,
+     alias_veces, facturas/clientes posibles, clientes por doc, ...) para
+     que los dos objetos sean intercambiables, y cbrAbrir rechaza abrir un
+     movimiento que ya tenga cobranza.
+
+     NO TOCA: el modal MP, cbrConfirmar, el flujo de cheque, el RPC v2,
+     Xubio, efectivo, transferencias, Valentina ni RLS. El contador sigue
+     con el boton deshabilitado, _contBloq en el handler y NO_AUTORIZADO
+     server-side.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.196.2 — 07/09/2026
      v13.196.2: FIX — EL LIGHTBOX DE FOTOS QUEDABA DEBAJO DE LOS MODALES.
 
@@ -47782,7 +47812,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.196.2';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.196.3';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
@@ -50420,8 +50450,46 @@ function ccxInit(){
     }
     d['cobranza'] = m.cobranza_id;
     d['entrega'] = m.match_entrega_id;
+    // v13.196.3 — mismas claves que arma el listado operativo. Sin esto,
+    // el objeto de la busqueda no era intercambiable con el del listado y
+    // _cbrCli()/_cbrPintar() no encontraban lo que esperaban.
+    if (v) {
+      d['match'] = v.origen_match;
+      d['alias_veces'] = v.alias_veces;
+      d['facturas posibles'] = v.cantidad_facturas_posibles;
+      d['clientes posibles'] = v.cantidad_clientes_posibles;
+      d['mismo importe'] = v.cantidad_movimientos_mismo_importe;
+      d['importe comun'] = v.importe_comun;
+      d['calidad'] = v.calidad_historica;
+      d['clientes por doc'] = v.clientes_por_documento;
+    }
     d['clasificacion'] = v ? v.clasificacion : 'fuera de la vista';
     return d;
+  }
+
+  // ── v13.196.3 — RESOLUCION DEL MOVIMIENTO PARA EL MODAL ─────────────
+  // cbrAbrir() buscaba el mp_id SOLO en _cbz.rows, que es el listado
+  // operativo: ventana de _cbz.dias (7 por defecto) y ademas los 45 dias
+  // de vw_mp_a_conciliar. Una card salida de la busqueda global existia en
+  // pantalla pero su objeto no estaba en _cbz.rows -> 'No encontré el
+  // movimiento'. Afectaba igual al dueño con cualquier MP historico.
+  // Orden de resolucion: resultados de la busqueda, listado, y si no esta
+  // en ninguno, consulta server-side por mp_id EXACTO (PK), sin ventana.
+  async function _cbzResolverMP(mpId) {
+    var id = String(mpId);
+    var hits = (_cbz.busq && _cbz.busq.hits) || [];
+    var r = hits.filter(function(x){ return x.medio==='mp' && String(x.ref)===id; })[0];
+    if (r) return r;
+    r = (_cbz.rows||[]).filter(function(x){ return x.medio==='mp' && String(x.ref)===id; })[0];
+    if (r) return r;
+    var res = await Promise.allSettled([
+      sbFetch('mp_movimientos?mp_id=eq.' + encodeURIComponent(id) + '&select=*&limit=1'),
+      sbFetch('vw_mp_a_conciliar?mp_id=eq.' + encodeURIComponent(id) + '&select=*&limit=1')
+    ]);
+    var mov = (res[0].status==='fulfilled' && res[0].value && res[0].value[0]) || null;
+    if (!mov) return null;
+    var vis = (res[1].status==='fulfilled' && res[1].value && res[1].value[0]) || null;
+    return _cbzHitMP(mov, vis);
   }
 
   function _cbzHitMP(m, vista) {
@@ -50891,7 +50959,7 @@ function ccxInit(){
 
   function cbrPuede(){ return (typeof rolActual!=='undefined' && rolActual==='dueno'); }
 
-  function cbrAbrir(mpId) {
+  async function cbrAbrir(mpId) {
     // v13.196.0 — el contador entra en modo auditoria: ve el movimiento,
     // el cliente sugerido, las facturas y la diferencia. No puede confirmar.
     var _aud = (typeof esContador === 'function' && esContador());
@@ -50899,8 +50967,14 @@ function ccxInit(){
       if (_contBloq('registrar cobranzas')) return;
       if (!cbrPuede()) { toast('Solo el dueño puede confirmar cobranzas', 'err'); return; }
     }
-    var r = (_cbz.rows||[]).filter(function(x){ return x.medio==='mp' && String(x.ref)===String(mpId); })[0];
-    if (!r) { toast('No encontré el movimiento', 'err'); return; }
+    // v13.196.3 — busqueda global, listado, o consulta por mp_id exacto
+    var r = null;
+    try { r = await _cbzResolverMP(mpId); }
+    catch (e) { console.error('[cbr] resolver', e); }
+    if (!r) { toast('No encontré el movimiento ' + mpId, 'err'); return; }
+    if (r.cobranzaId || (typeof _cbzYaRegistrada==='function' && _cbzYaRegistrada(r))) {
+      toast('Ese movimiento ya tiene cobranza registrada', 'err'); return;
+    }
     if (!_aud && r.det && r.det.clasificacion === 'CONFLICTO') {
       toast('Este pago requiere una decisión explícita. No se puede confirmar desde acá.', 'err'); return;
     }
