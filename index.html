@@ -1,5 +1,52 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.198.1 — 07/09/2026
+     v13.198.0: CONCILIACION DE TRANSFERENCIAS — ATOMICA Y DECLARADA.
+
+     EL BUG. _transferConciliarConMatch hacia dos PATCH sueltos desde el
+     navegador: primero entregas.transfer_conciliada=true (que es lo que
+     habilita el posteo a Xubio) y despues mp_movimientos.match_entrega_id
+     dentro de un try/catch que solo hacia console.warn. Si el segundo
+     fallaba, la entrega quedaba conciliada y el movimiento libre — y el
+     toast decia 'Conciliada · vinculada a MP' igual.
+     Medido en produccion: 1.682 entregas conciliadas contra 768
+     movimientos vinculados. 914 de exposicion.
+
+     Otras tres rutas concilian sin vincular, y esta bien: ahi no hay
+     movimiento elegido (comprobante, ajuste de monto, disputa). El
+     problema es que la base no distinguia 'conciliada contra el
+     movimiento X' de 'conciliada sin movimiento'.
+
+     (1) Las cinco rutas dejan de hacer PATCH directo y llaman a
+         entrega_conciliar_transfer(p_entrega_id, p_mp_id, p_via):
+           _transferConciliar          -> via 'manual'
+           _transferConciliarConMatch  -> via 'match_mp' + mp_id
+           _ltAsignarElegir            -> 'match_mp' o 'ajuste' si los
+                                          montos no coinciden
+           _transferAjustarGuardar     -> via 'ajuste'
+           _transferDisputaResolver    -> via 'disputa'
+     (2) _ltDesconciliar pasa a entrega_desconciliar_transfer, que libera
+         el movimiento y desconcilia en una transaccion, y frena si la
+         transferencia ya se exporto a Xubio (guard que hoy no existe).
+     (3) Se elimina el exito falso: si el RPC falla, falla completo y el
+         toast muestra el motivo real (MOVIMIENTO_YA_VINCULADO,
+         MONTO_NO_COINCIDE, etc.) en vez de 'Error al guardar'.
+     (4) El ajuste del detalle_cobro sigue siendo un PATCH: no es una
+         conciliacion. Limpiar una disputa sin conciliar, tambien.
+     (5) CONTADOR habilitado SOLO para este circuito: lista blanca de tres
+         acciones dentro de _contBloq (conciliar transferencias, asignar
+         movimientos, resolver disputas). Las otras 91 siguen bloqueadas.
+         Decision de negocio del 07/09: contabilidad y cobranzas son del
+         contador; pedidos, logistica, stock y precios no.
+     (6) El RPC autoriza dueno / cobranzas / contador. Salen operaciones y
+         recepcion, que podian solo por herencia de la UI.
+     (7) TCK_UPD_LOCAL a 13.198.1. Acordate de version.json.
+
+     REQUIERE tck-entrega-conciliar-transfer.sql aplicado ANTES.
+     NO TOCA: el cron de Xubio, efectivo, cheques, el panel Cobranzas,
+     la busqueda global, el RPC de cheque v2, permisos ni RLS.
+     REQUIERE tck-entrega-conciliar-transfer-v2.sql aplicado ANTES.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.196.3 — 07/09/2026
      v13.196.3: FIX — 'No encontré el movimiento' al abrir un MP hallado
      por la busqueda global.
@@ -19639,8 +19686,20 @@ function esContador() { return (typeof rolActual !== 'undefined' && rolActual ==
 function _contAplicarClase() {
   try { document.body.classList.toggle('rol-contador', esContador()); } catch (e) {}
 }
+// v13.198.1 — el contador SI puede trabajar el circuito de conciliacion
+// de transferencias. Decision de negocio del 07/09: administracion,
+// contabilidad y cobranzas son suyas; pedidos, logistica, stock y precios
+// no. Esta lista blanca cubre SOLO las acciones de ese circuito; las otras
+// 91 siguen bloqueadas hasta la refactorizacion de permisos.
+// El control que vale igual es server-side: el RPC valida el rol.
+var CONT_ACCIONES_PERMITIDAS = {
+  'conciliar transferencias': 1,
+  'asignar movimientos':      1,
+  'resolver disputas':        1
+};
 function _contBloq(que) {
   if (esContador()) {
+    if (CONT_ACCIONES_PERMITIDAS[que]) return false;
     try { toast('Usuario de auditoria: solo lectura. No podes ' + (que || 'ejecutar esta accion') + '.', 'err'); }
     catch (e) { alert('Usuario de auditoria: solo lectura.'); }
     return true;
@@ -36558,22 +36617,67 @@ function _fotosEntregaRender(rows) {
 
 // Marca / desmarca una transferencia como conciliada.
 function transferConciliar(){ if (_contBloq('conciliar transferencias')) return; return _transferConciliar.apply(this, arguments); }
+// ══════════════════════════════════════════════════════════════════════
+// v13.198.0 — TODA CONCILIACION DE TRANSFERENCIA PASA POR EL RPC.
+//
+// El bug que cierra: _transferConciliarConMatch hacia dos PATCH sueltos.
+// Primero entregas.transfer_conciliada=true (que habilita el posteo a
+// Xubio), despues mp_movimientos.match_entrega_id dentro de un
+//    try { ... } catch (_eV) { console.warn(...) }
+// Si el segundo fallaba, la entrega quedaba conciliada y el movimiento
+// libre — y el toast decia 'vinculada a MP' igual. Medido: 1.682
+// entregas conciliadas contra 768 movimientos vinculados.
+//
+// Ahora las dos escrituras viven en una transaccion del servidor: o las
+// dos o ninguna. Y cuando NO hay movimiento (comprobante, ajuste,
+// disputa, manual) queda registrado COMO se concilio, en vez de ser
+// indistinguible de una conciliacion rota.
+// ══════════════════════════════════════════════════════════════════════
+
+// via: 'match_mp' | 'ajuste' | 'comprobante' | 'disputa' | 'manual'
+async function _ltRpcConciliar(entregaId, mpId, via) {
+  var out = await sbFetch('rpc/entrega_conciliar_transfer', {
+    method: 'POST',
+    body: JSON.stringify({
+      p_entrega_id: String(entregaId),
+      p_mp_id:      (mpId === null || mpId === undefined || mpId === '') ? null : Number(mpId),
+      p_via:        via || null
+    })
+  });
+  var r = (out && out.status) ? out : (out && out[0]) || {};
+  if (!r.status) throw new Error('respuesta inesperada del servidor');
+  return r;
+}
+
+async function _ltRpcDesconciliar(entregaId) {
+  var out = await sbFetch('rpc/entrega_desconciliar_transfer', {
+    method: 'POST',
+    body: JSON.stringify({ p_entrega_id: String(entregaId) })
+  });
+  var r = (out && out.status) ? out : (out && out[0]) || {};
+  if (!r.status) throw new Error('respuesta inesperada del servidor');
+  return r;
+}
+
+// El error del RPC llega con su codigo adelante (MOVIMIENTO_YA_VINCULADO:
+// ...). Se muestra tal cual: el operador tiene que ver POR QUE no se pudo,
+// no un 'error al guardar' generico.
+function _ltErrRpc(e) {
+  var m = String((e && e.message) || e || '');
+  return m.replace(/^[A-Z_]+:\s*/, '').slice(0, 160) || 'no se pudo guardar';
+}
+
 async function _transferConciliar(id, conciliar) {
   try {
-    await sbFetch('entregas?id=eq.' + id, {
-      method: 'PATCH',
-      headers: { 'Prefer': 'return=minimal' },
-      body: JSON.stringify({
-        transfer_conciliada: conciliar,
-        transfer_conciliada_en: conciliar ? new Date().toISOString() : null
-      })
-    });
+    // v13.198.0 — sin movimiento elegido: la via es 'manual' y queda escrita.
+    if (conciliar) await _ltRpcConciliar(id, null, 'manual');
+    else           await _ltRpcDesconciliar(id);
     toast(conciliar ? '✅ Transferencia conciliada' : '↩ Vuelta a pendiente', 'ok');
     var el = document.getElementById('logistica-contenido');
     if (el) renderLogisticaTransferencias(el);
   } catch(e) {
     console.error('transferConciliar:', e);
-    toast('❌ Error al guardar', 'err');
+    toast('❌ ' + _ltErrRpc(e), 'err');
   }
 }
 
@@ -36634,10 +36738,13 @@ async function _transferAjustarGuardar(id, valStr, conciliar, modalEl) {
   det.transferencia = nuevo;         // ajusto SOLO el componente transferencia
   var detJson = {};
   ['efectivo','transferencia','cheque','cuenta_corriente'].forEach(function(k){ if ((Number(det[k]) || 0) > 0) detJson[k] = Math.round(Number(det[k])); });
+  // v13.198.0 — el ajuste del detalle_cobro sigue siendo un PATCH (no es
+  // una conciliacion). La conciliacion sale del payload y va por el RPC,
+  // con via='ajuste', que es exactamente lo que es.
   var payload = { detalle_cobro: JSON.stringify(detJson) };
-  if (conciliar) { payload.transfer_conciliada = true; payload.transfer_conciliada_en = new Date().toISOString(); }
   try {
     await sbFetch('entregas?id=eq.' + encodeURIComponent(id), { method: 'PATCH', headers: { 'Prefer': 'return=minimal' }, body: JSON.stringify(payload) });
+    if (conciliar) await _ltRpcConciliar(id, null, 'ajuste');
     if (modalEl) modalEl.remove();
     toast(conciliar ? '✅ Ajustada y conciliada' : '✎ Monto ajustado', 'ok');
     var el = document.getElementById('logistica-contenido');
@@ -37404,16 +37511,9 @@ async function _ltAsignarElegir(mpId, entregaId) {
     if (!sigue) return;
   }
   try {
-    await sbFetch('mp_movimientos?mp_id=eq.' + mpId, {
-      method: 'PATCH',
-      headers: { 'Prefer': 'return=minimal' },
-      body: JSON.stringify({ match_entrega_id: entregaId })
-    });
-    await sbFetch('entregas?id=eq.' + entregaId, {
-      method: 'PATCH',
-      headers: { 'Prefer': 'return=minimal' },
-      body: JSON.stringify({ transfer_conciliada: true, transfer_conciliada_en: new Date().toISOString(), transfer_disputa: null, transfer_disputa_en: null })
-    });
+    // v13.198.0 — una sola llamada, atomica. Si los montos no coinciden es
+    // un ajuste declarado, no un match limpio: el RPC lo exige.
+    await _ltRpcConciliar(entregaId, mpId, (Math.abs(mE - mM) > 1) ? 'ajuste' : 'match_mp');
     _ltAprenderAlias(entregaId, mov);
     var md = document.getElementById('lt-asignar-modal');
     if (md) md.remove();
@@ -37430,18 +37530,10 @@ async function _ltAsignarElegir(mpId, entregaId) {
 function transferConciliarConMatch(){ if (_contBloq('conciliar transferencias')) return; return _transferConciliarConMatch.apply(this, arguments); }
 async function _transferConciliarConMatch(entregaId, mpId) {
   try {
-    await sbFetch('entregas?id=eq.' + entregaId, {
-      method: 'PATCH',
-      headers: { 'Prefer': 'return=minimal' },
-      body: JSON.stringify({ transfer_conciliada: true, transfer_conciliada_en: new Date().toISOString() })
-    });
-    try {
-      await sbFetch('mp_movimientos?mp_id=eq.' + mpId, {
-        method: 'PATCH',
-        headers: { 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ match_entrega_id: entregaId })
-      });
-    } catch (_eV) { console.warn('vínculo MP no guardado', _eV); }
+    // v13.198.0 — ACA ESTABA EL BUG. Antes: PATCH a entregas, y despues el
+    // vinculo dentro de un try/catch que solo hacia console.warn. El exito
+    // falso desaparece: una sola llamada, o las dos escrituras o ninguna.
+    await _ltRpcConciliar(entregaId, mpId, 'match_mp');
     // v13.21: aprender el pagador si no es el propio cliente
     try {
       var movAp = null;
@@ -37453,31 +37545,23 @@ async function _transferConciliarConMatch(entregaId, mpId) {
     if (el) renderLogisticaTransferencias(el);
   } catch (e) {
     console.error('transferConciliarConMatch:', e);
-    toast('❌ Error al conciliar', 'err');
+    toast('❌ ' + _ltErrRpc(e), 'err');
   }
 }
 
 // v13.18: deshacer conciliación + liberar el movimiento MP vinculado
 async function _ltDesconciliar(id) {
   try {
-    await sbFetch('entregas?id=eq.' + id, {
-      method: 'PATCH',
-      headers: { 'Prefer': 'return=minimal' },
-      body: JSON.stringify({ transfer_conciliada: false, transfer_conciliada_en: null })
-    });
-    try {
-      await sbFetch('mp_movimientos?match_entrega_id=eq.' + id, {
-        method: 'PATCH',
-        headers: { 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ match_entrega_id: null })
-      });
-    } catch (_eL) {}
+    // v13.198.0 — mismo bug al reves: liberar el vinculo iba en un catch
+    // vacio. Ahora el RPC libera el movimiento Y desconcilia en una sola
+    // transaccion, y ademas frena si la transferencia ya viajo a Xubio.
+    await _ltRpcDesconciliar(id);
     toast('↩ Conciliación deshecha', 'ok');
     var el = document.getElementById('logistica-contenido');
     if (el) renderLogisticaTransferencias(el);
   } catch (e) {
     console.error('_ltDesconciliar:', e);
-    toast('❌ Error', 'err');
+    toast('❌ ' + _ltErrRpc(e), 'err');
   }
 }
 
@@ -37631,20 +37715,24 @@ async function _transferDisputaResolver(id, conciliar) {
     }
   }
   try {
-    var payload = conciliar
-      ? { transfer_conciliada: true, transfer_conciliada_en: new Date().toISOString(), transfer_disputa: null, transfer_disputa_en: null }
-      : { transfer_disputa: null, transfer_disputa_en: null };
-    await sbFetch('entregas?id=eq.' + id, {
-      method: 'PATCH',
-      headers: { 'Prefer': 'return=minimal' },
-      body: JSON.stringify(payload)
-    });
+    // v13.198.0 — resolver la disputa conciliando pasa por el RPC con
+    // via='disputa'. Limpiar la disputa sin conciliar sigue siendo un PATCH:
+    // no toca transfer_conciliada.
+    if (conciliar) {
+      await _ltRpcConciliar(id, null, 'disputa');
+    } else {
+      await sbFetch('entregas?id=eq.' + id, {
+        method: 'PATCH',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ transfer_disputa: null, transfer_disputa_en: null })
+      });
+    }
     toast(conciliar ? '✅ Resuelta y conciliada' : '↩ Vuelta a pendiente', 'ok');
     var el = document.getElementById('logistica-contenido');
     if (el) renderLogisticaTransferencias(el);
   } catch (e) {
     console.error('transferDisputaResolver:', e);
-    toast('❌ Error al guardar', 'err');
+    toast('❌ ' + _ltErrRpc(e), 'err');
   }
 }
 
@@ -47812,7 +47900,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.196.3';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.198.1';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
