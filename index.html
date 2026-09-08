@@ -1,5 +1,27 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.201.0 — 08/09/2026
+     v13.201.0: EDITOR DE PEDIDOS PARA ADMIN (Braian/Chan/Francisco) — CIERRE.
+     Lo que le faltaba al port del editor de ventas (v13.199.0 propuesto)
+     para funcionar de punta a punta:
+     1. _mutarYConfirmar NO EXISTIA en admin. editarConfirmar la llamaba
+        despues de guardar -> ReferenceError -> catch -> toast "Error de
+        conexion" con el pedido YA guardado en el Sheet y la lista sin
+        refrescar. Medido: CCX1B anulado por Francisco el 08/09 08:21 y
+        nunca guardado; CAIO2 rehecho por Miguel desde ventas.
+     2. Sin boton "Editar pedido" en la card: la unica entrada al editor era
+        "Anular presupuesto y editar" (panel Xubio). Un pedido Pendiente o
+        Confirmado SIN presupuesto (o recien anulado, si el editor no abrio)
+        no tenia por donde editarse. Ahora la card muestra "Editar pedido"
+        a la whitelist si no hay presupuesto ni factura (misma regla que el
+        vendedor en ventas).
+     3. tckEscaleraRefrescar y tomadorSelDto (precio manual y % de descuento
+        dentro del editor) tampoco existian: portados de ventas v14.179.0.
+     Backend: prod YA acepta POST con actorJwt (probado 08/09: doPost enruta
+     editarPedido y desbloquearPedidoXubio; sin JWT responde
+     ACTOR_ADMIN_NO_VERIFICADO). El Codigo.gs local (v25.137.0) esta ATRAS
+     de produccion: pedir la foto antes de tocarlo.
+     ═══════════════════════════════════════════════════════════════════════
      TCK ADMIN — v13.198.1 — 07/09/2026
      v13.198.0: CONCILIACION DE TRANSFERENCIAS — ATOMICA Y DECLARADA.
 
@@ -22280,6 +22302,15 @@ function renderCard(p) {
     if (p.estado !== 'Entregado')  btns += '<button class="btn-estado btn-entregar"  onclick="cambiarEstado(\'' + p.pedidoId + '\',' + p.fila + ',\'Entregado\',event)">📦 Entregado</button>';
     if (esAdmin && p.estado !== 'Pendiente') btns += '<button class="btn-estado btn-pendiente-again" onclick="cambiarEstado(\'' + p.pedidoId + '\',' + p.fila + ',\'Pendiente\',event)">⏳ Pendiente</button>';
     if (esAdmin && p.estado !== 'Cancelado') btns += '<button class="btn-estado btn-cancelar" onclick="confirmarCancelar(\'' + p.pedidoId + '\',' + p.fila + ',event)">❌ Cancelar</button>';
+    // v13.201.0 — ✏️ Editar pedido para Braian/Chan/Francisco. Misma regla que
+    // el vendedor en ventas (Pendiente/Confirmado sin presupuesto) + sin
+    // factura. Con presupuesto la entrada sigue siendo "Anular presupuesto y
+    // editar" del panel Xubio; con factura no se edita: va por Nota de Credito.
+    if (typeof puedeAnularXubioAdmin === 'function' && puedeAnularXubioAdmin()
+        && !p.xubioNroPresupuesto && !_factNroMap[p.pedidoId]
+        && (p.estado === 'Pendiente' || p.estado === 'Confirmado')) {
+      btns += '<button class="btn-estado" style="background:#FFF8E1;color:#E65100;border-color:#E65100;" data-pid="' + p.pedidoId + '" onclick="adminEditarPedidoBtn(this,event)">✏️ Editar pedido</button>';
+    }
   }  // Botón asignar chofer — pedidos confirmados
   var asignarHtml = '';
   if (p.estado === 'Confirmado') {
@@ -48243,7 +48274,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.198.1';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.201.0';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
@@ -56147,6 +56178,80 @@ function escapeAttr(s) {
 //  catálogos vivos que en ventas se cargan al boot (acá no existían) y
 //  después abre el mismo editor portado arriba.
 // ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════
+//  v13.201.0 — LO QUE EL PORT DABA POR EXISTENTE Y NO EXISTIA EN ADMIN
+// ═══════════════════════════════════════════════════════════════════════
+
+// _mutarYConfirmar: en ventas es READ-AFTER-WRITE de un pedido contra el
+// servidor. Aca se relee la lista canonica entera (cargarPedidos) y recien
+// ahi se declara exito. Sin esta funcion, editarConfirmar tiraba
+// ReferenceError DESPUES de guardar y mostraba "Error de conexion".
+async function _mutarYConfirmar(pedidoId, opts) {
+  opts = opts || {};
+  toast('⏳ Guardado, actualizando la lista…', 'ok');
+  try {
+    await cargarPedidos(true);
+    if (opts.mensajeOk) toast(opts.mensajeOk, 'ok');
+    return { ok: true };
+  } catch (e) {
+    toast('⚠️ Se guardó, pero no pude releer la lista. Tocá 🔄 Actualizar.', 'err');
+    return { ok: false, motivo: String((e && e.message) || e) };
+  }
+}
+
+// Port de ventas v14.179.0 (tckEscaleraRefrescar). Refresca la escalera de
+// tramos de la card del tomador tras un precio manual. En admin la card del
+// editor no la renderiza (no existe tckCardPrecioHTML): sale sin tocar nada.
+function tckEscaleraRefrescar(nombre, ctx) {
+  if (typeof tckCardPrecioHTML !== 'function') return;
+  var item = null;
+  for (var i = 0; i < TOMADOR_CAT.length && !item; i++) {
+    for (var j = 0; j < TOMADOR_CAT[i].items.length; j++) {
+      if (TOMADOR_CAT[i].items[j].n === nombre) { item = TOMADOR_CAT[i].items[j]; break; }
+    }
+  }
+  if (!item) return;
+  var esMwa = (ctx === 'mwa');
+  var q = esMwa ? ((_manualWAQtys || {})[nombre] || 0) : ((_tomadorQtys || {})[nombre] || 0);
+  var id = esMwa
+    ? 'mwa-item-' + nombre.replace(/[^a-zA-Z0-9]/g, '-')
+    : 'titem-' + nombre.replace(/[^a-zA-Z0-9]/g, '_');
+  var card = document.getElementById(id);
+  if (!card) return;
+  var nodo = card.querySelector('.tomador-item-precio, .tomador-item-tramos');
+  if (!nodo) return;
+  var tmp = document.createElement('div');
+  tmp.innerHTML = tckCardPrecioHTML(item, q, ctx);
+  if (tmp.firstChild) nodo.replaceWith(tmp.firstChild);
+}
+
+// Port de ventas v14.179.0 (tomadorSelDto): marca el % elegido en el modal
+// de descuento del editor (editarAbrirDescuento lo usa en los botones y en
+// el input "Otro %").
+function tomadorSelDto(pct) {
+  window._dtoActualPct = pct;
+  [2,3,5,7,10].forEach(function(p){
+    var btn = document.getElementById('dto-btn-' + p);
+    if (!btn) return;
+    btn.style.borderColor = p === pct ? '#1565C0' : '#E0E0E0';
+    btn.style.background  = p === pct ? '#E3F2FD' : '#fff';
+    btn.style.color       = p === pct ? '#1565C0' : '#666';
+  });
+}
+
+// Entrada al editor desde la card (boton "✏️ Editar pedido").
+function adminEditarPedidoBtn(btn, event) {
+  if (event) event.stopPropagation();
+  if (_contBloq('editar pedido')) return;
+  if (typeof puedeAnularXubioAdmin !== 'function' || !puedeAnularXubioAdmin()) return;
+  var pedidoId = btn.getAttribute('data-pid');
+  var p = todosLosPedidos.find(function(x){ return x.pedidoId === pedidoId; });
+  if (!p) { toast('No encontré el pedido para editar', 'err'); return; }
+  if (_factNroMap[pedidoId]) { toast('Este pedido ya tiene factura ' + _factNroMap[pedidoId] + ': va por Nota de Crédito, no por edición.', 'err'); return; }
+  if (p.xubioNroPresupuesto) { toast('Tiene presupuesto N° ' + p.xubioNroPresupuesto + ': usá "Anular presupuesto y editar".', 'err'); return; }
+  abrirEditarPedidoAdmin(p);
+}
+
 var _adminEditorCatalogosListos = false;
 async function _adminEditorPrepararCatalogos() {
   if (_adminEditorCatalogosListos) return;
