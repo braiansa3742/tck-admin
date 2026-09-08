@@ -15697,7 +15697,7 @@ input.canales-exp-input[type="date"] {
         <tr><th>MP</th><td><b>Por la bandeja de este panel.</b> El movimiento llega de Mercado Pago,
             se identifica el cliente, se imputan las facturas y se registra. No se da de alta a mano:
             si el movimiento existe, se resuelve ac&aacute;.</td></tr>
-        <tr><th>Cheque</th><td><b>Por &laquo;+ Nueva cobranza &rarr; Cheque&raquo;.</b> El cheque ya fue
+        <tr><th>Cheque</th><td><b>Por &laquo;Imputar cheque&raquo;.</b> El cheque ya fue
             cargado por el chofer en la entrega; ac&aacute; se elige el cheque, se confirman cliente y
             facturas, y se imputa. El monto, banco, n&uacute;mero y emisor vienen del cheque, no se tipean.</td></tr>
         <tr><th>Efectivo</th><td><b>Autom&aacute;tico desde entrega y rendici&oacute;n.</b> El circuito
@@ -15717,7 +15717,7 @@ input.canales-exp-input[type="date"] {
       <!-- v13.196.0 - clase propia: NO usa cbz-go / ccx-cta / btn-accion,
            que el CSS de rol-contador apaga. El contador tiene que poder
            abrir el modal para auditar; lo que no puede es registrar. -->
-      <button class="cbz-new" onclick="cncAbrir()">+ Nueva cobranza</button>
+      <button class="cbz-new" onclick="cncAbrir()">Imputar cheque</button>
       <style>
         /* v13.194.0 — chip de estado real en resultados de busqueda */
         .chip.cbz-est{background:#2b2b2b;border:1px solid #555;color:#ddd;margin-right:6px}
@@ -15728,6 +15728,20 @@ input.canales-exp-input[type="date"] {
         .chip.cbz-est.e-fuera{border-color:#666;color:#aaa}
         .chip.cbz-est.e-registrada{border-color:#1E8449;color:#7fd6a4}
         /* v13.196.0 - Nueva cobranza (cheque) */
+        /* v13.200.0 — D/C/E/F */
+        .cnc-qch{width:100%;min-height:44px;padding:0 12px;margin-bottom:10px;box-sizing:border-box;
+          border:1.5px solid #E0E0E0;border-radius:10px;font-family:'Barlow',sans-serif;font-size:15px;outline:none}
+        .cnc-qch:focus{border-color:#B45309}
+        .cnc-cont{font-size:11px;font-weight:700;color:#8A8A8A;text-transform:uppercase;
+          letter-spacing:.8px;margin:2px 0 8px}
+        .cnc-nota{margin-top:10px;padding:10px 12px;background:#FAF4EC;border:1px solid #E7DCCB;
+          border-radius:10px;font-size:12.5px;line-height:1.45;color:#6B5B47}
+        .cnc-bxubio{margin-left:8px;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:800;
+          text-transform:uppercase;letter-spacing:.5px;vertical-align:middle;
+          background:#E8F5E9;color:#2E7D32;border:1px solid #C8E6C9}
+        .cbz-foto{margin:8px 0 0;padding:7px 12px;background:#E8F5E9;border:1px solid #C8E6C9;
+          border-radius:8px;font-family:'Barlow Condensed',sans-serif;font-size:13px;
+          font-weight:800;color:#2E7D32;cursor:pointer}
         .cbz-new{min-height:44px;padding:0 14px;border:1.5px solid #B45309;border-radius:10px;
           background:#fff;color:#B45309;font-weight:900;font-size:13px;letter-spacing:.3px;cursor:pointer;white-space:nowrap}
         .cbz-audit{margin-top:8px;padding:8px 12px;border:1px solid #8A7960;border-radius:9px;
@@ -50932,6 +50946,9 @@ function ccxInit(){
   function _cbzHitChq(c) {
     return { medio:'cheques', icono:'CHQ', ref:c.numero_cheque, fecha:c.created_at,
       monto:c.monto, cliente:c.cliente, factura:null, residual:null,
+      // v13.200.0 — E · path del bucket privado 'comprobantes'. La query de
+      // cheques ya usa select=*, asi que foto_url viene sin pedir nada nuevo.
+      foto: c.foto_url || null,
       // v13.194.2 — con cobranza_id el cheque ya esta imputado
       estado: c.cobranza_id ? 'registrada' : (c.estado === 'rechazado' ? 'problemas' : 'pendientes'),
       fuente: 'cheque', cobranzaId: c.cobranza_id || null,
@@ -51334,6 +51351,9 @@ function ccxInit(){
         (r.factura ? '<div class="l3">'+_cbzE(r.factura)+
            (r.residual ? ' · '+_cbzF(r.residual) : '')+'</div>' : '') +
         '<div class="l4">'+_cbzE(r.motivo)+'</div>' +
+        // v13.200.0 — E · mismo visor que Logistica > Cheques y que el modal.
+        (r.foto ? '<button class="cbz-foto" onclick="_verComprobanteAdmin(\''+
+           String(r.foto).replace(/'/g,'%27')+'\',this)">\ud83d\udcf7 Ver cheque</button>' : '') +
         (r.accion && r.accion!=='—' ? '<div class="l5"><span>Falta</span>'+_cbzE(r.accion)+'</div>' : '') +
         // v13.183.0: accion primaria solo para MP, solo dueno, nunca CONFLICTO
         // v13.194.3 — una sola puerta: _cbzAccionable() exige fuente 'mp_mov'.
@@ -51589,7 +51609,7 @@ function ccxInit(){
     _cnc = { paso:'medio', audit:aud, cheques:null, ch:null, ped:null,
              cliente:null, cliNom:'', metodo:null, confirmoSinPedido:false,
              docs:[], imput:{}, busq:[], guardando:false, cargando:false,
-             err:null, hecho:null, _busc:false };
+             err:null, hecho:null, _busc:false, qch:'' };   // v13.200.0 — qch: filtro de cheques
     _cncPintar();
   }
 
@@ -51600,6 +51620,7 @@ function ccxInit(){
     _cnc.paso = 'cheque'; _cnc.ch = null; _cnc.ped = null; _cnc.cliente = null;
     _cnc.cliNom = ''; _cnc.docs = []; _cnc.imput = {}; _cnc.busq = [];
     _cnc.metodo = null; _cnc.confirmoSinPedido = false; _cnc.err = null;
+    _cnc.qch = '';   // v13.200.0 — al volver al listado, filtro limpio
     _cncPintar();
   }
 
@@ -51610,7 +51631,12 @@ function ccxInit(){
     try {
       var rows = await sbFetch('cheques_recibidos?cobranza_id=is.null' +
         '&select=id,numero_cheque,banco,emisor,monto,estado,pedido_id,chofer,' +
-        'foto_url,fecha_vencimiento,created_at,cliente&order=created_at.desc&limit=300') || [];
+        // v13.200.0 — F · xubio_estado para el badge "Ya en Xubio".
+        // NO se filtra por el: 51 de 63 reconciliados todavia tienen facturas
+        // abiertas que pueden necesitar imputacion local. Reconciliado en
+        // Xubio no es lo mismo que imputado contra factura.
+        'foto_url,fecha_vencimiento,created_at,cliente,xubio_estado' +
+        '&order=created_at.desc&limit=300') || [];
       // los rechazados no se imputan: el RPC los frena con CHEQUE_RECHAZADO
       _cnc.cheques = rows.filter(function(c){ return String(c.estado||'') !== 'rechazado'; });
     } catch(e) {
@@ -51618,6 +51644,58 @@ function ccxInit(){
       _cnc.err = 'No se pudieron cargar los cheques: ' + String(e && e.message || e).slice(0,90);
     }
     _cnc.cargando = false; _cncPintar();
+  }
+
+  // ── v13.200.0 · D+F · buscador client-side del selector de cheques ────
+  // Normaliza para que '71320', '71.320' y '$71.320' encuentren lo mismo.
+  function _cncNormCh(x) {
+    return String(x == null ? '' : x)
+      .toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[.,$\s-]/g, '');
+  }
+  function _cncMatchCh(c, q) {
+    if (!q) return true;
+    var n = _cncNormCh(q);
+    return _cncNormCh(c.cliente).indexOf(n)       >= 0 ||
+           _cncNormCh(c.numero_cheque).indexOf(n) >= 0 ||
+           _cncNormCh(c.monto).indexOf(n)         >= 0 ||
+           _cncNormCh(c.pedido_id).indexOf(n)     >= 0 ||
+           _cncNormCh(c.banco).indexOf(n)         >= 0 ||
+           _cncNormCh(c.emisor).indexOf(n)        >= 0;
+  }
+  // Solo repinta #cnc-lista-ch: el input conserva el foco.
+  function cncFiltrarCheques(v) {
+    if (!_cnc) return;
+    _cnc.qch = v || '';
+    _cncPintarCheques();
+  }
+  function _cncPintarCheques() {
+    var cont = document.getElementById('cnc-lista-ch');
+    if (!cont || !_cnc) return;
+    var todos = _cnc.cheques || [];
+    var vis = todos.filter(function(c){ return _cncMatchCh(c, _cnc.qch); });
+    var h = '<div class="cnc-cont">' +
+      (_cnc.qch ? (vis.length + ' de ' + todos.length + ' cheques')
+                : (todos.length + ' cheques sin imputar')) + '</div>';
+    if (!vis.length) {
+      h += '<div class="cnc-vacio">Ningún cheque coincide con «' + _cbzE(_cnc.qch) + '».</div>';
+      cont.innerHTML = h; return;
+    }
+    vis.forEach(function(c){
+      // F · badge informativo. NO filtra: reconciliado en Xubio no significa
+      // imputado contra factura, y 51 de 63 tienen facturas abiertas.
+      var bdg = (c.xubio_estado === 'reconciliado' || c.xubio_estado === 'exportado')
+        ? '<span class="cnc-bxubio">ya en Xubio</span>' : '';
+      h += '<button class="cnc-op" onclick="cncElegirCheque(\'' + _cbzE(String(c.id)) + '\')">' +
+        '<b>' + _cbzE(c.banco||'?') + ' ' + _cbzE(c.numero_cheque||'?') + ' · ' + _cbzF(c.monto) +
+          bdg + '</b>' +
+        '<span>' + (c.cliente ? _cbzE(c.cliente) + ' · ' : '') +
+        (c.pedido_id ? 'pedido ' + _cbzE(c.pedido_id) : 'sin pedido') +
+        (c.fecha_vencimiento ? ' · vence ' + _cbzE(_cbzD(c.fecha_vencimiento)) : '') +
+        '</span></button>';
+    });
+    cont.innerHTML = h;
   }
 
   // ── cheque elegido: el pedido sugiere el cliente ────────────────────
@@ -51765,7 +51843,7 @@ function ccxInit(){
   function _cncPintar() {
     if (!_cnc) return;
     var h = '<div class="cnc-box">' +
-      '<div class="cnc-hd"><b>+ Nueva cobranza' +
+      '<div class="cnc-hd"><b>Imputar cheque' +
         (_cnc.paso !== 'medio' && _cnc.paso !== 'ok' ? ' · Cheque' : '') + '</b>' +
         '<button onclick="cncCerrar()" class="cnc-x">&times;</button></div>';
 
@@ -51790,32 +51868,36 @@ function ccxInit(){
 
     // ── paso 1: medio ──
     if (_cnc.paso === 'medio') {
-      h += '<div class="cnc-sec">Medio</div>' +
+      // v13.200.0 — C · se sacaron Efectivo / Transferencia / Mercado Pago.
+      // Eran botones disabled sin accion posible: no se podia hacer nada con
+      // ellos y hacian parecer que el modal era un alta generica de cobranzas.
+      // Los tres circuitos siguen EXACTAMENTE IGUAL: solo se saca el boton.
+      h += '<div class="cnc-sec">Imputar un cobro ya recibido</div>' +
         '<button class="cnc-op" onclick="cncMedio(\'cheque\')"><b>Cheque</b>' +
-          '<span>Elegís un cheque ya cargado por el chofer y lo imputás a facturas abiertas.</span></button>' +
-        '<button class="cnc-op" disabled style="opacity:.5;cursor:not-allowed"><b>Efectivo</b>' +
-          '<span>Automático desde entrega y rendición. Cargarlo a mano duplicaría la cobranza.</span></button>' +'' +
-        '<button class="cnc-op" disabled style="opacity:.5;cursor:not-allowed"><b>Transferencia</b>' +
-          '<span>Circuito existente de entrega. No hay fuente bancaria para darla de alta acá.</span></button>' +
-        '<button class="cnc-op" disabled style="opacity:.5;cursor:not-allowed"><b>Mercado Pago</b>' +
-          '<span>Se resuelve desde la bandeja MP. No se da de alta a mano.</span></button>';
+          '<span>Elegí un cheque ya recibido y asignalo a facturas abiertas. ' +
+          'No da de alta un cobro nuevo.</span></button>' +
+        '<div class="cnc-nota">Efectivo y transferencias se registran desde sus ' +
+        'circuitos automáticos. Acá sólo se imputan cheques ya recibidos.</div>';
       _cncMontar(h); return;
     }
 
     // ── paso 2: elegir cheque ──
     if (_cnc.paso === 'cheque') {
       h += '<div class="cnc-sec">Cheque sin cobranza</div>';
-      if (_cnc.cargando) h += '<div class="cnc-vacio">Cargando cheques…</div>';
-      else if (!(_cnc.cheques||[]).length) h += '<div class="cnc-vacio">No hay cheques pendientes de imputar.</div>';
-      else (_cnc.cheques||[]).forEach(function(c){
-        h += '<button class="cnc-op" onclick="cncElegirCheque(\'' + _cbzE(String(c.id)) + '\')">' +
-          '<b>' + _cbzE(c.banco||'?') + ' ' + _cbzE(c.numero_cheque||'?') + ' · ' + _cbzF(c.monto) + '</b>' +
-          '<span>' + (c.cliente ? _cbzE(c.cliente) + ' · ' : '') +
-          (c.pedido_id ? 'pedido ' + _cbzE(c.pedido_id) : 'sin pedido') +
-          (c.fecha_vencimiento ? ' · vence ' + _cbzE(_cbzD(c.fecha_vencimiento)) : '') +
-          '</span></button>';
-      });
-      _cncMontar(h); return;
+      // v13.200.0 — D · buscador client-side sobre los cheques ya cargados.
+      // El input va FUERA del contenedor que se repinta: si se re-renderizara
+      // junto con la lista perderia el foco en cada tecla.
+      // OJO: el id 'cnc-q' YA EXISTE para la busqueda de clientes por
+      // nombre/CUIT en el paso de cliente. Aca se usa 'cnc-qch'.
+      if (_cnc.cargando) { h += '<div class="cnc-vacio">Cargando cheques…</div>'; _cncMontar(h); return; }
+      if (!(_cnc.cheques||[]).length) { h += '<div class="cnc-vacio">No hay cheques sin imputar.</div>'; _cncMontar(h); return; }
+      h += '<input id="cnc-qch" class="cnc-qch" type="search" autocomplete="off" ' +
+             'placeholder="Buscar por cliente, importe, número, pedido, banco o emisor…" ' +
+             'value="' + _cbzE(_cnc.qch||'') + '" oninput="cncFiltrarCheques(this.value)">' +
+           '<div id="cnc-lista-ch"></div>';
+      _cncMontar(h);
+      _cncPintarCheques();
+      return;
     }
 
     // ── paso 3: detalle ──
