@@ -15728,13 +15728,18 @@ input.canales-exp-input[type="date"] {
         .chip.cbz-est.e-fuera{border-color:#666;color:#aaa}
         .chip.cbz-est.e-registrada{border-color:#1E8449;color:#7fd6a4}
         /* v13.196.0 - Nueva cobranza (cheque) */
-        /* v13.200.0 — D/C/E/F */
+        /* v13.200.0 — D/C/E/F · v13.200.1: .cnc-nota renombrada a
+           .cnc-nota-medios. La clase .cnc-nota YA EXISTIA (linea ~15795) y
+           la usan 4 notas del modal: al declarar otra con el mismo nombre,
+           mis propiedades (padding/background/border/border-radius) se
+           aplicaban tambien a esas 4, y las mias quedaban pisadas por la
+           historica, que se declara despues. */
         .cnc-qch{width:100%;min-height:44px;padding:0 12px;margin-bottom:10px;box-sizing:border-box;
           border:1.5px solid #E0E0E0;border-radius:10px;font-family:'Barlow',sans-serif;font-size:15px;outline:none}
         .cnc-qch:focus{border-color:#B45309}
         .cnc-cont{font-size:11px;font-weight:700;color:#8A8A8A;text-transform:uppercase;
           letter-spacing:.8px;margin:2px 0 8px}
-        .cnc-nota{margin-top:10px;padding:10px 12px;background:#FAF4EC;border:1px solid #E7DCCB;
+        .cnc-nota-medios{margin-top:10px;padding:10px 12px;background:#FAF4EC;border:1px solid #E7DCCB;
           border-radius:10px;font-size:12.5px;line-height:1.45;color:#6B5B47}
         .cnc-bxubio{margin-left:8px;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:800;
           text-transform:uppercase;letter-spacing:.5px;vertical-align:middle;
@@ -51876,7 +51881,7 @@ function ccxInit(){
         '<button class="cnc-op" onclick="cncMedio(\'cheque\')"><b>Cheque</b>' +
           '<span>Elegí un cheque ya recibido y asignalo a facturas abiertas. ' +
           'No da de alta un cobro nuevo.</span></button>' +
-        '<div class="cnc-nota">Efectivo y transferencias se registran desde sus ' +
+        '<div class="cnc-nota-medios">Efectivo y transferencias se registran desde sus ' +
         'circuitos automáticos. Acá sólo se imputan cheques ya recibidos.</div>';
       _cncMontar(h); return;
     }
