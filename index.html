@@ -23278,12 +23278,24 @@ async function pulsoCargar() {
   cont.innerHTML = '<div style="padding:40px;text-align:center;color:#999;">Cargando…</div>';
   try {
     var cArr = await sbFetch('vw_pulso_cierre?select=*');
+    // v13.205.2 — vista nueva. La vieja se sigue leyendo para el pie de
+    // contraste; cuando el modelo nuevo este aceptado se saca esa linea.
+    var c2Arr = null, c2Err = null;
+    try { c2Arr = await sbFetch('vw_pulso_cierre_v2?select=*'); }
+    catch (e2) {
+      c2Err = (e2 && e2.message) ? String(e2.message) : String(e2);
+      console.error('[PULSO] vw_pulso_cierre_v2 NO disponible \u2014 status/error:', c2Err, e2);
+    }
+    if (!c2Err && (!c2Arr || !c2Arr.length)) { c2Err = 'la vista respondi\u00f3 sin filas'; console.error('[PULSO] vw_pulso_cierre_v2 sin filas'); }
     var sArr = await sbFetch('vw_pulso_salud?select=*');
     var pvArr = await sbFetch('vw_proyeccion_ventas?select=*&order=dia.asc');
     var c = (cArr && cArr[0]) || {};
+    var c2 = (c2Arr && c2Arr[0]) || null;
     var s = (sArr && sArr[0]) || {};
     var pv = pvArr || [];
     window._pulsoProy = pv;
+    window._pulsoCierreV2 = c2;                                   // v13.205.2
+    window._pulsoDetalleDias = (c2 && c2.detalle_dias) || [];     // v13.205.2
 
     function m1(n){ n = Number(n)||0; return '$' + (n/1e6).toFixed(1).replace('.',',') + 'M'; }
     function full(n){ n = Math.round(Number(n)||0); return '$' + n.toLocaleString('es-AR'); }
@@ -23299,16 +23311,89 @@ async function pulsoCargar() {
     var colColg = colg===0 ? '#1E8449' : (colg<=5 ? '#B45309' : '#C62828');
 
     var html = '';
-    // Proyección de cierre (titular)
-    html += '<div style="background:#FAF4EC;border:1px solid #EADFCB;border-radius:16px;padding:18px 18px 16px;margin-bottom:16px;">';
-    html += '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#8A7B63;margin-bottom:8px;">Proyecci\u00f3n de cierre de mes \u2014 venta</div>';
-    html += '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;">';
-    html += '<div style="flex:1;min-width:160px;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:44px;line-height:1;color:#1E8449;">' + m1(c.proy_cierre_civa) + '</div><div style="font-size:12px;color:#8A7B63;margin-top:3px;">c/IVA \u00b7 ' + full(c.proy_cierre_civa) + '</div></div>';
-    html += '<div style="flex:1;min-width:160px;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:44px;line-height:1;color:#1A0800;">' + m1(c.proy_cierre_neto) + '</div><div style="font-size:12px;color:#8A7B63;margin-top:3px;">neto s/IVA \u00b7 ' + full(c.proy_cierre_neto) + '</div></div>';
-    html += '</div>';
-    html += '<div style="margin-top:12px;padding-top:11px;border-top:1px solid #EADFCB;font-size:13px;color:#5C5044;">Vendido al d\u00eda (salidas): <b>' + m1(c.salidas_mtd_civa) + '</b> c/IVA \u00b7 d\u00eda <b>' + (c.dias_venta_transcurridos||'\u2014') + '</b> de <b>' + (c.dias_venta_totales||'\u2014') + '</b> de venta</div>';
-    html += '<div style="margin-top:6px;font-size:11.5px;color:#A89A85;line-height:1.4;">Proyectado desde las <b>salidas reales</b> (lo que se vende), no desde el facturado \u2014 que va rezagado por el ciclo de facturaci\u00f3n. Dividir el facturado a la fecha da un n\u00famero falso y bajo.</div>';
-    html += '</div>';
+    // ══ v13.205.2 — TARJETA DE CIERRE (modelo v2) ═══════════════════════
+    // Una sola cifra titular, y debajo de dónde sale. Sin "piso (caja)":
+    // eso es tesorería y no vive acá.
+    if (c2) {
+      var _e   = Number(c2.entregado_real)||0;
+      var _sin = Number(c2.cargado_sin_entrega)||0;
+      var _mtd = Number(c2.mtd_civa)||0;
+      var _com = Number(c2.comprometido_civa)||0;
+      var _est = Number(c2.estimacion_no_comprometida_civa)||0;
+      var _proy= Number(c2.proy_cierre_civa)||0;
+      var _resp= Number(c2.pct_respaldado);
+      var _nc  = Number(c2.tasa_nc_90d_pct);
+      var _neto= Number(c2.proy_neta_nc_civa)||0;
+      var _mg  = Number(c2.margen_error_pct);
+      var _sucio = _mtd>0 ? (100*_sin/_mtd) : 0;
+
+      function _fila(lbl, val, tot, col, nota) {
+        var p = tot>0 ? Math.round(1000*val/tot)/10 : 0;
+        return '<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #F7F2E9;">' +
+          '<div style="width:9px;height:9px;border-radius:2px;background:' + col + ';flex-shrink:0;"></div>' +
+          '<div style="flex:1;min-width:0;font-size:13px;color:#5C5044;">' + lbl +
+            (nota ? '<span style="color:#A89A85;font-size:11px;"> · ' + nota + '</span>' : '') + '</div>' +
+          '<div style="font-size:13px;font-weight:800;color:#1A0800;white-space:nowrap;">' + full(val) + '</div>' +
+          '<div style="width:44px;text-align:right;font-size:11.5px;color:#8A7B63;">' + pct(p) + '</div></div>';
+      }
+
+      html += '<div style="background:#FAF4EC;border:1px solid #EADFCB;border-radius:16px;padding:18px 18px 16px;margin-bottom:16px;">';
+      html += '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:6px;">' +
+              '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#8A7B63;">Proyecci\u00f3n de cierre \u2014 ' + (c2.mes_etiqueta||'') + '</div>' +
+              '<div style="font-size:11px;color:#A89A85;">act. ' + (c2.actualizado_hhmm||'') + '</div></div>';
+      html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:46px;line-height:1;color:#1E8449;">' + m1(_proy) + '</div>';
+      html += '<div style="font-size:12px;color:#5C5044;margin-top:3px;">' + full(_proy) + ' c/IVA \u00b7 estimaci\u00f3n conservadora \u00b7 margen \u00b1' + pct(_mg) +
+              ' <span style="color:#A89A85;">(d\u00eda ' + (c2.dia_del_mes||'?') + ' de ' + (c2.dias_del_mes||'?') + ')</span></div>';
+      html += '<div style="font-size:12px;color:#5C5044;margin-top:4px;">Neto estimado de NC: <b>' + m1(_neto) + '</b> ' +
+              '<span style="color:#A89A85;">(tasa NC 90d: ' + pct(_nc) + ')</span></div>';
+
+      // barra de respaldo
+      html += '<div style="margin-top:12px;">';
+      html += '<div style="height:9px;border-radius:5px;overflow:hidden;display:flex;background:#EFE7D8;">' +
+                '<div style="width:' + (_proy>0?(100*_e/_proy):0) + '%;background:#1E8449;"></div>' +
+                '<div style="width:' + (_proy>0?(100*_sin/_proy):0) + '%;background:#7CB342;"></div>' +
+                '<div style="width:' + (_proy>0?(100*_com/_proy):0) + '%;background:#B45309;"></div>' +
+              '</div>';
+      html += '<div style="font-size:11.5px;color:#8A7B63;margin-top:5px;"><b>' + pct(_resp) + '</b> respaldado por pedidos concretos \u00b7 el resto es estimaci\u00f3n</div>';
+      html += '</div>';
+
+      // de dónde sale
+      html += '<div style="margin-top:12px;padding-top:8px;border-top:1px solid #EADFCB;">';
+      html += _fila('Entregado real', _e, _proy, '#1E8449', 'entrega confirmada');
+      html += _fila('Cargado, sin entrega confirmada', _sin, _proy, '#7CB342', 'salida ya pasada');
+      html += _fila('Comprometido (resto del mes)', _com, _proy, '#B45309', (c2.dias_con_comprometido||0) + ' d\u00edas con pedidos');
+      html += _fila('Estimaci\u00f3n del resto', _est, _proy, '#CBB994', 'promedio por d\u00eda de la semana, 28d');
+      html += '</div>';
+
+      html += '<div style="margin-top:10px;font-size:11.5px;color:#5C5044;">MTD (entregado + cargado): <b>' + full(_mtd) + '</b></div>';
+      if (_sucio > 15) {
+        html += '<div style="margin-top:8px;padding:9px 11px;border-radius:10px;background:#FFF3E0;border:1px solid #FFB74D;color:#7A3E00;font-size:12px;line-height:1.35;">' +
+                '\u26A0 <b>' + pct(_sucio) + '</b> del MTD (' + full(_sin) + ') tiene la salida vencida y sigue sin marcarse entregado. ' +
+                'Revisar en Log\u00edstica: mientras no se marque, no se sabe si esa venta ocurri\u00f3.</div>';
+      }
+      html += '<div style="margin-top:10px;font-size:11px;color:#A89A85;line-height:1.4;">' +
+              'Proyecci\u00f3n = MTD + comprometido + estimaci\u00f3n. La estimaci\u00f3n de cada d\u00eda futuro es el promedio de ese d\u00eda de la semana ' +
+              'en los 28 d\u00edas previos (los d\u00edas sin venta cuentan como cero) <b>menos</b> lo ya comprometido de ese d\u00eda, as\u00ed nada se cuenta dos veces. ' +
+              'Sin factor de tendencia. Cifras c/IVA por fecha de salida, excluyendo cancelados.</div>';
+      html += '<div style="margin-top:10px;padding-top:8px;border-top:1px solid #EADFCB;font-size:12px;color:#5C5044;">Objetivo comercial: <b style="color:#8A7B63;">sin cargar</b></div>';
+      html += '<div style="margin-top:6px;font-size:11px;color:#A89A85;">F\u00f3rmula vieja (regla de tres, mismo universo): ' + m1(c2.proy_cierre_civa_formula_vieja) +
+              ' \u00b7 diferencia ' + pct(Number(c2.proy_cierre_civa_formula_vieja)>0 ? (100*(_proy-Number(c2.proy_cierre_civa_formula_vieja))/Number(c2.proy_cierre_civa_formula_vieja)) : 0) + '</div>';
+      html += '</div>';
+    } else {
+      // v13.205.2 — la vista nueva no está o no responde. NO se presenta la
+      // vieja como si fuera vigente: primero el aviso, y el número viejo
+      // abajo, rotulado como contingencia.
+      html += '<div style="background:#FFF3E0;border:1.5px solid #FFB74D;border-radius:16px;padding:18px;margin-bottom:16px;">';
+      html += '<div style="font-size:15px;font-weight:900;color:#7A3E00;font-family:\'Barlow Condensed\',sans-serif;text-transform:uppercase;letter-spacing:.4px;">\u26A0 Modelo v2 no disponible</div>';
+      html += '<div style="margin-top:6px;font-size:13px;color:#7A3E00;line-height:1.4;">No pude leer <b>vw_pulso_cierre_v2</b>. La proyección que se muestra abajo es la <b>fórmula vieja</b> (regla de tres sobre días de calendario), que la auditoría dio por no confiable. <b>Usála solo como contingencia.</b></div>';
+      html += '<div style="margin-top:6px;font-size:11.5px;color:#A0713A;">Detalle técnico (también en la consola): ' + (c2Err ? String(c2Err).replace(/</g,'&lt;') : 'sin detalle') + '</div>';
+      html += '</div>';
+      html += '<div style="background:#F4F1EA;border:1px dashed #CBB994;border-radius:16px;padding:18px;margin-bottom:16px;opacity:.85;">';
+      html += '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#8A7B63;margin-bottom:6px;">Contingencia — fórmula vieja</div>';
+      html += '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:38px;line-height:1;color:#8A7B63;">' + m1(c.proy_cierre_civa) + '</div>';
+      html += '<div style="margin-top:4px;font-size:11.5px;color:#A89A85;">MTD / días no-domingo transcurridos × días no-domingo del mes. Sin desglose, sin margen, sin NC.</div>';
+      html += '</div>';
+    }
 
     // Proyecci\u00f3n de ventas 30 d\u00edas (vw_proyeccion_ventas)
     if (pv && pv.length) {
@@ -23321,7 +23406,7 @@ async function pulsoCargar() {
       html += '<div style="flex:1;min-width:105px;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:26px;line-height:1;color:#1A0800;">'+m1(_pvN)+'</div><div style="font-size:11.5px;color:#8A7B63;margin-top:2px;">neto</div></div>';
       html += '<div style="flex:1;min-width:105px;"><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:26px;line-height:1;color:#B45309;">'+m1(_pvP)+'</div><div style="font-size:11.5px;color:#8A7B63;margin-top:2px;">piso (caja)</div></div>';
       html += '</div>';
-      html += '<div style="font-size:11px;color:#A89A85;line-height:1.4;margin-bottom:12px;">Venta por salida = facturaci\u00f3n en monto (nada sale sin factura). El total del mes cierra contra Xubio; el d\u00eda no (la factura va \u00b11 d\u00eda). La plata entra por cobranza.</div>';
+      html += '<div style="font-size:11px;color:#A89A85;line-height:1.4;margin-bottom:12px;">Ventana estad\u00edstica de los pr\u00f3ximos 30 d\u00edas. Cruza meses y no representa el cierre mensual ni una proyecci\u00f3n de caja.</div>';
       html += '<div style="max-height:340px;overflow-y:auto;border-top:1px solid #F2EDE3;padding-top:6px;">';
       pv.forEach(function(r){
         var v=Number(r.venta_civa)||0; if(v<=0) return;
@@ -23373,41 +23458,56 @@ async function pulsoCargar() {
 
 // v13.111.0 — descarga del proyectado a Excel (SheetJS ya cargado) para reenviar a Gastón
 async function pulsoDescargarProy() {
-  var pv = window._pulsoProy || [];
-  if (!pv.length) { alert('No hay proyecci\u00f3n para descargar todav\u00eda.'); return; }
+  // v13.205.2 — exporta el CIERRE MENSUAL desglosado (no el rodante de 30 días).
+  var c2 = window._pulsoCierreV2;
+  if (!c2) { alert('Todav\u00eda no carg\u00f3 el cierre. Abr\u00ed Pulso y volv\u00e9 a intentar.'); return; }
   var XLSX;
   try { XLSX = (typeof _cargarSheetJS === 'function') ? await _cargarSheetJS() : window.XLSX; }
-  catch (e) { alert('No se pudo cargar el generador de Excel. Reintent\u00e1 en unos segundos.'); return; }
-  if (!XLSX) { alert('No se pudo cargar el generador de Excel. Reintent\u00e1 en unos segundos.'); return; }
-  var aoa = [];
-  aoa.push(['TCK \u2014 Proyectado de ventas \u00b7 pr\u00f3ximos 30 d\u00edas']);
-  aoa.push(['Venta por salida (c/IVA y neto). Es facturaci\u00f3n en monto; el mes cierra contra Xubio, el d\u00eda no.']);
-  aoa.push([]);
-  aoa.push(['Fecha','D\u00eda','Venta c/IVA','Venta neto','Piso conservador','Acumulado c/IVA']);
-  var tc=0,tn=0,tp=0;
-  pv.forEach(function(r){
-    var cc=Number(r.venta_civa)||0, nn=Number(r.venta_neto)||0, pp=Number(r.piso_civa)||0;
-    tc+=cc; tn+=nn; tp+=pp;
-    aoa.push([r.dia, r.dia_semana||'', cc, nn, pp, Number(r.acum_civa)||0]);
-  });
-  aoa.push([]);
-  aoa.push(['TOTAL 30 d\u00edas','', tc, tn, tp, '']);
-  var ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [{wch:12},{wch:8},{wch:15},{wch:15},{wch:16},{wch:16}];
-  var range = XLSX.utils.decode_range(ws['!ref']);
-  for (var R=4; R<=range.e.r; R++){
-    for (var C=2; C<=5; C++){
-      var cell = ws[XLSX.utils.encode_cell({r:R,c:C})];
-      if (cell && typeof cell.v==='number') cell.z='$#,##0';
-    }
-  }
+  catch (e) { alert('No pude cargar el generador de Excel.'); return; }
+  if (!XLSX) { alert('No pude cargar el generador de Excel.'); return; }
+  var n = function (v) { return Math.round(Number(v) || 0); };
+  var filas = [
+    ['TCK — Proyección de cierre mensual', ''],
+    ['Mes', c2.mes_etiqueta || ''],
+    ['Actualizado', (c2.hoy_ar || '') + ' ' + (c2.actualizado_hhmm || '') + ' ART'],
+    ['Día del mes', (c2.dia_del_mes || '') + ' de ' + (c2.dias_del_mes || '')],
+    ['', ''],
+    ['COMPONENTE', 'MONTO c/IVA'],
+    ['Entregado real (entrega confirmada)', n(c2.entregado_real)],
+    ['Cargado, salida pasada sin entrega confirmada', n(c2.cargado_sin_entrega)],
+    ['= MTD (venta acumulada del mes)', n(c2.mtd_civa)],
+    ['Comprometido (pedidos cargados, resto del mes)', n(c2.comprometido_civa)],
+    ['Estimación no comprometida', n(c2.estimacion_no_comprometida_civa)],
+    ['= PROYECCIÓN DE CIERRE', n(c2.proy_cierre_civa)],
+    ['', ''],
+    ['Respaldado por pedidos concretos (%)', Number(c2.pct_respaldado) || 0],
+    ['Margen de error comunicado (±%)', Number(c2.margen_error_pct) || 0],
+    ['Tasa de notas de crédito 90 días (%)', Number(c2.tasa_nc_90d_pct) || 0],
+    ['Proyección neta estimada de NC', n(c2.proy_neta_nc_civa)],
+    ['', ''],
+    ['Método', 'MTD + comprometido + estimación por día de la semana (28d, ceros incluidos), menos lo comprometido de cada día. Sin factor de tendencia.'],
+    ['Criterio de fecha', 'salida_planificada, fecha argentina'],
+    ['Estados excluidos', 'Cancelado'],
+    ['Fórmula anterior (regla de tres), referencia', n(c2.proy_cierre_civa_formula_vieja)]
+  ];
+  var ws = XLSX.utils.aoa_to_sheet(filas);
+  ws['!cols'] = [{ wch: 52 }, { wch: 22 }];
   var wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Proyectado 30d');
-  var hoy = new Date().toISOString().slice(0,10);
-  XLSX.writeFile(wb, 'TCK_proyectado_ventas_'+hoy+'.xlsx');
+  XLSX.utils.book_append_sheet(wb, ws, 'Cierre mensual');
+  // Segunda hoja: el detalle diario del resto del mes, si la vista lo trae.
+  var det = window._pulsoDetalleDias || [];
+  if (det.length) {
+    var d2 = [['Fecha', 'Día', 'Comprometido', 'Estimación adicional', 'Total esperado']];
+    det.forEach(function (r) {
+      d2.push([r.dia, r.dia_semana || '', n(r.comprometido), n(r.estimacion_adicional), n(r.total_esperado)]);
+    });
+    var ws2 = XLSX.utils.aoa_to_sheet(d2);
+    ws2['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 16 }, { wch: 20 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, ws2, 'Detalle días futuros');
+  }
+  XLSX.writeFile(wb, 'TCK_cierre_' + (c2.mes_etiqueta || 'mes').replace(/[^0-9A-Za-z]/g, '_') + '.xlsx');
 }
 
-/* == v13.112.0 - CONCILIACION TCK FOOD (vw_buffet_concil) == */
 function _fcNum(n){return (Math.round(Number(n)||0)).toLocaleString("es-AR");}
 function _fcEsc(x){return String(x==null?"":x).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];});}
 function _fcDelta(n){
@@ -48274,7 +48374,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.201.0';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.205.2';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
