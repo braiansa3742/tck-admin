@@ -15765,6 +15765,71 @@ input.canales-exp-input[type="date"] {
   font-weight:800;font-size:13.5px;cursor:pointer;font-family:inherit;margin:3px 5px 3px 0}
 .cf-btn.pri{background:#B45309;color:#fff}.cf-btn.dan{border-color:#C62828;color:#C62828}
 .cf-btn:disabled{opacity:.42;cursor:not-allowed}
+/* ── v13.212.0 · compactacion visual de Cobranzas ─────────────────────── */
+/* Acordeon de auditoria. Cerrado por defecto: es respaldo, no trabajo diario. */
+.cf-aud{margin:16px 0 0;border:1.5px solid #E7DCCB;border-radius:12px;background:#FEFCF8}
+.cf-aud>summary{cursor:pointer;padding:11px 14px;font-weight:800;font-size:13px;color:#6B5B47;
+  list-style:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.cf-aud>summary::-webkit-details-marker{display:none}
+.cf-aud>summary::before{content:'\25B8';color:#B45309;font-size:13px;transition:transform .15s}
+.cf-aud[open]>summary::before{transform:rotate(90deg)}
+.cf-aud[open]>summary{border-bottom:1px solid #EEE3D2}
+.cf-aud-h{font-weight:500;font-size:11.5px;color:#9C8A72;text-transform:none;letter-spacing:0}
+.cf-aud-in{padding:4px 14px 14px}
+/* El tab usa el ancho util: la tabla tenia 9 columnas apretadas contra la
+   izquierda mientras sobraba espacio a la derecha. */
+#cf-root{max-width:100%;width:100%}
+.cf-tbl{table-layout:auto}
+/* Motivos es la columna que mas texto lleva y la que peor se cortaba. */
+.cf-tbl th:nth-child(9),.cf-tbl td:nth-child(9){min-width:220px;width:26%}
+.cf-tbl th:nth-child(2),.cf-tbl td:nth-child(2){min-width:150px}
+.cf-tbl th:nth-child(7),.cf-tbl td:nth-child(7),
+.cf-tbl th:nth-child(8),.cf-tbl td:nth-child(8){min-width:120px}
+/* Nada de romper palabra por palabra ni letra por letra. */
+.cf-tbl td{overflow-wrap:anywhere;word-break:normal;hyphens:none}
+.cf-tbl td:nth-child(9){white-space:normal;line-height:1.45}
+/* Scroll horizontal solo como ultimo recurso, y sin romper las tarjetas movil. */
+@media (min-width:761px){
+  #cf-lista{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .cf-tbl{min-width:900px}
+}
+@media (max-width:760px){
+  /* Bandejas: una fila que se desliza, sin apilarse en una torre. */
+  .cf-band{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;
+    scroll-snap-type:x proximity;padding-bottom:4px;margin:8px -2px 10px}
+  .cf-band::-webkit-scrollbar{height:4px}
+  .cf-band::-webkit-scrollbar-thumb{background:#E7DCCB;border-radius:4px}
+  .cf-tab{flex:0 0 auto;min-width:158px;scroll-snap-align:start}
+  /* Filtros apilados y usables, no una grilla de cajitas de 150px. */
+  .cf-filt{grid-template-columns:1fr 1fr;gap:7px}
+  .cf-filt #cff-cliente,.cf-filt #cff-q,.cf-filt #cff-factura{grid-column:1/-1}
+  .cf-filt input,.cf-filt select{min-height:42px;font-size:15px}
+  .cf-filt .cf-btn{min-height:44px}
+  /* La tabla ya es tarjetas por el CSS existente: aca solo se evita que el
+     min-width de escritorio la vuelva a comprimir. */
+  #cf-lista{overflow-x:visible}
+  .cf-tbl{min-width:0}
+  .cf-tbl td:nth-child(9){min-width:0;width:auto}
+  /* La etiqueta de cada celda (data-l) NO puede partirse letra por letra:
+     'MOTIVOS' quedaba como MO/TIV/OS. Se le da ancho propio y nowrap. */
+  .cf-tbl td::before{flex:0 0 86px;white-space:nowrap;line-height:1.5}
+  .cf-tbl td{align-items:baseline}
+  .cf-tbl td:nth-child(9){flex-direction:column;gap:2px}
+  .cf-tbl td:nth-child(9)::before{flex:none}
+  /* Actualizar y Exportar CSV en UNA fila, no uno abajo del otro.
+     Cascada real verificada: mas abajo, en esta misma media query, existe
+     .cf-btn{width:100%;margin:4px 0}. Aunque '.cf-hd .cf-btn' tiene mas
+     especificidad, no alcanza con declarar flex: hay que sobrescribir
+     EXPLICITAMENTE width y margin, que es lo que apilaba los botones.
+     El override queda acotado a .cf-hd: los botones de filtros, paginacion
+     y ficha siguen con el ancho completo que ya tenian. */
+  .cf-hd h3{flex:1 0 100%;margin:0 0 2px}
+  .cf-hd .cf-btn{width:auto;flex:1 1 0;min-width:0;margin:0}
+  .cf-metr{grid-template-columns:1fr 1fr}
+  .cf-hd{flex-wrap:wrap;gap:7px}
+  .cf-aud-in{padding:4px 10px 12px}
+}
+
 .cf-tbl{width:100%;border-collapse:collapse;font-size:13px}
 .cf-tbl th{text-align:left;padding:7px 8px;background:#FAF4EC;border-bottom:2px solid #E7DCCB;font-size:11px;
   text-transform:uppercase;letter-spacing:.5px;color:#6B5B47;white-space:nowrap}
@@ -15820,17 +15885,12 @@ input.canales-exp-input[type="date"] {
     El tab funcional de Cobranzas está apagado (flag <code>modulo_cobranzas_ui</code>). La búsqueda de abajo sigue funcionando igual que siempre.
   </div>
   <div id="cf-body" style="display:none">
-    <div id="cf-evid"></div>
+    <!-- v13.212.0 — lo primero que se ve es qué requiere acción.
+         #cf-metr pintaba las MISMAS cinco bandejas que #cf-bandejas, sin ser
+         clicable: dos resúmenes idénticos, uno muerto. Queda una sola fila, la
+         interactiva. El export, los indicadores no excluyentes, el total
+         histórico y la explicación se mueven al acordeón de abajo, cerrado. -->
     <div class="cf-sec">Bandejas · cada cobranza está en una sola</div>
-    <div class="cf-metr" id="cf-metr"></div>
-    <div class="cf-sec">Indicadores · no excluyentes, independientes de la bandeja</div>
-    <div class="cf-metr" id="cf-ind"></div>
-    <div class="cf-info" style="font-size:12.5px">
-      <b>Existe en Xubio</b>, <b>posteada</b> y <b>aplicada</b> son tres cosas distintas. Que una cobranza
-      no tenga imputación cargada acá <b>no significa</b> que no esté aplicada en Xubio: la mayoría se
-      aplicó a mano y esa aplicación no vuelve por la API. Esas quedan como <i>aplicación desconocida</i>,
-      no como pendientes de trabajo.
-    </div>
     <div class="cf-band" id="cf-bandejas"></div>
     <div class="cf-filt">
       <input id="cff-fdesde" type="date" title="Desde">
@@ -15850,6 +15910,25 @@ input.canales-exp-input[type="date"] {
     <div class="cf-pag" id="cf-pag"></div>
     <div id="cf-lista"></div>
     <div class="cf-pag" id="cf-pag2"></div>
+
+    <!-- v13.212.0 — Resumen y auditoría. Cerrado por defecto: no es lo que se
+         mira para trabajar, es lo que se consulta cuando hace falta respaldo. -->
+    <details class="cf-aud" id="cf-aud">
+      <summary>Resumen y auditoría<span class="cf-aud-h">export de Xubio · indicadores · total histórico</span></summary>
+      <div class="cf-aud-in">
+        <div id="cf-evid"></div>
+        <div class="cf-sec">Total histórico</div>
+        <div class="cf-metr" id="cf-metr"></div>
+        <div class="cf-sec">Indicadores · no excluyentes, independientes de la bandeja</div>
+        <div class="cf-metr" id="cf-ind"></div>
+        <div class="cf-info" style="font-size:12.5px">
+          <b>Existe en Xubio</b>, <b>posteada</b> y <b>aplicada</b> son tres cosas distintas. Que una cobranza
+          no tenga imputación cargada acá <b>no significa</b> que no esté aplicada en Xubio: la mayoría se
+          aplicó a mano y esa aplicación no vuelve por la API. Esas quedan como <i>aplicación desconocida</i>,
+          no como pendientes de trabajo.
+        </div>
+      </div>
+    </details>
   </div>
 </section>
 <div class="cf-ficha" id="cf-ficha"><span class="cf-x" onclick="cfCerrar()">×</span><div id="cf-ficha-body"></div></div>
@@ -15941,10 +16020,9 @@ function pintarResumen() {
   var c = S.conteos || {}, b = c.bandejas || {}, k = c.indicadores || {};
   var m = document.getElementById('cf-metr');
   var cel = function (t, n, sub) { return '<div>' + E(t) + '<b>' + E(n == null ? 0 : n) + '</b><span class="m">' + E(sub || '') + '</span></div>'; };
-  // Bandejas: excluyentes, cada cobranza está en una sola.
-  m.innerHTML = BANDEJAS.map(function (bd) {
-    return cel(bd[1], (b[bd[0]] || {}).n, F((b[bd[0]] || {}).monto || 0));
-  }).join('') + cel('Total', (c.indicadores || {}).total, 'las cinco suman esto');
+  // v13.212.0 — #cf-metr ya no repite las bandejas: eso lo hace #cf-bandejas,
+  // que ademas es clicable. Aca queda solo el total, que es su unico dato propio.
+  m.innerHTML = cel('Total', (c.indicadores || {}).total, 'las cinco bandejas suman esto');
   // Indicadores: NO excluyentes e independientes de la bandeja. Una cobranza puede contarse en varios.
   // Cartel de evidencia: hasta qué día llega el export de Xubio y cuándo se importó.
   var ev = c.evidencia || {}, ce = document.getElementById('cf-evid');
@@ -49340,7 +49418,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.211.0';
+var TCK_VERSION = '13.212.0';
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
