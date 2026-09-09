@@ -16427,6 +16427,68 @@ window.cfModuloVersion = '1.4-13.205.3';
 
       <div class="tes-wrap">
 
+        <style>
+/* ══ v13.206.1 — TESORERIA MVP · PILOTO (bloque paralelo) ══════════════
+   No modifica ni una regla del modelo anterior: todo bajo .tmvp-        */
+.tmvp{margin-bottom:20px}
+.tmvp-hdr{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.tmvp-tit{font-size:16px;font-weight:800;color:#8E1B1B;letter-spacing:.3px}
+.tmvp-piloto{background:#1A0800;color:#D4A574;border-radius:8px;padding:3px 9px;font-size:10.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;white-space:nowrap}
+.tmvp-card{background:#fff;border:1px solid #EADFCB;border-radius:14px;padding:14px;margin-bottom:12px}
+.tmvp-sub{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:#8A7B63;margin-bottom:9px}
+.tmvp-row{display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid #F7F2E9;font-size:13px}
+.tmvp-row:last-child{border-bottom:none}
+.tmvp-dot{width:9px;height:9px;border-radius:2px;flex:0 0 auto}
+.tmvp-lbl{flex:1;min-width:0;color:#5C5044}
+.tmvp-src{display:block;font-size:10.5px;color:#8A7B63;font-weight:400;line-height:1.3}
+.tmvp-val{font-weight:800;white-space:nowrap;font-variant-numeric:tabular-nums}
+.tmvp-big{font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:38px;line-height:1}
+.tmvp-badge{display:inline-block;padding:2px 7px;border-radius:7px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;margin:2px 4px 2px 0}
+.tmvp-b-gris{background:#F2EDE3;color:#8A7B63}
+.tmvp-b-rojo{background:#FFEBEE;color:#C62828}
+.tmvp-b-ambar{background:#FFF3E0;color:#B45309}
+.tmvp-verde{color:#1E8449}.tmvp-ambar{color:#B45309}.tmvp-gris{color:#8A7B63}.tmvp-rojo{color:#C62828}
+.tmvp-bgverde{background:#1E8449}.tmvp-bgambar{background:#B45309}.tmvp-bggris{background:#CBB994}.tmvp-bgrojo{background:#C62828}
+.tmvp-nota{font-size:11px;color:#5C5044;line-height:1.45;background:#FAF4EC;border-left:3px solid #D4A574;padding:8px 10px;border-radius:0 8px 8px 0;margin-top:9px}
+.tmvp-alerta{margin-top:9px;padding:9px 11px;border-radius:10px;font-size:12px;line-height:1.35}
+.tmvp-a-rojo{background:#FFEBEE;border:1px solid #EF9A9A;color:#8B1A1A}
+.tmvp-a-ambar{background:#FFF3E0;border:1px solid #FFB74D;color:#7A3E00}
+/* Un día = una tarjeta. Sin scroll horizontal en celular. */
+.tmvp-dias{display:grid;grid-template-columns:1fr;gap:8px}
+@media(min-width:620px){.tmvp-dias{grid-template-columns:1fr 1fr}}
+.tmvp-dia{border:1px solid #EADFCB;border-radius:12px;padding:10px 11px;background:#fff}
+.tmvp-dia.neg{border-color:#EF9A9A;background:#FFF8F8}
+.tmvp-dia-hdr{display:flex;align-items:baseline;justify-content:space-between;gap:6px;margin-bottom:6px}
+.tmvp-dia-f{font-size:12.5px;font-weight:800;color:#1A0800}
+.tmvp-dia-cons{font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:22px;line-height:1;font-variant-numeric:tabular-nums}
+.tmvp-dia-prob{font-size:11px;color:#8A7B63;font-variant-numeric:tabular-nums;margin-top:1px}
+.tmvp-dia-det{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:7px;padding-top:6px;border-top:1px solid #F7F2E9;font-size:10.5px}
+.tmvp-dia-det span{white-space:nowrap;font-variant-numeric:tabular-nums}
+.tmvp-chip{display:inline-block;padding:1px 6px;border-radius:6px;font-size:9.5px;font-weight:800;text-transform:uppercase}
+.tmvp-c-alta{background:#E8F5E9;color:#1E8449}.tmvp-c-media{background:#FFF3E0;color:#B45309}.tmvp-c-baja{background:#F2EDE3;color:#8A7B63}
+.tmvp-al{list-style:none;padding:0;margin:0}
+.tmvp-al li{padding:8px 0;border-bottom:1px solid #F7F2E9;font-size:12.5px;line-height:1.4;color:#5C5044}
+.tmvp-al li:last-child{border-bottom:none}
+.tmvp-al b{color:#1A0800}
+.tmvp-btn{background:#F2EDE3;border:1.5px solid #EADFCB;color:#5C5044;border-radius:10px;padding:9px 14px;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;cursor:pointer}
+.tmvp-btn:active{background:#EADFCB}
+.tmvp-err{background:#FFEBEE;border:1.5px solid #EF9A9A;color:#8B1A1A;border-radius:12px;padding:12px 14px;font-size:12.5px;line-height:1.4;margin-bottom:12px}
+/* Modelo anterior, plegable. Abierto por defecto durante el piloto. */
+.tes-anterior{border-top:2px solid #EADFCB;margin-top:22px;padding-top:14px}
+.tes-anterior>summary{cursor:pointer;list-style:none;font-size:15px;font-weight:800;color:#8A7B63;padding:8px 0;display:flex;align-items:center;gap:8px}
+.tes-anterior>summary::-webkit-details-marker{display:none}
+.tes-anterior>summary::before{content:'▾';font-size:13px;color:#B0A18C}
+.tes-anterior:not([open])>summary::before{content:'▸'}
+        </style>
+
+        <!-- ═══ TESORERIA MVP · PILOTO (v13.206.1) ═══ -->
+        <div id="tmvp-root"></div>
+
+        <!-- v13.206.1: el modelo anterior queda INTACTO, solo envuelto en un
+             un desplegable para poder plegarlo. Abierto por defecto en el piloto. -->
+        <details class="tes-anterior" id="tes-anterior" open>
+        <summary>Modelo anterior · comparación</summary>
+
         <!-- ═══ CUENTAS CORRIENTES (v13.55.0) ═══ -->
         <style>
         .cc-sec{margin-bottom:18px}
@@ -16707,6 +16769,8 @@ window.cfModuloVersion = '1.4-13.205.3';
         <div id="tes-modal-deuda-lista">
           <!-- Items se renderizan acá -->
         </div>
+      </details>
+
       </div>
     </div>
   </div>
@@ -43786,7 +43850,276 @@ async function _ccDesmarcar(id){
   }catch(e){ console.error('[CC] desmarcar',e); if(typeof toast==='function') toast('Error','err'); else alert('Error'); }
 }
 // CARGAR data principal
+// ══ v13.206.1 — TESORERIA MVP · PILOTO ════════════════════════════════
+// Bloque paralelo dentro del tab Tesoreria. NO reemplaza el modelo anterior
+// ni le hace fallback: si una vista falla, se dice cual y se muestra el
+// error. La seguridad real esta en las vistas (gate por claim); esto solo
+// evita renderizar y disparar fetch para roles que no corresponden.
+var TMVP_ROLES = ['dueno', 'admin', 'contador'];
+var TMVP_PILOTO_INICIO = '2026-09-09';   // dia habil 1 del piloto
+var TMVP_PILOTO_DIAS = 5;                // duracion, en dias HABILES
+var _tmvpData = null;
+
+// Unico lugar donde se reporta una falla del piloto. Escribe SOLO en
+// #tmvp-root: nunca toca el DOM del modelo anterior ni interrumpe tesCargar().
+function _tmvpFallo(e) {
+  try {
+    console.error('[TMVP] el piloto fallo:', e);
+    var r = document.getElementById('tmvp-root');
+    if (!r) return;
+    var m = (e && e.message) ? String(e.message) : String(e);
+    r.innerHTML = '<div class="tmvp"><div class="tmvp-hdr">' +
+      '<div class="tmvp-tit">Tesoreria MVP \u00b7 piloto</div>' +
+      '<span class="tmvp-piloto">' + _tmvpRotulo() + '</span></div>' +
+      '<div class="tmvp-err"><b>\u26A0 El bloque piloto no se pudo cargar.</b><br>' +
+      _tmvpEsc(m) + '<br>El saldo conservador <b>no se reemplaza</b> por el modelo anterior. ' +
+      'La Tesoreria anterior sigue disponible abajo.</div></div>';
+  } catch (e2) {}
+}
+
+function _tmvpPuedeVer() {
+  return TMVP_ROLES.indexOf(rolActual) !== -1;
+}
+// Dias HABILES transcurridos desde el inicio, inclusive. Sabados y domingos
+// no cuentan. Si ya pasaron los 5, devuelve 6 o mas y el rotulo pasa a
+// PILOTO FINALIZADO: nunca se muestra "dia 6 de 5".
+function _tmvpDiaHabil() {
+  try {
+    var p = TMVP_PILOTO_INICIO.split('-');
+    var ini = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+    var s = new Date().toLocaleString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).slice(0, 10).split('-');
+    var hoy = new Date(Number(s[0]), Number(s[1]) - 1, Number(s[2]));
+    if (hoy < ini) return 0;
+    var n = 0, c = new Date(ini);
+    while (c <= hoy) {
+      var dw = c.getDay();
+      if (dw !== 0 && dw !== 6) n++;
+      c.setDate(c.getDate() + 1);
+    }
+    return n;
+  } catch (e) { return 1; }
+}
+function _tmvpRotulo() {
+  var d = _tmvpDiaHabil();
+  if (d < 1) return 'Piloto paralelo \u00b7 5 d\u00edas h\u00e1biles';
+  if (d > TMVP_PILOTO_DIAS) return 'Piloto finalizado';
+  return 'Piloto paralelo \u00b7 d\u00eda ' + d + ' de ' + TMVP_PILOTO_DIAS + ' d\u00edas h\u00e1biles';
+}
+function _tmvpN(v) { return Number(v) || 0; }
+function _tmvpM(v) {
+  var n = _tmvpN(v);
+  return (n < 0 ? '-$' : '$') + Math.abs(Math.round(n)).toLocaleString('es-AR');
+}
+function _tmvpFecha(iso) {
+  if (!iso) return '';
+  var p = String(iso).slice(0, 10).split('-');
+  return p[2] + '/' + p[1];
+}
+function _tmvpEsc(t) {
+  return String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+async function tmvpCargar() {
+  var root = document.getElementById('tmvp-root');
+  if (!root) return;
+  if (!_tmvpPuedeVer()) { root.innerHTML = ''; _tmvpData = null; return; }   // sin fetch
+
+  root.innerHTML = '<div class="tmvp"><div class="tmvp-hdr"><div class="tmvp-tit">Tesorería MVP · piloto</div>' +
+                   '<span class="tmvp-piloto">Cargando…</span></div></div>';
+
+  var nombres = ['vw_tes_mvp_hoy', 'vw_tes_mvp_15d', 'vw_tes_mvp_alertas', 'vw_tes_mvp_facturacion'];
+  var res = await Promise.all(nombres.map(function (v) {
+    var q = v + '?select=*' + (v === 'vw_tes_mvp_15d' ? '&order=fecha.asc'
+                             : (v === 'vw_tes_mvp_alertas' ? '&order=orden.asc' : ''));
+    return sbFetch(q).then(function (d) { return { vista: v, ok: true, data: d || [] }; })
+                     .catch(function (e) { return { vista: v, ok: false, error: (e && e.message) ? String(e.message) : String(e) }; });
+  }));
+
+  var fallas = res.filter(function (r) { return !r.ok; });
+  var vacias = res.filter(function (r) { return r.ok && r.data.length === 0; });
+  _tmvpData = { hoy: (res[0].data || [])[0] || null, dias: res[1].data || [],
+                alertas: res[2].data || [], fact: (res[3].data || [])[0] || null };
+
+  var html = '<div class="tmvp">';
+  html += '<div class="tmvp-hdr"><div class="tmvp-tit">Tesorería MVP · piloto</div>' +
+          '<span class="tmvp-piloto">' + _tmvpRotulo() + '</span></div>';
+
+  if (fallas.length) {
+    html += '<div class="tmvp-err"><b>⚠ No pude leer ' + fallas.length + ' vista(s) del MVP.</b><br>';
+    fallas.forEach(function (f) { html += '· <code>' + _tmvpEsc(f.vista) + '</code>: ' + _tmvpEsc(f.error) + '<br>'; });
+    html += 'El saldo conservador <b>no se reemplaza</b> por el modelo anterior. El modelo anterior sigue disponible abajo.</div>';
+  }
+  if (!fallas.length && vacias.length === 4) {
+    html += '<div class="tmvp-err"><b>Sin acceso.</b> Las cuatro vistas devolvieron cero filas: tu rol no está habilitado para Tesorería MVP. No se muestra ninguna otra fuente financiera en su lugar.</div>';
+    html += '</div>'; root.innerHTML = html; return;
+  }
+
+  html += _tmvpHoy(_tmvpData.hoy);
+  html += _tmvpDias(_tmvpData.dias);
+  html += _tmvpAlertas(_tmvpData.alertas, _tmvpData.dias);
+  html += _tmvpFact(_tmvpData.fact);
+  html += '<div style="margin-top:12px;text-align:center"><button class="tmvp-btn" onclick="tmvpCopiarControl()">📋 Copiar control del día</button></div>';
+  html += '</div>';
+  root.innerHTML = html;
+}
+
+function _tmvpHoy(h) {
+  if (!h) return '<div class="tmvp-card"><div class="tmvp-sub">Situación actual</div><div class="tmvp-gris">Sin acceso</div></div>';
+  var arrastrada = String(h.fecha_apertura).slice(0, 10) !== String(h.fecha).slice(0, 10);
+  var o = '<div class="tmvp-card"><div class="tmvp-sub">Situación actual</div>';
+  o += '<div class="tmvp-row"><div class="tmvp-dot tmvp-bggris"></div><div class="tmvp-lbl">Saldo total informado' +
+       '<span class="tmvp-src">Sheet · carga manual · apertura del ' + _tmvpFecha(h.fecha_apertura) + '</span></div>' +
+       '<div class="tmvp-val tmvp-gris">' + _tmvpM(h.saldo_total_informado) + '</div></div>';
+  o += '<div class="tmvp-row"><div class="tmvp-dot tmvp-bgrojo"></div><div class="tmvp-lbl">Cartera no acreditada' +
+       '<span class="tmvp-src">cheques ' + _tmvpM(h.cheques_fisicos) + ' + e-cheques ' + _tmvpM(h.e_cheques) + '</span></div>' +
+       '<div class="tmvp-val tmvp-rojo">-' + _tmvpM(h.cartera_no_acreditada) + '</div></div>';
+  o += '<div style="margin-top:11px;padding-top:10px;border-top:1px solid #EADFCB">' +
+       '<div class="tmvp-sub" style="margin-bottom:2px">Saldo líquido de apertura</div>' +
+       '<div class="tmvp-big tmvp-verde">' + _tmvpM(h.saldo_liquido_apertura) + '</div>' +
+       '<div class="tmvp-src">Galicia ' + _tmvpM(h.det_galicia) + ' · BBVA ' + _tmvpM(h.det_bbva) +
+       ' · MP ' + _tmvpM(h.det_mercado_pago) + ' · efectivo ' + _tmvpM(h.det_efectivo) + '</div></div>';
+  o += '<div style="margin-top:10px">' +
+       '<span class="tmvp-badge tmvp-b-gris">sinc. ' + _tmvpEsc(h.hora_sincronizacion) + '</span>' +
+       (h.hora_corte_conocida ? '' : '<span class="tmvp-badge tmvp-b-ambar">corte desconocido</span>') +
+       '<span class="tmvp-badge tmvp-b-rojo">sin conciliación bancaria</span></div>';
+  o += '<div class="tmvp-nota">El saldo conservador no cuenta cobranzas previstas. Sólo descuenta los pagos programados del dinero líquido informado.</div>';
+  if (arrastrada) {
+    o += '<div class="tmvp-alerta tmvp-a-rojo">⚠ <b>Apertura arrastrada:</b> el saldo es del <b>' +
+         _tmvpFecha(h.fecha_apertura) + '</b>, no de hoy. El Sheet todavía no cargó el día.</div>';
+  }
+  return o + '</div>';
+}
+
+function _tmvpDias(dias) {
+  if (!dias || !dias.length) return '<div class="tmvp-card"><div class="tmvp-sub">Caja · próximos 15 días</div><div class="tmvp-gris">Sin acceso</div></div>';
+  var o = '<div class="tmvp-card"><div class="tmvp-sub">Caja · próximos 15 días</div><div class="tmvp-dias">';
+  dias.forEach(function (d) {
+    var sc = _tmvpN(d.saldo_conservador), sp = _tmvpN(d.saldo_probable);
+    o += '<div class="tmvp-dia' + (sc < 0 ? ' neg' : '') + '">';
+    o += '<div class="tmvp-dia-hdr"><div class="tmvp-dia-f">' + _tmvpFecha(d.fecha) + ' ' + _tmvpEsc(d.dia_semana) + '</div>' +
+         '<span class="tmvp-chip tmvp-c-' + _tmvpEsc(d.confianza) + '">' + _tmvpEsc(d.confianza) + '</span></div>';
+    o += '<div class="tmvp-dia-cons ' + (sc < 0 ? 'tmvp-rojo' : 'tmvp-verde') + '">' + _tmvpM(sc) + '</div>';
+    o += '<div class="tmvp-dia-prob">probable ' + _tmvpM(sp) + '</div>';
+    o += '<div class="tmvp-dia-det">';
+    if (_tmvpN(d.entradas_acreditadas) > 0) o += '<span class="tmvp-verde">acreditado ' + _tmvpM(d.entradas_acreditadas) + '</span>';
+    if (_tmvpN(d.cobranzas_viajes_cargados) > 0) o += '<span class="tmvp-ambar">cobranzas viajes ' + _tmvpM(d.cobranzas_viajes_cargados) + '</span>';
+    if (_tmvpN(d.entradas_estadisticas) > 0) o += '<span class="tmvp-gris">estadísticas ' + _tmvpM(d.entradas_estadisticas) + '</span>';
+    if (_tmvpN(d.pagos_programados) > 0) o += '<span class="tmvp-rojo">pagos progr. ' + _tmvpM(d.pagos_programados) + '</span>';
+    if (_tmvpN(d.pagos_estimados) > 0) o += '<span class="tmvp-rojo">pagos estim. ' + _tmvpM(d.pagos_estimados) + '</span>';
+    o += '</div></div>';
+  });
+  o += '</div><div class="tmvp-nota"><b>Saldo conservador</b> = apertura líquida − pagos programados acumulados. ' +
+       '<b>Saldo probable</b> agrega cobranzas de viajes y estadísticas, menos pagos estimados. ' +
+       '«Cobranzas de viajes» significa que hay un viaje cargado, <b>no</b> que la plata acreditó.</div>';
+  return o + '</div>';
+}
+
+function _tmvpAlertas(al, dias) {
+  var o = '<div class="tmvp-card"><div class="tmvp-sub">Alertas · fuera de las curvas</div><ul class="tmvp-al">';
+  var neg = (dias || []).filter(function (d) { return _tmvpN(d.saldo_conservador) < 0; });
+  if (neg.length) {
+    var peor = neg.reduce(function (a, b) { return _tmvpN(a.saldo_conservador) <= _tmvpN(b.saldo_conservador) ? a : b; });
+    o += '<li>🔴 <b>Saldo conservador negativo</b> desde el <b>' + _tmvpFecha(neg[0].fecha) + '</b>. ' +
+         'Mínimo <b>' + _tmvpM(peor.saldo_conservador) + '</b> el ' + _tmvpFecha(peor.fecha) + '.</li>';
+  }
+  function A(t) { return (al || []).filter(function (x) { return x.tipo === t; })[0]; }
+  var orden = [
+    ['pagos_vencidos', '🔴', 'Pagos vencidos'],
+    ['apertura_arrastrada', '🟠', 'Apertura arrastrada'],
+    ['hora_corte_desconocida', '🟠', 'Hora de corte desconocida'],
+    ['sheet_no_conciliado', '⚪', 'Sheet no conciliado'],
+    ['cartera_diferencia_sheet_vs_tabla', '🟠', 'Diferencia de cartera'],
+    ['viajes_sin_rendir', '🟠', 'Viajes sin rendir'],
+    ['cuenta_corriente_sin_fecha', '🟠', 'Cuenta corriente sin fecha'],
+    ['posibles_duplicados', '🟠', 'Posibles duplicados'],
+    ['obligaciones_antiguas', '🟠', 'Obligaciones antiguas'],
+    ['cheques_no_acreditados', '🟠', 'Cheques no acreditados'],
+    ['movimientos_dia_sin_reconciliar', '🟠', 'Movimientos del día sin reconciliar']
+  ];
+  var h = _tmvpData && _tmvpData.hoy;
+  orden.forEach(function (o2) {
+    var a = A(o2[0]); if (!a) return;
+    var cant = _tmvpN(a.cantidad), monto = _tmvpN(a.monto);
+    if (cant === 0 && monto === 0) return;
+    if (o2[0] === 'cartera_diferencia_sheet_vs_tabla') {
+      var sheet = h ? _tmvpN(h.cartera_no_acreditada) : 0;
+      var tabla = sheet - monto;   // monto = sheet - tabla
+      o += '<li>' + o2[1] + ' <b>' + o2[2] + '</b> — Sheet ' + _tmvpM(sheet) +
+           ' · <code>cheques_recibidos</code> ' + _tmvpM(tabla) + ' · diferencia <b>' + _tmvpM(Math.abs(monto)) + '</b> ' +
+           (monto < 0 ? 'más en la tabla' : 'más en el Sheet') +
+           '. <b>Requiere conciliación</b>: no se toma ningún lado como cartera válida.</li>';
+      return;
+    }
+    o += '<li>' + o2[1] + ' <b>' + o2[2] + '</b>' +
+         (monto !== 0 ? ' — <b>' + _tmvpM(monto) + '</b>' : '') +
+         (cant > 1 ? ' (' + cant + ')' : '') +
+         '<span class="tmvp-src">' + _tmvpEsc(a.detalle) + '</span></li>';
+  });
+  o += '</ul><div class="tmvp-nota">Nada de esto se suma a las curvas. Está acá para decidir, no para inflar un saldo.</div>';
+  return o + '</div>';
+}
+
+function _tmvpFact(f) {
+  if (!f) return '<div class="tmvp-card"><div class="tmvp-sub">Facturación</div><div class="tmvp-gris">Sin acceso</div></div>';
+  var o = '<div class="tmvp-card"><div class="tmvp-sub">Facturación · sólo lo emitido</div>';
+  o += '<div class="tmvp-row"><div class="tmvp-dot tmvp-bgverde"></div><div class="tmvp-lbl">Emitido hoy</div><div class="tmvp-val tmvp-verde">' + _tmvpM(f.emitido_hoy) + '</div></div>';
+  o += '<div class="tmvp-row"><div class="tmvp-dot tmvp-bgverde"></div><div class="tmvp-lbl">Emitido en el mes</div><div class="tmvp-val tmvp-verde">' + _tmvpM(f.emitido_mtd) + '</div></div>';
+  o += '<div class="tmvp-row"><div class="tmvp-dot tmvp-bgrojo"></div><div class="tmvp-lbl">Notas de crédito del mes</div><div class="tmvp-val tmvp-rojo">-' + _tmvpM(f.nc_emitidas_mtd) + '</div></div>';
+  o += '<div class="tmvp-row"><div class="tmvp-dot tmvp-bgambar"></div><div class="tmvp-lbl">Pedidos sin factura vinculada' +
+       '<span class="tmvp-src">' + _tmvpN(f.alerta_pedidos_sin_factura_n) + ' pedidos · alerta operativa, no se suma al total facturado</span></div>' +
+       '<div class="tmvp-val tmvp-ambar">' + _tmvpM(f.alerta_pedidos_sin_factura_monto) + '</div></div>';
+  o += '<div class="tmvp-nota">Sin proyección diaria validada. Pulso proyecta venta por fecha de salida; no proyecta facturación ni caja.</div>';
+  return o + '</div>';
+}
+
+function tmvpCopiarControl() {
+  var d = _tmvpData;
+  if (!d || !d.hoy) { alert('Todavía no hay datos del MVP.'); return; }
+  var dias = d.dias || [];
+  var neg = dias.filter(function (x) { return _tmvpN(x.saldo_conservador) < 0; });
+  var minC = dias.length ? dias.reduce(function (a, b) { return _tmvpN(a.saldo_conservador) <= _tmvpN(b.saldo_conservador) ? a : b; }) : null;
+  var minP = dias.length ? dias.reduce(function (a, b) { return _tmvpN(a.saldo_probable) <= _tmvpN(b.saldo_probable) ? a : b; }) : null;
+  var prox48 = dias.slice(0, 2);
+  var t = [];
+  t.push('TCK · Control de caja ' + _tmvpFecha(d.hoy.fecha) + ' (' + _tmvpRotulo() + ')');
+  t.push('');
+  t.push('Apertura ' + _tmvpFecha(d.hoy.fecha_apertura) + ': total ' + _tmvpM(d.hoy.saldo_total_informado) +
+         ' · cartera ' + _tmvpM(d.hoy.cartera_no_acreditada) + ' · líquida ' + _tmvpM(d.hoy.saldo_liquido_apertura));
+  t.push('Sincronizado ' + d.hoy.hora_sincronizacion + ' · corte desconocido · sin conciliación bancaria');
+  t.push('');
+  if (minC) t.push('Saldo conservador mínimo: ' + _tmvpM(minC.saldo_conservador) + ' el ' + _tmvpFecha(minC.fecha));
+  t.push('Primera fecha negativa: ' + (neg.length ? _tmvpFecha(neg[0].fecha) : 'ninguna en 15 días'));
+  if (minP) t.push('Saldo probable mínimo: ' + _tmvpM(minP.saldo_probable) + ' el ' + _tmvpFecha(minP.fecha));
+  t.push('');
+  t.push('Pagos programados próximas 48 h:');
+  prox48.forEach(function (x) { t.push('  ' + _tmvpFecha(x.fecha) + ': ' + _tmvpM(x.pagos_programados)); });
+  t.push('');
+  t.push('Alertas principales:');
+  (d.alertas || []).slice(0, 6).forEach(function (a) {
+    if (_tmvpN(a.cantidad) === 0 && _tmvpN(a.monto) === 0) return;
+    t.push('  · ' + a.tipo + ': ' + _tmvpM(a.monto) + (_tmvpN(a.cantidad) > 1 ? ' (' + a.cantidad + ')' : ''));
+  });
+  if (d.fact) {
+    t.push('');
+    t.push('Facturación: hoy ' + _tmvpM(d.fact.emitido_hoy) + ' · mes ' + _tmvpM(d.fact.emitido_mtd) +
+           ' · NC ' + _tmvpM(d.fact.nc_emitidas_mtd));
+  }
+  var txt = t.join('\n');
+  try {
+    navigator.clipboard.writeText(txt).then(function () { toast('📋 Control del día copiado', 'ok'); },
+      function () { prompt('Copiá el texto:', txt); });
+  } catch (e) { prompt('Copiá el texto:', txt); }
+}
+
 async function tesCargar() {
+  // v13.206.1: el piloto corre en paralelo y NUNCA bloquea el modelo anterior.
+  // tmvpCargar() es async: un try/catch alrededor de la llamada NO atrapa un
+  // rechazo de la promesa. Se encadena .catch(), que sí lo hace, y el error se
+  // escribe UNICAMENTE dentro de #tmvp-root. No se re-lanza: tesCargar sigue.
+  try {
+    var _p = tmvpCargar();
+    if (_p && typeof _p.catch === 'function') _p.catch(_tmvpFallo);
+  } catch (e) { _tmvpFallo(e); }
   var loading = document.getElementById('tes-loading');
   var contenido = document.getElementById('tes-contenido');
   var errorBox = document.getElementById('tes-error');
@@ -48911,7 +49244,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.205.3';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.206.1';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
