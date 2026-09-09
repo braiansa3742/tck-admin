@@ -16267,7 +16267,7 @@ window.cfModuloVersion = '1.4-13.205.3';
         <tr><th>MP</th><td><b>Por la bandeja de este panel.</b> El movimiento llega de Mercado Pago,
             se identifica el cliente, se imputan las facturas y se registra. No se da de alta a mano:
             si el movimiento existe, se resuelve ac&aacute;.</td></tr>
-        <tr><th>Cheque</th><td><b>Por &laquo;Imputar cheque&raquo;.</b> El cheque ya fue
+        <tr><th>Cheque</th><td><b>Por &laquo;Registrar cheque en TCK&raquo;.</b> El cheque ya fue
             cargado por el chofer en la entrega; ac&aacute; se elige el cheque, se confirman cliente y
             facturas, y se imputa. El monto, banco, n&uacute;mero y emisor vienen del cheque, no se tipean.</td></tr>
         <tr><th>Efectivo</th><td><b>Autom&aacute;tico desde entrega y rendici&oacute;n.</b> El circuito
@@ -16287,7 +16287,7 @@ window.cfModuloVersion = '1.4-13.205.3';
       <!-- v13.196.0 - clase propia: NO usa cbz-go / ccx-cta / btn-accion,
            que el CSS de rol-contador apaga. El contador tiene que poder
            abrir el modal para auditar; lo que no puede es registrar. -->
-      <button class="cbz-new" onclick="cncAbrir()">Imputar cheque</button>
+      <button class="cbz-new" onclick="cncAbrir()">Registrar cheque en TCK</button>
       <style>
         /* v13.194.0 — chip de estado real en resultados de busqueda */
         .chip.cbz-est{background:#2b2b2b;border:1px solid #555;color:#ddd;margin-right:6px}
@@ -49340,7 +49340,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.210.0';
+var TCK_VERSION = '13.211.0';
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
@@ -53505,7 +53505,7 @@ function _cncPintar() {
       // Eran botones disabled sin accion posible: no se podia hacer nada con
       // ellos y hacian parecer que el modal era un alta generica de cobranzas.
       // Los tres circuitos siguen EXACTAMENTE IGUAL: solo se saca el boton.
-      h += '<div class="cnc-sec">Imputar un cobro ya recibido</div>' +
+      h += '<div class="cnc-sec">Registrar un cobro ya recibido en TCK</div>' +
         '<button class="cnc-op" onclick="cncMedio(\'cheque\')"><b>Cheque</b>' +
           '<span>Elegí un cheque ya recibido y asignalo a facturas abiertas. ' +
           'No da de alta un cobro nuevo.</span></button>' +
