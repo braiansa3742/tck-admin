@@ -15711,6 +15711,459 @@ input.canales-exp-input[type="date"] {
 
   <!-- v13.183.0 - PANEL COBRANZAS (MVP-A, solo lectura) -->
   <div class="view" id="view-cobranzas">
+    <!-- ══ TAB DE COBRANZAS · FASE 1 ══ modulo cf-* insertado sobre el Admin productivo.
+         Debajo queda intacto TODO lo que ya existia (encabezado, medios y la busqueda cbz*). -->
+<!-- ═══════════════════════════════════════════════════════════════════════════════════════════════
+  TCK Admin · TAB COBRANZAS · FASE 1 · 2026-09-08
+  Se inserta al inicio de view-cobranzas. La busqueda cbz* existente queda DEBAJO, intacta.
+  Visible solo si: rol en la allowlist (dueno / admin / contador / cobranzas) Y el flag
+  modulo_cobranzas_ui esta encendido. Ambas cosas las decide el SERVIDOR: el flag se consulta con
+  cobranzas_modulo_habilitado() y cada RPC valida el rol por su cuenta. La tabla del flag NO se abre
+  al cliente. Todo el dato viene de las RPC cobranza_ui_*, que son SECURITY DEFINER con search_path fijo.
+  Sin datos ficticios: si no hay backend, muestra el error tecnico.
+  FASE 1: lectura, revision y confirmacion manual. No postea, no sincroniza, no toca crons.
+  Prefijo cf- en CSS, ids y funciones.
+════════════════════════════════════════════════════════════════════════════════════════════════ -->
+<style>
+.cf{font-family:'Barlow',system-ui,sans-serif;color:#2b2b2b;margin:0 0 20px}.cf *{box-sizing:border-box}
+.cf-hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.cf-hd h3{margin:0;font-size:19px;font-weight:800}
+.cf-off,.cf-err,.cf-info{padding:10px 12px;border-radius:10px;font-size:13px;margin:6px 0}
+.cf-off{background:#FFF8E1;border:1px solid #FFE082}.cf-err{background:#FFEBEE;border:1px solid #EF9A9A;color:#B71C1C}
+.cf-info{background:#E8F4FD;border:1px solid #B3D9F2}
+.cf-metr{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:8px 0 12px}
+.cf-metr div{padding:9px 11px;background:#FAF4EC;border-radius:10px;font-size:12px;line-height:1.35}
+.cf-metr b{display:block;font-size:19px;font-weight:800}.cf-metr .m{color:#6B5B47;font-size:11.5px}
+.cf-band{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+.cf-tab{flex:1 1 150px;min-height:52px;padding:8px 12px;border-radius:12px;border:2px solid #E7DCCB;background:#fff;
+  font-weight:800;font-size:13.5px;cursor:pointer;text-align:left;font-family:inherit;color:#2b2b2b}
+.cf-tab small{display:block;font-weight:600;font-size:11.5px;color:#8A7960;margin-top:2px}
+.cf-tab.on{border-color:#B45309;background:#FFF4E6}
+.cf-tab.rev.on{border-color:#C62828;background:#FFEBEE}
+.cf-filt{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;margin-bottom:10px}
+.cf-filt input,.cf-filt select,.cf-form input,.cf-form select,.cf-form textarea{width:100%;min-height:40px;padding:0 9px;
+  border:1.5px solid #E0E0E0;border-radius:9px;font-size:13.5px;font-family:inherit;background:#fff}
+.cf-filt textarea{min-height:40px}
+.cf-btn{min-height:42px;padding:0 14px;border-radius:9px;border:1.5px solid #B45309;background:#fff;color:#B45309;
+  font-weight:800;font-size:13.5px;cursor:pointer;font-family:inherit;margin:3px 5px 3px 0}
+.cf-btn.pri{background:#B45309;color:#fff}.cf-btn.dan{border-color:#C62828;color:#C62828}
+.cf-btn:disabled{opacity:.42;cursor:not-allowed}
+.cf-tbl{width:100%;border-collapse:collapse;font-size:13px}
+.cf-tbl th{text-align:left;padding:7px 8px;background:#FAF4EC;border-bottom:2px solid #E7DCCB;font-size:11px;
+  text-transform:uppercase;letter-spacing:.5px;color:#6B5B47;white-space:nowrap}
+.cf-tbl td{padding:7px 8px;border-bottom:1px solid #F0F0F0;vertical-align:top}
+.cf-tbl tr:hover td{background:#FFFBF5;cursor:pointer}
+.cf-tbl .num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.cf-pill{display:inline-block;padding:2px 8px;border-radius:11px;font-size:10.5px;font-weight:800;
+  text-transform:uppercase;letter-spacing:.3px;white-space:nowrap;margin:1px 3px 1px 0}
+.cf-pill.pendientes{background:#E3F2FD;color:#1565C0}.cf-pill.revisar{background:#FFCDD2;color:#B71C1C}
+.cf-pill.posteadas{background:#F3E5F5;color:#6A1B9A}.cf-pill.confirmadas{background:#C8E6C9;color:#1B5E20}
+.cf-pill.medio{background:#EEE;color:#555}.cf-pill.mot{background:#FFF3E0;color:#BF360C;text-transform:none;font-weight:600}
+.cf-pill.apl{background:#ECEFF1;color:#455A64;text-transform:none}
+.cf-neg{color:#C62828;font-weight:700}
+.cf-ficha{position:fixed;top:0;right:0;width:min(660px,100vw);height:100vh;background:#fff;
+  box-shadow:-4px 0 26px rgba(0,0,0,.2);z-index:9200;overflow:auto;padding:16px 16px 90px;display:none}
+.cf-ficha.open{display:block}
+.cf-ficha h4{margin:15px 0 6px;font-size:11.5px;text-transform:uppercase;letter-spacing:.8px;color:#8A7960}
+.cf-kv{display:grid;grid-template-columns:150px 1fr;gap:4px 10px;font-size:13.5px}
+.cf-kv div:nth-child(odd){color:#8A7960}
+.cf-x{position:absolute;top:10px;right:14px;font-size:26px;line-height:1;cursor:pointer;color:#999;padding:4px 8px}
+.cf-mono{font-family:ui-monospace,monospace;font-size:11.5px;background:#FAFAFA;border:1px solid #EEE;
+  border-radius:8px;padding:8px;white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto}
+.cf-ev{font-size:12.5px;border-left:3px solid #E7DCCB;padding:4px 9px;margin:5px 0}
+.cf-form{background:#FAF4EC;border-radius:11px;padding:11px;margin:9px 0}
+.cf-form label{display:block;font-size:12px;color:#6B5B47;margin:7px 0 2px;font-weight:600}
+.cf-items{width:100%;font-size:13px}.cf-items td{padding:3px 3px}
+.cf-items input{width:100%;min-height:38px;padding:0 7px;border:1px solid #DDD;border-radius:7px;font-family:inherit}
+.cf-pag{display:flex;gap:9px;align-items:center;flex-wrap:wrap;font-size:12.5px;margin:9px 0}
+.cf-load{opacity:.45;pointer-events:none}
+.cf-vacio{padding:26px 14px;text-align:center;color:#8A7960;font-size:14px;background:#FAFAFA;border-radius:11px}
+@media (max-width:760px){
+  .cf-tab{flex:1 1 46%}
+  .cf-tbl thead{display:none}
+  .cf-tbl tr{display:block;border:1.5px solid #EEE;border-radius:11px;margin-bottom:9px;padding:7px}
+  .cf-tbl td{display:flex;justify-content:space-between;gap:10px;border:0;padding:4px 2px}
+  .cf-tbl td::before{content:attr(data-l);color:#8A7960;font-size:11px;text-transform:uppercase;font-weight:700}
+  .cf-tbl .num{text-align:right}
+  .cf-kv{grid-template-columns:1fr;gap:1px 0}.cf-kv div:nth-child(odd){margin-top:7px;font-size:11.5px}
+  .cf-ficha{width:100vw;padding:14px 12px 100px}
+  .cf-btn{width:100%;margin:4px 0}
+}
+</style>
+
+<section class="cf" id="cf-root">
+  <div class="cf-hd">
+    <h3>Cobranzas</h3>
+    <span id="cf-flag" class="cf-pill medio">cargando…</span>
+    <button class="cf-btn" id="cf-b-refresh" onclick="cfCargar()">Actualizar</button>
+    <button class="cf-btn" id="cf-b-csv" onclick="cfExportar()">Exportar CSV</button>
+  </div>
+  <div id="cf-err" class="cf-err" style="display:none"></div>
+  <div id="cf-off" class="cf-off" style="display:none">
+    El tab funcional de Cobranzas está apagado (flag <code>modulo_cobranzas_ui</code>). La búsqueda de abajo sigue funcionando igual que siempre.
+  </div>
+  <div id="cf-body" style="display:none">
+    <div class="cf-metr" id="cf-metr"></div>
+    <div class="cf-band" id="cf-bandejas"></div>
+    <div class="cf-filt">
+      <input id="cff-fdesde" type="date" title="Desde">
+      <input id="cff-fhasta" type="date" title="Hasta">
+      <input id="cff-cliente" placeholder="Cliente o id Xubio">
+      <select id="cff-medio"><option value="">Todos los medios</option><option value="efectivo">Efectivo</option><option value="transferencia">Transferencia</option><option value="mp">Mercado Pago</option><option value="cheque">Cheque</option></select>
+      <input id="cff-pedido" placeholder="Pedido / entrega">
+      <input id="cff-factura" placeholder="Factura">
+      <input id="cff-recibo" placeholder="Recibo Xubio">
+      <select id="cff-con_recibo"><option value="">Recibo Xubio: todos</option><option value="si">Con recibo</option><option value="no">Sin recibo</option></select>
+      <select id="cff-con_imputacion"><option value="">Imputación: todas</option><option value="si">Con imputación</option><option value="no">Sin imputación</option></select>
+      <select id="cff-con_diferencia"><option value="">Diferencia: todas</option><option value="si">Solo con diferencia</option></select>
+      <input id="cff-q" placeholder="Búsqueda libre">
+      <button class="cf-btn pri" onclick="cfBuscar()">Buscar</button>
+      <button class="cf-btn" onclick="cfLimpiar()">Limpiar</button>
+    </div>
+    <div class="cf-pag" id="cf-pag"></div>
+    <div id="cf-lista"></div>
+    <div class="cf-pag" id="cf-pag2"></div>
+  </div>
+</section>
+<div class="cf-ficha" id="cf-ficha"><span class="cf-x" onclick="cfCerrar()">×</span><div id="cf-ficha-body"></div></div>
+
+<script>
+(function () {
+'use strict';
+var E = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
+var F = function (n) { var x = Number(n); if (!isFinite(x)) return '—'; return '$' + x.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+var T = function (m, t) { if (typeof toast === 'function') toast(m, t); else console.log('[cf]', t, m); };
+var ROL = function () { return (typeof rolActual !== 'undefined') ? rolActual : null; };
+// Allowlist funcional del tab. El gate REAL esta en el servidor (cobranzas_ui_operador_autorizado);
+// esto solo evita mostrar botones que el backend va a rechazar igual.
+var ROLES_OK = ['dueno', 'admin', 'contador', 'cobranzas'];
+var esOperador = function () { return ROLES_OK.indexOf(S.rol || ROL()) >= 0; };
+var LIMIT = 50;
+var BANDEJAS = [
+  ['pendientes', 'Pendientes', 'entraron y todavía no cerraron el circuito'],
+  ['revisar', 'Para revisar', 'necesitan una decisión de Administración'],
+  ['posteadas', 'Posteadas en Xubio', 'creadas en Xubio; aplicar es otro paso'],
+  ['confirmadas', 'Confirmadas', 'revisadas y cerradas']
+];
+var S = { flag: null, rol: null, conteos: null, band: 'revisar', page: { rows: [], total: 0, limit: LIMIT, offset: 0 }, sel: null, ficha: null, busy: false };
+
+function api() { if (typeof sbFetch !== 'function') throw new Error('sbFetch no disponible: el tab no puede operar sin backend'); return sbFetch; }
+async function rpc(n, a) { var o = await api()('rpc/' + n, { method: 'POST', body: JSON.stringify(a || {}) }); return Array.isArray(o) ? o[0] : o; }
+// Ante un error, ademas de mostrarlo se ESCONDE el cuerpo: no puede quedar a la vista una tabla
+// vieja como si fuera el estado actual.
+function setErr(m) {
+  var e = document.getElementById('cf-err'); e.style.display = m ? 'block' : 'none'; e.textContent = m || '';
+  if (m) { var b = document.getElementById('cf-body'); if (b) b.style.display = 'none'; }
+}
+function busy(on) { S.busy = on; ['cf-b-refresh', 'cf-b-csv'].forEach(function (i) { var b = document.getElementById(i); if (b) b.disabled = on; });
+  var l = document.getElementById('cf-lista'); if (l) l.classList.toggle('cf-load', on); }
+function v(id) { var e = document.getElementById(id); return e ? String(e.value || '').trim() : ''; }
+function numAR(s) { if (s == null) return null; s = String(s).trim(); if (s === '') return null;
+  if (/^\d+(\.\d+)?$/.test(s) && !/,/.test(s)) return Number(s); s = s.replace(/\./g, '').replace(',', '.');
+  var n = Number(s); return isFinite(n) ? n : NaN; }
+function num2(n) { return (Math.round(Number(n) * 100) / 100).toFixed(2); }
+function reciboOk(x) { return /^X-\d{4}-\d{8}$/.test(String(x || '')); }
+function tidOk(x) { return /^\d{1,15}$/.test(String(x || '')) && String(x) !== '0'; }
+function urlOk(x) { if (!x) return true; try { var u = new URL(x); return u.protocol === 'https:' && x.length <= 1000; } catch (e) { return false; } }
+
+function filtros() {
+  return { bandeja: S.band, fdesde: v('cff-fdesde'), fhasta: v('cff-fhasta'), cliente: v('cff-cliente'),
+    medio: v('cff-medio'), pedido: v('cff-pedido'), factura: v('cff-factura'), recibo: v('cff-recibo'),
+    con_recibo: v('cff-con_recibo'), con_imputacion: v('cff-con_imputacion'),
+    con_diferencia: v('cff-con_diferencia'), q: v('cff-q') };
+}
+window.cfLimpiar = function () { ['cff-fdesde','cff-fhasta','cff-cliente','cff-medio','cff-pedido','cff-factura','cff-recibo','cff-con_recibo','cff-con_imputacion','cff-con_diferencia','cff-q']
+  .forEach(function (i) { var e = document.getElementById(i); if (e) e.value = ''; }); cfBuscar(); };
+
+window.cfCargar = async function () {
+  setErr('');
+  try { api(); } catch (e) { setErr(String(e.message)); return; }
+  if (ROL() && ROLES_OK.indexOf(ROL()) < 0) { setErr('Este tab es para Administración y Cobranzas. Tu rol (' + E(ROL()) + ') no tiene acceso.'); return; }
+  busy(true);
+  try {
+    // El flag se consulta por RPC: la tabla no se abre al cliente.
+    var h = await rpc('cobranzas_modulo_habilitado');
+    S.flag = !!(h && h.flag); S.rol = h && h.rol;
+    if (h && h.autorizado === false) { setErr('Este tab es para Administración y Cobranzas. Tu rol (' + E(S.rol || ROL() || 'desconocido') + ') no tiene acceso.'); return; }
+    var st = document.getElementById('cf-flag');
+    st.textContent = S.flag ? 'activo' : 'apagado'; st.className = 'cf-pill ' + (S.flag ? 'confirmadas' : 'medio');
+    document.getElementById('cf-off').style.display = S.flag ? 'none' : 'block';
+    document.getElementById('cf-body').style.display = S.flag ? 'block' : 'none';
+    if (!S.flag) return;
+    S.conteos = await rpc('cobranza_ui_conteos');
+    if (!S.conteos || typeof S.conteos.total === 'undefined') throw new Error('cobranza_ui_conteos no devolvió datos');
+    pintarResumen(); S.page.offset = 0; await cargarPagina();
+  } catch (e) { setErr('Error al cargar: ' + String(e && e.message || e).slice(0, 220)); }
+  finally { busy(false); }
+};
+window.cfBuscar = async function () { S.page.offset = 0; busy(true); try { await cargarPagina(); } catch (e) { setErr('Error al buscar: ' + String(e && e.message || e).slice(0, 220)); } finally { busy(false); } };
+window.cfBand = async function (b) { S.band = b; pintarResumen(); await cfBuscar(); };
+window.cfPag = async function (d) { var o = S.page.offset + d * S.page.limit; if (o < 0 || o >= S.page.total) return;
+  S.page.offset = o; busy(true); try { await cargarPagina(); } finally { busy(false); } };
+async function cargarPagina() {
+  var r = await rpc('cobranza_ui_pagina', { p_filtros: filtros(), p_limit: LIMIT, p_offset: S.page.offset });
+  if (!r || !Array.isArray(r.rows)) throw new Error('cobranza_ui_pagina no devolvió filas');
+  S.page = { rows: r.rows, total: Number(r.total) || 0, limit: Number(r.limit) || LIMIT, offset: Number(r.offset) || 0 };
+  pintarLista();
+}
+function pintarResumen() {
+  var c = S.conteos || {}, b = c.bandejas || {};
+  var m = document.getElementById('cf-metr');
+  var cel = function (t, n, sub) { return '<div>' + E(t) + '<b>' + E(n == null ? 0 : n) + '</b><span class="m">' + E(sub || '') + '</span></div>'; };
+  m.innerHTML =
+    cel('Pendientes', (b.pendientes || {}).n, F((b.pendientes || {}).monto || 0)) +
+    cel('Para revisar', (b.revisar || {}).n, F((b.revisar || {}).monto || 0)) +
+    cel('Posteadas', (b.posteadas || {}).n, F((b.posteadas || {}).monto || 0)) +
+    cel('Confirmadas', (b.confirmadas || {}).n, F((b.confirmadas || {}).monto || 0)) +
+    cel('Con error', c.con_error, 'posting o resultado desconocido') +
+    cel('Sin cliente', c.sin_cliente, 'hay que identificarlo') +
+    cel('Sin imputación', c.sin_imputacion, 'falta la factura') +
+    cel('Con diferencia', c.con_diferencia, F(c.monto_diferencia || 0));
+  var h = '';
+  BANDEJAS.forEach(function (bd) {
+    var n = (b[bd[0]] || {}).n || 0;
+    h += '<button class="cf-tab ' + (bd[0] === 'revisar' ? 'rev ' : '') + (S.band === bd[0] ? 'on' : '') + '" onclick="cfBand(\'' + bd[0] + '\')">' +
+         E(bd[1]) + ' (' + n + ')<small>' + E(bd[2]) + '</small></button>';
+  });
+  document.getElementById('cf-bandejas').innerHTML = h;
+}
+function pintarLista() {
+  var p = S.page, desde = p.total ? p.offset + 1 : 0, hasta = Math.min(p.offset + p.rows.length, p.total);
+  var pag = '<span>' + (p.total ? ('Mostrando <b>' + desde + '–' + hasta + '</b> de <b>' + p.total + '</b>') : 'Sin resultados') + '</span>' +
+    '<button class="cf-btn" onclick="cfPag(-1)"' + (p.offset <= 0 ? ' disabled' : '') + '>‹ Anterior</button>' +
+    '<button class="cf-btn" onclick="cfPag(1)"' + (p.offset + p.limit >= p.total ? ' disabled' : '') + '>Siguiente ›</button>';
+  document.getElementById('cf-pag').innerHTML = pag; document.getElementById('cf-pag2').innerHTML = pag;
+  if (!p.rows.length) {
+    document.getElementById('cf-lista').innerHTML = '<div class="cf-vacio">No hay cobranzas en <b>' + E(S.band) + '</b> con estos filtros.<br>Probá limpiar los filtros o mirar otra bandeja.</div>';
+    return;
+  }
+  var h = '<table class="cf-tbl"><thead><tr><th>Fecha</th><th>Cliente</th><th>Medio</th><th class="num">Recibido</th>' +
+    '<th class="num">Imputado</th><th class="num">Diferencia</th><th>Xubio</th><th>Aplicación</th><th>Motivos</th></tr></thead><tbody>';
+  p.rows.forEach(function (r) {
+    var dif = Number(r.diferencia) || 0;
+    h += '<tr onclick="cfAbrir(' + Number(r.id) + ')">' +
+      '<td data-l="Fecha">' + E(r.fecha) + '</td>' +
+      '<td data-l="Cliente">' + E(r.cliente_nombre || (r.cliente_xubio_id ? ('#' + r.cliente_xubio_id) : '⚠ sin cliente')) +
+        (r.origen_ref ? '<br><small style="color:#8A7960">' + E(r.origen_ref) + '</small>' : '') + '</td>' +
+      '<td data-l="Medio"><span class="cf-pill medio">' + E(r.instrumento || '—') + '</span></td>' +
+      '<td data-l="Recibido" class="num">' + E(F(r.importe_recibido)) + '</td>' +
+      '<td data-l="Imputado" class="num">' + E(F(r.importe_imputado)) + '</td>' +
+      '<td data-l="Diferencia" class="num' + (Math.abs(dif) > 0.05 ? ' cf-neg' : '') + '">' + (Math.abs(dif) > 0.05 ? E(F(dif)) : '—') + '</td>' +
+      '<td data-l="Xubio">' + (r.posteada ? (E(r.xubio_numero_recibo || 'sí') ) : '—') + '</td>' +
+      '<td data-l="Aplicación"><span class="cf-pill apl">' + E(etiquetaAplicacion(r)) + '</span></td>' +
+      '<td data-l="Motivos">' + (r.motivos_revision || []).map(function (m) { return '<span class="cf-pill mot">' + E(m) + '</span>'; }).join('') + '</td></tr>';
+  });
+  document.getElementById('cf-lista').innerHTML = h + '</tbody></table>';
+}
+// Nunca se afirma "no aplicada": sin evidencia, es desconocida.
+function etiquetaAplicacion(r) {
+  if (r.aplicacion === 'verificada') return 'aplicación confirmada';
+  if (r.aplicacion === 'pendiente_confirmada') return 'falta aplicar (comprobado)';
+  if (r.aplicacion === 'imputada_local') return 'imputada acá · aplicación no verificada';
+  if (r.aplicacion === 'parcial_local') return 'imputación parcial · aplicación no verificada';
+  return r.posteada ? 'estado en Xubio desconocido' : 'aplicación no verificable';
+}
+
+window.cfAbrir = async function (id) {
+  if (S.busy) return; busy(true);
+  try { var f = await rpc('cobranza_ui_ficha', { p_cobranza_id: id }); if (!f || !f.cabecera) throw new Error('ficha vacía');
+    S.sel = f.cabecera; S.ficha = f; pintarFicha(); document.getElementById('cf-ficha').classList.add('open'); }
+  catch (e) { T('No se pudo abrir la ficha: ' + String(e && e.message || e).slice(0, 150), 'err'); }
+  finally { busy(false); }
+};
+window.cfCerrar = function () { document.getElementById('cf-ficha').classList.remove('open'); };
+async function refrescar(id) { await cfCargar(); if (id) await cfAbrir(id); }
+
+function pintarFicha() {
+  var r = S.sel, f = S.ficha, dif = Number(r.diferencia) || 0;
+  var h = '<h3 style="margin:0 4px 2px 0">Cobranza #' + E(r.id) + ' <span class="cf-pill ' + E(r.bandeja) + '">' + E(r.bandeja) + '</span></h3>';
+  if ((r.motivos_revision || []).length) h += '<div class="cf-info"><b>Para revisar:</b> ' + (r.motivos_revision || []).map(E).join(' · ') + '</div>';
+  h += '<h4>Qué se cobró</h4><div class="cf-kv">' +
+    '<div>Fecha de cobranza</div><div>' + E(r.fecha) + '</div>' +
+    '<div>Fecha de registro</div><div>' + E(String(r.creado_at || '').slice(0, 16)) + '</div>' +
+    '<div>Cliente</div><div>' + E(r.cliente_nombre || '(sin nombre)') + ' · Xubio ' + (r.cliente_xubio_id ? E(r.cliente_xubio_id) : '<b>NO RESUELTO</b>') + '</div>' +
+    '<div>Pedido / entrega</div><div>' + E(r.origen_ref || '—') + ' · origen ' + E(r.origen || '—') + '</div>' +
+    '<div>Medio de cobro</div><div>' + E(r.instrumento || '—') + '</div>' +
+    '<div>Importe recibido</div><div><b>' + E(F(r.importe_recibido)) + '</b></div>' +
+    '<div>Importe propuesto</div><div>' + E(F(r.importe_propuesto)) + '</div>' +
+    '<div>Importe imputado</div><div>' + E(F(r.importe_imputado)) + '</div>' +
+    '<div>Diferencia / sobrante</div><div class="' + (Math.abs(dif) > 0.05 ? 'cf-neg' : '') + '">' + E(F(dif)) + (r.es_anticipo ? ' (anticipo a cuenta)' : '') + '</div>' +
+    '</div><h4>Estado en Xubio</h4><div class="cf-kv">' +
+    '<div>Creada en Xubio</div><div>' + (r.posteada ? 'sí' : 'no hay evidencia') + '</div>' +
+    '<div>transaccionid</div><div>' + E(r.xubio_transaccionid || '—') + '</div>' +
+    '<div>Recibo</div><div>' + E(r.xubio_numero_recibo || '—') + '</div>' +
+    '<div>TCKREF</div><div class="cf-mono" style="max-height:52px">' + E(r.tckref || '—') + '</div>' +
+    '<div>Aplicación</div><div>' + E(etiquetaAplicacion(r)) + '</div>' +
+    '<div>Error / motivo</div><div>' + E(r.xubio_error || r.ultima_accion_motivo || '—') + '</div>' +
+    '</div>';
+  h += '<div class="cf-info">La API de Xubio (<code>CobranzaBean</code>) crea la cobranza pero <b>no permite indicar contra qué facturas se aplica</b>. La aplicación se hace a mano en Xubio y se confirma acá.</div>';
+  if (f.mp && f.mp.mp_id) h += '<h4>Mercado Pago</h4><div class="cf-kv">' +
+    '<div>mp_id</div><div>' + E(f.mp.mp_id) + '</div><div>Pagador</div><div>' + E(f.mp.payer || '—') + ' · doc ' + E(f.mp.doc || '—') + '</div>' +
+    '<div>Nivel de match</div><div><b>' + E(f.mp.nivel || '—') + '</b>' + (f.mp.apto_auto ? ' · sugerencia segura' : ' · requiere revisión') + '</div>' +
+    '<div>Candidatos</div><div>' + E(f.mp.n_candidatos == null ? '—' : f.mp.n_candidatos) + ' · bidireccional: ' + (f.mp.bidireccional ? 'sí' : 'no') + ' · OCR duplicado: ' + (f.mp.ocr_duplicado ? 'sí' : 'no') + '</div></div>';
+  if ((f.cheques || []).length) { h += '<h4>Cheques</h4>';
+    f.cheques.forEach(function (c) { h += '<div class="cf-ev"><b>' + E(c.banco || 'sin banco') + ' ' + E(c.numero || 's/n') + '</b> · ' + E(F(c.monto)) +
+      ' · emisor ' + E(c.emisor || '—') + ' · recibido ' + E(String(c.recibido || '').slice(0, 10)) + ' · vto ' + E(c.vto || '—') + ' · ' + E(c.estado || '') + '</div>'; }); }
+  h += '<h4>Facturas propuestas</h4>';
+  if (f.propuestas && f.propuestas.length && (f.propuestas[0].items || []).length) { h += '<table class="cf-items"><tr><th>Factura</th><th>tid</th><th>Importe</th></tr>';
+    f.propuestas[0].items.forEach(function (i) { h += '<tr><td>' + E(i.factura) + '</td><td>' + E(i.tid || '—') + '</td><td>' + E(F(i.importe)) + '</td></tr>'; });
+    h += '</table>'; } else h += '<div style="font-size:12.5px;color:#999">sin propuesta</div>';
+  h += '<h4>Imputado en el sistema</h4>';
+  if ((f.imputaciones || []).length) { h += '<table class="cf-items"><tr><th>Factura</th><th>Importe</th><th>Origen</th></tr>';
+    f.imputaciones.forEach(function (i) { h += '<tr><td>' + E(i.factura) + '</td><td>' + E(F(i.importe)) + '</td><td>' + E(i.source || '—') + '</td></tr>'; });
+    h += '</table>'; } else h += '<div style="font-size:12.5px;color:#999">sin imputaciones</div>';
+  h += '<h4>Aplicación verificada</h4>';
+  if ((f.verificaciones || []).length) { f.verificaciones.forEach(function (x) {
+    h += '<div class="cf-ev"' + (x.supersedida ? ' style="opacity:.5"' : '') + '><b>v' + E(x.version) + '</b> · ' + E(x.recibo) + ' · ' + E(x.actor) +
+      ' · ' + E(String(x.cuando || '').slice(0, 16)) + (x.supersedida ? ' · corregida' : '') + (x.difiere ? ' · DIFIERE de lo propuesto' : '') + '<br>' +
+      (x.items || []).map(function (i) { return E(i.factura) + ' ' + E(F(i.importe)); }).join(' · ') + ' · remanente ' + E(F(x.remanente)) + '</div>'; });
+  } else h += '<div style="font-size:12.5px;color:#999">todavía nadie confirmó la aplicación en Xubio</div>';
+  if ((f.posteos || []).length) { h += '<h4>Intentos de posting (' + f.posteos.length + ')</h4>';
+    f.posteos.slice(0, 6).forEach(function (l) { h += '<div class="cf-ev"><b>' + E(l.fase) + '/' + E(l.resultado) + '</b> HTTP ' + E(l.http || '—') +
+      (l.ambiguo ? ' · <b class="cf-neg">AMBIGUO</b>' : '') + ' · ' + E(String(l.momento || '').slice(0, 19)) + (l.nota ? '<br>' + E(l.nota) : '') + '</div>'; }); }
+  h += '<h4>Quién tocó este caso</h4>';
+  var hist = (f.auditoria || []).map(function (a) { return '<div class="cf-ev"><b>' + E(a.accion) + '</b> · ' + E(a.actor) + ' · ' +
+      E(String(a.cuando || '').slice(0, 16)) + '<br>' + E(a.motivo) + '</div>'; }).join('') +
+    '';
+  h += hist || '<div style="font-size:12.5px;color:#999">sin movimientos</div>';
+
+  h += '<h4>Acciones</h4>';
+  if (!esOperador()) h += '<div class="cf-off">Tu rol es de solo lectura.</div>';
+  var b = function (l, fn, cls) { return '<button class="cf-btn ' + (cls || '') + '" onclick="' + fn + '"' + (esOperador() ? '' : ' disabled') + '>' + l + '</button>'; };
+  if (!r.cliente_xubio_id) h += b('Asignar cliente', "cfForm('cliente')", 'pri');
+  else h += b('Corregir cliente', "cfForm('cliente')");
+  h += b('Asociar pedido', "cfForm('pedido')");
+  h += b('Proponer facturas', "cfForm('prop')", r.importe_propuesto ? '' : 'pri');
+  h += b('Copiar ficha para Xubio', 'cfCopiar()');
+  h += b('Confirmé la aplicación en Xubio', "cfForm('verif')", 'pri');
+  h += b('Enviar a revisión', "cfForm('revisar')");
+  h += b('Cerrar caso', "cfForm('cerrar')");
+  h += '<div id="cf-form"></div>';
+  document.getElementById('cf-ficha-body').innerHTML = h;
+}
+
+function itemsForm(id, base) {
+  var rows = (base && base.length ? base : [{}]).map(function (i) {
+    return '<tr><td><input class="f" placeholder="A-00008-00000000" value="' + E(i.factura || '') + '"></td>' +
+      '<td><input class="t" placeholder="tid" inputmode="numeric" value="' + E(i.tid || '') + '"></td>' +
+      '<td><input class="i" placeholder="12.345,67" value="' + E(i.importe != null ? String(i.importe).replace('.', ',') : '') + '"></td></tr>';
+  }).join('');
+  return '<table class="cf-items" id="' + id + '"><tr><th>Factura</th><th>transaccionid</th><th>Importe</th></tr>' + rows + '</table>' +
+    '<button class="cf-btn" onclick="cfAddRow(\'' + id + '\')">+ factura</button>';
+}
+window.cfAddRow = function (id) { var t = document.getElementById(id), tr = t.insertRow(-1);
+  tr.innerHTML = '<td><input class="f" placeholder="A-00008-00000000"></td><td><input class="t" inputmode="numeric"></td><td><input class="i" placeholder="12.345,67"></td>'; };
+function leerItems(id) {
+  var out = [], errs = [];
+  document.querySelectorAll('#' + id + ' tr').forEach(function (tr) {
+    var f = tr.querySelector('.f'); if (!f || !f.value.trim()) return;
+    var fac = f.value.trim(), tid = tr.querySelector('.t').value.trim(), imp = numAR(tr.querySelector('.i').value);
+    if (!/^[A-Z]-\d{4,5}-\d{8}$/.test(fac)) errs.push('factura "' + fac + '" inválida');
+    if (imp === null || isNaN(imp) || imp <= 0) errs.push('importe inválido en ' + fac);
+    if (tid && !tidOk(tid)) errs.push('tid inválido en ' + fac);
+    out.push({ factura_numero: fac, factura_transaccionid: tid ? String(tid) : null, importe: num2(imp || 0), moneda: 'ARS' });
+  });
+  return { items: out, errs: errs };
+}
+window.cfForm = function (tipo) {
+  var r = S.sel, f = S.ficha, box = document.getElementById('cf-form'), h = '';
+  if (tipo === 'cliente') h = '<div class="cf-form"><h4>Asignar o corregir cliente</h4>' +
+    '<label>ID de cliente en Xubio</label><input id="cf-cli" inputmode="numeric" value="' + E(r.cliente_xubio_id || '') + '">' +
+    '<label>Nombre (opcional)</label><input id="cf-clin" value="' + E(r.cliente_nombre || '') + '">' +
+    '<label>Por qué (queda auditado)</label><input id="cf-clim" placeholder="lo identifiqué por el CBU">' +
+    '<button class="cf-btn pri" onclick="cfDoCliente()">Guardar</button></div>';
+  else if (tipo === 'pedido') h = '<div class="cf-form"><h4>Asociar pedido o entrega</h4>' +
+    '<label>Pedido / entrega</label><input id="cf-ped" value="' + E(r.origen_ref || '') + '">' +
+    '<label>Por qué</label><input id="cf-pedm" placeholder="lo confirmó el chofer">' +
+    '<button class="cf-btn pri" onclick="cfDoPedido()">Guardar</button></div>';
+  else if (tipo === 'prop') h = '<div class="cf-form"><h4>Proponer facturas</h4>' +
+    '<div style="font-size:12.5px;margin-bottom:6px">Importe recibido: <b>' + E(F(r.importe_recibido)) + '</b>. Podés repartirlo entre varias facturas y dejar el resto a cuenta.</div>' +
+    itemsForm('cf-pi', ((f.propuestas || [])[0] || {}).items) +
+    '<label><input type="checkbox" id="cf-sob" style="width:auto;min-height:0"> El resto queda como sobrante a cuenta (pago parcial)</label>' +
+    '<label>Nota</label><input id="cf-pm" placeholder="cómo se reparte">' +
+    '<button class="cf-btn pri" onclick="cfDoProp()">Guardar propuesta</button></div>';
+  else if (tipo === 'verif') { var base = ((f.verificaciones || []).filter(function (x) { return !x.supersedida_por; })[0] || {}).items || ((f.propuestas || [])[0] || {}).items;
+    h = '<div class="cf-form"><h4>Confirmé la aplicación en Xubio</h4>' +
+    '<div style="font-size:12.5px;margin-bottom:6px">Registra <b>lo que realmente aplicaste</b> en Xubio. No modifica importes históricos: si difiere de lo propuesto, queda marcado.</div>' +
+    '<label>Recibo Xubio</label><input id="cf-vr" value="' + E(r.xubio_numero_recibo || '') + '" placeholder="X-0001-00000000">' +
+    '<label>transaccionid</label><input id="cf-vt" inputmode="numeric" value="' + E(r.xubio_transaccionid || '') + '">' +
+    '<label>Evidencia (URL https, opcional)</label><input id="cf-ve" placeholder="https://...">' +
+    '<label>Observación</label><input id="cf-vo">' + itemsForm('cf-vi', base) +
+    '<button class="cf-btn pri" onclick="cfDoVerif()">Registrar</button></div>'; }
+  else if (tipo === 'revisar') h = '<div class="cf-form"><h4>Enviar a revisión</h4>' +
+    '<label>Motivo</label><input id="cf-rm" placeholder="qué hay que mirar"><button class="cf-btn pri" onclick="cfDoRevisar()">Enviar</button></div>';
+  else if (tipo === 'cerrar') h = '<div class="cf-form"><h4>Cerrar el caso</h4>' +
+    '<label>Observación del control (mínimo 5 caracteres)</label><input id="cf-cn" placeholder="controlado contra el extracto">' +
+    '<button class="cf-btn pri" onclick="cfDoCerrar()">Cerrar</button></div>';
+  box.innerHTML = h; box.scrollIntoView({ block: 'nearest' });
+};
+async function run(fn) { if (S.busy) return; busy(true);
+  try { await fn(); } catch (e) { T('No se pudo: ' + String(e && e.message || e).slice(0, 180), 'err'); } finally { busy(false); } }
+window.cfDoCliente = function () { return run(async function () {
+  var id = v('cf-cli'), m = v('cf-clim');
+  if (!/^\d+$/.test(id)) throw new Error('El id de cliente Xubio tiene que ser numérico');
+  if (m.length < 3) throw new Error('Escribí por qué');
+  await rpc('cobranza_ui_asignar_cliente', { p_cobranza_id: S.sel.id, p_cliente_xubio_id: Number(id), p_cliente_nombre: v('cf-clin') || null, p_motivo: m });
+  T('Cliente asignado', 'ok'); await refrescar(S.sel.id); }); };
+window.cfDoPedido = function () { return run(async function () {
+  var p = v('cf-ped'), m = v('cf-pedm');
+  if (!p) throw new Error('Falta el pedido'); if (m.length < 3) throw new Error('Escribí por qué');
+  await rpc('cobranza_ui_asociar_pedido', { p_cobranza_id: S.sel.id, p_origen_ref: p, p_motivo: m });
+  T('Pedido asociado', 'ok'); await refrescar(S.sel.id); }); };
+window.cfDoProp = function () { return run(async function () {
+  var it = leerItems('cf-pi'); if (it.errs.length) throw new Error(it.errs.join('; '));
+  if (!it.items.length) throw new Error('Cargá al menos una factura');
+  var o = await rpc('cobranza_ui_proponer', { p_cobranza_id: S.sel.id, p_items: it.items, p_motivo: v('cf-pm') || null,
+    p_sobrante_a_cuenta: document.getElementById('cf-sob').checked });
+  T('Propuesta v' + o.version + (Number(o.sobrante_a_cuenta) > 0 ? ' · sobrante ' + F(o.sobrante_a_cuenta) : ''), 'ok');
+  await refrescar(S.sel.id); }); };
+window.cfDoVerif = function () { return run(async function () {
+  var it = leerItems('cf-vi'); if (it.errs.length) throw new Error(it.errs.join('; '));
+  if (!it.items.length) throw new Error('Cargá lo que aplicaste');
+  var rn = v('cf-vr'), rt = v('cf-vt'), ve = v('cf-ve');
+  if (!reciboOk(rn)) throw new Error('El recibo va con formato X-0001-00000000');
+  if (!tidOk(rt)) throw new Error('El transaccionid tiene que ser un entero positivo');
+  if (!urlOk(ve)) throw new Error('La evidencia tiene que ser una URL https');
+  var suma = it.items.reduce(function (a, i) { return a + Number(i.importe); }, 0);
+  if (suma > Number(S.sel.importe_recibido) + 0.05) throw new Error('La suma supera el importe recibido');
+  if (!window.confirm('Registrar la aplicación:\n' + it.items.map(function (i) { return i.factura_numero + ' ' + F(i.importe); }).join('\n') +
+    '\nremanente ' + F(Number(S.sel.importe_recibido) - suma))) return;
+  var o = await rpc('cobranza_ui_confirmar_aplicacion', { p_cobranza_id: S.sel.id, p_items: it.items, p_recibo: rn,
+    p_transaccionid: Number(rt), p_evidencia_url: ve || null, p_observacion: v('cf-vo') || null });
+  T('Aplicación confirmada (v' + o.version + ')' + (o.difiere_de_propuesta ? ' · DIFIERE de lo propuesto' : ''), 'ok');
+  await refrescar(S.sel.id); }); };
+window.cfDoRevisar = function () { return run(async function () {
+  var m = v('cf-rm'); if (m.length < 3) throw new Error('Escribí el motivo');
+  await rpc('cobranza_ui_revisar', { p_cobranza_id: S.sel.id, p_motivo: m }); T('Enviada a revisión', 'ok'); await refrescar(S.sel.id); }); };
+window.cfDoCerrar = function () { return run(async function () {
+  var n = v('cf-cn'); if (n.length < 5) throw new Error('La observación necesita al menos 5 caracteres');
+  await rpc('cobranza_ui_cerrar', { p_cobranza_id: S.sel.id, p_nota: n }); T('Caso cerrado', 'ok'); await refrescar(S.sel.id); }); };
+window.cfCopiar = function () { return run(async function () {
+  var txt = await rpc('cobranza_ui_ficha_texto', { p_cobranza_id: S.sel.id });
+  if (typeof txt !== 'string') txt = JSON.stringify(txt);
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(function () { T('Ficha copiada', 'ok'); }, function () { window.prompt('Copiá:', txt); });
+  else window.prompt('Copiá:', txt); }); };
+window.cfExportar = function () { return run(async function () {
+  var cols = ['id','fecha','creado_at','cliente_xubio_id','cliente_nombre','instrumento','origen_ref','importe_recibido',
+    'importe_propuesto','importe_imputado','diferencia','posteada','xubio_numero_recibo','xubio_transaccionid','tckref',
+    'aplicacion','bandeja','motivos_revision'];
+  var f = filtros(), off = 0, all = [], total = null;
+  do { var r = await rpc('cobranza_ui_pagina', { p_filtros: f, p_limit: 500, p_offset: off });
+    if (!r || !Array.isArray(r.rows)) throw new Error('export interrumpido');
+    total = Number(r.total); all = all.concat(r.rows); off += 500;
+    if (off > 50000) throw new Error('Export demasiado grande'); } while (off < total);
+  var csv = [cols.join(';')].concat(all.map(function (x) { return cols.map(function (c) {
+    var v2 = x[c]; if (Array.isArray(v2)) v2 = v2.join(' | ');
+    if (['importe_recibido','importe_propuesto','importe_imputado','diferencia'].indexOf(c) >= 0) v2 = (v2 == null ? '' : String(v2).replace('.', ','));
+    return '"' + String(v2 == null ? '' : v2).replace(/"/g, '""') + '"'; }).join(';'); })).join('\n');
+  var a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,\uFEFF' + encodeURIComponent(csv);
+  a.download = 'cobranzas_' + S.band + '_' + new Date().toISOString().slice(0, 10) + '.csv'; a.click();
+  T('Exportadas ' + all.length + ' de ' + total, 'ok'); }); };
+window.cfModuloVersion = '1.1-fase1';
+})();
+</script>
+
     <div class="ccx-head"><h2>Cobranzas <span class="ccx-badge">SOLO LECTURA</span></h2></div>
     <!-- v13.194.3 - como entra cada medio. Que nadie interprete que faltan funciones. -->
     <details class="cbz-medios">
@@ -24544,6 +24997,8 @@ function cambiarTab(tab) {
   if (tab === 'cobranzas' && typeof puedeVer === 'function' && !puedeVer('cobranzas')) tab = 'pedidos';
   if (_tabActual === tab) return;
   _tabActual = tab;
+  // Fase 1 — el tab de Cobranzas se carga al abrirlo. Si el modulo no esta, no pasa nada.
+  if (tab === 'cobranzas' && typeof cfCargar === 'function') { try { setTimeout(cfCargar, 0); } catch (_eCF) {} }
 
   // Views — incluye logistica + stock (v12.15.0) + compras (v12.18.0) + tesoreria (v12.20.0)
   ['pedidos','clientes','gps','mapa','reportes','logistica','rendiciones','acc-dup','prod-canon','ccanon','stock','compras','cc','tesoreria','margenes','facturacion','buffet','ccprod','pulso','foodconcil','comisiones','embudo','ccontrol','ctacte','mpconc','cobranzas'].forEach(function(t) {
