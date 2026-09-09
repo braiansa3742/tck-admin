@@ -49557,7 +49557,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.213.0';
+var TCK_VERSION = '13.214.0';
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
@@ -52038,6 +52038,34 @@ var CBZ_ESTADOS = [['pendientes','Sin registrar en TCK'],
                       rechazado:'problemas', cargando:'revisar' };
   // Bandejas que se sirven del universo cobranza_id IS NULL.
   var CHQ_BANDEJAS_SIN_COBRANZA = ['pendientes','enxubio','conciliar','revisar','contable'];
+  // v13.214.0 — bandejas EXCLUSIVAS de cheques. En Todos, MP y Efectivo no se
+  // pintan: sus etiquetas hablan de un circuito que esos medios no tienen.
+  var CBZ_ESTADOS_SOLO_CHEQUES = ['enxubio','conciliar','contable'];
+  // Que estados se muestran segun el medio activo. Con busqueda activa se
+  // muestran todos, igual que hasta ahora.
+  function cbzEstadosVisibles() {
+    var soloChq = (_cbz.medio === 'cheques');
+    return CBZ_ESTADOS.filter(function (e) {
+      return soloChq || CBZ_ESTADOS_SOLO_CHEQUES.indexOf(e[0]) === -1;
+    });
+  }
+  // Etiqueta de cada bandeja segun el medio: 'revisar' y 'pendientes' existen
+  // en los tres circuitos, pero en cheques se llaman distinto desde v13.210.
+  // Con Todos/MP/Efectivo las bandejas de cheques no se pintan, pero sus filas
+  // siguen existiendo: sin esto, 66 cheques en 'enxubio'/'conciliar'/'contable'
+  // no caian en NINGUNA tarjeta y la suma no cerraba con el total del medio.
+  // Se agrupan en 'revisar', que es lo que son: requieren decision. NO se
+  // cambia el estado del dato, solo en que tarjeta se cuenta al mostrar.
+  function cbzEstadoVisible(est) {
+    if (_cbz.medio === 'cheques') return est;
+    return (CBZ_ESTADOS_SOLO_CHEQUES.indexOf(est) !== -1) ? 'revisar' : est;
+  }
+  function cbzEtiquetaEstado(e) {
+    if (_cbz.medio === 'cheques') return e[1];
+    if (e[0] === 'pendientes') return 'Pendientes';
+    if (e[0] === 'revisar')    return 'Para revisar';
+    return e[1];
+  }
 
   function _cbzN(v){ var n=Number(v); return isFinite(n)?n:0; }
   function _cbzF(n){ return '$'+Math.round(_cbzN(n)).toLocaleString('es-AR'); }
@@ -52047,6 +52075,10 @@ var CBZ_ESTADOS = [['pendientes','Sin registrar en TCK'],
 
   function cbzSetMedio(m){
     _cbz.medio = m;
+    // v13.214.0 — si la bandeja activa no existe en el medio nuevo (p.ej. venias
+    // de Cheques en 'conciliar' y pasas a MP), cae a 'pendientes'. Sin esto
+    // quedaria una bandeja seleccionada que no se ve y la lista vacia.
+    if (m !== 'cheques' && CBZ_ESTADOS_SOLO_CHEQUES.indexOf(_cbz.estado) !== -1) _cbz.estado = 'pendientes';
     // v13.213.0 — el boton de registrar cheque solo aparece con Cheques.
     try { if (typeof cbvGate === 'function') cbvGate(); } catch (_eG) {}
     // v13.194.0: si hay busqueda activa se re-busca en el nuevo medio
@@ -52623,12 +52655,14 @@ var CBZ_ESTADOS = [['pendientes','Sin registrar en TCK'],
     h += '</div>';
     // filtro de estado, con contador y monto
     h += '<div class="cbz-tabs">';
-    CBZ_ESTADOS.forEach(function(e){
+    // v13.214.0 — el conjunto depende del medio; el conteo de cada tarjeta es
+    // exactamente el mismo filtro de siempre.
+    cbzEstadosVisibles().forEach(function(e){
       var f = _cbz.rows.filter(function(r){
-        return r.estado===e[0] && (_cbz.medio==='todos' || r.medio===_cbz.medio); });
+        return cbzEstadoVisible(r.estado)===e[0] && (_cbz.medio==='todos' || r.medio===_cbz.medio); });
       var tot = f.reduce(function(a,r){ return a+_cbzN(r.monto); },0);
       h += '<button class="cbz-tab'+(_cbz.estado===e[0]?' on':'')+'" onclick="cbzSetEstado(\''+e[0]+'\')">' +
-           '<b>'+f.length+'</b><span>'+_cbzE(e[1])+'</span><i>'+_cbzF(tot)+'</i></button>';
+           '<b>'+f.length+'</b><span>'+_cbzE(cbzEtiquetaEstado(e))+'</span><i>'+_cbzF(tot)+'</i></button>';
     });
     h += '</div>';
 
@@ -53462,7 +53496,12 @@ function _chqEvCargarSync(cheques) {
   _chqEv.cargandoAsync = true;
   _chqEvCargar(cheques).then(function(){
     _chqEv.cargandoAsync = false;
-    try { if (typeof _cbzPintar === 'function') _cbzPintar(); } catch(e) {}
+    // v13.214.0 — la funcion se llama cbzRender, no _cbzPintar. El typeof
+    // hacia que fallara en silencio y el repintado NUNCA ocurria: los 81
+    // cheques quedaban en clase 'cargando' -> bandeja 'revisar' para siempre.
+    // Un solo repintado: _chqEv ya esta en memoria y cbzRender solo recorre
+    // _cbz.rows, no pide datos. El guard _chqEv.listo impide reentrar.
+    try { if (typeof cbzRender === 'function') cbzRender(); } catch(e) {}
   });
 }
 var _chqNum = { cheque_id:null, actual:null, historial:[], cargando:false, err:null,
