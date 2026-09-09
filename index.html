@@ -15765,6 +15765,71 @@ input.canales-exp-input[type="date"] {
   font-weight:800;font-size:13.5px;cursor:pointer;font-family:inherit;margin:3px 5px 3px 0}
 .cf-btn.pri{background:#B45309;color:#fff}.cf-btn.dan{border-color:#C62828;color:#C62828}
 .cf-btn:disabled{opacity:.42;cursor:not-allowed}
+/* ── v13.213.0 · navegación interna del tab Cobranzas ──────────────────── */
+.cbv-top{margin:0 0 14px}
+.cbv-h{font-size:21px;font-weight:800;margin:0 0 9px;color:#2b2b2b}
+.cbv-nav{display:flex;gap:8px}
+.cbv-t{flex:1 1 0;min-width:0;text-align:left;padding:9px 13px;border-radius:12px;
+  border:2px solid #E7DCCB;background:#fff;cursor:pointer;font-family:inherit;
+  font-weight:800;font-size:14px;color:#6B5B47;line-height:1.25}
+.cbv-t small{display:block;font-weight:500;font-size:11px;color:#9C8A72;margin-top:2px}
+.cbv-t.on{border-color:#B45309;background:#FFF7EC;color:#B45309}
+.cbv-t.on small{color:#B45309;opacity:.78}
+.cbv-t:focus-visible{outline:3px solid #E9B872;outline-offset:2px}
+.cbv-panel[hidden]{display:none}
+.cbv-sub{font-size:17px;font-weight:800;margin:0;color:#2b2b2b}
+.cbv-sub:focus{outline:none}
+.cbv-sub:focus-visible{outline:3px solid #E9B872;outline-offset:3px;border-radius:6px}
+.cbv-desc{font-size:12px;color:#8A7960;margin:2px 0 10px}
+@media (max-width:760px){
+  .cbv-h{font-size:19px}
+  /* Las dos opciones caben sin abrir ningún menú. */
+  .cbv-nav{gap:6px}
+  .cbv-t{padding:8px 10px;font-size:13px}
+  .cbv-t small{font-size:10px;line-height:1.3}
+}
+
+/* ── v13.213.0 · compactación de Trabajo diario ────────────────────────── */
+/* La barra era `display:flex;gap:8px` sin wrap ni flex en el input: el
+   buscador se comprimía a ~50px y el selector de período se salía del borde.
+   Acotado a #cbv-p-diario para no tocar los otros dos .ccx-search del archivo. */
+#cbv-p-diario .ccx-search{display:grid;gap:8px;align-items:center;
+  grid-template-columns:minmax(0,1fr) auto auto;grid-auto-rows:min-content}
+#cbv-p-diario .ccx-search>input#cbz-q{grid-column:1;min-width:0;width:100%;box-sizing:border-box}
+#cbv-p-diario .ccx-search>.btn1{grid-column:2;white-space:nowrap}
+#cbv-p-diario .ccx-search>select#cbz-dias{grid-column:3;max-width:100%}
+/* El botón de cheque salta a su propia fila y no reserva espacio si está oculto. */
+#cbv-p-diario .ccx-search>.cbz-new{grid-column:1/-1;grid-row:2;justify-self:start}
+#cbv-p-diario .ccx-search>style{display:none}
+/* Tarjetas más bajas, con jerarquía importe → cliente → estado → acción. */
+#cbv-p-diario .cnc-op{padding:8px 11px;margin-top:5px;line-height:1.35}
+#cbv-p-diario .cnc-op>b{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:14px}
+#cbv-p-diario .cnc-op>span{display:block;font-size:11.5px;color:#8A7960;margin-top:1px}
+#cbv-p-diario .cnc-op .chq-c{margin-left:0}
+/* "Detalles" tiene que parecer clicable. */
+#cbv-p-diario .cbz-det>summary{cursor:pointer;color:#B45309;font-weight:800;font-size:11.5px;
+  list-style:none;display:inline-flex;align-items:center;gap:5px;padding:3px 0}
+#cbv-p-diario .cbz-det>summary::-webkit-details-marker{display:none}
+#cbv-p-diario .cbz-det>summary::before{content:'\25B8';transition:transform .15s}
+#cbv-p-diario .cbz-det[open]>summary::before{transform:rotate(90deg)}
+#cbv-p-diario .cbz-det>summary:hover{text-decoration:underline}
+/* Métricas: aprovechan el ancho en escritorio en vez de formar una torre. */
+#cbv-p-diario .cbz-tabs{grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
+#cbv-p-diario .cbz-tab{padding:8px 11px}
+#cbv-p-diario .cbz-tab span{line-height:1.3}
+@media (max-width:760px){
+  /* Buscador en UNA fila completa; Buscar y período debajo, sin recortes. */
+  #cbv-p-diario .ccx-search{grid-template-columns:minmax(0,1fr) minmax(0,auto)}
+  #cbv-p-diario .ccx-search>input#cbz-q{grid-column:1/-1;grid-row:1}
+  #cbv-p-diario .ccx-search>.btn1{grid-column:1;grid-row:2;width:100%}
+  #cbv-p-diario .ccx-search>select#cbz-dias{grid-column:2;grid-row:2;width:100%;min-width:0}
+  #cbv-p-diario .ccx-search>.cbz-new{grid-column:1/-1;grid-row:3;justify-self:stretch;text-align:center}
+  #cbv-p-diario .cbz-tabs{grid-template-columns:1fr 1fr;gap:7px}
+  #cbv-p-diario .cbz-tab{padding:7px 9px}
+  #cbv-p-diario .cbz-tab span{font-size:10px;letter-spacing:.2px}
+  #cbv-p-diario .cnc-op>b{font-size:13.5px}
+}
+
 /* ── v13.212.0 · compactacion visual de Cobranzas ─────────────────────── */
 /* Acordeon de auditoria. Cerrado por defecto: es respaldo, no trabajo diario. */
 .cf-aud{margin:16px 0 0;border:1.5px solid #E7DCCB;border-radius:12px;background:#FEFCF8}
@@ -15796,7 +15861,7 @@ input.canales-exp-input[type="date"] {
 @media (max-width:760px){
   /* Bandejas: una fila que se desliza, sin apilarse en una torre. */
   .cf-band{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;
-    scroll-snap-type:x proximity;padding-bottom:4px;margin:8px -2px 10px}
+    scroll-snap-type:x proximity;padding-bottom:4px;margin:8px 0 10px}
   .cf-band::-webkit-scrollbar{height:4px}
   .cf-band::-webkit-scrollbar-thumb{background:#E7DCCB;border-radius:4px}
   .cf-tab{flex:0 0 auto;min-width:158px;scroll-snap-align:start}
@@ -15873,9 +15938,25 @@ input.canales-exp-input[type="date"] {
 }
 </style>
 
+<!-- v13.213.0 · cabecera unica del tab + navegacion interna -->
+<div class="cbv-top">
+  <h2 class="cbv-h">Cobranzas</h2>
+  <div class="cbv-nav" role="tablist" aria-label="Vistas de Cobranzas">
+    <button type="button" class="cbv-t on" id="cbv-t-diario" role="tab"
+            aria-selected="true" aria-controls="cbv-p-diario" tabindex="0"
+            onclick="cbvVer('diario')" onkeydown="cbvNavTecla(event)">
+      Trabajo diario<small>registrar MP, efectivo y cheques en TCK</small></button>
+    <button type="button" class="cbv-t" id="cbv-t-concil" role="tab"
+            aria-selected="false" aria-controls="cbv-p-concil" tabindex="-1"
+            onclick="cbvVer('concil')" onkeydown="cbvNavTecla(event)">
+      Conciliación con Xubio<small>cruce histórico contra el export</small></button>
+  </div>
+</div>
+
+<div class="cbv-panel" id="cbv-p-concil" role="tabpanel" aria-labelledby="cbv-t-concil" hidden>
 <section class="cf" id="cf-root">
   <div class="cf-hd">
-    <h3>Cobranzas</h3>
+    <h3 id="cbv-h-concil" tabindex="-1">Conciliación con Xubio</h3>
     <span id="cf-flag" class="cf-pill medio">cargando…</span>
     <button class="cf-btn" id="cf-b-refresh" onclick="cfCargar()">Actualizar</button>
     <button class="cf-btn" id="cf-b-csv" onclick="cfExportar()">Exportar CSV</button>
@@ -16337,7 +16418,12 @@ window.cfModuloVersion = '1.4-13.205.3';
 })();
 </script>
 
-    <div class="ccx-head"><h2>Cobranzas <span class="ccx-badge">SOLO LECTURA</span></h2></div>
+    </div><!-- /cbv-p-concil -->
+
+    <div class="cbv-panel" id="cbv-p-diario" role="tabpanel" aria-labelledby="cbv-t-diario">
+    <div class="ccx-head"><h3 class="cbv-sub" id="cbv-h-diario" tabindex="-1">Trabajo diario</h3>
+      <span class="ccx-badge">SOLO LECTURA</span></div>
+    <div class="cbv-desc">Registrar en TCK los cobros que ya entraron: MP, efectivo y cheques.</div>
     <!-- v13.194.3 - como entra cada medio. Que nadie interprete que faltan funciones. -->
     <details class="cbz-medios">
       <summary>C&oacute;mo se registra cada medio de cobro</summary>
@@ -16527,6 +16613,59 @@ window.cfModuloVersion = '1.4-13.205.3';
       </select>
     </div>
     <div id="cbz-cont"></div>
+    </div><!-- /cbv-p-diario -->
+<script>
+/* ═══ v13.213.0 · navegacion interna del tab Cobranzas ═══════════════════
+   Dos vistas, una visible a la vez. NO carga datos: las dos cargas siguen
+   disparandose desde cambiarTab() igual que antes (cfCargar incondicional,
+   cbzInit solo si no hay filas). Aca solo se alterna 'hidden', asi que el
+   DOM de la vista oculta se conserva entero: filtros, bandeja, busqueda y
+   paginacion siguen donde estaban al volver. */
+var _cbvVista = 'diario';
+function cbvVer(v, foco) {
+  if (v !== 'diario' && v !== 'concil') return;
+  _cbvVista = v;
+  [['diario','cbv-p-diario','cbv-t-diario'],['concil','cbv-p-concil','cbv-t-concil']]
+  .forEach(function (x) {
+    var act = (x[0] === v);
+    var p = document.getElementById(x[1]), t = document.getElementById(x[2]);
+    if (p) p.hidden = !act;
+    if (t) {
+      t.classList.toggle('on', act);
+      t.setAttribute('aria-selected', act ? 'true' : 'false');
+      t.tabIndex = act ? 0 : -1;
+    }
+  });
+  /* El foco va al titulo de la vista, no al principio del documento: el
+     usuario queda donde eligio estar. Solo cuando el cambio fue por teclado
+     o clic explicito, nunca al pintar. */
+  if (foco !== false) {
+    var h = document.getElementById(v === 'diario' ? 'cbv-h-diario' : 'cbv-h-concil');
+    if (h && typeof h.focus === 'function') { try { h.focus({ preventScroll: true }); } catch (e) { h.focus(); } }
+  }
+  cbvGate();
+}
+/* Flechas y Home/End entre las dos opciones, como corresponde a role=tablist. */
+function cbvNavTecla(ev) {
+  var k = ev.key;
+  if (k === 'ArrowRight' || k === 'ArrowDown') { ev.preventDefault(); cbvVer(_cbvVista === 'diario' ? 'concil' : 'diario'); }
+  else if (k === 'ArrowLeft' || k === 'ArrowUp') { ev.preventDefault(); cbvVer(_cbvVista === 'diario' ? 'concil' : 'diario'); }
+  else if (k === 'Home') { ev.preventDefault(); cbvVer('diario'); }
+  else if (k === 'End')  { ev.preventDefault(); cbvVer('concil'); }
+}
+/* El boton de registrar cheque solo tiene sentido con el medio Cheques
+   seleccionado. En Todos, MP y Efectivo se oculta: la accion es exclusiva
+   de ese circuito y su guard duro sigue intacto en cncConfirmar(). */
+function cbvGate() {
+  try {
+    var b = document.querySelector('.cbz-new');
+    if (!b) return;
+    var esCheques = (typeof _cbz !== 'undefined' && _cbz && _cbz.medio === 'cheques');
+    b.style.display = (_cbvVista === 'diario' && esCheques) ? '' : 'none';
+  } catch (e) {}
+}
+</script>
+
   </div>
 
   <!-- v13.183.0 - PAGOS A CONCILIAR (solo lectura) -->
@@ -49418,7 +49557,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.212.0';
+var TCK_VERSION = '13.213.0';
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
@@ -51908,6 +52047,8 @@ var CBZ_ESTADOS = [['pendientes','Sin registrar en TCK'],
 
   function cbzSetMedio(m){
     _cbz.medio = m;
+    // v13.213.0 — el boton de registrar cheque solo aparece con Cheques.
+    try { if (typeof cbvGate === 'function') cbvGate(); } catch (_eG) {}
     // v13.194.0: si hay busqueda activa se re-busca en el nuevo medio
     if (_cbz.busq && _cbz.busq.activa) { cbzBuscar(); return; }
     cbzCargar();
@@ -52586,6 +52727,8 @@ var CBZ_ESTADOS = [['pendientes','Sin registrar en TCK'],
   }
 
   function cbzInit() {
+    // v13.213.0 — sincroniza el boton de cheque con el medio actual al abrir.
+    try { if (typeof cbvGate === 'function') cbvGate(); } catch (_eG2) {}
     // v13.193.0 — el selector refleja el estado real al abrir el tab
     var sd = document.getElementById('cbz-dias');
     if (sd && String(sd.value) !== String(_cbz.dias)) sd.value = String(_cbz.dias);
