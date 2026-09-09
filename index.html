@@ -49340,7 +49340,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.209.0';
+var TCK_VERSION = '13.210.0';
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
@@ -51803,8 +51803,24 @@ function ccxInit(){
 
 
   var CBZ_MEDIOS  = [['todos','Todos'],['mp','MP'],['efectivo','Efectivo'],['cheques','Cheques']];
-  var CBZ_ESTADOS = [['pendientes','Pendientes'],['revisar','Para revisar'],
+  // v13.210.0 — 'Pendientes' agrupaba todo lo que no estaba imputado, y 'Para
+// revisar' era una bolsa de 70. Ahora cada clase de cheque tiene su bandeja y
+// su nombre real. Los medios que no son cheque (MP, efectivo) siguen usando
+// 'pendientes' y 'revisar' como siempre: no se les cambia la semantica.
+var CBZ_ESTADOS = [['pendientes','Sin registrar en TCK'],
+                     ['enxubio','En Xubio · falta completar TCK'],
+                     ['conciliar','Encontrados en Xubio · conciliar'],
+                     ['revisar','Coincidencias aproximadas · revisar'],
+                     ['contable','Revisión contable'],
                      ['confirmadas','Confirmadas'],['problemas','Problemas']];
+
+  // Mapa clase de cheque -> bandeja. Unico lugar donde se decide, para que las
+  // tres rutas que arman filas de cheques no puedan divergir.
+  var CHQ_BANDEJA = { completo:'confirmadas', enxubio:'enxubio', conciliar:'conciliar',
+                      revision:'revisar', contable:'contable', sinreg:'pendientes',
+                      rechazado:'problemas', cargando:'revisar' };
+  // Bandejas que se sirven del universo cobranza_id IS NULL.
+  var CHQ_BANDEJAS_SIN_COBRANZA = ['pendientes','enxubio','conciliar','revisar','contable'];
 
   function _cbzN(v){ var n=Number(v); return isFinite(n)?n:0; }
   function _cbzF(n){ return '$'+Math.round(_cbzN(n)).toLocaleString('es-AR'); }
@@ -51820,7 +51836,11 @@ function ccxInit(){
   }
   function cbzSetEstado(e){
     var prev = _cbz.estado; _cbz.estado = e;
-    var recarga = (prev==='pendientes') !== (e==='pendientes');
+    // v13.210.0 — solo hace falta recargar si se cruza el borde del universo
+    // "sin cobranza local", no en cada cambio entre esas cinco bandejas.
+    var _a = CHQ_BANDEJAS_SIN_COBRANZA.indexOf(prev) !== -1;
+    var _b = CHQ_BANDEJAS_SIN_COBRANZA.indexOf(e)    !== -1;
+    var recarga = _a !== _b;
     if (recarga && (_cbz.medio==='todos' || _cbz.medio==='cheques')) cbzCargar(); else cbzRender();
   }
   // v13.193.0 — el <select> vive FUERA de cbz-cont, asi que cbzRender() no lo
@@ -52055,10 +52075,9 @@ function ccxInit(){
       foto: c.foto_url || null,
       // v13.194.2 — con cobranza_id el cheque ya esta imputado
       // v13.209.0 — sin cobranza_id NO es 'pendiente': puede estar ya en Xubio.
+      // v13.210.0 — cada clase tiene su bandeja propia.
       estado: (function(){ var k = chqClasificar(c).k;
-                 return k==='completo' ? 'registrada'
-                      : k==='rechazado' ? 'problemas'
-                      : k==='sinreg'    ? 'pendientes' : 'revisar'; })(),
+                 return k==='completo' ? 'registrada' : (CHQ_BANDEJA[k] || 'revisar'); })(),
       fuente: 'cheque', cobranzaId: c.cobranza_id || null,
       registrada: !!c.cobranza_id,
       etiqueta: c.cobranza_id ? ('Cobranza ' + c.cobranza_id) : 'Sin registrar', accion:'\u2014',
@@ -52262,8 +52281,10 @@ function ccxInit(){
       // 42 dias caia en la posicion 557, fuera del corte, sin aviso alguno.
       pideMP  ? sbFetch('vw_mp_a_conciliar?fecha=gte.'+desde+'&select=*&order=fecha.desc&limit=1000') : Promise.resolve([]),
       // v13.183.0: un cheque sin cobranza es pendiente sin importar cuando entro.
+      // v13.210.0 — las bandejas de cheques sin cobranza local son cinco, no una:
+      // todas necesitan el mismo universo (cobranza_id IS NULL).
       pideChq ? sbFetch('cheques_recibidos?' +
-                 (_cbz.estado==='pendientes'
+                 (CHQ_BANDEJAS_SIN_COBRANZA.indexOf(_cbz.estado) !== -1
                    ? 'cobranza_id=is.null&select=*&order=created_at.desc&limit=500'
                    : 'created_at=gte.'+desde+'&select=*&order=created_at.desc&limit=300'))
               : Promise.resolve([]),
@@ -52309,10 +52330,8 @@ function ccxInit(){
       _chqEvCargarSync(res[1].value||[]);
       (res[1].value||[]).forEach(function(c){
         var _cl = chqClasificar(c);
-        var est = (_cl.k==='rechazado') ? 'problemas'
-                : (_cl.k==='completo')  ? 'confirmadas'
-                : (_cl.k==='sinreg')    ? 'pendientes'
-                : 'revisar';
+        // v13.210.0 — una bandeja por clase, no una bolsa 'revisar' con 70 adentro.
+        var est = CHQ_BANDEJA[_cl.k] || 'revisar';
         out.push({ medio:'cheques', icono:'CHQ', ref:c.numero_cheque, fecha:c.created_at, monto:c.monto,
           cliente:c.cliente, factura:null, residual:null, estado:est,
           etiqueta: _cl.txt,
@@ -52808,8 +52827,10 @@ function ccxInit(){
                 : (todos.length + ' cheques sin cobranza local')) + '</div>';
     if (!_cnc.qch && _chqEv.listo) {
       h += '<div class="chq-res">';
-      [['completo','Completo en TCK'],['enxubio','En Xubio'],['conciliar','Conciliar'],
-       ['revision','Revisión'],['sinreg','Sin registrar'],['contable','Contable']].forEach(function(pp){
+      [['completo','Completo en TCK'],['enxubio','En Xubio · falta completar TCK'],
+       ['conciliar','Encontrados en Xubio · conciliar'],['revision','Coincidencias aproximadas · revisar'],
+       ['sinreg','Sin registrar en TCK'],['contable','Revisión contable'],
+       ['rechazado','Rechazados']].forEach(function(pp){
         if (res[pp[0]]) h += '<span>' + _cbzE(pp[1]) + ' <b>' + res[pp[0]] + '</b></span>';
       });
       h += '</div>';
@@ -53081,7 +53102,7 @@ var CHQ_CLASES = {
   enxubio:   { n:2, txt:'En Xubio · falta completar en TCK',  cls:'chq-c-xub',  accion:null },
   conciliar: { n:3, txt:'Encontrado en Xubio · conciliar',    cls:'chq-c-conc', accion:null },
   revision:  { n:4, txt:'Requiere revisión',                  cls:'chq-c-rev',  accion:null },
-  sinreg:    { n:5, txt:'Sin registrar',                      cls:'chq-c-sin',  accion:'registrar' },
+  sinreg:    { n:5, txt:'Sin registrar en TCK',                cls:'chq-c-sin',  accion:'registrar' },
   contable:  { n:6, txt:'Depositado/acreditado · revisión contable', cls:'chq-c-cont', accion:null }
 };
 
@@ -53129,20 +53150,38 @@ function chqClasificar(c) {
       ev: _chqEv.vinculos[String(c.id)] ? 'vínculo con Xubio' : 'xubio_estado ' + xe }, CHQ_CLASES.enxubio);
   }
 
-  var cli = _chqEv.clientes[c.pedido_id];
+  // v13.210.0 — REGLA DE CLIENTE.
+  // Antes, con cliente_xubio_id sin resolver el filtro de cliente simplemente no
+  // se aplicaba y la evidencia decia "mismo cliente": una afirmacion que los
+  // datos NO respaldan. Solo estaba demostrado el importe.
+  // Ahora:
+  //   · cliente resuelto  -> cliente+importe+vto = conciliar · cliente+importe = revision
+  //   · cliente NULL      -> NUNCA conciliar. Como mucho revision, y la evidencia
+  //                          dice "cliente local sin resolver".
+  var cli = _chqEv.clientes[c.pedido_id] || null;
   var imp = Number(c.monto), vto = String(c.fecha_vencimiento || '');
   var exacto = null, parcial = null;
   _chqEv.espejo.forEach(function(x){
     if (x.imp !== imp) return;
-    if (cli && x.cli !== cli) return;
+    if (cli && x.cli !== cli) return;   // con cliente resuelto, tiene que coincidir
     if (x.vto === vto) { if (!exacto) exacto = x; }
     else               { if (!parcial) parcial = x; }
   });
 
-  if (exacto) return Object.assign({ k:'conciliar',
-    ev:'recibo ' + exacto.recibo + ' · N.º ' + exacto.num + ' · mismo cliente, importe y vencimiento' }, CHQ_CLASES.conciliar);
-  if (parcial) return Object.assign({ k:'revision',
-    ev:'recibo ' + parcial.recibo + ' · N.º ' + parcial.num + ' · mismo cliente e importe, vence ' + parcial.vto + ' en Xubio' }, CHQ_CLASES.revision);
+  if (!cli) {
+    // Sin cliente local no se puede afirmar que sea el mismo cheque: como mucho,
+    // revisar. Nunca 'conciliar', ni aunque coincidan importe y vencimiento.
+    var m = exacto || parcial;
+    if (m) return Object.assign({ k:'revision',
+      ev:'recibo ' + m.recibo + ' · N.º ' + m.num + ' · coincide el importe' +
+         (exacto ? ' y el vencimiento' : ', vence ' + m.vto + ' en Xubio') +
+         ' · cliente local sin resolver' }, CHQ_CLASES.revision);
+  } else {
+    if (exacto) return Object.assign({ k:'conciliar',
+      ev:'recibo ' + exacto.recibo + ' · N.º ' + exacto.num + ' · mismo cliente, importe y vencimiento' }, CHQ_CLASES.conciliar);
+    if (parcial) return Object.assign({ k:'revision',
+      ev:'recibo ' + parcial.recibo + ' · N.º ' + parcial.num + ' · mismo cliente e importe, vence ' + parcial.vto + ' en Xubio' }, CHQ_CLASES.revision);
+  }
 
   var est = String(c.estado || '');
   if (est === 'depositado' || est === 'acreditado')
@@ -53172,13 +53211,18 @@ function _chqClaseBloque(ch) {
     completo:  'Este cheque ya tiene su cobranza local. No hay nada que registrar.',
     enxubio:   '<b>Ya está en Xubio.</b> Falta completarlo en TCK. La acción local correcta todavía no está definida: se resuelve en la próxima versión. <b>No</b> se ofrece registrar para no duplicar.',
     conciliar: '<b>Este cheque ya existe en Xubio.</b> Hay que conciliarlo contra el recibo encontrado, no volver a crearlo. La conciliación se hace en la próxima versión.',
-    revision:  '<b>Coincidencia aproximada en Xubio</b> (mismo cliente e importe, otro vencimiento). Puede ser el mismo cheque con la fecha mal tipeada. Revisar antes de registrar nada.',
+    revision:  '<b>Coincidencia aproximada en Xubio.</b> Puede ser el mismo cheque. Revisar antes de registrar nada.',
+    revision_sincli: '<b>Coincidencia por importe en Xubio</b>, pero el cliente local del pedido no está resuelto: <b>no se puede afirmar que sea el mismo cheque</b>. Revisar a mano antes de registrar nada.',
     contable:  'El cheque figura depositado o acreditado y no tiene registro. Revisar el circuito con el contador.',
     rechazado: 'Cheque rechazado: no se imputa.',
     cargando:  'Verificando contra Xubio antes de habilitar cualquier acción…'
   };
   if (cl.k !== 'sinreg') {
-    h += '<div class="chq-nobtn">' + (m[cl.k] || '') + '</div>';
+    // v13.210.0 — si la evidencia dice que el cliente no esta resuelto, el texto
+    // no puede hablar de "mismo cliente".
+    var _k = (cl.k === 'revision' && /cliente local sin resolver/.test(cl.ev || ''))
+             ? 'revision_sincli' : cl.k;
+    h += '<div class="chq-nobtn">' + (m[_k] || '') + '</div>';
   } else {
     h += '<div class="chq-nobtn">Sin rastro en Xubio. Podés <b>registrar la cobranza en TCK</b>: ' +
          'crea la cobranza local y la imputación contra la factura. <b>No crea nada en Xubio.</b></div>';
@@ -53432,7 +53476,7 @@ async function chqNumGuardar() {
 function _cncPintar() {
     if (!_cnc) return;
     var h = '<div class="cnc-box">' +
-      '<div class="cnc-hd"><b>Imputar cheque' +
+      '<div class="cnc-hd"><b>Registrar cheque en TCK' +
         (_cnc.paso !== 'medio' && _cnc.paso !== 'ok' ? ' · Cheque' : '') + '</b>' +
         '<button onclick="cncCerrar()" class="cnc-x">&times;</button></div>';
 
