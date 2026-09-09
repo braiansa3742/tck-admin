@@ -1,5 +1,18 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.207.0 — 09/09/2026
+     v13.207.0: EL PANEL DE RENDICION VE LAS NO ENTREGAS.
+       rvCargar traia solo estado=in.(entregado,pendiente). Una devolucion de
+       una entrega 'no_entregado' quedaba invisible: no aparecia en la grilla
+       y, sobre todo, no contaba en _devPend, asi que NO trababa la rendicion.
+       · + no_entregado en el fetch de entregas del panel.
+       · _rvTot devuelve 0 para no_entregado: una no entrega no espera plata.
+         Imprescindible por los ~95 no_entregado historicos SIN devolucion:
+         sin esto entraban a la grilla esperando su importe completo.
+       Sin cambios en cobranzas, transferencias, cheques ni en el resto del
+       panel. Acompana a tck-ventas v14.181/182 y a la migracion
+       migracion_no_entrega_v3.sql.
+
      TCK ADMIN — v13.201.0 — 08/09/2026
      v13.201.0: EDITOR DE PEDIDOS PARA ADMIN (Braian/Chan/Francisco) — CIERRE.
      Lo que le faltaba al port del editor de ventas (v13.199.0 propuesto)
@@ -19538,7 +19551,10 @@ function _rvDev(e){
   if (_rvDevEnt[e.id] != null) return _rvN(_rvDevEnt[e.id]);
   return _rvN(_rvDevPed[String(e.pedido_id||'')]);
 }
-function _rvTot(e){ return Math.max(0, _rvN(e.monto) - _rvDev(e)); }
+// v13.207.0 — una entrega no_entregado NUNCA espera plata: la mercaderia vuelve.
+// Vale con o sin devolucion cargada, asi los no_entregado historicos (sin
+// devolucion) no inflan el esperado del viaje al entrar a la grilla.
+function _rvTot(e){ if (e && e.estado === 'no_entregado') return 0; return Math.max(0, _rvN(e.monto) - _rvDev(e)); }
 function _rvSumInc(instr){
   return _rvEnt.reduce(function(a,e){ return a+(_rvIncluir[e.id]?_rvN(_rvCobro[e.id][instr]):0); },0);
 }
@@ -19552,7 +19568,9 @@ async function rvCargar(){
     if(!viajes.length){ _rvViajes=[]; rvRenderLista(); return; }
     var ids = viajes.map(function(v){ return '"'+v.id+'"'; }).join(',');
     // v13.80: traemos también las 'pendiente' (entregas que el chofer NO marcó) para poder rendirlas
-    var ents = await _tesFetch("entregas?viaje_id=in.("+ids+")&estado=in.(entregado,pendiente)&select=id,viaje_id,cliente,ciudad,pedido_id,monto,forma_cobro,detalle_cobro,transfer_conciliada,rendicion_estado,estado&limit=3000");
+    // v13.207.0: + no_entregado. Sin esto una devolucion total (tipo
+    // 'no_entrega_total') era invisible para el panel y no trababa la rendicion.
+    var ents = await _tesFetch("entregas?viaje_id=in.("+ids+")&estado=in.(entregado,pendiente,no_entregado)&select=id,viaje_id,cliente,ciudad,pedido_id,monto,forma_cobro,detalle_cobro,transfer_conciliada,rendicion_estado,estado&limit=3000");
     ents = ents || [];
     var porViaje={}, smViaje={};   // porViaje = entregado · smViaje = pendiente (sin marcar)
     ents.forEach(function(e){
