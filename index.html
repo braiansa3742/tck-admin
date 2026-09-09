@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.207.0 — 09/09/2026
+     TCK ADMIN — v13.208.0 — 09/09/2026
      v13.207.0: EL PANEL DE RENDICION VE LAS NO ENTREGAS.
        rvCargar traia solo estado=in.(entregado,pendiente). Una devolucion de
        una entrega 'no_entregado' quedaba invisible: no aparecia en la grilla
@@ -16311,7 +16311,40 @@ window.cfModuloVersion = '1.4-13.205.3';
           letter-spacing:.8px;margin:2px 0 8px}
         .cnc-nota-medios{margin-top:10px;padding:10px 12px;background:#FAF4EC;border:1px solid #E7DCCB;
           border-radius:10px;font-size:12.5px;line-height:1.45;color:#6B5B47}
-        .cnc-bxubio{margin-left:8px;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:800;
+        /* ── v13.208.0 · CHEQUE-5 · N.º real del cheque para Xubio ──
+       Paleta tomada del propio tab Cobranzas: fondo blanco, sepia #8A7960 para
+       rotulos, ambar #B45309 para acciones, verde #1E8449 y rojo #B71C1C para
+       estados. Nada de fondos oscuros: el Admin es tema claro. */
+    .chq-idtrx{display:block;font-size:11px;color:#9C8A72;letter-spacing:.02em;margin-top:2px}
+    .chq-est{margin:6px 0 8px}
+    .chq-b{display:inline-block;padding:3px 9px;border-radius:20px;font-size:10px;font-weight:900;
+      letter-spacing:.4px;text-transform:uppercase}
+    .chq-b-falta{background:#FFF7EC;color:#B45309;border:1px solid #E9B872}
+    .chq-b-ok{background:#F1FBF5;color:#1E8449;border:1px solid #1E8449}
+    .chq-b-xubio{background:#E8F5E9;color:#2E7D32;border:1px solid #A5D6A7}
+    .chq-b-cob{background:#F3F0FB;color:#5B4B9E;border:1px solid #C6BCEA}
+    .chq-num{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;font-size:15px}
+    .chq-accion{display:block;width:100%;margin-top:8px;padding:10px;border-radius:10px;
+      border:1.5px solid #B45309;background:#FFF7EC;color:#B45309;font-weight:800;font-size:13px;cursor:pointer}
+    .chq-accion[disabled]{opacity:.55;cursor:default}
+    .chq-hist{margin-top:6px;border-top:1px solid #EEE3D2;padding-top:6px}
+    .chq-hl{padding:6px 0;border-bottom:1px solid #F5EFE4;font-size:12px;color:#3A3226}
+    .chq-hl span{display:block;font-size:11px;color:#9C8A72;margin-top:2px;line-height:1.45}
+    .chq-ov{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.5);display:flex;
+      align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto}
+    .chq-md{background:#fff;border-radius:16px;max-width:440px;width:100%;padding:16px;margin:auto}
+    .chq-lb{display:block;margin:10px 0;font-size:11.5px;font-weight:800;color:#5C5040}
+    .chq-lb i{font-style:normal;font-weight:500;color:#9C8A72}
+    .chq-lb input,.chq-lb select,.chq-lb textarea{display:block;width:100%;margin-top:4px;padding:9px 10px;
+      border-radius:10px;border:1px solid #EEE3D2;background:#fff;color:#3A3226;font-size:14px;
+      font-weight:500;box-sizing:border-box}
+    .chq-lb input:focus,.chq-lb select:focus,.chq-lb textarea:focus{outline:2px solid #E9B872;outline-offset:-1px}
+    .chq-lb input#chq-f-num{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+      letter-spacing:.14em;font-size:18px;font-weight:700}
+    .chq-op{margin:14px 0 2px;font-size:10.5px;font-weight:900;letter-spacing:.5px;
+      text-transform:uppercase;color:#8A7960}
+    .chq-btns{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-top:16px}
+    .cnc-bxubio{margin-left:8px;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:800;
           text-transform:uppercase;letter-spacing:.5px;vertical-align:middle;
           background:#E8F5E9;color:#2E7D32;border:1px solid #C8E6C9}
         .cbz-foto{margin:8px 0 0;padding:7px 12px;background:#E8F5E9;border:1px solid #C8E6C9;
@@ -52637,9 +52670,13 @@ function ccxInit(){
     _cncPintar();
   }
 
-  function cncCerrar(){ var o=document.getElementById('cnc-ov'); if(o) o.remove(); _cnc=null; }
+  function cncCerrar(){ var o=document.getElementById('cnc-ov'); if(o) o.remove(); _cnc=null;
+    _chqNumReset();
+    try { var _ch2=document.getElementById('chq-modal-host'); if(_ch2) _ch2.innerHTML=''; } catch(_e) {} }
 
   function cncVolver() {
+  _chqNumReset();
+  try { var _ch = document.getElementById('chq-modal-host'); if (_ch) _ch.innerHTML = ''; } catch(_e) {}
     if (!_cnc) return;
     _cnc.paso = 'cheque'; _cnc.ch = null; _cnc.ped = null; _cnc.cliente = null;
     _cnc.cliNom = ''; _cnc.docs = []; _cnc.imput = {}; _cnc.busq = [];
@@ -52711,9 +52748,14 @@ function ccxInit(){
       // imputado contra factura, y 51 de 63 tienen facturas abiertas.
       var bdg = (c.xubio_estado === 'reconciliado' || c.xubio_estado === 'exportado')
         ? '<span class="cnc-bxubio">ya en Xubio</span>' : '';
+      // v13.208.0 · CHEQUE-5 — lo que TCK guarda en numero_cheque es el ID de
+      // TRANSACCION del eCheq, no el numero bancario. Se etiqueta para que nadie
+      // los confunda. El N.º real vive en cheque_numero_xubio y se resuelve al
+      // abrir el detalle: cheque_numero_historial() es por cheque y no acepta
+      // lotes, asi que pedirlo para los 300 de la lista serian 300 RPC.
       h += '<button class="cnc-op" onclick="cncElegirCheque(\'' + _cbzE(String(c.id)) + '\')">' +
-        '<b>' + _cbzE(c.banco||'?') + ' ' + _cbzE(c.numero_cheque||'?') + ' · ' + _cbzF(c.monto) +
-          bdg + '</b>' +
+        '<b>' + _cbzE(c.banco||'?') + ' · ' + _cbzF(c.monto) + bdg + '</b>' +
+        '<span class="chq-idtrx">ID trx ' + _cbzE(c.numero_cheque||'?') + '</span>' +
         '<span>' + (c.cliente ? _cbzE(c.cliente) + ' · ' : '') +
         (c.pedido_id ? 'pedido ' + _cbzE(c.pedido_id) : 'sin pedido') +
         (c.fecha_vencimiento ? ' · vence ' + _cbzE(_cbzD(c.fecha_vencimiento)) : '') +
@@ -52730,7 +52772,14 @@ function ccxInit(){
     _cnc.ch = c; _cnc.ped = null; _cnc.cliente = null; _cnc.cliNom = '';
     _cnc.docs = []; _cnc.imput = {}; _cnc.busq = []; _cnc.metodo = null;
     _cnc.confirmoSinPedido = false; _cnc.err = null;
-    _cnc.paso = 'detalle'; _cnc.cargando = true; _cncPintar();
+    _cnc.paso = 'detalle'; _cnc.cargando = true;
+    // v13.208.0 · CHEQUE-5 — el N.º real se lee aca: una sola RPC por cheque,
+    // no en la lista (serian 300). No bloquea el resto del detalle.
+    _chqNumReset(); _chqNum.cheque_id = String(id); _chqNum.cargando = true;
+    _cncPintar();
+    _chqNumCargar(String(id)).then(function(){
+      if (_cnc && _cnc.paso === 'detalle') _cncPintar();
+    });
     try {
       if (c.pedido_id) {
         var p = await sbFetch('pedidos_zona?pedido_id=eq.' + encodeURIComponent(c.pedido_id) +
@@ -52864,7 +52913,267 @@ function ccxInit(){
   }
 
   // ── render ─────────────────────────────────────────────────────────
-  function _cncPintar() {
+  
+// ═══════════════════════════════════════════════════════════════════════════
+//  v13.208.0 · CHEQUE-5 · N.º REAL DEL CHEQUE PARA XUBIO
+//
+//  TCK guarda en cheques_recibidos.numero_cheque el ID de TRANSACCION del
+//  eCheq (11-15 caracteres). El numero BANCARIO del cheque (7-8 digitos, con
+//  sus ceros) vive en cheque_numero_xubio y es el unico que puede viajar a
+//  Xubio. Evidencia: de 66 vinculos historicos, cuando TCK guarda 8 digitos el
+//  numero coincide con Xubio en el 94%; cuando guarda 11 o 14, en el 0%.
+//
+//  CONTRATO REAL, verificado sobre lo instalado. No se inventa ni un parametro:
+//    cheque_numero_historial(p_cheque_id uuid) -> jsonb {actual, historial}
+//        authenticated OK · service_role OK · anon NO
+//    cheque_numero_registrar(p_cheque_id uuid, p_numero_real text,
+//        p_origen text, p_evidencia_ref text, p_motivo text DEFAULT NULL,
+//        p_cuit_librador text DEFAULT NULL, p_cmc7 text DEFAULT NULL,
+//        p_id_bancario text DEFAULT NULL) -> jsonb
+//        authenticated OK · service_role OK · anon NO
+//    cheque_cobranza_preparar -> authenticated NO. Es interna de service_role:
+//        este tab NO la llama ni la expone.
+//
+//  Por eso los estados se limitan a lo demostrable con estos datos. NO se
+//  muestra "requiere revision" ni "apto para postear": necesitarian el
+//  preflight interno, que el Admin no puede ejecutar.
+//
+//  El numero es TEXTO SIEMPRE. Nunca Number(): '00002082' daria 2082 y el
+//  cheque seria otro.
+//
+//  Ninguna funcion de aca escribe tablas: todo pasa por las dos RPC.
+// ═══════════════════════════════════════════════════════════════════════════
+
+var _chqNum = { cheque_id:null, actual:null, historial:[], cargando:false, err:null,
+                modal:null, verHist:false, guardando:false };
+
+// dueno y cobranzas registran/corrigen; el contador solo consulta. El rol real
+// lo revalida la RPC server-side contra app_usuarios: esto es solo para no
+// mostrar un boton que va a fallar.
+function _chqPuedeEditar() {
+  return typeof rolActual !== 'undefined' && (rolActual === 'dueno' || rolActual === 'cobranzas');
+}
+
+function _chqNumReset() {
+  _chqNum = { cheque_id:null, actual:null, historial:[], cargando:false, err:null,
+              modal:null, verHist:false, guardando:false };
+}
+
+// Lee el numero vigente y su auditoria. Una sola RPC por cheque.
+async function _chqNumCargar(chequeId) {
+  _chqNum.cheque_id = String(chequeId);
+  _chqNum.actual = null; _chqNum.historial = []; _chqNum.err = null;
+  _chqNum.cargando = true;
+  try {
+    var out = await sbFetch('rpc/cheque_numero_historial', {
+      method: 'POST', body: JSON.stringify({ p_cheque_id: String(chequeId) })
+    });
+    var d = (out && out.actual !== undefined) ? out : ((out && out[0]) || {});
+    _chqNum.actual    = d.actual || null;
+    _chqNum.historial = d.historial || [];
+  } catch (e) {
+    _chqNum.err = 'No se pudo leer el N.º real: ' + String((e && e.message) || e).slice(0, 90);
+  }
+  _chqNum.cargando = false;
+}
+
+// Estados demostrables con lo que el Admin ya conoce: cheques_recibidos
+// (cobranza_id, xubio_estado) y la presencia del numero real.
+function _chqEstado(ch) {
+  if (ch && ch.cobranza_id) return { k:'cobranza', txt:'Con cobranza local', cls:'chq-b-cob' };
+  if (ch && (ch.xubio_estado === 'reconciliado' || ch.xubio_estado === 'exportado'))
+    return { k:'xubio', txt:'Ya registrado en Xubio', cls:'chq-b-xubio' };
+  if (_chqNum.actual) return { k:'ok', txt:'Número verificado', cls:'chq-b-ok' };
+  return { k:'falta', txt:'Falta número real', cls:'chq-b-falta' };
+}
+
+function _chqNumBloque() {
+  var ch = (_cnc && _cnc.ch) ? _cnc.ch : {};
+  var st = _chqEstado(ch);
+  var h  = '<div class="cnc-sec">N.º real del cheque para Xubio</div>';
+
+  if (_chqNum.cargando) return h + '<div class="cnc-vacio">Leyendo el N.º real…</div>';
+  if (_chqNum.err)      h += '<div class="cnc-alerta">' + _cbzE(_chqNum.err) + '</div>';
+
+  h += '<div class="chq-est"><span class="chq-b ' + st.cls + '">' + _cbzE(st.txt) + '</span></div>';
+
+  var a = _chqNum.actual;
+  if (a) {
+    h += '<div class="cnc-ev">' +
+         '<div><span>N.º real</span><b class="chq-num">' + _cbzE(a.numero_real) + '</b></div>' +
+         '<div><span>Origen</span><b>' + _cbzE(a.origen) + '</b></div>' +
+         '<div><span>Verificado por</span><b>' + _cbzE(a.verificado_por) + '</b></div>' +
+         '<div><span>Cuándo</span><b>' + _cbzE(_cbzD(a.verificado_en)) + '</b></div>' +
+         '<div><span>Evidencia</span><b>' + _cbzE(a.evidencia_ref) + '</b></div>';
+    if (a.cuit_librador) h += '<div><span>CUIT librador</span><b>' + _cbzE(a.cuit_librador) + '</b></div>';
+    if (a.cmc7)          h += '<div><span>CMC7</span><b>' + _cbzE(a.cmc7) + '</b></div>';
+    if (a.id_bancario)   h += '<div><span>ID bancario</span><b>' + _cbzE(a.id_bancario) + '</b></div>';
+    h += '</div>';
+  } else {
+    h += '<div class="cnc-nota" style="text-align:left">' +
+         'El ID de transacción del eCheq no sirve como número de cheque en Xubio. ' +
+         'Hay que cargar el número bancario: el de 7 u 8 dígitos del listado del banco.' +
+         '</div>';
+  }
+
+  if (_chqPuedeEditar()) {
+    h += '<button class="chq-accion" onclick="chqNumAbrir(' + (a ? 'true' : 'false') + ')">' +
+         (a ? 'Corregir número' : 'Registrar número') + '</button>';
+  } else {
+    h += '<div class="cnc-nota" style="text-align:left">Tu rol puede consultar el N.º real, no modificarlo.</div>';
+  }
+
+  if ((_chqNum.historial || []).length) {
+    h += '<button class="cbr-lnk" style="display:block;margin-top:6px" onclick="chqHistToggle()">' +
+         (_chqNum.verHist ? 'ocultar historial' : 'ver historial (' + _chqNum.historial.length + ')') +
+         '</button>';
+    if (_chqNum.verHist) {
+      h += '<div class="chq-hist">';
+      _chqNum.historial.forEach(function(l){
+        h += '<div class="chq-hl"><b>' + _cbzE(l.accion) + '</b> · ' +
+             (l.valor_anterior ? _cbzE(l.valor_anterior) + ' → ' : '') + _cbzE(l.valor_nuevo) +
+             '<span>' + _cbzE(l.actor) + ' · ' + _cbzE(_cbzD(l.registrado_en)) +
+             ' · ' + _cbzE(l.origen) + ' · ' + _cbzE(l.evidencia_ref) +
+             (l.motivo ? ' · ' + _cbzE(l.motivo) : '') + '</span></div>';
+      });
+      h += '</div>';
+    }
+  }
+  return h;
+}
+
+function chqHistToggle() { _chqNum.verHist = !_chqNum.verHist; _cncPintar(); }
+
+// ── modal de alta / correccion ──
+function chqNumAbrir(esCorreccion) {
+  if (!_chqPuedeEditar()) { toast('Tu rol no puede modificar el N.º real', 'err'); return; }
+  _chqNum.modal = { correccion: !!esCorreccion, err: null };
+  _chqModalMontar();
+}
+function chqNumCerrar() {
+  _chqNum.modal = null;
+  var host = document.getElementById('chq-modal-host');
+  if (host) host.innerHTML = '';
+}
+
+function _chqModalMontar() {
+  var m = _chqNum.modal;
+  var host = document.getElementById('chq-modal-host');
+  if (!host) {
+    host = document.createElement('div'); host.id = 'chq-modal-host';
+    document.body.appendChild(host);
+  }
+  if (!m) { host.innerHTML = ''; return; }
+
+  var a = _chqNum.actual;
+  var h = '<div class="chq-ov"><div class="chq-md">' +
+    '<div class="cnc-hd"><b>' + (m.correccion ? 'Corregir' : 'Registrar') + ' N.º real</b>' +
+    '<button class="cnc-x" onclick="chqNumCerrar()">&times;</button></div>';
+  if (m.err) h += '<div class="cnc-alerta">' + _cbzE(m.err) + '</div>';
+  h += '<label class="chq-lb">N.º real del cheque <i>(como figura en el banco, con los ceros)</i>' +
+       '<input id="chq-f-num" type="text" inputmode="numeric" autocomplete="off" maxlength="10" ' +
+       'placeholder="09664997" value="' + _cbzE((a && m.correccion) ? a.numero_real : '') + '"></label>' +
+       '<label class="chq-lb">Origen' +
+       '<select id="chq-f-origen">' +
+       '<option value="listado_galicia">listado_galicia</option>' +
+       '<option value="pdf_galicia">pdf_galicia</option>' +
+       '<option value="verificacion_manual">verificacion_manual</option>' +
+       '<option value="xubio_reconciliacion">xubio_reconciliacion</option>' +
+       '</select></label>' +
+       '<label class="chq-lb">Evidencia <i>(archivo o pantalla · obligatorio)</i>' +
+       '<input id="chq-f-ev" type="text" autocomplete="off" ' +
+       'placeholder="ListadoChequesRecibidos-2026-09-09.csv"></label>';
+  if (m.correccion) {
+    h += '<label class="chq-lb">Motivo del cambio <i>(obligatorio)</i>' +
+         '<textarea id="chq-f-motivo" rows="2" placeholder="por qué cambia el número"></textarea></label>';
+  }
+  h += '<div class="chq-op">Opcionales · mejoran la detección de duplicados</div>' +
+       '<label class="chq-lb">CUIT del librador' +
+       '<input id="chq-f-cuit" type="text" inputmode="numeric" maxlength="11" placeholder="20252379593"></label>' +
+       '<label class="chq-lb">CMC7' +
+       '<input id="chq-f-cmc7" type="text" inputmode="numeric" maxlength="30" placeholder="01435764650992904506760523594"></label>' +
+       '<label class="chq-lb">ID bancario' +
+       '<input id="chq-f-idb" type="text" autocomplete="off" placeholder="G0QNDDK76XGNEXY"></label>' +
+       '<div class="chq-btns">' +
+       '<button class="cbr-lnk" onclick="chqNumCerrar()">cancelar</button>' +
+       '<button class="chq-accion" style="width:auto;margin:0;padding:9px 18px" ' +
+       (_chqNum.guardando ? 'disabled' : '') + ' onclick="chqNumGuardar()">' +
+       (_chqNum.guardando ? 'Guardando…' : 'Guardar') + '</button>' +
+       '</div></div></div>';
+  host.innerHTML = h;
+  var sel = document.getElementById('chq-f-origen');
+  if (sel && a && m.correccion) sel.value = a.origen;
+}
+
+// Traduce el error de la RPC a algo accionable. Los codigos salen del contrato
+// real de cheque_numero_registrar, no de suposiciones.
+function _chqMsgError(raw) {
+  var t = String(raw || '');
+  if (t.indexOf('NUMERO_INVALIDO') >= 0)
+    return 'El número tiene que ser de 4 a 10 dígitos. Si pusiste el de 11 o más, ese es el ID de transacción del eCheq, no el número del cheque.';
+  if (t.indexOf('EVIDENCIA_REQUERIDA') >= 0)   return 'Falta decir contra qué archivo o pantalla verificaste el número (mínimo 8 caracteres).';
+  if (t.indexOf('MOTIVO_REQUERIDO') >= 0)      return 'Para cambiar un número ya cargado hace falta un motivo de al menos 10 caracteres.';
+  if (t.indexOf('CUIT_INVALIDO') >= 0)         return 'El CUIT del librador tiene que tener 11 dígitos.';
+  if (t.indexOf('CMC7_INVALIDO') >= 0)         return 'El CMC7 tiene entre 20 y 30 dígitos.';
+  if (t.indexOf('CHEQUE_YA_IDENTIFICADO') >= 0) return 'Ese número, con ese banco y ese librador, ya está cargado en otro cheque.';
+  if (t.indexOf('NO_AUTORIZADO') >= 0)         return 'Tu rol no puede cargar números de cheque.';
+  if (t.indexOf('NO_AUTENTICADO') >= 0)        return 'Se venció la sesión. Volvé a entrar con tu PIN.';
+  if (t.indexOf('USUARIO_INVALIDO') >= 0)      return 'Tu usuario no está activo.';
+  if (t.indexOf('ORIGEN_INVALIDO') >= 0)       return 'Ese origen no está permitido.';
+  if (t.indexOf('CHEQUE_INEXISTENTE') >= 0)    return 'El cheque ya no existe.';
+  return 'No se pudo guardar: ' + t.slice(0, 140);
+}
+
+function _chqVal(id) { var e = document.getElementById(id); return e ? String(e.value || '').trim() : ''; }
+
+async function chqNumGuardar() {
+  var m = _chqNum.modal;
+  if (!m || _chqNum.guardando) return;
+  if (!_chqPuedeEditar()) { m.err = 'Tu rol no puede modificar el N.º real.'; _chqModalMontar(); return; }
+
+  // TEXTO. Nunca Number(): '00002082' se convertiria en 2082.
+  var num = _chqVal('chq-f-num');
+  var ev  = _chqVal('chq-f-ev');
+  var mot = _chqVal('chq-f-motivo');
+
+  if (!/^[0-9]{4,10}$/.test(num))       { m.err = _chqMsgError('NUMERO_INVALIDO');     _chqModalMontar(); return; }
+  if (ev.length < 8)                    { m.err = _chqMsgError('EVIDENCIA_REQUERIDA'); _chqModalMontar(); return; }
+  if (m.correccion && mot.length < 10)  { m.err = _chqMsgError('MOTIVO_REQUERIDO');    _chqModalMontar(); return; }
+
+  var args = {
+    p_cheque_id:     String(_chqNum.cheque_id),
+    p_numero_real:   num,
+    p_origen:        _chqVal('chq-f-origen') || 'listado_galicia',
+    p_evidencia_ref: ev
+  };
+  if (mot)                     args.p_motivo        = mot;
+  if (_chqVal('chq-f-cuit'))   args.p_cuit_librador = _chqVal('chq-f-cuit');
+  if (_chqVal('chq-f-cmc7'))   args.p_cmc7          = _chqVal('chq-f-cmc7');
+  if (_chqVal('chq-f-idb'))    args.p_id_bancario   = _chqVal('chq-f-idb');
+
+  _chqNum.guardando = true; m.err = null; _chqModalMontar();
+  try {
+    var out = await sbFetch('rpc/cheque_numero_registrar', { method:'POST', body: JSON.stringify(args) });
+    var r = (out && out.estado) ? out : ((out && out[0]) || {});
+    _chqNum.guardando = false;
+    if (r.estado === 'REGISTRADO' || r.estado === 'CORREGIDO' || r.estado === 'SIN_CAMBIOS') {
+      _chqNum.modal = null;
+      _chqModalMontar();
+      toast(r.estado === 'SIN_CAMBIOS' ? 'El número ya estaba cargado'
+            : ('N.º real ' + (r.estado === 'CORREGIDO' ? 'corregido' : 'registrado')), 'ok');
+      if (r.advertencia) toast(String(r.advertencia).slice(0, 120), 'warn');
+      await _chqNumCargar(_chqNum.cheque_id);
+      _cncPintar();
+    } else {
+      m.err = _chqMsgError(JSON.stringify(r)); _chqModalMontar();
+    }
+  } catch (e) {
+    _chqNum.guardando = false;
+    m.err = _chqMsgError(String((e && e.message) || e)); _chqModalMontar();
+  }
+}
+
+function _cncPintar() {
     if (!_cnc) return;
     var h = '<div class="cnc-box">' +
       '<div class="cnc-hd"><b>Imputar cheque' +
@@ -52932,7 +53241,7 @@ function ccxInit(){
 
     h += '<div class="cnc-sec">Cheque <span style="text-transform:none;font-weight:600">' +
          '(evidencia · no se edita)</span></div><div class="cnc-ev">';
-    [['Banco', ch.banco], ['Número', ch.numero_cheque], ['Emisor', ch.emisor],
+    [['Banco', ch.banco], ['ID de transacción bancaria', ch.numero_cheque], ['Emisor', ch.emisor],
      ['Importe', _cbzF(ch.monto)], ['Recepción', _cbzD(ch.created_at)],
      ['Vencimiento', _cbzD(ch.fecha_vencimiento)], ['Estado', ch.estado],
      ['Chofer', ch.chofer], ['Pedido', ch.pedido_id]].forEach(function(f){
@@ -52948,7 +53257,10 @@ function ccxInit(){
     // URL y lo abre en el lightbox. Mismo escapado de comilla simple.
     if (ch.foto_url) h += '<button class="cnc-foto" onclick="_verComprobanteAdmin(\'' +
       String(ch.foto_url).replace(/\x27/g, '%27') + '\',this)">Ver foto del cheque</button>';
-    h += '<button class="cbr-lnk" style="display:block;margin-top:8px" onclick="cncVolver()">elegir otro cheque</button>';
+    // ── v13.208.0 · CHEQUE-5 · N.º real del cheque para Xubio ──
+  h += _chqNumBloque();
+
+  h += '<button class="cbr-lnk" style="display:block;margin-top:8px" onclick="cncVolver()">elegir otro cheque</button>';
 
     // cliente
     h += '<div class="cnc-sec">Cliente</div>';
