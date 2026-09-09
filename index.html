@@ -15711,7 +15711,10 @@ input.canales-exp-input[type="date"] {
 
   <!-- v13.183.0 - PANEL COBRANZAS (MVP-A, solo lectura) -->
   <div class="view" id="view-cobranzas">
-    <!-- ══ TAB DE COBRANZAS · FASE 1 ══ modulo cf-* insertado sobre el Admin productivo.
+    <!-- ══ TAB DE COBRANZAS · v13.205.3 ══ modulo cf-* sobre el Admin productivo.
+         Cambia respecto de 13.205.2: la conciliacion cruza TRES evidencias (TCK, export actual de
+         Xubio y espejo historico), CINCO bandejas mutuamente excluyentes (las anuladas/duplicadas
+         tienen la suya), indicadores independientes de la bandeja y CSV con trazabilidad del export.
          Debajo queda intacto TODO lo que ya existia (encabezado, medios y la busqueda cbz*). -->
 <!-- ═══════════════════════════════════════════════════════════════════════════════════════════════
   TCK Admin · TAB COBRANZAS · FASE 1 · 2026-09-08
@@ -15733,9 +15736,10 @@ input.canales-exp-input[type="date"] {
 .cf-info{background:#E8F4FD;border:1px solid #B3D9F2}
 .cf-metr{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:8px 0 12px}
 .cf-metr div{padding:9px 11px;background:#FAF4EC;border-radius:10px;font-size:12px;line-height:1.35}
+.cf-sec{font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:#8A7960;font-weight:800;margin:12px 0 4px}
 .cf-metr b{display:block;font-size:19px;font-weight:800}.cf-metr .m{color:#6B5B47;font-size:11.5px}
 .cf-band{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
-.cf-tab{flex:1 1 150px;min-height:52px;padding:8px 12px;border-radius:12px;border:2px solid #E7DCCB;background:#fff;
+.cf-tab{flex:1 1 130px;min-height:52px;padding:8px 12px;border-radius:12px;border:2px solid #E7DCCB;background:#fff;
   font-weight:800;font-size:13.5px;cursor:pointer;text-align:left;font-family:inherit;color:#2b2b2b}
 .cf-tab small{display:block;font-weight:600;font-size:11.5px;color:#8A7960;margin-top:2px}
 .cf-tab.on{border-color:#B45309;background:#FFF4E6}
@@ -15757,7 +15761,7 @@ input.canales-exp-input[type="date"] {
 .cf-pill{display:inline-block;padding:2px 8px;border-radius:11px;font-size:10.5px;font-weight:800;
   text-transform:uppercase;letter-spacing:.3px;white-space:nowrap;margin:1px 3px 1px 0}
 .cf-pill.pendientes{background:#E3F2FD;color:#1565C0}.cf-pill.revisar{background:#FFCDD2;color:#B71C1C}
-.cf-pill.posteadas{background:#F3E5F5;color:#6A1B9A}.cf-pill.confirmadas{background:#C8E6C9;color:#1B5E20}
+.cf-pill.posteadas{background:#F3E5F5;color:#6A1B9A}.cf-pill.confirmadas{background:#C8E6C9;color:#1B5E20}.cf-pill.anuladas_duplicadas{background:#ECEFF1;color:#546E7A}
 .cf-pill.medio{background:#EEE;color:#555}.cf-pill.mot{background:#FFF3E0;color:#BF360C;text-transform:none;font-weight:600}
 .cf-pill.apl{background:#ECEFF1;color:#455A64;text-transform:none}
 .cf-neg{color:#C62828;font-weight:700}
@@ -15803,7 +15807,17 @@ input.canales-exp-input[type="date"] {
     El tab funcional de Cobranzas está apagado (flag <code>modulo_cobranzas_ui</code>). La búsqueda de abajo sigue funcionando igual que siempre.
   </div>
   <div id="cf-body" style="display:none">
+    <div id="cf-evid"></div>
+    <div class="cf-sec">Bandejas · cada cobranza está en una sola</div>
     <div class="cf-metr" id="cf-metr"></div>
+    <div class="cf-sec">Indicadores · no excluyentes, independientes de la bandeja</div>
+    <div class="cf-metr" id="cf-ind"></div>
+    <div class="cf-info" style="font-size:12.5px">
+      <b>Existe en Xubio</b>, <b>posteada</b> y <b>aplicada</b> son tres cosas distintas. Que una cobranza
+      no tenga imputación cargada acá <b>no significa</b> que no esté aplicada en Xubio: la mayoría se
+      aplicó a mano y esa aplicación no vuelve por la API. Esas quedan como <i>aplicación desconocida</i>,
+      no como pendientes de trabajo.
+    </div>
     <div class="cf-band" id="cf-bandejas"></div>
     <div class="cf-filt">
       <input id="cff-fdesde" type="date" title="Desde">
@@ -15838,12 +15852,16 @@ var ROL = function () { return (typeof rolActual !== 'undefined') ? rolActual : 
 // esto solo evita mostrar botones que el backend va a rechazar igual.
 var ROLES_OK = ['dueno', 'admin', 'contador', 'cobranzas'];
 var esOperador = function () { return ROLES_OK.indexOf(S.rol || ROL()) >= 0; };
+function fechaAR(s) { if (!s) return '—'; var p = String(s).slice(0, 10).split('-'); return p.length === 3 ? (p[2] + '/' + p[1] + '/' + p[0]) : String(s); }
+function fechaHoraAR(s) { if (!s) return '—'; return fechaAR(s) + ' ' + String(s).slice(11, 16) + ' hs'; }
 var LIMIT = 50;
+// Cinco bandejas, mutuamente excluyentes: cada cobranza está en exactamente una.
 var BANDEJAS = [
   ['pendientes', 'Pendientes', 'entraron y todavía no cerraron el circuito'],
   ['revisar', 'Para revisar', 'necesitan una decisión de Administración'],
   ['posteadas', 'Posteadas en Xubio', 'creadas en Xubio; aplicar es otro paso'],
-  ['confirmadas', 'Confirmadas', 'revisadas y cerradas']
+  ['confirmadas', 'Confirmadas', 'revisadas y cerradas'],
+  ['anuladas_duplicadas', 'Anuladas / duplicadas', 'anuladas en TCK; quedan para consulta histórica']
 ];
 var S = { flag: null, rol: null, conteos: null, band: 'revisar', page: { rows: [], total: 0, limit: LIMIT, offset: 0 }, sel: null, ficha: null, busy: false };
 
@@ -15907,18 +15925,41 @@ async function cargarPagina() {
   pintarLista();
 }
 function pintarResumen() {
-  var c = S.conteos || {}, b = c.bandejas || {};
+  var c = S.conteos || {}, b = c.bandejas || {}, k = c.indicadores || {};
   var m = document.getElementById('cf-metr');
   var cel = function (t, n, sub) { return '<div>' + E(t) + '<b>' + E(n == null ? 0 : n) + '</b><span class="m">' + E(sub || '') + '</span></div>'; };
-  m.innerHTML =
-    cel('Pendientes', (b.pendientes || {}).n, F((b.pendientes || {}).monto || 0)) +
-    cel('Para revisar', (b.revisar || {}).n, F((b.revisar || {}).monto || 0)) +
-    cel('Posteadas', (b.posteadas || {}).n, F((b.posteadas || {}).monto || 0)) +
-    cel('Confirmadas', (b.confirmadas || {}).n, F((b.confirmadas || {}).monto || 0)) +
-    cel('Con error', c.con_error, 'posting o resultado desconocido') +
-    cel('Sin cliente', c.sin_cliente, 'hay que identificarlo') +
-    cel('Sin imputación', c.sin_imputacion, 'falta la factura') +
-    cel('Con diferencia', c.con_diferencia, F(c.monto_diferencia || 0));
+  // Bandejas: excluyentes, cada cobranza está en una sola.
+  m.innerHTML = BANDEJAS.map(function (bd) {
+    return cel(bd[1], (b[bd[0]] || {}).n, F((b[bd[0]] || {}).monto || 0));
+  }).join('') + cel('Total', (c.indicadores || {}).total, 'las cinco suman esto');
+  // Indicadores: NO excluyentes e independientes de la bandeja. Una cobranza puede contarse en varios.
+  // Cartel de evidencia: hasta qué día llega el export de Xubio y cuándo se importó.
+  var ev = c.evidencia || {}, ce = document.getElementById('cf-evid');
+  if (!ev.hay_evidencia) {
+    ce.className = 'cf-err'; ce.style.display = 'block';
+    ce.textContent = 'No hay ningún export de Xubio cargado. Sin esa evidencia el tab no puede confirmar existencia ni detectar diferencias: todo queda como "sin evidencia cargada".';
+  } else {
+    ce.className = ev.vencida ? 'cf-off' : 'cf-info'; ce.style.display = 'block';
+    ce.innerHTML = '<b>Export Xubio actualizado al ' + E(fechaAR(ev.fecha_corte)) + '</b>' +
+      ' · importado el ' + E(fechaHoraAR(ev.importado_en)) +
+      ' · ' + E(ev.filas) + ' cobranzas · desde ' + E(fechaAR(ev.fecha_desde)) +
+      '<br><span style="font-size:11.5px">carga <code>' + E(String(ev.hash || '').slice(0, 8)) + '</code> · ' + E(ev.archivos || '') + '</span>' +
+      (ev.vencida ? '<br><b>⚠ ' + E(ev.aviso) + '</b>' : '');
+  }
+  var mi = document.getElementById('cf-ind');
+  mi.innerHTML =
+    cel('Total', k.total, F(k.monto_total || 0)) +
+    cel('Con recibo o ID Xubio', k.con_recibo_o_id_xubio, 'existe en Xubio · ' + F(k.monto_con_recibo || 0)) +
+    cel('Presentes en el export', k.presentes_en_export, 'confirmadas contra Xubio') +
+    cel('Ausentes del export', k.ausentes_del_export, 'estaban en el espejo · verificar') +
+    cel('Sin evidencia en Xubio', k.sin_evidencia_en_xubio, 'ni export ni espejo') +
+    cel('Anuladas / duplicadas', k.anuladas_duplicadas, 'anuladas en TCK') +
+    cel('Posteriores al corte', k.posteriores_al_corte, 'el export no las alcanza') +
+    cel('Aplicación confirmada', k.aplicacion_confirmada, 'alguien la verificó en Xubio') +
+    cel('Aplicación desconocida', k.aplicacion_desconocida, 'sin evidencia · ' + F(k.monto_aplicacion_desconocida || 0)) +
+    cel('Errores reales', k.errores_reales, 'posting fallido') +
+    cel('Diferencias verificables', k.diferencias_verificables, F(k.monto_diferencias_verificables || 0)) +
+    cel('Marcadas a mano', k.marcadas_a_mano, 'las mandó Administración');
   var h = '';
   BANDEJAS.forEach(function (bd) {
     var n = (b[bd[0]] || {}).n || 0;
@@ -15938,7 +15979,7 @@ function pintarLista() {
     return;
   }
   var h = '<table class="cf-tbl"><thead><tr><th>Fecha</th><th>Cliente</th><th>Medio</th><th class="num">Recibido</th>' +
-    '<th class="num">Imputado</th><th class="num">Diferencia</th><th>Xubio</th><th>Aplicación</th><th>Motivos</th></tr></thead><tbody>';
+    '<th class="num">Imputado</th><th class="num">Diferencia</th><th>Conciliación</th><th>Aplicación</th><th>Motivos</th></tr></thead><tbody>';
   p.rows.forEach(function (r) {
     var dif = Number(r.diferencia) || 0;
     h += '<tr onclick="cfAbrir(' + Number(r.id) + ')">' +
@@ -15949,19 +15990,36 @@ function pintarLista() {
       '<td data-l="Recibido" class="num">' + E(F(r.importe_recibido)) + '</td>' +
       '<td data-l="Imputado" class="num">' + E(F(r.importe_imputado)) + '</td>' +
       '<td data-l="Diferencia" class="num' + (Math.abs(dif) > 0.05 ? ' cf-neg' : '') + '">' + (Math.abs(dif) > 0.05 ? E(F(dif)) : '—') + '</td>' +
-      '<td data-l="Xubio">' + (r.posteada ? (E(r.xubio_numero_recibo || 'sí') ) : '—') + '</td>' +
+      '<td data-l="Conciliación">' + E(etiquetaCategoria(r.categoria_xubio)) +
+        (r.xubio_numero_recibo ? '<br><small style="color:#8A7960">' + E(r.xubio_numero_recibo) + '</small>' : '') +
+        '<br><small style="color:#8A7960">según ' + E(r.origen_conclusion || '—') + '</small></td>' +
       '<td data-l="Aplicación"><span class="cf-pill apl">' + E(etiquetaAplicacion(r)) + '</span></td>' +
       '<td data-l="Motivos">' + (r.motivos_revision || []).map(function (m) { return '<span class="cf-pill mot">' + E(m) + '</span>'; }).join('') + '</td></tr>';
   });
   document.getElementById('cf-lista').innerHTML = h + '</tbody></table>';
 }
 // Nunca se afirma "no aplicada": sin evidencia, es desconocida.
+// Nunca se afirma "anulada" por no estar en el export: se pide verificar.
+function etiquetaCategoria(c) {
+  return ({
+    PRESENTE_Y_COINCIDE: 'coincide con el export',
+    DIFERENCIA_IMPORTE: 'difiere el importe',
+    DIFERENCIA_FECHA: 'difiere la fecha',
+    AUSENTE_EXPORT_PRESENTE_ESPEJO: 'no está en el export · verificar edición o anulación',
+    AUSENTE_EXPORT_Y_ESPEJO: 'SIN evidencia en Xubio',
+    PENDIENTE_TCK: 'nunca se posteó',
+    ANULADA_DUPLICADA_TCK: 'anulada en TCK',
+    POSTERIOR_AL_CORTE: 'posterior al corte del export',
+    SIN_EVIDENCIA_CARGADA: 'sin export cargado'
+  })[c] || (c || '—');
+}
+// Nunca se afirma "no aplicada": sin evidencia, es desconocida.
 function etiquetaAplicacion(r) {
-  if (r.aplicacion === 'verificada') return 'aplicación confirmada';
-  if (r.aplicacion === 'pendiente_confirmada') return 'falta aplicar (comprobado)';
-  if (r.aplicacion === 'imputada_local') return 'imputada acá · aplicación no verificada';
-  if (r.aplicacion === 'parcial_local') return 'imputación parcial · aplicación no verificada';
-  return r.posteada ? 'estado en Xubio desconocido' : 'aplicación no verificable';
+  if (r.aplicacion === 'aplicacion_confirmada') return 'aplicación confirmada';
+  if (r.aplicacion === 'aplicacion_local_registrada') return 'imputada acá · aplicación no verificada';
+  if (r.aplicacion === 'aplicacion_local_parcial') return 'imputación parcial · aplicación no verificada';
+  return r.en_export ? 'existe en Xubio · aplicación desconocida'
+       : (r.posteada ? 'posteada · aplicación desconocida' : 'aplicación no verificable');
 }
 
 window.cfAbrir = async function (id) {
@@ -15992,7 +16050,10 @@ function pintarFicha() {
     '<div>Creada en Xubio</div><div>' + (r.posteada ? 'sí' : 'no hay evidencia') + '</div>' +
     '<div>transaccionid</div><div>' + E(r.xubio_transaccionid || '—') + '</div>' +
     '<div>Recibo</div><div>' + E(r.xubio_numero_recibo || '—') + '</div>' +
-    '<div>TCKREF</div><div class="cf-mono" style="max-height:52px">' + E(r.tckref || '—') + '</div>' +
+    '<div>Conciliación</div><div><b>' + E(etiquetaCategoria(r.categoria_xubio)) + '</b> · según ' + E(r.origen_conclusion || '—') + '</div>' +
+    '<div>Export actual</div><div>' + (r.en_export ? ('presente · ' + E(F(r.export_importe)) + ' · ' + E(fechaAR(r.export_fecha)))
+       : (r.cubierta_por_export ? 'NO figura (corte ' + E(fechaAR(r.export_corte)) + ')' : 'fuera del corte del export')) + '</div>' +
+    '<div>Espejo histórico</div><div>' + (r.existe_en_espejo ? ('lo tenía · ' + E(F(r.espejo_importe)) + ' · ' + E(fechaAR(r.espejo_fecha))) : 'sin dato del espejo') + '</div>' +
     '<div>Aplicación</div><div>' + E(etiquetaAplicacion(r)) + '</div>' +
     '<div>Error / motivo</div><div>' + E(r.xubio_error || r.ultima_accion_motivo || '—') + '</div>' +
     '</div>';
@@ -16145,14 +16206,35 @@ window.cfCopiar = function () { return run(async function () {
   else window.prompt('Copiá:', txt); }); };
 window.cfExportar = function () { return run(async function () {
   var cols = ['id','fecha','creado_at','cliente_xubio_id','cliente_nombre','instrumento','origen_ref','importe_recibido',
-    'importe_propuesto','importe_imputado','diferencia','posteada','xubio_numero_recibo','xubio_transaccionid','tckref',
-    'aplicacion','bandeja','motivos_revision'];
+    'importe_propuesto','importe_imputado','diferencia','posteada','categoria_xubio','origen_conclusion','prioridad',
+    'en_export','export_importe','export_fecha','cubierta_por_export','existe_en_espejo','espejo_importe','espejo_fecha',
+    'xubio_numero_recibo','xubio_transaccionid','aplicacion','bandeja','motivos_revision'];
   var f = filtros(), off = 0, all = [], total = null;
   do { var r = await rpc('cobranza_ui_pagina', { p_filtros: f, p_limit: 500, p_offset: off });
     if (!r || !Array.isArray(r.rows)) throw new Error('export interrumpido');
     total = Number(r.total); all = all.concat(r.rows); off += 500;
     if (off > 50000) throw new Error('Export demasiado grande'); } while (off < total);
-  var csv = [cols.join(';')].concat(all.map(function (x) { return cols.map(function (c) {
+  // Encabezado de trazabilidad: qué se exportó, cuándo, cuánto, y de dónde sale cada estado.
+  var suma = all.reduce(function (a, x) { return a + (Number(x.importe_recibido) || 0); }, 0);
+  var nExiste = all.filter(function (x) { return x.posteada; }).length;
+  var nApl = all.filter(function (x) { return x.aplicacion === 'aplicacion_confirmada'; }).length;
+  var meta = [
+    ['# export', 'TCK Cobranzas · tab Administración'],
+    ['# generado', new Date().toISOString()],
+    ['# bandeja', S.band],
+    ['# filtros', JSON.stringify(f)],
+    ['# cantidad', String(all.length)],
+    ['# importe_total', suma.toFixed(2)],
+    ['# export_xubio_corte', String((S.conteos && S.conteos.evidencia && S.conteos.evidencia.fecha_corte) || 'sin evidencia cargada')],
+    ['# export_xubio_importado', String((S.conteos && S.conteos.evidencia && S.conteos.evidencia.importado_en) || '-')],
+    ['# export_xubio_hash', String((S.conteos && S.conteos.evidencia && S.conteos.evidencia.hash) || '-')],
+    ['# fuente_del_estado', 'conciliacion: cobranza_ui_export_xubio (export actual) + cobranzas_xubio (espejo historico) + cta_cte_cobranzas (TCK) · aplicacion: cobranza_ui_verificacion + cta_cte_imputaciones'],
+    ['# existe_en_xubio', String(nExiste)],
+    ['# aplicacion_confirmada', String(nApl)],
+    ['# aplicacion_desconocida', String(all.length - nApl)],
+    ['# nota', 'existe en Xubio, posteada y aplicada son tres cosas distintas; sin evidencia la aplicacion es DESCONOCIDA, no "no aplicada"']
+  ].map(function (p) { return p[0] + ';' + '"' + p[1].replace(/"/g, '""') + '"'; }).join('\n');
+  var csv = meta + '\n\n' + [cols.join(';')].concat(all.map(function (x) { return cols.map(function (c) {
     var v2 = x[c]; if (Array.isArray(v2)) v2 = v2.join(' | ');
     if (['importe_recibido','importe_propuesto','importe_imputado','diferencia'].indexOf(c) >= 0) v2 = (v2 == null ? '' : String(v2).replace('.', ','));
     return '"' + String(v2 == null ? '' : v2).replace(/"/g, '""') + '"'; }).join(';'); })).join('\n');
@@ -16160,7 +16242,7 @@ window.cfExportar = function () { return run(async function () {
   a.href = 'data:text/csv;charset=utf-8,\uFEFF' + encodeURIComponent(csv);
   a.download = 'cobranzas_' + S.band + '_' + new Date().toISOString().slice(0, 10) + '.csv'; a.click();
   T('Exportadas ' + all.length + ' de ' + total, 'ok'); }); };
-window.cfModuloVersion = '1.1-fase1';
+window.cfModuloVersion = '1.4-13.205.3';
 })();
 </script>
 
@@ -48829,7 +48911,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    TCK_UPD_LOCAL aca Y el archivo version.json del repo.
    ============================================================ */
 (function(){
-  var TCK_UPD_LOCAL = '13.205.2';        /* <-- bump en cada deploy */
+  var TCK_UPD_LOCAL = '13.205.3';        /* <-- bump en cada deploy */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
