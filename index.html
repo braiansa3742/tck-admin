@@ -16464,7 +16464,7 @@ window.cfModuloVersion = '1.4-13.205.3';
 
     <div class="cbv-panel" id="cbv-p-diario" role="tabpanel" aria-labelledby="cbv-t-diario">
     <div class="ccx-head"><h3 class="cbv-sub" id="cbv-h-diario" tabindex="-1">Trabajo diario</h3>
-      <span class="ccx-badge">SOLO LECTURA</span></div>
+      <span class="ccx-badge ccx-badge-sl">SOLO LECTURA</span></div>
     <div class="cbv-desc">Registrar en TCK los cobros que ya entraron: MP, efectivo y cheques.</div>
     <!-- v13.194.3 - como entra cada medio. Que nadie interprete que faltan funciones. -->
     <details class="cbz-medios">
@@ -16712,7 +16712,7 @@ function cbvGate() {
 
   <!-- v13.183.0 - PAGOS A CONCILIAR (solo lectura) -->
   <div class="view" id="view-mpconc">
-    <div class="ccx-head"><h2>Pagos a conciliar <span class="ccx-badge">SOLO LECTURA</span></h2></div>
+    <div class="ccx-head"><h2>Pagos a conciliar <span class="ccx-badge ccx-badge-sl">SOLO LECTURA</span></h2></div>
     <div class="ccx-piloto">Vista de observaci&oacute;n. No registra cobranzas ni modifica Mercado Pago.</div>
     <div class="ccx-search">
       <input type="text" id="mpc-q" placeholder="Cliente, email, CUIT, factura o mp_id..." autocomplete="off">
@@ -21254,6 +21254,15 @@ function login(nombre, rol, tabsExtra) {
   filtroFecha    = 'hoy';
   filtroVendedor = 'todos';
   guardarSesion(nombre, rolActual, tabsExtraActual);
+  // v13.217.2 · cosmetico: dueno y contador tienen permisos operativos en Cobranzas,
+  // asi que el cartel "SOLO LECTURA" ya no describe lo que pueden hacer. No cambia
+  // ningun permiso: quien decide sigue siendo el servidor.
+  try {
+    var _sl = (rolActual === 'dueno' || rolActual === 'contador');
+    document.querySelectorAll('.ccx-badge-sl').forEach(function(el){
+      el.style.display = _sl ? 'none' : '';
+    });
+  } catch(e) {}
   // Roles de oficina → vendedorActual = 'ADMIN' (compat. con verificaciones === 'ADMIN')
   vendedorActual = esOficina ? 'ADMIN' : nombre;
   // v11 admin: cargar info de última sync de clientes Xubio + iniciar refresh visual
@@ -49586,7 +49595,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.217.1';
+var TCK_VERSION = '13.217.2';
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
@@ -54133,8 +54142,8 @@ function _cncPintar() {
 
     if (_cnc.audit) {
       h += '<div class="cnc-nota" style="text-align:left;margin:0 0 8px">' +
-           'Modo auditoría: podés recorrer todo el flujo y simular la imputación. ' +
-           'El registro está reservado al dueño.</div>';
+           'Verificá los datos, cargá el número bancario real y seleccioná las facturas ' +
+           'antes de registrar la cobranza.</div>';
     }
     if (_cnc.err) h += '<div class="cnc-alerta">' + _cbzE(_cnc.err) + '</div>';
 
