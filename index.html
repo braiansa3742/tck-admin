@@ -49586,7 +49586,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.217.0';
+var TCK_VERSION = '13.217.1';
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
@@ -53561,7 +53561,8 @@ var _chqNum = { cheque_id:null, actual:null, historial:[], cargando:false, err:n
 // lo revalida la RPC server-side contra app_usuarios: esto es solo para no
 // mostrar un boton que va a fallar.
 function _chqPuedeEditar() {
-  return typeof rolActual !== 'undefined' && (rolActual === 'dueno' || rolActual === 'cobranzas');
+  return typeof rolActual !== 'undefined' &&
+         (rolActual === 'dueno' || rolActual === 'cobranzas' || rolActual === 'contador'); // v13.217.1
 }
 
 function _chqNumReset() {
@@ -53629,8 +53630,10 @@ function _chqFlujoReset() {
 function _chqFlujoRol() {
   return (typeof rolActual !== 'undefined') ? String(rolActual || '') : '';
 }
-function _chqFlujoEsDueno()    { return _chqFlujoRol() === 'dueno'; }
-function _chqFlujoPuedeVer()   { var r = _chqFlujoRol(); return r === 'dueno' || r === 'contador'; }
+// v13.217.1 · decision del dueño: en el modulo de cheques, contador tiene las mismas
+// facultades que dueno. La UI y la base cambian juntas; los demas roles siguen fuera.
+function _chqFlujoEsDueno()    { var r = _chqFlujoRol(); return r === 'dueno' || r === 'contador'; }
+function _chqFlujoPuedeVer()   { return _chqFlujoEsDueno(); }
 
 async function _chqFlujoCargar(chequeId) {
   _chqFlujo.cheque_id = String(chequeId);
@@ -53674,7 +53677,7 @@ async function _chqEdge(modo) {
 
 async function chqFlujoDryRun() {
   if (_chqFlujo.ocupado) return;
-  if (!_chqFlujoEsDueno()) { toast('Tu rol puede consultar, no ejecutar', 'err'); return; }
+  if (!_chqFlujoEsDueno()) { toast('Tu rol no puede ejecutar el dry-run', 'err'); return; }
   _chqFlujo.ocupado = true; _cncPintar();
   try {
     var r = await _chqEdge('dry_run');
@@ -53694,7 +53697,7 @@ async function chqFlujoDryRun() {
 
 async function chqFlujoAprobar() {
   if (_chqFlujo.ocupado) return;
-  if (!_chqFlujoEsDueno()) { toast('Solo el dueno aprueba', 'err'); return; }
+  if (!_chqFlujoEsDueno()) { toast('Tu rol no puede aprobar', 'err'); return; }
   _chqFlujo.ocupado = true; _cncPintar();
   try {
     var out = await sbFetch('rpc/cheque_posteo_aprobar', {
@@ -53712,7 +53715,7 @@ async function chqFlujoAprobar() {
 
 async function chqFlujoRevocar() {
   if (_chqFlujo.ocupado) return;
-  if (!_chqFlujoEsDueno()) { toast('Solo el dueno revoca', 'err'); return; }
+  if (!_chqFlujoEsDueno()) { toast('Tu rol no puede revocar', 'err'); return; }
   var motivo = prompt('Motivo de la revocacion (minimo 10 caracteres):', '');
   if (motivo === null) return;
   if (String(motivo).trim().length < 10) { toast('El motivo es obligatorio', 'err'); return; }
@@ -53730,7 +53733,7 @@ async function chqFlujoRevocar() {
 
 /** Paso previo obligatorio al envio real: se muestra TODO lo que va a viajar. */
 function chqFlujoConfirmarAbrir() {
-  if (!_chqFlujoEsDueno()) { toast('Solo el dueno envia', 'err'); return; }
+  if (!_chqFlujoEsDueno()) { toast('Tu rol no puede enviar', 'err'); return; }
   var e = _chqFlujo.est;
   if (!e || !e.puede_postear) { toast((e && e.motivo_posteo) || 'No se puede enviar', 'err'); return; }
   _chqFlujo.confirmando = true; _chqFlujoModalMontar();
@@ -53743,7 +53746,7 @@ function chqFlujoConfirmarCerrar() {
 
 async function chqFlujoEnviar() {
   if (_chqFlujo.ocupado) return;                 // sin dobles clics
-  if (!_chqFlujoEsDueno()) { toast('Solo el dueno envia', 'err'); return; }
+  if (!_chqFlujoEsDueno()) { toast('Tu rol no puede enviar', 'err'); return; }
   var e = _chqFlujo.est;
   if (!e || !e.puede_postear) { toast((e && e.motivo_posteo) || 'No se puede enviar', 'err'); return; }
   _chqFlujo.ocupado = true; _chqFlujoModalMontar();
@@ -53871,8 +53874,7 @@ function _chqFlujoBloque() {
 
   // ── acciones ──
   if (!_chqFlujoEsDueno()) {
-    h += '<div class="cnc-nota" style="text-align:left">Tu rol puede consultar el estado, el payload ' +
-         'resumido, el recibo y las alertas. Las acciones son del dueno.</div>';
+    h += '<div class="cnc-nota" style="text-align:left">Tu rol no tiene acciones en este circuito.</div>';
     return h;
   }
 
@@ -53969,7 +53971,7 @@ function _chqNumBloque() {
     h += '<button class="chq-accion" onclick="chqNumAbrir(' + (a ? 'true' : 'false') + ')">' +
          (a ? 'Corregir número' : 'Registrar número') + '</button>';
   } else {
-    h += '<div class="cnc-nota" style="text-align:left">Tu rol puede consultar el N.º real, no modificarlo.</div>';
+    h += '<div class="cnc-nota" style="text-align:left">Tu rol puede consultar el N.º real, no modificarlo.</div>'; // v13.217.1: contador si puede
   }
 
   if ((_chqNum.historial || []).length) {
