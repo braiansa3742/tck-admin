@@ -11381,6 +11381,36 @@ input[type="date"] {
   text-align: center;
   margin-bottom: 14px;
 }
+    /* ── v13.215.0 · menú "Más" en una columna ─────────────────────────── */
+    .menu-mas-buscar{padding:0 2px 8px}
+    .menu-mas-buscar input{width:100%;box-sizing:border-box;min-height:44px;padding:0 12px;
+      border:1.5px solid #EEE3D2;border-radius:11px;background:#fff;color:#3A3226;
+      font-size:15px;font-family:inherit}
+    .menu-mas-buscar input:focus{outline:2px solid #E9B872;outline-offset:-1px}
+    #menu-mas-lista{display:block;max-height:min(62vh,520px);overflow-y:auto;
+      -webkit-overflow-scrolling:touch;overflow-x:hidden}
+    .menu-mas-grp{font-size:10.5px;font-weight:900;letter-spacing:.6px;text-transform:uppercase;
+      color:#8A7960;margin:11px 0 4px;padding:0 2px}
+    .menu-mas-grp:first-child{margin-top:0}
+    #menu-mas-lista .menu-mas-item{display:flex;align-items:center;gap:11px;width:100%;
+      box-sizing:border-box;padding:10px 12px;margin:0 0 5px;border:1px solid #EEE3D2;
+      border-radius:11px;background:#fff;cursor:pointer;text-align:left;
+      font-family:inherit;font-size:14px;font-weight:700;color:#3A3226;min-height:46px}
+    #menu-mas-lista .menu-mas-item:active{background:#FFF7EC}
+    #menu-mas-lista .menu-mas-item:focus-visible{outline:3px solid #E9B872;outline-offset:1px}
+    #menu-mas-lista .menu-mas-icon{font-size:17px;line-height:1;flex:0 0 auto;width:22px;text-align:center}
+    #menu-mas-lista .menu-mas-lbl{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;
+      white-space:nowrap;font-size:14px;font-weight:700}
+    #menu-mas-lista .menu-mas-badge{flex:0 0 auto;background:#C62828;color:#fff;border-radius:10px;
+      padding:1px 7px;font-size:10px;font-weight:800}
+    .mm-off{display:none !important}
+    .menu-mas-vacio{padding:14px 4px;font-size:12.5px;color:#9C8A72;text-align:center}
+    /* Estas ganan por venir después del bloque original, que trae
+       flex-direction:column, padding 18px y text-transform:uppercase. */
+    #menu-mas-lista .menu-mas-item{flex-direction:row;padding:10px 12px;gap:11px;
+      border-radius:11px;border-width:1px;align-items:center;text-align:left}
+    #menu-mas-lista .menu-mas-lbl{text-transform:none;letter-spacing:0;font-size:14px;text-align:left}
+    #menu-mas-lista .menu-mas-icon{font-size:17px}
 .menu-mas-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -18070,120 +18100,103 @@ function cbvGate() {
   <div class="menu-mas-sheet" onclick="event.stopPropagation()">
     <div class="menu-mas-pill"></div>
     <div class="menu-mas-titulo">Más opciones</div>
-    <div class="menu-mas-grid">
-      <!-- v13.59.0 — Fotos de entrega (respaldo ante reclamos de faltante) -->
-      <button class="menu-mas-item" id="menu-mas-fotosentrega" onclick="cerrarMenuMas();fotosEntregaBuscarAbrir()">
-        <div class="menu-mas-icon">📸</div>
-        <div class="menu-mas-lbl">Fotos entrega</div>
-      </button>
-      <button class="menu-mas-item" id="menu-mas-stock" onclick="cambiarTab('stock');cerrarMenuMas()">
-        <div class="menu-mas-icon">📦</div>
-        <div class="menu-mas-lbl">Stock</div>
-        <div class="menu-mas-badge" id="menu-mas-stock-badge" style="display:none;background:#C62828;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;margin-top:3px;">0</div>
-      </button>
-      <!-- v12.18.0 — Tab Compras -->
-      <button class="menu-mas-item" id="menu-mas-compras" onclick="cambiarTab('compras');cerrarMenuMas()">
-        <div class="menu-mas-icon">🛒</div>
-        <div class="menu-mas-lbl">Compras</div>
-        <div class="menu-mas-badge" id="menu-mas-compras-badge" style="display:none;background:#C62828;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;margin-top:3px;">0</div>
-      </button>
-      <!-- v13.92.0 — Cuenta Corriente del Producto -->
-      <button class="menu-mas-item" id="menu-mas-ccprod" onclick="cambiarTab('ccprod');cerrarMenuMas()">
-        <div class="menu-mas-icon">📒</div>
-        <div class="menu-mas-lbl">Cta Producto</div>
-      </button>
-      <button class="menu-mas-item" id="menu-mas-foodconcil" onclick="cambiarTab('foodconcil');cerrarMenuMas()">
-        <div class="menu-mas-icon">&#129525;</div>
-        <div class="menu-mas-lbl">Concil. Food</div>
-      </button>
-      <!-- v13.152.0 — Centro de Control operativo -->
-      <button class="menu-mas-item" id="menu-mas-ccontrol" onclick="cambiarTab('ccontrol');cerrarMenuMas()">
-        <div class="menu-mas-icon">&#129517;</div>
-        <div class="menu-mas-lbl">Centro Control</div>
-        <div class="menu-mas-badge" id="menu-mas-ccontrol-badge" style="display:none;background:#C62828;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;margin-top:3px;">0</div>
-      </button>
-      <!-- v12.29 — Tab Márgenes -->
-      <button class="menu-mas-item" id="menu-mas-margenes" onclick="cambiarTab('margenes');cerrarMenuMas()">
-        <div class="menu-mas-icon">📊</div>
-        <div class="menu-mas-lbl">Márgenes</div>
-      </button>
-      <!-- v13.139.0 — Tab Comisiones -->
-      <button class="menu-mas-item" id="menu-mas-embudo" onclick="cambiarTab('embudo');cerrarMenuMas()">
-        <div class="menu-mas-icon">🎯</div>
-        <div class="menu-mas-lbl">Embudo</div>
-      </button>
-      <button class="menu-mas-item" id="menu-mas-comisiones" onclick="cambiarTab('comisiones');cerrarMenuMas()">
-        <div class="menu-mas-icon">💵</div>
-        <div class="menu-mas-lbl">Comisiones</div>
-      </button>
-      <button class="menu-mas-item" id="menu-mas-buffet" onclick="cambiarTab('buffet');cerrarMenuMas()">
-        <div class="menu-mas-icon">🍔</div>
-        <div class="menu-mas-lbl">Buffet</div>
-      </button>
-      <!-- v13.109.0 — Tab Pulso (venta real + salud del circuito) -->
-      <button class="menu-mas-item" id="menu-mas-pulso" onclick="cambiarTab('pulso');cerrarMenuMas()">
-        <div class="menu-mas-icon">📈</div>
-        <div class="menu-mas-lbl">Pulso</div>
-      </button>
-      <!-- v13.36.0 — Tab Facturación (Centro de Facturación) -->
-      <button class="menu-mas-item" id="menu-mas-facturacion" onclick="cambiarTab('facturacion');cerrarMenuMas()">
-        <div class="menu-mas-icon">🧾</div>
-        <div class="menu-mas-lbl">Facturación</div>
-        <div class="menu-mas-badge" id="menu-mas-fc-badge" style="display:none;background:#C62828;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;margin-top:3px;">0</div>
-      </button>
-      <!-- v13.63.0 — Tab Cuentas Corrientes (separado de Tesorería) -->
-      <button class="menu-mas-item" id="menu-mas-cc" onclick="cambiarTab('cc');cerrarMenuMas()">
-        <div class="menu-mas-icon">📒</div>
-        <div class="menu-mas-lbl">Ctas Ctes</div>
-      </button>
-      <!-- v13.175.0 — Cuenta Corriente (PILOTO, solo dueno) -->
-      <button class="menu-mas-item" id="menu-mas-cobranzas" onclick="cambiarTab('cobranzas');cerrarMenuMas()">
-        <div class="menu-mas-icon">&#128176;</div>
-        <div class="menu-mas-lbl">Cobranzas</div>
-      </button>
-      <button class="menu-mas-item" id="menu-mas-mpconc" onclick="cambiarTab('mpconc');cerrarMenuMas()">
-        <div class="menu-mas-icon">&#128270;</div>
-        <div class="menu-mas-lbl">Conciliar MP</div>
-      </button>
-      <button class="menu-mas-item" id="menu-mas-ctacte" onclick="cambiarTab('ctacte');cerrarMenuMas()">
-        <div class="menu-mas-icon">💳</div>
-        <div class="menu-mas-lbl">Cta. Cte. 2026</div>
-      </button>
-      <!-- v12.20.0 — Tab Tesorería -->
-      <button class="menu-mas-item" id="menu-mas-tesoreria" onclick="cambiarTab('tesoreria');cerrarMenuMas()">
-        <div class="menu-mas-icon">💰</div>
-        <div class="menu-mas-lbl">Tesorería</div>
-      </button>
-      <button class="menu-mas-item" id="menu-mas-clientes" onclick="cambiarTab('clientes');cerrarMenuMas()">
-        <div class="menu-mas-icon">⭐</div>
-        <div class="menu-mas-lbl">Clientes</div>
-      </button>
-      <button class="menu-mas-item" id="menu-mas-visitas" onclick="cambiarTab('gps');cerrarMenuMas()">
-        <div class="menu-mas-icon">📍</div>
-        <div class="menu-mas-lbl">Visitas</div>
-      </button>
-      <button class="menu-mas-item" id="menu-mas-rendiciones" onclick="cambiarTab('rendiciones');cerrarMenuMas()">
-        <div class="menu-mas-icon">💰</div>
-        <div class="menu-mas-lbl">Rendiciones</div>
-        <div class="menu-mas-badge" id="menu-mas-rend-badge" style="display:none;background:#EF6C00;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;margin-top:3px;">0</div>
-      </button>
-      <button class="menu-mas-item" id="menu-mas-acc-dup" onclick="cambiarTab('acc-dup');cerrarMenuMas()">
-        <div class="menu-mas-icon">📋</div>
-        <div class="menu-mas-lbl">Duplicados</div>
-      </button>
-      <button class="menu-mas-item" id="menu-mas-prod-canon" onclick="cambiarTab('prod-canon');cerrarMenuMas()" style="display:none;">
-        <div class="menu-mas-icon">🔧</div>
-        <div class="menu-mas-lbl">Sin canonizar</div>
-        <div class="menu-mas-badge" id="menu-mas-pcanon-badge" style="display:none;background:#EF6C00;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;margin-top:3px;">0</div>
-      </button>
-      <button class="menu-mas-item" id="menu-mas-ccanon" onclick="cambiarTab('ccanon');cerrarMenuMas()" style="display:none;">
-        <div class="menu-mas-icon">🏙️</div>
-        <div class="menu-mas-lbl">Ciudades</div>
-        <div class="menu-mas-badge" id="menu-mas-ccanon-badge" style="display:none;background:#EF6C00;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;margin-top:3px;">0</div>
-      </button>
-    </div>
+    <!-- v13.215.0 — una sola columna, buscador y cuatro grupos.
+           Los grupos son SOLO presentacion: cada boton conserva su id, su
+           onclick y su badge, asi el gating por rol sigue funcionando igual.
+           ccontrol no se expone: su view existe pero esta vacia. -->
+      <div class="menu-mas-buscar">
+        <input type="search" id="menu-mas-q" placeholder="Buscar destino…" autocomplete="off"
+               oninput="menuMasFiltrar(this.value)" onkeydown="menuMasTecla(event)">
+      </div>
+      <div class="menu-mas-lista" id="menu-mas-lista">
+        <div class="menu-mas-grp" data-grp="operación">Operación</div>
+        <button class="menu-mas-item" id="menu-mas-stock" data-mm="stock" data-tipo="tab" onclick="cambiarTab('stock');cerrarMenuMas()"><span class="menu-mas-icon">&#128230;</span><span class="menu-mas-lbl">Stock</span><span class="menu-mas-badge" id="menu-mas-stock-badge" style="display:none"></span></button>
+        <button class="menu-mas-item" id="menu-mas-compras" data-mm="compras" data-tipo="tab" onclick="cambiarTab('compras');cerrarMenuMas()"><span class="menu-mas-icon">&#128722;</span><span class="menu-mas-lbl">Compras</span><span class="menu-mas-badge" id="menu-mas-compras-badge" style="display:none"></span></button>
+        <button class="menu-mas-item" id="menu-mas-rendiciones" data-mm="rendiciones" data-tipo="tab" onclick="cambiarTab('rendiciones');cerrarMenuMas()"><span class="menu-mas-icon">&#128176;</span><span class="menu-mas-lbl">Rendiciones</span><span class="menu-mas-badge" id="menu-mas-rend-badge" style="display:none"></span></button>
+        <button class="menu-mas-item" id="menu-mas-buffet" data-mm="buffet" data-tipo="tab" onclick="cambiarTab('buffet');cerrarMenuMas()"><span class="menu-mas-icon">&#127828;</span><span class="menu-mas-lbl">Buffet</span></button>
+        <div class="menu-mas-grp" data-grp="clientes y ventas">Clientes y ventas</div>
+        <button class="menu-mas-item" id="menu-mas-clientes" data-mm="clientes" data-tipo="tab" onclick="cambiarTab('clientes');cerrarMenuMas()"><span class="menu-mas-icon">&#11088;</span><span class="menu-mas-lbl">Clientes</span></button>
+        <button class="menu-mas-item" id="menu-mas-visitas" data-mm="visitas" data-tipo="tab" onclick="cambiarTab('gps');cerrarMenuMas()"><span class="menu-mas-icon">&#128205;</span><span class="menu-mas-lbl">Visitas</span></button>
+        <button class="menu-mas-item" id="menu-mas-embudo" data-mm="embudo" data-tipo="tab" onclick="cambiarTab('embudo');cerrarMenuMas()"><span class="menu-mas-icon">&#127919;</span><span class="menu-mas-lbl">Embudo</span></button>
+        <button class="menu-mas-item" id="menu-mas-ccanon" data-mm="ciudades" data-tipo="tab" onclick="cambiarTab('ccanon');cerrarMenuMas()"><span class="menu-mas-icon">&#127961;</span><span class="menu-mas-lbl">Ciudades</span><span class="menu-mas-badge" id="menu-mas-ccanon-badge" style="display:none"></span></button>
+        <button class="menu-mas-item" id="menu-mas-prod-canon" data-mm="sin canonizar" data-tipo="tab" onclick="cambiarTab('prod-canon');cerrarMenuMas()"><span class="menu-mas-icon">&#128295;</span><span class="menu-mas-lbl">Sin canonizar</span><span class="menu-mas-badge" id="menu-mas-pcanon-badge" style="display:none"></span></button>
+        <div class="menu-mas-grp" data-grp="administración y finanzas">Administración y finanzas</div>
+        <button class="menu-mas-item" id="menu-mas-cobranzas" data-mm="cobranzas" data-tipo="tab" onclick="cambiarTab('cobranzas');cerrarMenuMas()"><span class="menu-mas-icon">&#128176;</span><span class="menu-mas-lbl">Cobranzas</span></button>
+        <button class="menu-mas-item" id="menu-mas-facturacion" data-mm="facturación" data-tipo="tab" onclick="cambiarTab('facturacion');cerrarMenuMas()"><span class="menu-mas-icon">&#129534;</span><span class="menu-mas-lbl">Facturación</span><span class="menu-mas-badge" id="menu-mas-fc-badge" style="display:none"></span></button>
+        <button class="menu-mas-item" id="menu-mas-tesoreria" data-mm="tesorería" data-tipo="tab" onclick="cambiarTab('tesoreria');cerrarMenuMas()"><span class="menu-mas-icon">&#128176;</span><span class="menu-mas-lbl">Tesorería</span></button>
+        <button class="menu-mas-item" id="menu-mas-cc" data-mm="ctas ctes" data-tipo="tab" onclick="cambiarTab('cc');cerrarMenuMas()"><span class="menu-mas-icon">&#128210;</span><span class="menu-mas-lbl">Ctas Ctes</span></button>
+        <button class="menu-mas-item" id="menu-mas-ctacte" data-mm="cta. cte. 2026" data-tipo="tab" onclick="cambiarTab('ctacte');cerrarMenuMas()"><span class="menu-mas-icon">&#128179;</span><span class="menu-mas-lbl">Cta. Cte. 2026</span></button>
+        <button class="menu-mas-item" id="menu-mas-ccprod" data-mm="cta producto" data-tipo="tab" onclick="cambiarTab('ccprod');cerrarMenuMas()"><span class="menu-mas-icon">&#128210;</span><span class="menu-mas-lbl">Cta Producto</span></button>
+        <button class="menu-mas-item" id="menu-mas-comisiones" data-mm="comisiones" data-tipo="tab" onclick="cambiarTab('comisiones');cerrarMenuMas()"><span class="menu-mas-icon">&#128181;</span><span class="menu-mas-lbl">Comisiones</span></button>
+        <div class="menu-mas-grp" data-grp="control y análisis">Control y análisis</div>
+        <button class="menu-mas-item" id="menu-mas-pulso" data-mm="pulso" data-tipo="tab" onclick="cambiarTab('pulso');cerrarMenuMas()"><span class="menu-mas-icon">&#128200;</span><span class="menu-mas-lbl">Pulso</span></button>
+        <button class="menu-mas-item" id="menu-mas-margenes" data-mm="márgenes" data-tipo="tab" onclick="cambiarTab('margenes');cerrarMenuMas()"><span class="menu-mas-icon">&#128202;</span><span class="menu-mas-lbl">Márgenes</span></button>
+        <button class="menu-mas-item" id="menu-mas-mpconc" data-mm="conciliar mp" data-tipo="tab" onclick="cambiarTab('mpconc');cerrarMenuMas()"><span class="menu-mas-icon">&#128270;</span><span class="menu-mas-lbl">Conciliar MP</span></button>
+        <button class="menu-mas-item" id="menu-mas-foodconcil" data-mm="concil. food" data-tipo="tab" onclick="cambiarTab('foodconcil');cerrarMenuMas()"><span class="menu-mas-icon">&#129525;</span><span class="menu-mas-lbl">Concil. Food</span></button>
+        <button class="menu-mas-item" id="menu-mas-acc-dup" data-mm="duplicados" data-tipo="tab" onclick="cambiarTab('acc-dup');cerrarMenuMas()"><span class="menu-mas-icon">&#128203;</span><span class="menu-mas-lbl">Duplicados</span></button>
+        <div class="menu-mas-grp" data-grp="acciones">Acciones</div>
+        <button class="menu-mas-item" id="menu-mas-fotosentrega" data-mm="fotos entrega" data-tipo="accion" onclick="cerrarMenuMas();fotosEntregaBuscarAbrir()"><span class="menu-mas-icon">&#128248;</span><span class="menu-mas-lbl">Fotos entrega</span></button>
+        <div class="menu-mas-vacio" id="menu-mas-vacio" style="display:none">Ningún destino coincide.</div>
+      </div>
     <div class="tck-ver" id="tck-ver-movil"></div>
     <button class="menu-mas-cerrar" onclick="cerrarMenuMas()">Cerrar</button>
+<script>
+/* ═══ v13.215.0 · buscador del menu "Mas" ════════════════════════════════
+   Filtra sobre los botones YA renderizados. No toca permisos: los items que
+   el gating oculto con display:none siguen ocultos, porque el filtro solo
+   agrega/quita la clase mm-off y nunca fuerza display. */
+function menuMasFiltrar(q) {
+  var t = String(q || '').toLowerCase().trim()
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  var lista = document.getElementById('menu-mas-lista');
+  if (!lista) return;
+  var visibles = 0;
+  lista.querySelectorAll('.menu-mas-item').forEach(function (b) {
+    var n = (b.getAttribute('data-mm') || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    var ok = !t || n.indexOf(t) !== -1;
+    b.classList.toggle('mm-off', !ok);
+    /* solo cuenta si ademas el gating lo dejo visible */
+    if (ok && b.style.display !== 'none') visibles++;
+  });
+  /* los encabezados de grupo se esconden si el grupo quedo sin items */
+  lista.querySelectorAll('.menu-mas-grp').forEach(function (g) {
+    var hay = false, n = g.nextElementSibling;
+    while (n && !n.classList.contains('menu-mas-grp')) {
+      if (n.classList.contains('menu-mas-item') && !n.classList.contains('mm-off')
+          && n.style.display !== 'none') hay = true;
+      n = n.nextElementSibling;
+    }
+    g.classList.toggle('mm-off', !hay);
+  });
+  var v = document.getElementById('menu-mas-vacio');
+  if (v) v.style.display = visibles ? 'none' : 'block';
+}
+/* Enter abre el primer resultado; Escape limpia o cierra. */
+function menuMasTecla(ev) {
+  if (ev.key === 'Enter') {
+    var lista = document.getElementById('menu-mas-lista');
+    if (!lista) return;
+    var b = [].slice.call(lista.querySelectorAll('.menu-mas-item'))
+      .filter(function (x) { return !x.classList.contains('mm-off') && x.style.display !== 'none'; })[0];
+    if (b) { ev.preventDefault(); b.click(); }
+  } else if (ev.key === 'Escape') {
+    ev.preventDefault();
+    if (ev.target && ev.target.value) { ev.target.value = ''; menuMasFiltrar(''); }
+    else if (typeof cerrarMenuMas === 'function') cerrarMenuMas();
+  }
+}
+/* Escape con foco fuera del input, y foco al buscador al abrir. */
+document.addEventListener('keydown', function (ev) {
+  if (ev.key !== 'Escape') return;
+  var bd = document.getElementById('menu-mas-backdrop');
+  if (bd && bd.classList.contains('open') && typeof cerrarMenuMas === 'function') cerrarMenuMas();
+});
+function menuMasFoco() {
+  var q = document.getElementById('menu-mas-q');
+  if (q) { q.value = ''; menuMasFiltrar(''); try { q.focus({ preventScroll: true }); } catch (e) {} }
+}
+</script>
+
   </div>
 </div>
 
@@ -24084,6 +24097,7 @@ var _tabActual = 'pedidos';
 
 // ── MENÚ "MÁS" (sheet inferior con opciones extra) ─────────────
 function abrirMenuMas() {
+  try { setTimeout(menuMasFoco, 30); } catch (_eMM) {}
   var b = document.getElementById('menu-mas-backdrop');
   if (b) b.classList.add('on');
   // Mostrar/ocultar Visitas según rol (solo admin las ve, vendedores van directo desde Visitas tab)
@@ -49557,7 +49571,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.214.0';
+var TCK_VERSION = '13.215.0';
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
