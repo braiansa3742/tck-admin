@@ -1,5 +1,23 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.222.0 — 16/09/2026
+     v13.222.0: CAMBIAR FECHA/TURNO DE ENTREGA (TL). Requiere Apps Script
+       v25.139.0 y Supabase Fase 0 v3 (ya aplicados).
+       · Botón "📅 Cambiar fecha/turno" para Dueño, Operaciones y Cobranzas
+         en la tarjeta del pedido y en el detalle del viaje (pedidos TL).
+       · Modal: estado actual, 15 días con mañana/tarde (domingo y sábado
+         tarde deshabilitados), vista previa con advertencias, motivo
+         obligatorio y confirmaciones por nivel (planilla impresa, carga
+         cerrada con reapertura, en ruta solo Dueño/Operaciones).
+       · Crea el viaje TL de destino si no existe (lo hace el backend).
+       · Al terminar: resumen con las planillas a regenerar y refresco de
+         logística, detalle del viaje y lista de pedidos.
+       · "⇄ Mover" ya no se ofrece para pedidos TL (el backend lo rechaza)
+         y ahora también lo ve el Dueño.
+       · Centro de Control: "Próxima salida" / "Asignar" sobre un pedido TL
+         abren el modal nuevo en vez de fallar.
+       DEPLOY: subir este archivo como index.html y version.json a 13.222.0.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.221.0 — 16/09/2026
      v13.221.0: ALTA de los tres Premium en caja de 5 Kg (pedido de Chan).
        Fresnova pasó Medallón de Pollo, Formitas y Medallón JyQ Premium de
@@ -23344,6 +23362,13 @@ function renderCard(p) {
       btns += '<button class="btn-estado" style="background:#FFF8E1;color:#E65100;border-color:#E65100;" data-pid="' + p.pedidoId + '" onclick="adminEditarPedidoBtn(this,event)">✏️ Editar pedido</button>';
     }
   }  // Botón asignar chofer — pedidos confirmados
+  // v13.222.0 — 📅 Cambiar fecha/turno (TL) para Dueño/Operaciones/Cobranzas
+  if (typeof ceePuede === 'function' && ceePuede() &&
+      (p.estado === 'Pendiente' || p.estado === 'Confirmado' || p.estado === 'En revisión') &&
+      ceeEsPedidoTL({ pedidoId: p.pedidoId, localidad: p.localidad })) {
+    btns += '<button class="btn-estado" style="background:#FFF3E0;color:#E65100;border-color:#E65100;" data-pid="' + p.pedidoId +
+            '" onclick="ceeAbrir(this.getAttribute(\'data-pid\'),\'admin_pedido\',event)">📅 Cambiar fecha/turno</button>';
+  }
   var asignarHtml = '';
   if (p.estado === 'Confirmado') {
     if (p.choferAsignado) {
@@ -34508,7 +34533,14 @@ function lzRenderPedidoEnViaje(p) {
   html += '    <div class="v-pedido-estado-mini ' + estadoCls + '">' + estadoTxt + '</div>';
   // v13.140.0 — mover el pedido a otro viaje (Fran). El backend valida rendición
   // confirmada y ventana de días; acá solo mostramos el botón a quien opera.
-  if (lzPuedeMoverViaje()) {
+  // v13.222.0 — TL: la fecha/turno se cambian con el modal nuevo (el backend
+  // rechaza "Mover" para TL). Interior: sigue "⇄ Mover".
+  const _ceeTL = ceeEsPedidoTL(p);
+  if (_ceeTL && ceePuede() && p.estado !== 'Entregado') {
+    html += '    <button class="v-cee-btn" title="Cambiar fecha/turno de entrega" ' +
+            'data-pid="' + lzEsc(p.pedido_id) + '" onclick="event.stopPropagation();ceeAbrir(this.getAttribute(\'data-pid\'),\'admin_viaje\')">📅 Fecha/turno</button>';
+  }
+  if (!_ceeTL && lzPuedeMoverViaje()) {
     html += '    <button class="v-mv-btn" title="Mover este pedido a otro viaje" ' +
             'onclick="event.stopPropagation();mvpAbrir(\'' + lzEsc(p.pedido_id) + '\')">🔀 Mover</button>';
   }
@@ -34530,7 +34562,7 @@ function lzRenderPedidoEnViaje(p) {
 // de UI, para que el botón no le aparezca a quien no opera logística.
 // ═══════════════════════════════════════════════════════════════════
 function lzPuedeMoverViaje() {
-  return rolActual === 'operaciones' || rolActual === 'admin';
+  return rolActual === 'operaciones' || rolActual === 'admin' || rolActual === 'dueno';  // v13.222.0: + dueño
 }
 
 function _mvpHost() {
@@ -34627,6 +34659,409 @@ async function _mvpConfirmar(pedidoId, viajeDestino) {
 // ───────────────────────────────────────────────────────────────
 // MARCA QUE LA CONFIG CAMBIÓ (mostrar botón Guardar)
 // ───────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+// v13.222.0 — CAMBIAR FECHA/TURNO DE ENTREGA (TL)
+//
+// Botón "📅 Cambiar fecha/turno" para Dueño, Operaciones y Cobranzas,
+// desde la tarjeta del pedido, desde el detalle del viaje y desde el
+// Centro de Control. Todo el movimiento lo hace el backend en una sola
+// operación (Apps Script v25.139.0 → fn_pedido_cambiar_entrega):
+// pedido + entrega + totales + planillas + auditoría. Si no existe el
+// viaje TL de destino, se crea.
+//
+// Flujo: elegir día y turno → vista previa (advertencias y nivel) →
+// motivo obligatorio → confirmaciones según el nivel → confirmar.
+//   Nivel 1  planilla impresa / viaje adicional  → "Entendido"
+//   Nivel 2  carga cerrada en el viaje actual    → "Reabrir la carga"
+//   Nivel 3  el pedido ya salió con el chofer    → solo Dueño/Operaciones
+// El JWT viaja en el body del POST (nunca en la URL).
+// ═══════════════════════════════════════════════════════════════════
+var _cee = null;
+
+function ceePuede() {
+  return rolActual === 'dueno' || rolActual === 'operaciones' || rolActual === 'cobranzas';
+}
+
+function ceeEsPedidoTL(p) {
+  if (!p) return false;
+  if (p.zona) return p.zona === 'tl';
+  var pid = p.pedido_id || p.pedidoId;
+  var rows = (typeof _lzPedidosZona !== 'undefined' && Array.isArray(_lzPedidosZona)) ? _lzPedidosZona : [];
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].pedido_id === pid && rows[i].zona) return rows[i].zona === 'tl';
+  }
+  return /trenque/i.test(String(p.localidad || p.localidad_canonica || ''));
+}
+
+function _ceeHost() {
+  var h = document.getElementById('cee-host');
+  if (!h) { h = document.createElement('div'); h.id = 'cee-host'; document.body.appendChild(h); }
+  return h;
+}
+
+function ceeCerrar() {
+  var h = document.getElementById('cee-host');
+  if (h) h.innerHTML = '';
+  _cee = null;
+}
+
+function _ceeTurnoLbl(t) { return (t === 'mañana' || t === 'manana') ? 'Mañana' : 'Tarde'; }
+function _ceeTurnoKey(t) { return (t === 'mañana' || t === 'manana') ? 'manana' : 'tarde'; }
+
+function _ceeDiaLbl(iso) {
+  if (!_cee || !_cee.opciones) return iso;
+  for (var i = 0; i < _cee.opciones.length; i++) {
+    if (_cee.opciones[i].fecha === iso) return _cee.opciones[i].dia_txt;
+  }
+  return (typeof _fcFechaCorta === 'function') ? _fcFechaCorta(iso) : iso;
+}
+
+function _ceeRelativo(iso) {
+  if (!_cee || !_cee.opciones || !_cee.opciones.length) return '';
+  var hoy = _cee.opciones[0].fecha;
+  if (iso === hoy) return 'Hoy · ';
+  var p = hoy.split('-');
+  var d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2] + 1));
+  var man = d.getUTCFullYear() + '-' + ('0' + (d.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + d.getUTCDate()).slice(-2);
+  return iso === man ? 'Mañana · ' : '';
+}
+
+async function _ceePost(body) {
+  body.actorJwt = (typeof _JWT !== 'undefined' && _JWT) || '';
+  var res = await fetch(APPS_SCRIPT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(body)
+  });
+  return res.json();
+}
+
+function ceeAbrir(pedidoId, canal, ev) {
+  if (ev && ev.stopPropagation) ev.stopPropagation();
+  if (_contBloq('cambiar la fecha/turno de entrega')) return;
+  if (!ceePuede()) { toast('Tu usuario no puede cambiar la fecha/turno', 'err'); return; }
+  if (typeof _JWT === 'undefined' || !_JWT) { toast('Sesión vencida: volvé a entrar con tu PIN', 'err'); return; }
+  return _ceeAbrir(pedidoId, canal || 'admin_pedido');
+}
+
+async function _ceeAbrir(pedidoId, canal) {
+  _cee = { pedidoId: pedidoId, canal: canal, sel: null, preview: null, enviando: false, pidiendo: 0 };
+  _ceeHost().innerHTML = [
+    '<div class="fc-rc-overlay"><div class="fc-rc">',
+    '<div class="fc-rc-tit">📅 Cambiar fecha/turno</div>',
+    '<div class="fc-rc-fac">Cargando…</div>',
+    '</div></div>'
+  ].join('');
+  try {
+    var r = await Promise.all([
+      sbFetch('pedidos_zona?pedido_id=eq.' + encodeURIComponent(pedidoId) +
+              '&select=pedido_id,cliente,zona,estado,total,salida_planificada,turno,viaje_id,entrega_origen,entrega_fijada_por&limit=1'),
+      sbFetch('rpc/fn_tl_opciones_entrega', { method: 'POST', body: '{}' })
+    ]);
+    if (!_cee || _cee.pedidoId !== pedidoId) return;
+    var pz = Array.isArray(r[0]) ? r[0][0] : null;
+    if (!pz) { ceeCerrar(); toast('El pedido todavía no está en logística', 'err'); return; }
+    if (pz.zona !== 'tl') { ceeCerrar(); toast('Por ahora solo se cambia fecha/turno en pedidos de Trenque Lauquen', 'err'); return; }
+    var vj = null;
+    if (pz.viaje_id) {
+      var vr = await sbFetch('viajes?id=eq.' + encodeURIComponent(pz.viaje_id) +
+        '&select=id,zona,fecha_salida,estado,chofer,vehiculo,planilla_version,planilla_desactualizada&limit=1');
+      vj = Array.isArray(vr) ? vr[0] : null;
+    }
+    _cee.pz = pz;
+    _cee.viaje = vj;
+    _cee.opciones = Array.isArray(r[1]) ? r[1] : [];
+    _ceePintar();
+  } catch (e) {
+    ceeCerrar();
+    toast('No se pudo abrir: ' + e.message, 'err');
+  }
+}
+
+var _CEE_EST = { planificado: 'Planificado', preparando: 'Preparando', carga_cerrada: 'Carga cerrada',
+                 en_ruta: 'En ruta', rindiendo: 'Rindiendo', cerrado: 'Cerrado' };
+
+function _ceeViajeTxt(v) {
+  if (!v) return 'sin viaje asignado';
+  var ch = (v.chofer && v.chofer !== '—' && v.chofer !== '-') ? v.chofer : 'sin chofer';
+  var pl = Number(v.planilla_version || 0) > 0
+    ? ' · planilla v' + v.planilla_version + (v.planilla_desactualizada ? ' (desactualizada)' : '')
+    : '';
+  return ch + ' · ' + (_CEE_EST[v.estado] || v.estado) + pl;
+}
+
+function _ceePintar() {
+  if (!_cee || !_cee.pz) return;
+  var pz = _cee.pz;
+  var H = [];
+  H.push('<div class="fc-rc-overlay" onclick="if(event.target===this)ceeCerrar()">');
+  H.push('<div class="fc-rc cee-sheet">');
+  H.push('<div class="fc-rc-tit">📅 Cambiar fecha/turno</div>');
+  H.push('<div class="fc-rc-fac">' + lzEsc(pz.cliente || '(sin cliente)') +
+         '<span>' + lzEsc(pz.pedido_id) + ' · ' + lzFmtMoneda(Number(pz.total) || 0) + ' · ' + lzEsc(pz.estado || '') + '</span></div>');
+
+  // Programación actual
+  var origen = (pz.entrega_origen === 'admin' || pz.entrega_origen === 'vendedor')
+    ? 'elegida por ' + lzEsc(pz.entrega_fijada_por || pz.entrega_origen)
+    : 'calculada por el sistema';
+  H.push('<div class="cee-actual"><b>Ahora:</b> ' +
+         lzEsc(_ceeRelativo(pz.salida_planificada) + _ceeDiaLbl(pz.salida_planificada)) + ' · ' +
+         lzEsc(_ceeTurnoLbl(pz.turno)) +
+         '<small>' + lzEsc(_ceeViajeTxt(_cee.viaje)) + ' · ' + origen + '</small></div>');
+
+  // Selector de día y turno
+  H.push('<label class="fc-rc-lbl">Elegí el nuevo día y turno</label>');
+  H.push('<div class="cee-dias">');
+  var porDia = {};
+  var orden = [];
+  (_cee.opciones || []).forEach(function (o) {
+    if (!porDia[o.fecha]) { porDia[o.fecha] = {}; orden.push(o.fecha); }
+    porDia[o.fecha][o.turno] = o;
+  });
+  orden.forEach(function (f) {
+    var m = porDia[f]['mañana'], t = porDia[f]['tarde'];
+    var dia = (m || t).dia_txt;
+    if (m && !m.habilitado && m.motivo === 'DOMINGO_SIN_REPARTO') {
+      H.push('<div class="cee-dia cee-dia-off"><span>' + lzEsc(dia) + '</span><em>sin reparto</em></div>');
+      return;
+    }
+    H.push('<div class="cee-dia"><span class="cee-dia-lbl">' + lzEsc(_ceeRelativo(f) + dia) + '</span>');
+    H.push('<div class="cee-tbs">' + _ceeBtnTurno(m) + _ceeBtnTurno(t) + '</div></div>');
+  });
+  H.push('</div>');
+
+  // Vista previa, motivo y confirmaciones
+  H.push('<div id="cee-prev"></div>');
+  H.push('<label class="fc-rc-lbl">Motivo (obligatorio, queda registrado)</label>');
+  H.push('<input id="cee-motivo" class="fc-rc-inp" type="text" maxlength="200" ' +
+         'placeholder="Ej: el cliente pidió recibirlo el viernes" oninput="_ceeActualizarBtn()">');
+  H.push('<div id="cee-chk"></div>');
+  H.push('<div class="fc-rc-acc">');
+  H.push('<button class="fc-rc-btn cancel" onclick="ceeCerrar()">Cancelar</button>');
+  H.push('<button id="cee-ok" class="fc-rc-btn ok" disabled onclick="ceeConfirmar()">Confirmar cambio</button>');
+  H.push('</div></div></div>');
+  _ceeHost().innerHTML = H.join('');
+}
+
+function _ceeBtnTurno(o) {
+  if (!o) return '';
+  var pz = _cee.pz;
+  var esActual = (o.fecha === pz.salida_planificada && o.turno === pz.turno);
+  var sel = _cee.sel && _cee.sel.fecha === o.fecha && _cee.sel.turno === o.turno;
+  var cls = 'cee-tb' + (sel ? ' sel' : '') + (esActual ? ' actual' : '') + (!o.habilitado ? ' off' : '');
+  var sub = '';
+  if (!o.habilitado) {
+    sub = o.motivo === 'SABADO_SOLO_MANANA' ? 'sin tarde' : 'no disponible';
+  } else if (esActual) {
+    sub = 'actual';
+  } else if (o.advertencia === 'SE_CREA_VIAJE') {
+    sub = 'viaje nuevo';
+  } else if (o.advertencia === 'SE_CREA_VIAJE_ADICIONAL') {
+    sub = '⚠ viaje adicional';
+  } else if (o.viaje_id) {
+    var ch = (o.viaje_chofer && o.viaje_chofer !== '—') ? o.viaje_chofer : 'sin chofer';
+    sub = ch + ' · ' + (o.viaje_pedidos || 0) + (o.advertencia === 'PLANILLA_YA_IMPRESA' ? ' · ⚠ planilla' : '');
+  }
+  var dis = (!o.habilitado || esActual) ? ' disabled' : '';
+  return '<button type="button" class="' + cls + '"' + dis +
+         ' data-f="' + o.fecha + '" data-t="' + o.turno + '" onclick="ceeElegirBtn(this)">' +
+         '<b>' + _ceeTurnoLbl(o.turno) + '</b><small>' + lzEsc(sub) + '</small></button>';
+}
+
+function ceeElegirBtn(btn) {
+  if (!_cee || _cee.enviando) return;
+  _cee.sel = { fecha: btn.getAttribute('data-f'), turno: btn.getAttribute('data-t') };
+  var todos = document.querySelectorAll('#cee-host .cee-tb');
+  for (var i = 0; i < todos.length; i++) {
+    var b = todos[i];
+    b.classList.toggle('sel', b.getAttribute('data-f') === _cee.sel.fecha && b.getAttribute('data-t') === _cee.sel.turno);
+  }
+  _ceePrevisualizar();
+}
+
+async function _ceePrevisualizar(aviso) {
+  if (!_cee || !_cee.sel) return;
+  var n = ++_cee.pidiendo;
+  _cee.preview = null;
+  var prev = document.getElementById('cee-prev');
+  var chk = document.getElementById('cee-chk');
+  if (prev) prev.innerHTML = '<div class="cee-box cee-info">Revisando…</div>';
+  if (chk) chk.innerHTML = '';
+  _ceeActualizarBtn();
+  try {
+    var d = await _ceePost({ accion: 'cambiarEntregaPreview', pedido_id: _cee.pedidoId,
+                             fecha: _cee.sel.fecha, turno: _ceeTurnoKey(_cee.sel.turno), canal: _cee.canal });
+    if (!_cee || n !== _cee.pidiendo) return;
+    _cee.preview = d;
+    _ceePintarPreview(aviso);
+  } catch (e) {
+    if (prev) prev.innerHTML = '<div class="cee-box cee-err">No se pudo consultar: ' + lzEsc(e.message) + '</div>';
+  }
+  _ceeActualizarBtn();
+}
+
+var _CEE_BLOQ = {
+  SIN_PERMISO_EN_RUTA: 1, PEDIDO_ENTREGADO: 1, PEDIDO_CANCELADO: 1, ENTREGA_ENTREGADA: 1,
+  ENTREGA_CERRADA: 1, RENDICION_CONFIRMADA: 1, VIAJE_ORIGEN_CERRADO: 1, ZONA_NO_HABILITADA: 1,
+  NO_ENTREGA_RECHAZO: 1, NO_ENTREGA_SIN_DEVOLUCION: 1, NO_ENTREGA_ESPERA_CAMARA: 1,
+  NO_ENTREGA_RESOLVER_DIFERENCIAS: 1, NO_ENTREGA_REPROGRAMABLE_FASE2: 1, NO_ENTREGA_INCONSISTENTE: 1,
+  DEVOLUCION_PARCIAL_ABIERTA: 1, SIN_CAMBIOS: 1
+};
+
+function _ceePintarPreview(aviso) {
+  var d = _cee.preview || {};
+  var prev = document.getElementById('cee-prev');
+  var chk = document.getElementById('cee-chk');
+  if (!prev || !chk) return;
+  var H = [];
+  if (aviso) H.push('<div class="cee-box cee-warn">' + lzEsc(aviso) + '</div>');
+
+  var utilizable = d.preview === true || d.code === 'SIN_PERMISO_EN_RUTA';
+  if (!utilizable) {
+    H.push('<div class="cee-box cee-err">' + lzEsc(d.message || d.code || 'No se puede hacer este cambio') + '</div>');
+    prev.innerHTML = H.join('');
+    chk.innerHTML = '';
+    return;
+  }
+
+  var de = d.destino || {};
+  var destTxt = lzEsc(_ceeRelativo(de.fecha) + (de.fecha_txt || de.fecha)) + ' · ' + lzEsc(_ceeTurnoLbl(de.turno));
+  var vTxt = de.viaje_se_crea
+    ? 'se crea un viaje nuevo, sin chofer'
+    : lzEsc(_ceeViajeTxt({ chofer: de.viaje_chofer, estado: de.viaje_estado, planilla_version: de.viaje_planilla }));
+  H.push('<div class="cee-box ' + (d.nivel > 0 ? 'cee-warn' : 'cee-ok') + '"><b>Pasa a:</b> ' + destTxt +
+         '<small>' + vTxt + '</small></div>');
+
+  if (d.code === 'SIN_PERMISO_EN_RUTA') {
+    H.push('<div class="cee-box cee-err">' + lzEsc(d.message) + '</div>');
+    prev.innerHTML = H.join('');
+    chk.innerHTML = '';
+    return;
+  }
+
+  (d.advertencias || []).forEach(function (a) {
+    H.push('<div class="cee-adv">⚠ ' + lzEsc(a.message) + '</div>');
+  });
+  prev.innerHTML = H.join('');
+
+  var C = [];
+  if (d.code === 'REQUIERE_REABRIR_ORIGEN') {
+    C.push(_ceeChk('cee-c-reabrir', 'Reabrir la carga del viaje actual',
+      'Queda registrado. Depósito tiene que volver a controlar y cerrar la carga.'));
+  } else if (d.nivel >= 1) {
+    C.push(_ceeChk('cee-c-ok', 'Entendido: hay que regenerar la planilla y avisar al depósito', ''));
+  }
+  if (d.nivel >= 3) {
+    var ch = (d.antes && d.antes.viaje_chofer) ? d.antes.viaje_chofer : 'el chofer';
+    C.push(_ceeChk('cee-c-ruta', 'Ya le avisé a ' + ch + ' que no lo entregue',
+      'La mercadería vuelve en el vehículo y la recibe Cámara.'));
+  }
+  chk.innerHTML = C.join('');
+}
+
+function _ceeChk(id, txt, sub) {
+  return '<label class="fc-rc-radio cee-chk"><input type="checkbox" id="' + id + '" onchange="_ceeActualizarBtn()">' +
+         '<span>' + lzEsc(txt) + (sub ? '<small>' + lzEsc(sub) + '</small>' : '') + '</span></label>';
+}
+
+function _ceeListo() {
+  if (!_cee || _cee.enviando || !_cee.sel || !_cee.preview) return false;
+  var d = _cee.preview;
+  if (d.preview !== true) return false;
+  var mot = (document.getElementById('cee-motivo') || {}).value || '';
+  if (mot.trim().length < 3) return false;
+  var chks = document.querySelectorAll('#cee-chk input[type=checkbox]');
+  for (var i = 0; i < chks.length; i++) if (!chks[i].checked) return false;
+  return true;
+}
+
+function _ceeActualizarBtn() {
+  var b = document.getElementById('cee-ok');
+  if (b) b.disabled = !_ceeListo();
+}
+
+function ceeConfirmar() {
+  if (_contBloq('cambiar la fecha/turno de entrega')) return;
+  if (!_ceeListo()) return;
+  return _ceeConfirmar();
+}
+
+async function _ceeConfirmar() {
+  var d = _cee.preview;
+  var motivo = ((document.getElementById('cee-motivo') || {}).value || '').trim();
+  var reabrir = !!(document.getElementById('cee-c-reabrir') || {}).checked;
+  _cee.enviando = true;
+  var b = document.getElementById('cee-ok');
+  if (b) { b.disabled = true; b.textContent = 'Guardando…'; }
+  try {
+    var body = {
+      accion: 'cambiarEntregaPedido', pedido_id: _cee.pedidoId,
+      fecha: _cee.sel.fecha, turno: _ceeTurnoKey(_cee.sel.turno), canal: _cee.canal,
+      motivo: motivo, confirmar_nivel: Number(d.nivel) || 0
+    };
+    if (reabrir) body.reabrir_carga = true;
+    var r = await _ceePost(body);
+    if (r.status === 'ok' && r.code === 'CAMBIADO') {
+      _ceeResultado(r);
+      ceeRefrescar();
+      return;
+    }
+    _cee.enviando = false;
+    if (b) b.textContent = 'Confirmar cambio';
+    if (r.code === 'REQUIERE_CONFIRMACION' || r.code === 'REQUIERE_REABRIR_ORIGEN') {
+      _ceePrevisualizar('La situación cambió mientras confirmabas. Revisá las advertencias.');
+      return;
+    }
+    if (r.code === 'OCUPADO') { toast(r.message, 'err'); _ceeActualizarBtn(); return; }
+    toast('✗ ' + (r.message || r.code || 'No se pudo cambiar'), 'err');
+    _ceePrevisualizar();
+  } catch (e) {
+    if (_cee) _cee.enviando = false;
+    if (b) b.textContent = 'Confirmar cambio';
+    toast('Error de conexión: ' + e.message + '. Revisá el pedido antes de reintentar.', 'err');
+    _ceeActualizarBtn();
+  }
+}
+
+function _ceeResultado(r) {
+  var de = r.despues || {};
+  var H = [];
+  H.push('<div class="fc-rc-overlay"><div class="fc-rc">');
+  H.push('<div class="fc-rc-tit">✅ Fecha/turno cambiados</div>');
+  H.push('<div class="fc-rc-fac">' + lzEsc((_cee && _cee.pz && _cee.pz.cliente) || '') +
+         '<span>' + lzEsc(de.fecha_txt || de.fecha) + ' · ' + lzEsc(_ceeTurnoLbl(de.turno)) + '</span></div>');
+  H.push('<div class="cee-box cee-ok">' +
+         (de.viaje_creado ? 'Se creó el viaje ' + lzEsc(_ceeTurnoLbl(de.turno)) + ' de ese día (sin chofer).'
+                          : 'Quedó en el viaje de ' + lzEsc((de.viaje_chofer && de.viaje_chofer !== '—') ? de.viaje_chofer : 'ese turno (sin chofer)') + '.') +
+         '<small>Al chofer le aparece actualizado en su app.</small></div>');
+  if (r.carga_reabierta) {
+    H.push('<div class="cee-adv">⚠ Se reabrió la carga del viaje anterior: Depósito tiene que volver a controlar y cerrarla.</div>');
+  }
+  (r.planillas_desactualizadas || []).forEach(function (p) {
+    H.push('<div class="cee-adv">⚠ La planilla v' + p.version + ' del viaje ' +
+           (p.rol === 'origen' ? 'anterior' : 'de destino') +
+           ' quedó desactualizada: regenerala desde el detalle del viaje antes de cargar.</div>');
+  });
+  H.push('<div class="fc-rc-acc"><button class="fc-rc-btn ok" onclick="ceeCerrar()">Listo</button></div>');
+  H.push('</div></div>');
+  _ceeHost().innerHTML = H.join('');
+}
+
+async function ceeRefrescar() {
+  try { if (typeof lzCargarViajes === 'function') await lzCargarViajes(); } catch (e) {}
+  try { if (typeof lzCargarDatos === 'function') await lzCargarDatos(); } catch (e) {}
+  try {
+    if (typeof _vDetalleId !== 'undefined' && _vDetalleId) {
+      var nv = _lzViajes.find(function (v) { return v.id === _vDetalleId; });
+      if (nv) _vDetalleData = nv;
+      var ov = document.getElementById('v-detalle-overlay');
+      if (ov && ov.classList.contains('open')) ov.innerHTML = lzRenderDetalleViaje();
+    }
+  } catch (e) {}
+  try { if (typeof cargarPedidos === 'function') await cargarPedidos(true); } catch (e) {}
+  try { if (typeof renderLogistica === 'function') renderLogistica(); } catch (e) {}
+}
+
 function lzMarcarConfigCambiada() {
   const btn = document.getElementById('v-btn-guardar-config');
   if (btn) btn.classList.remove('hidden');
@@ -47957,6 +48392,30 @@ async function comprasDetailCargarFecha() {
 .fc-rc-btn.cancel{background:var(--cream2);color:var(--text2);}
 .fc-rc-btn.ok{background:var(--orange);color:#fff;}
 .fc-rc-btn:active{opacity:.7;}
+/* v13.222.0 — Cambiar fecha/turno */
+.cee-sheet{max-height:92vh;overflow-y:auto;}
+.cee-actual{background:#E3F2FD;border-radius:10px;padding:9px 11px;font-size:13px;color:#0D47A1;margin-bottom:4px;}
+.cee-actual small,.cee-box small{display:block;font-size:11.5px;font-weight:600;opacity:.85;margin-top:2px;}
+.cee-dias{display:flex;flex-direction:column;gap:5px;}
+.cee-dia{display:flex;align-items:center;gap:8px;}
+.cee-dia-lbl{flex:1;font-size:12.5px;font-weight:800;color:var(--text);min-width:0;}
+.cee-dia-off{justify-content:space-between;font-size:11.5px;color:var(--text3);padding:2px 2px;}
+.cee-tbs{display:flex;gap:5px;flex:0 0 auto;}
+.cee-tb{width:104px;border:2px solid var(--cream3);background:#fff;border-radius:10px;padding:5px 6px;cursor:pointer;font-family:inherit;text-align:center;}
+.cee-tb b{display:block;font-size:13px;color:var(--text);}
+.cee-tb small{display:block;font-size:10px;font-weight:600;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cee-tb.sel{border-color:var(--orange);background:#FFF3E0;}
+.cee-tb.actual{border-style:dashed;background:#E8F5E9;cursor:default;}
+.cee-tb.off{opacity:.45;cursor:not-allowed;background:#FAFAFA;}
+.cee-box{border-radius:10px;padding:9px 11px;font-size:13px;margin-top:10px;}
+.cee-ok{background:#E8F5E9;color:#1B5E20;}
+.cee-warn{background:#FFF8E1;color:#E65100;}
+.cee-err{background:#FFEBEE;color:#B71C1C;font-weight:700;}
+.cee-info{background:var(--cream2);color:var(--text2);}
+.cee-adv{font-size:12px;color:#E65100;background:#FFF8E1;border-radius:8px;padding:6px 9px;margin-top:6px;line-height:1.35;}
+.cee-chk{margin-top:8px;}
+.v-cee-btn{margin-top:4px;background:#E65100;color:#fff;border:none;border-radius:7px;padding:3px 8px;font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:900;letter-spacing:.3px;cursor:pointer;touch-action:manipulation;}
+.v-cee-btn:active{transform:scale(.96);}
 </style>
 
 <!-- ═══ v12.0 BLOQUE D — MODALES DE LOGÍSTICA ZONAS ═══ -->
@@ -49713,7 +50172,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.221.0';
+var TCK_VERSION = '13.222.0';
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
@@ -50588,6 +51047,8 @@ window.ccColaProxima = async function (eventoId, pedidoId) {
   if (d.status === 'ok') {
     await ccGAS('accion=opsEventoResolver&id=' + eventoId + '&quien=' + encodeURIComponent(ccQuien()));
     ccToast('✅ Reagendado a ' + ((d.registro && d.registro.salida_planificada) || 'próxima salida'), 'ok');
+  } else if (/Cambiar fecha\/turno/.test(d.message || '')) {
+    ceeAbrir(pedidoId, 'centro_control');   // v13.222.0 — TL
   } else ccToast('No se pudo reagendar: ' + (d.message || ''), 'err');
   ccCargar();
 };
@@ -50596,6 +51057,11 @@ window.ccRepararUno = async function (pedidoId, btn) {
   if (btn) { btn.disabled = true; btn.textContent = 'Asignando…'; }
   var d = await ccGAS('accion=pedidoReagendar&pedido_id=' + encodeURIComponent(pedidoId) +
     '&quien=' + encodeURIComponent(ccQuien()) + '&motivo=' + encodeURIComponent('Reparación: sin viaje'));
+  if (d.status !== 'ok' && /Cambiar fecha\/turno/.test(d.message || '')) {   // v13.222.0 — TL
+    if (btn) { btn.disabled = false; btn.textContent = 'Asignar'; }
+    ceeAbrir(pedidoId, 'centro_control');
+    return;
+  }
   ccToast(d.status === 'ok' ? '✅ ' + pedidoId + ' asignado' : '⛔ ' + (d.message || ''), d.status === 'ok' ? 'ok' : 'err');
   ccCargar();
 };
