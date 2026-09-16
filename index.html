@@ -1,6 +1,16 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.219.0 — 15/09/2026
+     TCK ADMIN — v13.220.0 — 16/09/2026
+     v13.220.0: CHOFERES NUEVOS ASIGNABLES (pedido Braian 16/09, par de
+       ventas v14.191.0). Los selectores de chofer son listas fijas: sin
+       esto no se le puede asignar un viaje a los nuevos. Salen Luis y
+       Alfredo; entran Nahuel, Cesar, Comodin, 'Chan Chofer' y 'Roman
+       Chofer' (los valores son el nombre exacto de app_usuarios). Tocado:
+         · "⚙️ Configurar viaje" (v-chofer-sel)
+         · Planilla/remito veterinario (vet-chofer-sel)
+         · Picker de chofer por pedido (mostrarPickerChofer)
+       Los viajes viejos con chofer Luis/Alfredo se siguen viendo (el
+       detalle no editable muestra el texto tal cual). Sin cambios de backend.
      v13.219.0: "PEDIDO DOBLE" YA NO MARCA LAS VENTAS DE MOSTRADOR.
        Reporte de Braian (15/09): la venta de $104.500 de mostrador salía
        marcada como doble sin serlo. Causa: el detector del admin agrupa por
@@ -15327,9 +15337,12 @@ input.canales-exp-input[type="date"] {
             <select id="vet-chofer-sel" onchange="vetActualizarVehiculo()" style="width:100%;padding:8px 10px;border-radius:10px;border:1.5px solid var(--cream3);font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:700;background:#fff;">
               <option value="">— Elegir —</option>
               <option value="Joan">🚚 Joan</option>
-              <option value="Luis">🚚 Luis</option>
               <option value="Juan Pablo">🚚 Ian</option>
-              <option value="Alfredo">🚚 Alfredo</option>
+              <option value="Nahuel">🚚 Nahuel</option>
+              <option value="Cesar">🚚 César</option>
+              <option value="Comodin">🚚 Comodín</option>
+              <option value="Chan Chofer">🚚 Chan (chofer)</option>
+              <option value="Roman Chofer">🚚 Román (chofer)</option>
             </select>
           </div>
           <div style="flex:1;">
@@ -34302,9 +34315,12 @@ function lzRenderDetalleViaje() {
     html += '        <select id="v-chofer-sel" onchange="lzMarcarConfigCambiada()">';
     html += '          <option value="">— Elegir —</option>';
     html += '          <option value="Joan"' + (v.chofer === 'Joan' ? ' selected' : '') + '>🟢 Joan</option>';
-    html += '          <option value="Luis"' + (v.chofer === 'Luis' ? ' selected' : '') + '>🟠 Luis</option>';
     html += '          <option value="Juan Pablo"' + (v.chofer === 'Juan Pablo' ? ' selected' : '') + '>🔵 Ian</option>';
-    html += '          <option value="Alfredo"' + (v.chofer === 'Alfredo' ? ' selected' : '') + '>🟣 Alfredo</option>';
+    html += '          <option value="Nahuel"' + (v.chofer === 'Nahuel' ? ' selected' : '') + '>🔵 Nahuel</option>';
+    html += '          <option value="Cesar"' + (v.chofer === 'Cesar' ? ' selected' : '') + '>🔵 César</option>';
+    html += '          <option value="Comodin"' + (v.chofer === 'Comodin' ? ' selected' : '') + '>🔵 Comodín</option>';
+    html += '          <option value="Chan Chofer"' + (v.chofer === 'Chan Chofer' ? ' selected' : '') + '>🔵 Chan (chofer)</option>';
+    html += '          <option value="Roman Chofer"' + (v.chofer === 'Roman Chofer' ? ' selected' : '') + '>🔵 Román (chofer)</option>';
     html += '        </select>';
   } else {
     html += '        <div class="v-detalle-static">' + lzEsc(tieneChofer ? v.chofer : '—') + '</div>';
@@ -36415,9 +36431,12 @@ function mostrarPickerChofer(btn, event) {
   wrap.innerHTML =
     '<div class="chofer-picker">' +
       '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Joan" onclick="asignarChoferBtn(this,event)">🚚 Joan</button>' +
-      '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Luis" onclick="asignarChoferBtn(this,event)">🚚 Luis</button>' +
       '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Juan Pablo" onclick="asignarChoferBtn(this,event)">🚚 Ian</button>' +
-      '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Alfredo" onclick="asignarChoferBtn(this,event)">🚚 Alfredo</button>' +
+      '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Nahuel" onclick="asignarChoferBtn(this,event)">🚚 Nahuel</button>' +
+      '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Cesar" onclick="asignarChoferBtn(this,event)">🚚 César</button>' +
+      '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Comodin" onclick="asignarChoferBtn(this,event)">🚚 Comodín</button>' +
+      '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Chan Chofer" onclick="asignarChoferBtn(this,event)">🚚 Chan (chofer)</button>' +
+      '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Roman Chofer" onclick="asignarChoferBtn(this,event)">🚚 Román (chofer)</button>' +
     '</div>' +
     '<button class="chofer-picker-cancel" data-pid="' + pedidoId + '" onclick="cancelarPickerChoferBtn(this,event)">Cancelar</button>';
 }
@@ -49670,7 +49689,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.219.0';
+var TCK_VERSION = '13.220.0';
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
