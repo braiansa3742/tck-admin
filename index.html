@@ -1,5 +1,42 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.219.0 — 15/09/2026
+     v13.219.0: "PEDIDO DOBLE" YA NO MARCA LAS VENTAS DE MOSTRADOR.
+       Reporte de Braian (15/09): la venta de $104.500 de mostrador salía
+       marcada como doble sin serlo. Causa: el detector del admin agrupa por
+       cliente + día, y todas las ventas de mostrador comparten el nombre
+       "Consumidor Final", así que caen todas en el mismo grupo. Ventas ya lo
+       había arreglado el 03/09 (v14.175.0); el admin nunca lo recibió.
+       Port de las dos excepciones de ventas, mismo código:
+       (A) DUP_CLIENTES_GENERICOS + _dupClienteAnonimo: un nombre que no
+           identifica a nadie ("Consumidor Final", "Varios", "Mostrador",
+           "CF", vacío…) nunca agrupa, ni en el mapa ni en el marcado.
+       (B) _dupEsMostrador + _dupComparable, ventana de 10 min: en mostrador
+           el día entero es absurdo (el mismo cliente pasa a la mañana y a la
+           tarde y son DOS ventas). El doble guardado real vive en segundos.
+       (7) TCK_VERSION a 13.219.0. Acordate de version.json en el repo.
+       NO TOCA: el modal de duplicados, la unión de pedidos, los pares
+       marcados como legítimos en Supabase, ni la detección fuera de
+       mostrador (un cliente con nombre real se sigue comparando todo el día).
+     ─────────────────────────────────────────────────────────────────────
+     TCK ADMIN — v13.218.0 — 12/09/2026
+     v13.218.0: CONTROL FÍSICO DE CARGA — YA NO VIENE PRELLENADO.
+       Caso huevos 11/09 (zona2b): el modal "Control físico de carga" traía la
+       columna Cargado = Pide y un tilde; se confirmó dos veces "0 excepciones"
+       contra 147 maples con 87 en el camión. 11 de 11 controles históricos
+       fueron así (Francisco, <2 min después de generar la planilla).
+       · Cargado arranca VACÍO (placeholder = lo pedido). Sin todas las
+         cantidades no se confirma. Botón "Todo coincide con la planilla"
+         llena solo lo vacío: decisión explícita, no default.
+       · Si la cantidad difiere aparece el campo Motivo (obligatorio, ≥3
+         letras). La excepción viaja con nota a cargaControlConfirmar (GAS,
+         sin cambios) → ops_evento 'faltante_carga' y el cierre bloquea hasta
+         autorizar con motivo, como ya hacía.
+       · Aviso arriba: "Este control lo hace Depósito desde su app" (ventas
+         v14.189.0, RPC fn_carga_control_confirmar). Pendiente decisión de
+         Braian (D1): si administración deja de poder confirmarlo del todo.
+       Base: v13.217.2 de producción (bajada con git pull). Solo este modal.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.216.1 — 10/09/2026
      v13.216.1: foto propia del Pan Maxi Hamburguesa 310g (Pan_Maxi_Hamburguesa.jpg)
        y presentacion "310 Grs · 4u". Espejo de ventas v14.183.1 / catalogo v3.59.1.
@@ -21465,10 +21502,41 @@ async function cargarPedidos(silencioso) {
     // Pedidos del mismo cliente con productos 100% distintos NO son duplicados,
     // son pedidos legítimos separados. El admin los ve igual en el modal con
     // un click al badge, pero dejan de ensuciar la lista con falsas alarmas.
+    // ──────────────────────────────────────────────────────────────────
+    // v13.219.0 — PORT de ventas v14.175.0 (reporte de Braian 15/09: el
+    // admin marca "PEDIDO DOBLE" ventas de mostrador que no lo son).
+    // (A) "Consumidor Final" y compañía NO identifican a nadie: dos ventas
+    //     de mostrador del mismo día no son el mismo cliente.
+    // (B) En mostrador solo se comparan las ventas PEGADAS EN EL TIEMPO
+    //     (10 min), que es donde vive el doble guardado real.
+    // Fuera de mostrador no cambia nada salvo (A).
+    // ──────────────────────────────────────────────────────────────────
+    var DUP_CLIENTES_GENERICOS = ['consumidorfinal','consumidor','sinnombre','varios',
+                                  'particular','clientenuevo','mostrador','contado','cf'];
+    function _dupClienteAnonimo(nombre) {
+      var n = String(nombre || '').toLowerCase().replace(/\s/g, '');
+      if (!n) return true;                       // sin nombre no identifica a nadie
+      return DUP_CLIENTES_GENERICOS.indexOf(n) >= 0;
+    }
+    function _dupEsMostrador(p) {
+      if (!p) return false;
+      if (String(p.origen || '').toLowerCase() === 'mostrador') return true;
+      return String(p.vendedor || '').toLowerCase().indexOf('mostrador') >= 0;
+    }
+    var DUP_MOSTRADOR_VENTANA_MS = 10 * 60 * 1000;
+    function _dupComparable(a, b) {
+      if (!_dupEsMostrador(a) && !_dupEsMostrador(b)) return true;
+      var ta = Date.parse(String(a.fechaHora || '').replace(' ', 'T'));
+      var tb = Date.parse(String(b.fechaHora || '').replace(' ', 'T'));
+      if (!isFinite(ta) || !isFinite(tb)) return true;   // dato feo: lado seguro
+      return Math.abs(ta - tb) <= DUP_MOSTRADOR_VENTANA_MS;
+    }
+
     var mapTotal = {};
     pedidos.forEach(function(p) {
       if (p.estado === 'Cancelado') return;
       if (p.unidoReciente) return;   // v13.167.0 — union en vuelo, no agrupar
+      if (_dupClienteAnonimo(p.cliente)) return;   // v13.219.0
       var mFecha = (p.pedidoId || '').match(/TCK-(\d{8})/);
       var fechaDia = mFecha ? mFecha[1] : (p.fechaHora || '').substring(0, 10).replace(/-/g,'');
       if (!fechaDia) return;
@@ -21514,6 +21582,8 @@ async function cargarPedidos(silencioso) {
       if (p.estado === 'Cancelado') { p.esDuplicado = false; p.tipoDuplicado = null; p.duplicadoCon = ''; return; }
       // v13.167.0 — recien unido: el Sheet todavia no sincronizo, no marcar.
       if (p.unidoReciente) { p.esDuplicado = false; p.tipoDuplicado = null; p.duplicadoCon = ''; return; }
+      // v13.219.0 — cliente generico ("Consumidor Final"): nunca agrupa.
+      if (_dupClienteAnonimo(p.cliente)) { p.esDuplicado = false; p.tipoDuplicado = null; p.duplicadoCon = ''; return; }
       var mFecha = (p.pedidoId || '').match(/TCK-(\d{8})/);
       var fechaDia = mFecha ? mFecha[1] : (p.fechaHora || '').substring(0, 10).replace(/-/g,'');
       if (!fechaDia) { p.esDuplicado = false; p.tipoDuplicado = null; p.duplicadoCon = ''; return; }
@@ -21540,7 +21610,12 @@ async function cargarPedidos(silencioso) {
       //   - 'exacto'    → mismo cliente, mismo día, algún producto en común
       //   - 'parcial'   → mismo cliente, mismo día, productos distintos (posible pedido separado legítimo)
       var misProds = _setProds(p);
-      var otros = grupo.filter(function(x){ return x.pedidoId !== p.pedidoId; });
+      var otros = grupo.filter(function(x){ return x.pedidoId !== p.pedidoId; })
+                       .filter(function(x){ return _dupComparable(p, x); });   // v13.219.0
+      if (!otros.length) {
+        p.esDuplicado = false; p.tipoDuplicado = null; p.duplicadoCon = '';
+        return;
+      }
       var otrosConProdComun = otros.filter(function(x) {
         var sus = _setProds(x);
         for (var n of misProds) { if (sus.has(n)) return true; }
@@ -49595,7 +49670,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.217.2';
+var TCK_VERSION = '13.219.0';
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
@@ -50707,12 +50782,20 @@ window.vcAbrirControl = async function (viajeId) {
          ccEsc(prev.confirmado_por) + ' el ' + ccHora(prev.confirmado_at) +
          ((prev.excepciones || []).length ? ' · ' + prev.excepciones.length + ' excepciones' : ' · sin excepciones') + '. Podés volver a confirmarla si recontrolaron.</div>';
   }
+  // v13.218.0 — el control lo hace DEPÓSITO desde su app (ventas ≥14.189.0). Desde acá
+  // se puede seguir confirmando, pero ya no viene prellenado: hay que contar y tipear la
+  // cantidad real de cada producto (caso huevos 11/09: dos confirmaciones "0 excepciones"
+  // contra 147 maples con 87 en el camión). Una diferencia exige motivo.
+  h += '<div class="vc-row" style="background:#FFF8E1;border:1.5px solid #F9A825;color:#7A4F00;border-radius:8px;margin-top:8px;font-size:12.5px;">' +
+       '<b>Este control lo hace Depósito desde su app.</b> Si lo confirmás desde acá, contá la mercadería y tipeá la cantidad <b>real</b> de cada producto. ' +
+       'Lo que no coincida necesita motivo. <button type="button" class="cc-btn gris" style="margin-left:6px;padding:3px 8px;font-size:12px;" onclick="vcCtlTodoCoincide()">Todo coincide con la planilla</button></div>';
   h += '<div style="max-height:44vh;overflow:auto;"><table class="vc-tbl" id="vc-ctl-tbl">' +
-       '<tr><th>Producto</th><th style="text-align:right">Pide</th><th>Cargado</th><th style="text-align:right">Clientes</th></tr>' +
+       '<tr><th>Producto</th><th style="text-align:right">Pide</th><th>Cargado</th><th>Motivo si difiere</th><th style="text-align:right">Clientes</th></tr>' +
     items.map(function (it, i) {
       return '<tr data-i="' + i + '"><td>' + ccEsc(it.producto) + '</td>' +
         '<td style="text-align:right;font-weight:700;">' + it.requerido + '</td>' +
-        '<td><input type="number" step="any" value="' + it.requerido + '" data-req="' + it.requerido + '" data-prod="' + ccEsc(it.producto) + '" oninput="vcMarcarExc(this)"></td>' +
+        '<td><input type="number" step="any" value="" placeholder="' + it.requerido + '" data-req="' + it.requerido + '" data-prod="' + ccEsc(it.producto) + '" oninput="vcMarcarExc(this)" style="width:70px;"></td>' +
+        '<td><input type="text" class="vc-ctl-nota" placeholder="—" maxlength="200" style="width:100%;min-width:120px;display:none;"></td>' +
         '<td style="text-align:right;">' + it.pedidos + '</td></tr>';
     }).join('') + '</table></div>';
   if ((d.pedidos_sin_detalle || []).length) {
@@ -50732,19 +50815,39 @@ window.vcAbrirControl = async function (viajeId) {
 
 window.vcMarcarExc = function (inp) {
   var tr = inp.closest('tr');
-  if (Number(inp.value) !== Number(inp.getAttribute('data-req'))) tr.classList.add('exc');
-  else tr.classList.remove('exc');
+  var vacio = String(inp.value).trim() === '';
+  var difiere = !vacio && Number(inp.value) !== Number(inp.getAttribute('data-req'));
+  if (difiere) tr.classList.add('exc'); else tr.classList.remove('exc');
+  // v13.218.0 — el motivo aparece solo cuando la cantidad difiere
+  var nota = tr.querySelector('.vc-ctl-nota');
+  if (nota) nota.style.display = difiere ? '' : 'none';
+};
+
+// v13.218.0 — llena con lo pedido SOLO lo que quedó vacío (decisión explícita, no default)
+window.vcCtlTodoCoincide = function () {
+  document.querySelectorAll('#vc-ctl-tbl input[type=number]').forEach(function (inp) {
+    if (String(inp.value).trim() === '') { inp.value = inp.getAttribute('data-req'); vcMarcarExc(inp); }
+  });
 };
 
 window.vcConfirmarControl = async function (viajeId, version, btn) {
   var chk = document.getElementById('vc-ctl-chk');
   if (!chk || !chk.checked) return ccToast('Falta tildar la confirmación de verificación física', 'err');
-  var exc = [];
+  var exc = [], vacios = 0, sinNota = null;
   document.querySelectorAll('#vc-ctl-tbl input[type=number]').forEach(function (inp) {
+    if (String(inp.value).trim() === '') { vacios++; return; }
     var req = Number(inp.getAttribute('data-req')), car = Number(inp.value);
-    if (car !== req) exc.push({ producto: inp.getAttribute('data-prod'), requerido: req, cargado: car });
+    if (car !== req) {
+      var notaEl = inp.closest('tr').querySelector('.vc-ctl-nota');
+      var nota = notaEl ? String(notaEl.value || '').trim() : '';
+      if (nota.length < 3 && !sinNota) sinNota = inp.getAttribute('data-prod');
+      exc.push({ producto: inp.getAttribute('data-prod'), requerido: req, cargado: car, nota: nota });
+    }
   });
-  if (exc.length && !confirm('Vas a confirmar con ' + exc.length + ' excepción(es) — queda registrado como FALTANTE crítico visible para Braian y Francisco.\n\n¿Confirmás?')) return;
+  // v13.218.0 — sin cantidades no hay control: hay que tipear todas (o "Todo coincide")
+  if (vacios) return ccToast('Faltan ' + vacios + ' producto(s) sin cantidad cargada. Contá y tipeá, o tocá "Todo coincide con la planilla".', 'err');
+  if (sinNota) return ccToast('Falta el motivo de la diferencia en "' + sinNota + '"', 'err');
+  if (exc.length && !confirm('Vas a confirmar con ' + exc.length + ' diferencia(s) — queda registrado como FALTANTE crítico visible para Braian y Francisco, y el camión no puede salir hasta autorizarlo.\n\n¿Confirmás?')) return;
   if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
   var d = await ccGAS('accion=cargaControlConfirmar&viaje_id=' + encodeURIComponent(viajeId) +
     '&version=' + version + '&quien=' + encodeURIComponent(ccQuien()) +
