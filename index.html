@@ -1,5 +1,33 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.228.0 — 17/09/2026
+     v13.228.0: LA CUENTA CORRIENTE YA NO SE MUESTRA COMO DINERO COBRADO.
+       (rebase sobre v13.226.0; no cambia nada más de esa versión)
+       Acompaña a Supabase devolucion_total_v1 r2 + tck-ventas v14.199.0:
+       viajes.monto_cobrado pasa a ser SOLO dinero recibido (efectivo,
+       transferencia, cheque u otro medio de dinero). Sin este ajuste, las
+       pantallas de Logística mostraban como "cobrado" plata que todavía no
+       entró.
+       · Viajes en curso: Cobrado (dinero) y, aparte, "a cta. cte." y
+         "devuelto/faltante" cuando hay. El % del viaje se calcula sobre lo
+         entregado (cobrado + cta. cte.), no sobre la plata recibida.
+       · Tarjeta del viaje en ruta: misma separación en la barra.
+       · Ya no se estima la cantidad de entregas a partir del dinero
+         cobrado (ni en curso ni en el histórico): se usa el conteo real de
+         entregas o directamente la cantidad de pedidos.
+       · Histórico: el total dice "Cobrado (sin cta. cte.)" para no
+         confundirlo con lo entregado.
+       Carga v2 no se toca y sigue apagada (CARGA_V2_ADMIN.modo = 'off').
+       DEPLOY: subir como index.html y version.json a 13.228.0. Va DESPUÉS
+       del SQL y de tck-ventas v14.199.0.
+     ─────────────────────────────────────────────────────────────────────
+     TCK ADMIN — v13.226.0 — 16/09/2026
+     v13.226.0: CARGA V2 (par de ventas v14.198.0; CARGA_V2_ADMIN.modo arranca en 'off').
+       Con el modo prendido, el bloque de carga muestra el avance real de Depósito y
+       del chofer y saca Control/Cerrar/Arrancar de la oficina. Admin solo autoriza
+       diferencias, contingencia fiscal y arranque de contingencia (RPC, motivo de
+       catálogo, auditado). Francisco asignable como chofer (reparte con su usuario).
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.222.0 — 16/09/2026
      v13.222.0: CAMBIAR FECHA/TURNO DE ENTREGA (TL). Requiere Apps Script
        v25.139.0 y Supabase Fase 0 v3 (ya aplicados).
@@ -15379,6 +15407,7 @@ input.canales-exp-input[type="date"] {
               <option value="Comodin">🚚 Comodín</option>
               <option value="Chan Chofer">🚚 Chan (chofer)</option>
               <option value="Roman Chofer">🚚 Román (chofer)</option>
+              <option value="Francisco">🚚 Francisco (reparto)</option>
             </select>
           </div>
           <div style="flex:1;">
@@ -33735,16 +33764,23 @@ function lzRenderViajeCard(v) {
   // Stats line: pedidos / monto / ciudades
   if (estado === 'en_ruta') {
     // Si está en ruta, mostrar barra de progreso
-    const cobrado = Number(v.monto_cobrado) || 0;
+    // v13.228.0 — cobrado = dinero recibido (viajes.monto_cobrado ya no incluye
+    // cta. cte.). Si el índice de entregas está cargado, se muestra separado.
+    const _erVC = _lzEntregasPorViaje[v.id];
+    const cobrado = _erVC ? _erVC.montoCobrado : (Number(v.monto_cobrado) || 0);
+    const ctaCteVC = _erVC ? (_erVC.montoCtaCte || 0) : 0;
+    const entregadoVC = cobrado + ctaCteVC;
     const total = Number(v.monto_total) || 1;
-    const pct = Math.min(100, Math.round((cobrado / total) * 100));
+    const pct = Math.min(100, Math.round((entregadoVC / total) * 100));
     html += '  <div class="lz-viaje-progreso">';
     html += '    <div class="lz-viaje-progreso-bar">';
     html += '      <div class="lz-viaje-progreso-fill" style="width:' + pct + '%;"></div>';
     html += '    </div>';
     html += '    <div class="lz-viaje-progreso-meta">';
     html += '      <span>' + (v.total_pedidos || 0) + ' pedidos</span>';
-    html += '      <span>' + lzFmtMoneda(cobrado) + ' / ' + lzFmtMoneda(total) + '</span>';
+    html += '      <span>' + lzFmtMoneda(cobrado) + ' cobrado' +
+            (ctaCteVC > 0 ? ' · ' + lzFmtMoneda(ctaCteVC) + ' cta. cte.' : '') +
+            ' / ' + lzFmtMoneda(total) + '</span>';
     html += '    </div>';
     html += '  </div>';
   } else {
@@ -33822,6 +33858,48 @@ function lzRenderViajeCardColapsada(v) {
 // Solución: leer directo de tabla `entregas` filtrando por viaje_id.
 let _lzEntregasPorViaje = {}; // { viaje_id: { totalEntregadas, montoCobrado, loadedAt } }
 
+// v13.228.0 — ¿cuánto de esta entrega es dinero recibido, cuánto queda en
+// cuenta corriente y cuánto volvió? Mismo criterio que fn_entrega_importe_cobrado
+// (Supabase) y que _chMontosViaje (tck-ventas): la cta. cte. no es cobro.
+var _LZ_NO_DINERO = ['cuenta_corriente','cuentacorriente','cta_cte','ctacte','cc','no_cobro','no_cobró','nocobro','nocobró'];
+function _lzNormMedio(k) { return String(k || '').trim().toLowerCase().replace(/[\s.]+/g, '_'); }
+function _lzMontosEntrega(e) {
+  const r = { cobrado: 0, cta: 0, devuelto: 0 };
+  let m = Number(e.monto) || 0;
+  // Compatibilidad bug histórico: montos guardados como /1000
+  if (m > 0 && m < 1000) m = m * 1000;
+  if (e.estado === 'no_entregado') { r.devuelto = m; return r; }
+  if (e.estado !== 'entregado') return r;
+  let declarado = 0, leido = false;
+  if (e.detalle_cobro) {
+    try {
+      const det = JSON.parse(e.detalle_cobro);
+      if (det && typeof det === 'object' && !Array.isArray(det)) {
+        leido = true;
+        Object.keys(det).forEach(k => {
+          const v = parseFloat(det[k]);
+          if (!(v > 0)) return;
+          declarado += v;
+          const nk = _lzNormMedio(k);
+          if (_LZ_NO_DINERO.indexOf(nk) >= 0) { if (nk.indexOf('no') !== 0) r.cta += v; }
+          else r.cobrado += v;
+        });
+      }
+    } catch(_) {}
+  }
+  if (!leido) {
+    const f = _lzNormMedio(e.forma_cobro);
+    const real = (e.monto_cobrado_real === null || e.monto_cobrado_real === undefined)
+      ? null : Number(e.monto_cobrado_real);
+    if (f === 'cuenta_corriente') r.cta = (real !== null ? real : m);
+    else if (f === '' || _LZ_NO_DINERO.indexOf(f) >= 0) r.devuelto = 0;
+    else r.cobrado = (real !== null ? real : m);
+    return r;
+  }
+  if (m - declarado > 0.5) r.devuelto += (m - declarado);
+  return r;
+}
+
 async function lzCargarEntregasDeViajes(viajesIds) {
   if (!viajesIds || !viajesIds.length) return;
   // Filtrar IDs que ya estén en cache "fresca" (<30s)
@@ -33835,28 +33913,31 @@ async function lzCargarEntregasDeViajes(viajesIds) {
   try {
     // Query batch: traer todas las entregas de los viajes en una sola request
     const idsList = idsACargar.map(id => '"' + id + '"').join(',');
+    // v13.228.0 — hacen falta los medios de cobro: la cuenta corriente NO es
+    // dinero recibido y lo devuelto tampoco se cobró.
     const url = 'entregas?viaje_id=in.(' + idsACargar.map(encodeURIComponent).join(',') +
-      ')&select=viaje_id,estado,monto';
+      ')&select=viaje_id,estado,monto,forma_cobro,detalle_cobro,monto_cobrado_real';
     const rows = await sbFetch(url);
 
     // Agrupar por viaje_id
     const acc = {};
-    idsACargar.forEach(id => { acc[id] = { entregadas: 0, cobrado: 0 }; });
+    idsACargar.forEach(id => { acc[id] = { entregadas: 0, cobrado: 0, cta: 0, devuelto: 0 }; });
     (rows || []).forEach(e => {
       if (!e.viaje_id || !acc[e.viaje_id]) return;
-      if (e.estado === 'entregado') {
-        acc[e.viaje_id].entregadas += 1;
-        let m = Number(e.monto) || 0;
-        // Compatibilidad bug histórico: montos guardados como /1000
-        if (m > 0 && m < 1000) m = m * 1000;
-        acc[e.viaje_id].cobrado += m;
-      }
+      const d = _lzMontosEntrega(e);
+      if (e.estado === 'entregado') acc[e.viaje_id].entregadas += 1;
+      acc[e.viaje_id].cobrado  += d.cobrado;
+      acc[e.viaje_id].cta      += d.cta;
+      acc[e.viaje_id].devuelto += d.devuelto;
     });
     // Persistir en cache
     Object.keys(acc).forEach(id => {
       _lzEntregasPorViaje[id] = {
         totalEntregadas: acc[id].entregadas,
-        montoCobrado:    acc[id].cobrado,
+        montoCobrado:    acc[id].cobrado,   // v13.228.0: SOLO dinero recibido
+        montoCtaCte:     acc[id].cta,
+        montoDevuelto:   acc[id].devuelto,
+        montoEntregado:  acc[id].cobrado + acc[id].cta,
         loadedAt:        ahora
       };
     });
@@ -33917,16 +33998,20 @@ async function lzRenderEnCurso(el) {
 
     // FIX N42-C: usar entregas reales de Supabase en vez de viajes.monto_cobrado
     // (que está roto porque Apps Script no lo recalcula al confirmar entrega).
+    // v13.228.0 — cobrado = dinero recibido; la cta. cte. y lo devuelto van aparte.
     const entregasReales = _lzEntregasPorViaje[v.id];
     const cobrado = entregasReales ? entregasReales.montoCobrado : (Number(v.monto_cobrado) || 0);
+    const ctaCte  = entregasReales ? (entregasReales.montoCtaCte || 0) : 0;
+    const devuelto = entregasReales ? (entregasReales.montoDevuelto || 0) : 0;
+    const entregado = cobrado + ctaCte;   // lo que salió del camión y está facturado
     const total = Number(v.monto_total) || 1;
-    const pct = Math.min(100, Math.round((cobrado / total) * 100));
+    // El avance del viaje se mide por lo entregado, no por la plata recibida
+    const pct = Math.min(100, Math.round((entregado / total) * 100));
 
     const totalPedidos = v.total_pedidos || 0;
-    // Conteo REAL de entregadas (en vez de la aproximación cobrado/total*pedidos)
-    const entregadas = entregasReales ? entregasReales.totalEntregadas
-                                      : Math.round((cobrado / total) * totalPedidos);
-    const pendientes = Math.max(0, totalPedidos - entregadas);
+    // Conteo REAL de entregadas. Sin el índice cargado no se estima con dinero.
+    const entregadas = entregasReales ? entregasReales.totalEntregadas : null;
+    const pendientes = (entregadas === null) ? null : Math.max(0, totalPedidos - entregadas);
 
     const fecha = lzFechaCard(v.fecha_salida);
     const zonaNombre = lzZonaNombreFromKey(v.zona);
@@ -33944,11 +34029,11 @@ async function lzRenderEnCurso(el) {
 
     html += '  <div class="lz-encurso-stats-grid">';
     html += '    <div class="lz-encurso-stat">';
-    html += '      <div class="lz-encurso-stat-num">' + entregadas + '</div>';
+    html += '      <div class="lz-encurso-stat-num">' + (entregadas === null ? '—' : entregadas) + '</div>';
     html += '      <div class="lz-encurso-stat-lbl">Entregadas</div>';
     html += '    </div>';
     html += '    <div class="lz-encurso-stat">';
-    html += '      <div class="lz-encurso-stat-num">' + pendientes + '</div>';
+    html += '      <div class="lz-encurso-stat-num">' + (pendientes === null ? '—' : pendientes) + '</div>';
     html += '      <div class="lz-encurso-stat-lbl">Pendientes</div>';
     html += '    </div>';
     html += '    <div class="lz-encurso-stat">';
@@ -33956,6 +34041,21 @@ async function lzRenderEnCurso(el) {
     html += '      <div class="lz-encurso-stat-lbl">Cobrado</div>';
     html += '    </div>';
     html += '  </div>';
+    // v13.228.0 — lo que NO es plata recibida, bien separado
+    if (ctaCte > 0 || devuelto > 0) {
+      html += '  <div class="lz-encurso-conceptos" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px;">';
+      if (ctaCte > 0) {
+        html += '    <span style="background:#E3F2FD;color:#0D47A1;border:1px solid #BBDEFB;border-radius:7px;padding:3px 8px;font-size:11.5px;font-weight:700;">📘 ' +
+                lzFmtMoneda(ctaCte) + ' a cta. cte.</span>';
+      }
+      if (devuelto > 0) {
+        html += '    <span style="background:#FFEBEE;color:#B71C1C;border:1px solid #FFCDD2;border-radius:7px;padding:3px 8px;font-size:11.5px;font-weight:700;">↩️ ' +
+                lzFmtMoneda(devuelto) + ' devuelto/faltante</span>';
+      }
+      html += '    <span style="background:#F1F8E9;color:#33691E;border:1px solid #DCEDC8;border-radius:7px;padding:3px 8px;font-size:11.5px;font-weight:700;">📦 ' +
+              lzFmtMoneda(entregado) + ' entregado</span>';
+      html += '  </div>';
+    }
 
     const fillStyle = isLuis
       ? 'background:linear-gradient(90deg,var(--luis),#F57C00);'
@@ -34370,6 +34470,7 @@ function lzRenderDetalleViaje() {
     html += '          <option value="Comodin"' + (v.chofer === 'Comodin' ? ' selected' : '') + '>🔵 Comodín</option>';
     html += '          <option value="Chan Chofer"' + (v.chofer === 'Chan Chofer' ? ' selected' : '') + '>🔵 Chan (chofer)</option>';
     html += '          <option value="Roman Chofer"' + (v.chofer === 'Roman Chofer' ? ' selected' : '') + '>🔵 Román (chofer)</option>';
+    html += '          <option value="Francisco"' + (v.chofer === 'Francisco' ? ' selected' : '') + '>🔵 Francisco (reparto)</option>';
     html += '        </select>';
   } else {
     html += '        <div class="v-detalle-static">' + lzEsc(tieneChofer ? v.chofer : '—') + '</div>';
@@ -36070,7 +36171,7 @@ function lzRenderHistorico(el) {
   html += '  </div>';
   html += '  <div class="lz-hist-stat">';
   html += '    <div class="lz-hist-stat-num">' + lzFmtMoneda(totalCobrado) + '</div>';
-  html += '    <div class="lz-hist-stat-lbl">Cobrado</div>';
+  html += '    <div class="lz-hist-stat-lbl">Cobrado (sin cta. cte.)</div>';   // v13.228.0
   html += '  </div>';
   html += '</div>';
 
@@ -36090,8 +36191,8 @@ function lzRenderHistViajeRow(v) {
   const cobrado = Number(v.monto_cobrado) || 0;
   const total = Number(v.monto_total) || 0;
   const totalPedidos = v.total_pedidos || 0;
-  // Aproximación de entregadas (cobrado/total * pedidos)
-  const entregadas = total > 0 ? Math.round((cobrado / total) * totalPedidos) : 0;
+  // v13.228.0 — se quitó la aproximación cobrado/total*pedidos: monto_cobrado
+  // ya no incluye la cta. cte., así que ese cálculo daba cualquier cosa.
 
   // Color del badge según el chofer
   const choferKey = String(v.chofer || '').toLowerCase();
@@ -36116,7 +36217,7 @@ function lzRenderHistViajeRow(v) {
     html += '      </span>';
   }
   html += '    </div>';
-  html += '    <div class="lz-hist-meta">' + entregadas + ' de ' + totalPedidos + ' entregadas</div>';
+  html += '    <div class="lz-hist-meta">' + totalPedidos + ' pedidos</div>';
   html += '  </div>';
 
   html += '  <div class="lz-hist-cifras">';
@@ -36896,6 +36997,7 @@ function mostrarPickerChofer(btn, event) {
       '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Comodin" onclick="asignarChoferBtn(this,event)">🚚 Comodín</button>' +
       '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Chan Chofer" onclick="asignarChoferBtn(this,event)">🚚 Chan (chofer)</button>' +
       '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Roman Chofer" onclick="asignarChoferBtn(this,event)">🚚 Román (chofer)</button>' +
+      '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Francisco" onclick="asignarChoferBtn(this,event)">🚚 Francisco</button>' +
     '</div>' +
     '<button class="chofer-picker-cancel" data-pid="' + pedidoId + '" onclick="cancelarPickerChoferBtn(this,event)">Cancelar</button>';
 }
@@ -50172,7 +50274,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.222.0';
+var TCK_VERSION = '13.228.0';
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
@@ -51125,7 +51227,15 @@ function vcBloque(v) {
 
   // Control físico + cierre
   var _vcPuede = (typeof vcPuedeOperarCarga !== 'function') || vcPuedeOperarCarga(); // v13.157.0
-  if (!_vcPuede) {
+  if (typeof cv2aOn === 'function' && cv2aOn() && String(v.zona || '').indexOf('tl') !== 0 && (est === 'preparando' || est === 'carga_cerrada')) {
+    // v13.226.0 — carga v2: la preparación y el cierre son de Depósito; el arranque, del chofer
+    h += cv2aBloqueHtml(v);
+    if (_vcPuede && est === 'carga_cerrada') {
+      h += '<div class="vc-row"><span style="flex:1"></span>' +
+           '<button class="cc-btn gris" onclick="vcReabrirCarga(\'' + v.id + '\')">↩ Reabrir</button>' +
+           '<button class="cc-btn azul" onclick="vcReabrirYSumar(\'' + v.id + '\')">➕ Abrir y sumar pedidos</button></div>';
+    }
+  } else if (!_vcPuede) {
     // rol sin permiso de operar la carga: ve el estado, sin botones de acción
   } else if (est === 'planificado' || est === 'preparando') {
     h += '<div class="vc-row"><b>Depósito</b><span style="flex:1"></span>' +
@@ -51139,6 +51249,7 @@ function vcBloque(v) {
          '<button class="cc-btn azul" onclick="vcReabrirYSumar(\'' + v.id + '\')">➕ Abrir y sumar pedidos</button>' +
          '<button class="cc-btn verde" onclick="vcArrancar(\'' + v.id + '\')">🚚 Arrancar viaje</button></div>';
   } else if (est === 'en_ruta') {
+    if (typeof cv2aOn === 'function' && cv2aOn() && String(v.zona || '').indexOf('tl') !== 0) h += cv2aBloqueHtml(v);   // v13.226.0
     // v13.157.0 — pedido Braian: meter pedidos de última hora aunque el
     // viaje figure en ruta (el botón legacy lo pone en_ruta sin que el
     // camión haya salido). Reabre, elegís qué sumar y regenera la planilla.
@@ -59162,5 +59273,409 @@ async function abrirEditarPedidoAdmin(pedido) {
 
 </script>
 
+<script id="cv2-admin">
+/* ═══ v13.226.0 — CARGA V2 en Admin (par de tck-ventas v14.198.0) ═══════
+   Con modo 'off' no cambia nada. Con 'piloto'/'on' el bloque "Circuito de
+   carga" deja de ofrecer Control/Cerrar/Arrancar desde la oficina: muestra
+   el avance real de Depósito y del chofer, y solo habilita lo que le toca
+   a Administración: autorizar diferencias, contingencia fiscal y
+   arranque de contingencia (todas con motivo de catálogo y auditadas). */
+var CARGA_V2_ADMIN = { modo: 'off' };
+function cv2aOn() { return CARGA_V2_ADMIN.modo === 'on' || CARGA_V2_ADMIN.modo === 'piloto'; }
+// Helpers propios: ccEsc/ccHora/vcModal/ccGAS/ccToast viven dentro de una IIFE y no son globales.
+function cv2aEsc(x) {
+  return String(x == null ? '' : x).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function cv2aHora(ts) {
+  if (!ts) return '';
+  try { var d = new Date(ts); return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }) + ' ' + d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; }
+}
+function cv2aToast(m, t) { try { if (typeof toast === 'function') toast(m, t); else alert(m); } catch (e) {} }
+function cv2aModal(html) {
+  var bk = document.createElement('div');
+  bk.className = 'vc-modal-bk';
+  bk.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100000;display:flex;align-items:center;justify-content:center;padding:14px;';
+  bk.onclick = function (e) { if (e.target === bk) bk.remove(); };
+  bk.innerHTML = '<div class="vc-modal" style="background:#fff;border-radius:14px;max-width:520px;width:100%;padding:16px;max-height:90vh;overflow:auto;">' + html + '</div>';
+  document.body.appendChild(bk);
+  return bk;
+}
+async function cv2aGAS(q) {
+  var r = await fetch(APPS_SCRIPT_URL + '?' + q + '&_cb=' + Date.now());
+  return r.json();
+}
+function cv2aLimpiarMsg(m) {
+  var t = String(m == null ? '' : m), i = t.indexOf('CARGA_V2:');
+  if (i >= 0) { var r = t.slice(i + 9), f = r.search(/"|\\"/); return (f >= 0 ? r.slice(0, f) : r).trim(); }
+  return t.replace(/^Error:\s*/, '');
+}
+var CV2A = { est: {}, motivos: null };
+async function cv2aRpc(fn, args) {
+  return sbFetch('rpc/' + fn, { method: 'POST', body: JSON.stringify(args || {}) });
+}
+async function cv2aMotivos() {
+  if (CV2A.motivos) return CV2A.motivos;
+  try { CV2A.motivos = await sbFetch('carga_motivo?select=codigo,ambito,texto,exige_nota&activo=eq.true') || []; } catch (e) { CV2A.motivos = []; }
+  return CV2A.motivos;
+}
+function cv2aBloqueHtml(v) {
+  setTimeout(function () { cv2aCargar(v.id); }, 0);
+  return '<div id="cv2a-' + v.id + '" class="vc-row" style="display:block;">⏳ Leyendo la carga de Depósito…</div>';
+}
+async function cv2aCargar(id) {
+  var el = document.getElementById('cv2a-' + id);
+  if (!el) return;
+  var r;
+  try { r = await cv2aRpc('carga_estado', { p_viaje_id: id }); } catch (e) { r = { ok: false, message: e.message }; }
+  if (!r || !r.ok) { el.innerHTML = '⛔ ' + cv2aEsc((r && r.message) || 'No se pudo leer la carga'); return; }
+  CV2A.est[id] = r;
+  var L = r.lineas || [], s = r.sesion || {}, v = r.viaje;
+  var ok = L.filter(function (l) { return l.estado === 'ok' || (l.estado === 'diferencia' && l.dif_autorizada); }).length;
+  var cambios = L.filter(function (l) { return l.estado === 'cambio'; }).length;
+  var difs = L.filter(function (l) { return l.estado === 'diferencia'; });
+  var cfg = r.config || {};
+  var h = '<div><b>📦 Depósito (carga v2)</b> · ' + ok + '/' + L.length + ' productos listos' +
+          (cambios ? ' · <span style="color:#B71C1C;font-weight:800;">' + cambios + ' cambio(s) por mover</span>' : '') + '</div>';
+  h += '<div style="height:8px;background:#eee;border-radius:9px;margin:4px 0 8px;"><div style="height:8px;border-radius:9px;background:#2E7D32;width:' + (L.length ? Math.round(ok / L.length * 100) : 0) + '%"></div></div>';
+  if (difs.length) {
+    h += '<div style="margin:6px 0;"><b>Diferencias de preparación</b>' + difs.map(function (l) {
+      return '<div style="padding:3px 0;">≠ ' + cv2aEsc(l.producto) + ': pide ' + l.requerido + ', preparado ' + l.contado + ' · ' + cv2aEsc(l.motivo_codigo || '') +
+        (l.dif_autorizada ? ' <span class="vc-tag ok">autorizada por ' + cv2aEsc(l.dif_autorizada_por) + '</span>'
+          : (cfg.autoriza_diferencia && v.estado === 'preparando' ? ' <button class="cc-btn rojo" onclick="cv2aAutorizarDif(\'' + id + '\',\'' + encodeURIComponent(l.clave) + '\')">Autorizar salida con diferencia</button>' : ' <span class="vc-tag warn">sin autorizar</span>')) + '</div>';
+    }).join('') + '</div>';
+  }
+  var fis = r.fiscal || [];
+  h += '<div style="margin:6px 0;"><b>🧾 Fiscal</b> · ' + (fis.length ? fis.length + ' pedido(s) sin factura' : 'todo facturado') + '</div>';
+  fis.forEach(function (f) {
+    h += '<div style="padding:2px 0;">• ' + cv2aEsc(f.cliente) + ' ' + (f.contingencia ? '<span class="vc-tag ok">contingencia: ' + cv2aEsc(f.contingencia.por) + '</span>'
+      : (cfg.contingencia_fiscal && v.estado === 'preparando' ? '<button class="cc-btn gris" onclick="cv2aContFiscal(\'' + id + '\',\'' + encodeURIComponent(f.pedido_id) + '\')">Contingencia fiscal</button>' : '<span class="vc-tag warn">sin factura · regla fiscal vigente</span>')) + '</div>';
+  });
+  h += '<div style="margin:6px 0;">' +
+    (s.cerrada_version ? '🔒 Cerrada v' + s.cerrada_version + ' por <b>' + cv2aEsc(s.cerrada_por) + '</b> ' + cv2aHora(s.cerrada_at) : '🔓 Carga abierta (la cierra Depósito)') + '<br>' +
+    (s.aceptada_version ? '✅ Aceptada por <b>' + cv2aEsc(s.aceptada_por) + '</b> ' + cv2aHora(s.aceptada_at) : '⏳ Sin aceptación del chofer') +
+    (s.arrancado_por ? '<br>🚚 Arrancó <b>' + cv2aEsc(s.arrancado_por) + '</b> ' + cv2aHora(s.arrancado_at) : '') + '</div>';
+  // Planilla final (documento inmutable)
+  if (r.planilla_final) {
+    h += '<div style="margin:6px 0;">📄 Planilla final N° ' + r.planilla_final.id + ' (v' + r.planilla_final.version + ')' +
+         (r.planilla_final.aceptada_por ? ' · aceptada por <b>' + cv2aEsc(r.planilla_final.aceptada_por) + '</b>' : ' · <b>sin aceptación del chofer</b>') +
+         ' <button class="cc-btn gris" onclick="cv2aPdfFinal(\'' + id + '\',\'ver\')">Ver</button>' +
+         ' <button class="cc-btn gris" onclick="cv2aPdfFinal(\'' + id + '\',\'imprimir\')">Imprimir para firmar</button></div>';
+  }
+  // Retiro excepcional (solo carga cerrada por Depósito, antes de salir)
+  if (v.estado === 'carga_cerrada' && r.congelado && cfg.autoriza_retiro) {
+    h += '<button class="cc-btn rojo" onclick="cv2aRetiro(\'' + id + '\')">📦 Retirar mercadería de carga cerrada</button> ' +
+         '<span style="font-size:11.5px;color:#8a6f5f;">Rompe el cierre' + (s.aceptada_version ? ' y la aceptación del chofer' : '') + '. Depósito descarga y vuelve a cerrar.</span>';
+  }
+  (r.retiros || []).forEach(function (rt) {
+    h += '<div style="margin:6px 0;padding:6px 8px;border:1px solid #E0B4B4;border-radius:8px;background:#FFF5F5;">📦 Retiro N° ' + rt.id + ' · ' +
+         (rt.estado === 'pendiente_descarga' ? '<b>esperando que Depósito descargue</b>' : 'recibido por ' + cv2aEsc(rt.recibido_por) + ' ' + cv2aHora(rt.recibido_at)) +
+         ' · inició ' + cv2aEsc(rt.iniciado_por) + ' ' + cv2aHora(rt.iniciado_at) + '<br>' +
+         (rt.items || []).map(function (it) { return cv2aEsc(it.cantidad_retiro) + ' ' + cv2aEsc(it.producto) + ' (pedido ' + cv2aEsc(it.pedido_id) + ')'; }).join(' · ') +
+         '<br><span style="color:#8a6f5f;">' + cv2aEsc(rt.nota) + '</span></div>';
+  });
+  (r.regularizaciones || []).forEach(function (g) {
+    var acc = { nota_credito: 'nota de crédito', ajuste_pedido: 'ajuste del pedido', cuenta_corriente: 'cuenta corriente', investigacion: 'investigación' };
+    h += '<div style="margin:4px 0;">🧾 Regularizar pedido <b>' + cv2aEsc(g.pedido_id) + '</b> (' + cv2aEsc((g.detalle || {}).cliente || '') + ') · ' +
+         (g.estado === 'resuelta'
+           ? '<span class="vc-tag ok">resuelta por ' + cv2aEsc(g.resuelta_por) + ': ' + (g.acciones || []).map(function (a) { return acc[a] || a; }).join(', ') + '</span>'
+           : (cfg.autoriza_retiro ? '<button class="cc-btn gris" onclick="cv2aRegularizar(\'' + id + '\',' + g.id + ')">Resolver</button>' : '<span class="vc-tag warn">pendiente</span>')) + '</div>';
+  });
+  var inc = r.incidencias || [];
+  if (inc.length) {
+    h += '<div style="margin:8px 0;padding:8px;border:2px solid #C62828;border-radius:10px;background:#FFEBEE;">' +
+         '<b>⚠ Cambios después del cierre o la salida (' + inc.length + ')</b> — la carga cerrada no se modifica.' +
+         inc.map(function (i) {
+           var d = i.detalle || {};
+           var t = { pedido_derivado: 'pedido nuevo derivado a la próxima salida', pedido_sin_viaje: 'pedido nuevo SIN viaje disponible',
+                     edicion_items: 'pedido modificado' + (d.producto ? ' (' + d.producto + ': ' + (d.antes == null ? '—' : d.antes) + ' → ' + (d.despues == null ? 'quitado' : d.despues) + ')' : ''),
+                     version_bloqueada: 'intento de planilla nueva bloqueado' + (d.version_intentada ? ' (v' + d.version_intentada + ')' : ''),
+                     entrega_redirigida: 'entrega pasada a la próxima salida',
+                     pedido_retirado_en_ruta: 'pedido sacado del camión en ruta (vuelve a Cámara)' }[i.subtipo] || i.subtipo;
+           if (i.tipo === 'cambio_post_cierre') t += ' (con la carga cerrada)';
+           return '<div style="padding:3px 0;">• ' + cv2aEsc(i.cliente || i.pedido_id || (i.subtipo === 'version_bloqueada' ? 'Planilla' : '')) + ' — ' + cv2aEsc(t) + ' <span style="color:#8a6f5f;">' + cv2aHora(i.creada_at) + '</span>' +
+             (i.estado === 'revisada' ? ' <span class="vc-tag ok">revisada por ' + cv2aEsc(i.revisada_por) + '</span>'
+               : (cfg.autoriza_incidencia ? ' <button class="cc-btn gris" onclick="cv2aRevisarInc(\'' + id + '\',' + i.id + ')">Marcar revisada</button>' : '')) + '</div>';
+         }).join('') + '</div>';
+  }
+  if (r.congelado) {
+    h += '<div style="margin:6px 0;font-weight:800;">' + (r.etapa === 'salida'
+      ? '🔒 El camión ya salió: carga, versión aceptada y custodia congeladas. No hay reapertura: devolución e incidencia pos-salida.'
+      : '🔒 Carga cerrada por Depósito: congelada. No se agregan, editan ni sacan pedidos; los nuevos van a la próxima salida.') + '</div>';
+  }
+  el.innerHTML = h;
+  if (r.congelado) {   // sin "reabrir" ni "sumar pedidos" sobre un viaje que ya salió
+    var cont = el.parentElement;
+    if (cont) cont.querySelectorAll('button').forEach(function (b) {
+      var oc = b.getAttribute('onclick') || '';
+      if (/vcReabrir|vcReabrirYSumar/.test(oc)) b.style.display = 'none';
+    });
+    // textos heredados que invitan a regenerar o reabrir: no aplican a un viaje que ya salió
+    if (cont) cont.querySelectorAll('div, span, p').forEach(function (n) {
+      if (n.children.length === 0 && /Entraron\/salieron pedidos después de imprimir|Solo si el camión NO salió/.test(n.textContent || '')) n.style.display = 'none';
+    });
+  }
+}
+function cv2aRevisarInc(viajeId, incId) {
+  cv2aMotivoModal('Marcar incidencia como revisada', '__ninguno__',
+    '<div style="font-size:13px;">Contá qué se hizo con este cambio posterior a la salida.</div>',
+    async function (mot, nota) {
+      var r = await cv2aRpc('carga_incidencia_revisar', { p_id: incId, p_nota: nota });
+      if (r && r.ok) { cv2aToast('Incidencia revisada', 'ok'); cv2aCargar(viajeId); }
+      return r;
+    });
+}
+function cv2aMotivoModal(titulo, ambito, extraHtml, onOk) {
+  cv2aMotivos().then(function (ms) {
+    var ops = ms.filter(function (m) { return m.ambito === ambito; });
+    var h = '<h3>' + titulo + '</h3>' + (extraHtml || '') +
+      (ops.length ? '<select id="cv2a-mot" style="width:100%;padding:8px;margin:6px 0;"><option value="">— Motivo —</option>' +
+        ops.map(function (m) { return '<option value="' + m.codigo + '">' + cv2aEsc(m.texto) + '</option>'; }).join('') + '</select>' : '') +
+      '<textarea id="cv2a-nota" rows="3" style="width:100%;padding:8px;box-sizing:border-box;" placeholder="Detalle obligatorio (mínimo 15 caracteres, con palabras)"></textarea>' +
+      '<div style="display:flex;gap:8px;margin-top:10px;"><button class="cc-btn rojo" style="flex:1" id="cv2a-ok">Confirmar</button>' +
+      '<button class="cc-btn gris" onclick="this.closest(\'.vc-modal-bk\').remove()">Cancelar</button></div>';
+    var bk = cv2aModal(h);
+    bk.querySelector('#cv2a-ok').onclick = async function () {
+      var mot = bk.querySelector('#cv2a-mot') ? bk.querySelector('#cv2a-mot').value : null;
+      var nota = bk.querySelector('#cv2a-nota').value;
+      if (ops.length && !mot) return cv2aToast('Elegí un motivo', 'err');
+      this.disabled = true;
+      var r;
+      try { r = await onOk(mot, nota); } catch (e) { r = { ok: false, message: e.message }; }
+      this.disabled = false;
+      if (r && r.ok) bk.remove(); else cv2aToast('⛔ ' + ((r && r.message) || 'No se pudo'), 'err');
+    };
+  });
+}
+function cv2aAutorizarDif(id, claveEnc) {
+  var clave = decodeURIComponent(claveEnc), e = CV2A.est[id];
+  var l = (e.lineas || []).find(function (x) { return x.clave === clave; });
+  cv2aMotivoModal('Autorizar salida con diferencia', '__ninguno__',
+    '<div style="font-size:13px;">' + cv2aEsc(l.producto) + ': pide <b>' + l.requerido + '</b>, preparado <b>' + l.contado + '</b>.<br>Clientes: ' +
+    (l.pedidos || []).map(function (p) { return cv2aEsc(p.cliente); }).join(', ') + '</div>',
+    async function (mot, nota) {
+      var r = await cv2aRpc('carga_diferencia_autorizar', { p_viaje_id: id, p_version: e.planilla.version, p_hash: e.planilla.hash, p_clave: clave, p_nota: nota, p_request_id: 'adm-' + Date.now() });
+      if (r && r.ok) { cv2aToast('Diferencia autorizada', 'ok'); cv2aCargar(id); }
+      return r;
+    });
+}
+function cv2aContFiscal(id, pedEnc) {
+  var ped = decodeURIComponent(pedEnc), e = CV2A.est[id];
+  var f = (e.fiscal || []).find(function (x) { return x.pedido_id === ped; });
+  cv2aMotivoModal('Contingencia fiscal', 'fiscal',
+    '<div style="font-size:13px;">' + cv2aEsc(f ? f.cliente : ped) + ' sale sin factura. Queda auditado con tu nombre.</div>',
+    async function (mot, nota) {
+      var r = await cv2aRpc('carga_fiscal_contingencia', { p_viaje_id: id, p_version: e.planilla.version, p_hash: e.planilla.hash, p_pedido_id: ped, p_motivo_codigo: mot, p_nota: nota, p_request_id: 'adm-' + Date.now() });
+      if (r && r.ok) { cv2aToast('Contingencia registrada', 'ok'); cv2aCargar(id); }
+      return r;
+    });
+}
+
+// ── Retiro excepcional (regla 16/09) ──
+function cv2aRetiro(id) {
+  var e = CV2A.est[id]; if (!e) return;
+  var filas = [];
+  (e.lineas || []).forEach(function (l) {
+    (l.pedidos || []).forEach(function (p) {
+      if (Number(p.cantidad) > 0) filas.push({ pedido_id: p.pedido_id, cliente: p.cliente, producto: l.producto, calibre: l.calibre, max: Number(p.cantidad) });
+    });
+  });
+  cv2aMotivos().then(function (ms) {
+    var ops = ms.filter(function (m) { return m.ambito === 'retiro'; });
+    var h = '<h3>📦 Retirar mercadería de carga cerrada</h3>' +
+      '<div style="font-size:13px;background:#FFEBEE;border-radius:8px;padding:8px;">Se rompe formalmente el cierre de Depósito' +
+      (e.sesion && e.sesion.aceptada_version ? ' y se <b>anula la aceptación de ' + cv2aEsc(e.sesion.aceptada_por) + '</b>' : '') +
+      '. Depósito tiene que descargar y confirmar lo recibido; después se genera la planilla nueva, se cierra de nuevo y el chofer vuelve a aceptar.</div>' +
+      '<div style="max-height:260px;overflow:auto;margin:8px 0;">' + filas.map(function (f, i) {
+        return '<div style="display:flex;gap:8px;align-items:center;padding:3px 0;border-bottom:1px solid #eee;"><div style="flex:1;font-size:13px;">' +
+          cv2aEsc(f.producto) + (f.calibre ? ' ' + cv2aEsc(f.calibre) : '') + ' · ' + cv2aEsc(f.cliente) + ' <span style="color:#888;">(' + f.max + ')</span></div>' +
+          '<input type="number" min="0" max="' + f.max + '" step="1" id="cv2a-ret-' + i + '" placeholder="0" style="width:70px;padding:4px;"></div>';
+      }).join('') + '</div>' +
+      '<select id="cv2a-ret-mot" style="width:100%;padding:8px;margin:6px 0;"><option value="">— Motivo —</option>' +
+      ops.map(function (m) { return '<option value="' + m.codigo + '">' + cv2aEsc(m.texto) + '</option>'; }).join('') + '</select>' +
+      '<textarea id="cv2a-ret-nota" rows="3" style="width:100%;padding:8px;box-sizing:border-box;" placeholder="Detalle obligatorio (mínimo 15 caracteres)"></textarea>' +
+      '<div style="display:flex;gap:8px;margin-top:10px;"><button class="cc-btn rojo" style="flex:1" id="cv2a-ret-ok">Romper el cierre e iniciar el retiro</button>' +
+      '<button class="cc-btn gris" onclick="this.closest(\'.vc-modal-bk\').remove()">Cancelar</button></div>';
+    var bk = cv2aModal(h);
+    bk.querySelector('#cv2a-ret-ok').onclick = async function () {
+      var items = [];
+      filas.forEach(function (f, i) {
+        var v = Number((bk.querySelector('#cv2a-ret-' + i) || {}).value || 0);
+        if (v > 0) items.push({ pedido_id: f.pedido_id, producto: f.producto, calibre: f.calibre, cantidad: v });
+      });
+      if (!items.length) return cv2aToast('Indicá qué cantidad se retira', 'err');
+      var mot = bk.querySelector('#cv2a-ret-mot').value;
+      if (!mot) return cv2aToast('Elegí el motivo', 'err');
+      this.disabled = true;
+      var r;
+      try { r = await cv2aRpc('carga_retiro_iniciar', { p_viaje_id: id, p_items: items, p_motivo_codigo: mot, p_nota: bk.querySelector('#cv2a-ret-nota').value, p_request_id: 'adm-' + Date.now() }); }
+      catch (err) { r = { ok: false, message: err.message }; }
+      this.disabled = false;
+      if (r && r.ok) { bk.remove(); cv2aToast('Retiro N° ' + r.retiro_id + ' iniciado. Depósito tiene que descargar.', 'ok'); cv2aCargar(id); }
+      else cv2aToast('⛔ ' + ((r && r.message) || 'No se pudo iniciar'), 'err');
+    };
+  });
+}
+function cv2aRegularizar(id, regId) {
+  var h = '<h3>🧾 Regularización del retiro</h3><div style="font-size:13px;">Marcá lo que se hizo con este pedido.</div>' +
+    [['nota_credito', 'Nota de crédito'], ['ajuste_pedido', 'Ajuste del pedido (comercial / Xubio)'], ['cuenta_corriente', 'Cuenta corriente'], ['investigacion', 'Investigación']]
+      .map(function (x) { return '<label style="display:block;margin:4px 0;"><input type="checkbox" value="' + x[0] + '" class="cv2a-reg-acc"> ' + x[1] + '</label>'; }).join('') +
+    '<textarea id="cv2a-reg-nota" rows="3" style="width:100%;padding:8px;box-sizing:border-box;" placeholder="Qué se hizo (mínimo 15 caracteres)"></textarea>' +
+    '<div style="display:flex;gap:8px;margin-top:10px;"><button class="cc-btn rojo" style="flex:1" id="cv2a-reg-ok">Marcar resuelta</button>' +
+    '<button class="cc-btn gris" onclick="this.closest(\'.vc-modal-bk\').remove()">Cancelar</button></div>';
+  var bk = cv2aModal(h);
+  bk.querySelector('#cv2a-reg-ok').onclick = async function () {
+    var acc = Array.prototype.slice.call(bk.querySelectorAll('.cv2a-reg-acc:checked')).map(function (c) { return c.value; });
+    var r;
+    try { r = await cv2aRpc('carga_regularizacion_resolver', { p_id: regId, p_acciones: acc, p_nota: bk.querySelector('#cv2a-reg-nota').value }); }
+    catch (err) { r = { ok: false, message: err.message }; }
+    if (r && r.ok) { bk.remove(); cv2aToast('Regularización resuelta', 'ok'); cv2aCargar(id); }
+    else cv2aToast('⛔ ' + ((r && r.message) || 'No se pudo'), 'err');
+  };
+}
+function cv2aPdfFinal(id, modo) {
+  cv2PdfFinal(cv2aRpc, id, null, modo).catch(function (err) { cv2aToast('⛔ ' + err.message, 'err'); });
+}
+
+/* ═══ CARGA V2 · PLANILLA FINAL DE CARGA (documento inmutable) ═══════
+   Compartido por TCK Ventas (Depósito y chofer) y TCK Admin.
+   Lee carga_planilla_final_ver: el contenido se tomó al cerrar y no cambia.
+   cv2PdfFinal(rpc, viajeId, id, modo) · modo: 'ver' | 'descargar' | 'imprimir'   */
+var CV2PF_JSPDF_URL = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+function cv2pfJsPDF() {
+  if (window.jspdf && window.jspdf.jsPDF) return Promise.resolve(window.jspdf.jsPDF);
+  return new Promise(function (ok, ko) {
+    var sc = document.createElement('script');
+    sc.src = CV2PF_JSPDF_URL;
+    sc.onload = function () { (window.jspdf && window.jspdf.jsPDF) ? ok(window.jspdf.jsPDF) : ko(new Error('jsPDF no cargó')); };
+    sc.onerror = function () { ko(new Error('No se pudo bajar jsPDF')); };
+    document.head.appendChild(sc);
+  });
+}
+function cv2pfFecha(ts) {
+  if (!ts) return '—';
+  try { return new Date(ts).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+  catch (e) { return String(ts); }
+}
+var CV2PF_UNI = { caja: 'cajas', bolsa: 'bolsas', maple: 'maples', cajita: 'cajitas', paquete: 'paquetes', estuche: 'estuches', bulto: 'bultos', tubo: 'tubos', unidad: 'unidades' };
+
+async function cv2PdfFinal(rpc, viajeId, id, modo) {
+  var r = await rpc('carga_planilla_final_ver', { p_viaje_id: viajeId, p_id: id || null });
+  if (!r || !r.ok) throw new Error((r && r.message) || 'No se pudo leer la planilla final');
+  var pf = r.planilla;
+  if (!pf) throw new Error('Este viaje todavía no tiene planilla final (se emite al cerrar la carga).');
+  var c = pf.contenido || {};
+  var vj = c.viaje || {};
+  var jsPDF = await cv2pfJsPDF();
+  var doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  var W = 210, M = 12, y = 14, TXT = [];
+  function t(s, x, size, bold, align) {
+    doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(size || 9.5);
+    doc.text(String(s), x, y, align ? { align: align } : undefined); TXT.push(String(s));
+  }
+  function salto(n) { y += n; if (y > 270) { doc.addPage(); y = 16; } }
+  function reservar(n) { if (y + n > 270) { doc.addPage(); y = 16; } }
+
+  t('PLANILLA FINAL DE CARGA', M, 17, true);
+  t('Documento N° ' + pf.id, W - M, 10, true, 'right'); salto(6);
+  if (pf.anulada_at) {
+    doc.setTextColor(183, 28, 28);
+    t('ANULADA el ' + cv2pfFecha(pf.anulada_at) + ' por ' + (pf.anulada_por || '—') + ' — ' + (pf.anulada_motivo || ''), M, 9.5, true);
+    doc.setTextColor(0, 0, 0); salto(6);
+  }
+  t('Viaje: ' + (vj.zona || '') + ' · salida ' + (vj.fecha_salida || '') + ' · Vehículo: ' + (pf.vehiculo || vj.vehiculo || '—'), M, 10, true); salto(5);
+  t('Chofer: ' + (pf.chofer || '—') + ' · Encargado de depósito: ' + pf.cerrada_por, M, 10); salto(5);
+  t('Cierre de carga: ' + cv2pfFecha(pf.cerrada_at) + ' · Planilla v' + pf.version, M, 10); salto(5);
+  t('Hash: ' + pf.hash, M, 8.5); salto(7);
+
+  // Productos por grupo físico
+  var grupos = {}, orden = [];
+  (c.lineas || []).forEach(function (l) {
+    var g = l.lote_nombre || l.lote || 'Sin clasificar';
+    if (!grupos[g]) { grupos[g] = []; orden.push(g); }
+    grupos[g].push(l);
+  });
+  t('PRODUCTOS Y CANTIDADES', M, 11, true); salto(5);
+  orden.forEach(function (g) {
+    reservar(12);
+    t(g, M, 9.5, true); salto(4.5);
+    grupos[g].forEach(function (l) {
+      reservar(6);
+      var dif = l.diferencia ? '  ≠ pedido ' + l.requerido + ' · ' + (l.motivo || '') + (l.autorizada_por ? ' · autorizó ' + l.autorizada_por : '') : '';
+      t(l.producto + (l.calibre ? ' (' + l.calibre + ')' : ''), M + 3, 9);
+      t((l.cargado == null ? '—' : l.cargado) + ' ' + (CV2PF_UNI[l.unidad] || l.unidad || ''), W - M, 9, true, 'right');
+      if (dif) { salto(4); t(dif, M + 6, 8); }
+      salto(4.5);
+    });
+  });
+  salto(2);
+  reservar(10);
+  t('BULTOS POR GRUPO (control del chofer)', M, 10, true); salto(4.5);
+  (c.lotes || []).forEach(function (lo) { reservar(5); t(lo.nombre + ': ' + lo.bultos + ' ' + (CV2PF_UNI[lo.unidad] || ''), M + 3, 9); salto(4.2); });
+
+  salto(2); reservar(10);
+  t('PEDIDOS INCLUIDOS Y DOCUMENTACIÓN', M, 10, true); salto(4.5);
+  (c.pedidos || []).forEach(function (p) {
+    reservar(9);
+    t(p.pedido_id + ' · ' + (p.cliente || '') + (p.localidad ? ' — ' + p.localidad : ''), M + 3, 9, true);
+    t(p.documentado ? ('Factura ' + (p.factura_nro || 'emitida')) : 'SIN DOCUMENTACIÓN', W - M, 9, true, 'right'); salto(4);
+    var its = (p.items || []).map(function (i) { return i.cantidad + ' ' + i.producto + (i.calibre ? ' ' + i.calibre : ''); }).join(' · ');
+    doc.splitTextToSize(its, W - 2 * M - 8).forEach(function (row) { reservar(5); t(row, M + 6, 8); salto(3.8); });
+  });
+
+  var difs = (c.lineas || []).filter(function (l) { return l.diferencia; });
+  salto(2); reservar(10);
+  t('DIFERENCIAS Y RESOLUCIONES', M, 10, true); salto(4.5);
+  if (!difs.length) { t('Sin diferencias.', M + 3, 9); salto(4.2); }
+  difs.forEach(function (l) {
+    reservar(6);
+    t(l.producto + ': pedido ' + l.requerido + ', cargado ' + l.cargado + ' · ' + (l.motivo || '') + (l.motivo_nota ? ' — ' + l.motivo_nota : '') +
+      (l.autorizada_por ? ' · autorizó ' + l.autorizada_por + (l.autorizada_nota ? ': ' + l.autorizada_nota : '') : ''), M + 3, 8.5);
+    salto(4.2);
+  });
+  if ((c.retiros || []).length) {
+    salto(2); reservar(10);
+    t('RETIROS DE MERCADERÍA ANTERIORES A ESTE CIERRE', M, 10, true); salto(4.5);
+    c.retiros.forEach(function (rt) {
+      (rt.items || []).forEach(function (i) {
+        reservar(5);
+        t('Retiro N° ' + rt.id + ': ' + i.cantidad_retiro + ' ' + i.producto + ' (pedido ' + i.pedido_id + ') · ' + rt.motivo + ' · inició ' +
+          rt.iniciado_por + ' · recibió ' + (rt.recibido_por || '—'), M + 3, 8.5);
+        salto(4.2);
+      });
+    });
+  }
+
+  // Cierre, aceptación y firmas
+  salto(4); reservar(62);
+  t('CIERRE DE DEPÓSITO', M, 10, true); salto(4.5);
+  t('Cerró ' + pf.cerrada_por + ' el ' + cv2pfFecha(pf.cerrada_at) + ' (usuario autenticado).', M + 3, 9); salto(6);
+  t('ACEPTACIÓN DEL CHOFER', M, 10, true); salto(4.5);
+  if (pf.aceptada_at) t('Aceptada digitalmente por ' + pf.aceptada_por + ' el ' + cv2pfFecha(pf.aceptada_at) + ' (versión v' + pf.version + ' y hash de este documento).', M + 3, 9);
+  else t('PENDIENTE DE ACEPTACIÓN DIGITAL del chofer.', M + 3, 9, true);
+  salto(9);
+  doc.setDrawColor(90); doc.setLineWidth(0.3);
+  doc.rect(M, y - 2, 88, 26); doc.rect(W - M - 88, y - 2, 88, 26);
+  y += 20;
+  t('Firma del chofer', M + 2, 8.5); t('Firma del encargado de depósito', W - M - 86, 8.5); salto(8);
+  t('Aclaración: ______________________   DNI: ____________', M, 8.5); salto(6);
+  t('Fecha y hora: ____/____/______  ____:____', M, 8.5); salto(6);
+  t('El original firmado queda en poder del encargado de depósito. La fuente de verdad es el registro digital.', M, 8);
+
+  var n = doc.getNumberOfPages();
+  for (var i = 1; i <= n; i++) {
+    doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5);
+    doc.text('TCK · Planilla final N° ' + pf.id + ' · v' + pf.version + ' · ' + pf.hash + ' · pág. ' + i + '/' + n, W / 2, 290, { align: 'center' });
+    if (pf.anulada_at) { doc.setTextColor(200, 40, 40); doc.setFontSize(40); doc.text('ANULADA', W / 2, 150, { align: 'center', angle: 30 }); doc.setTextColor(0, 0, 0); }
+  }
+  var nombre = 'PlanillaFinal-' + (vj.zona || 'viaje') + '-' + (vj.fecha_salida || '') + '-v' + pf.version + '-N' + pf.id + '.pdf';
+  try { window.__cv2UltimoPdfFinal = { id: pf.id, version: pf.version, hash: pf.hash, paginas: n, anulada: !!pf.anulada_at, texto: TXT.join('\n'), nombre: nombre }; } catch (e) {}
+  if (modo === 'descargar') { doc.save(nombre); return; }
+  if (modo === 'imprimir') doc.autoPrint();
+  var w = window.open(doc.output('bloburl'), '_blank');
+  if (!w) doc.save(nombre);
+}
+</script>
 </body>
 </html>
