@@ -1,5 +1,17 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.229.0 — 17/09/2026
+     v13.229.0: CARGA V2 · REGLAS DEL PILOTO (rebase sobre v13.228.0 productivo;
+       no cambia nada de la separación de cuenta corriente ni del histórico).
+       · Administración PIDE retiro o anulación del cierre: lo autoriza Chan.
+       · Mercadería que vuelve: una sola tabla (devoluciones). Se ve la
+         recepción real de Depósito (completa, parcial o no recibida), la
+         diferencia pendiente y las tareas de NC, stock y cuenta corriente.
+       · La devolución no se cierra hasta conciliar las cuatro cosas.
+       · Chan autoriza y rechaza desde su propio perfil, con motivo obligatorio.
+       Requiere el SQL tck_carga_v2_integrador. CARGA_V2_ADMIN.modo sigue en 'off'.
+       DEPLOY: subir como index.html y version.json a 13.229.0.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.228.0 — 17/09/2026
      v13.228.0: LA CUENTA CORRIENTE YA NO SE MUESTRA COMO DINERO COBRADO.
        (rebase sobre v13.226.0; no cambia nada más de esa versión)
@@ -50274,7 +50286,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.228.0';
+var TCK_VERSION = '13.229.0';
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
@@ -59274,7 +59286,7 @@ async function abrirEditarPedidoAdmin(pedido) {
 </script>
 
 <script id="cv2-admin">
-/* ═══ v13.226.0 — CARGA V2 en Admin (par de tck-ventas v14.198.0) ═══════
+/* ═══ v13.227.0 — CARGA V2 en Admin (par de tck-ventas v14.199.0) ═══════
    Con modo 'off' no cambia nada. Con 'piloto'/'on' el bloque "Circuito de
    carga" deja de ofrecer Control/Cerrar/Arrancar desde la oficina: muestra
    el avance real de Depósito y del chofer, y solo habilita lo que le toca
@@ -59363,24 +59375,53 @@ async function cv2aCargar(id) {
          ' <button class="cc-btn gris" onclick="cv2aPdfFinal(\'' + id + '\',\'ver\')">Ver</button>' +
          ' <button class="cc-btn gris" onclick="cv2aPdfFinal(\'' + id + '\',\'imprimir\')">Imprimir para firmar</button></div>';
   }
-  // Retiro excepcional (solo carga cerrada por Depósito, antes de salir)
-  if (v.estado === 'carga_cerrada' && r.congelado && cfg.autoriza_retiro) {
-    h += '<button class="cc-btn rojo" onclick="cv2aRetiro(\'' + id + '\')">📦 Retirar mercadería de carga cerrada</button> ' +
-         '<span style="font-size:11.5px;color:#8a6f5f;">Rompe el cierre' + (s.aceptada_version ? ' y la aceptación del chofer' : '') + '. Depósito descarga y vuelve a cerrar.</span>';
+  // Excepciones antes de salir (las autoriza Chan)
+  var hayPend = (r.excepciones || []).some(function (x) { return x.estado === 'pendiente'; });
+  if (v.estado === 'carga_cerrada' && r.congelado && cfg.puede_solicitar && !hayPend) {
+    h += '<button class="cc-btn rojo" onclick="cv2aRetiro(\'' + id + '\')">📦 Solicitar retiro de mercadería</button> ' +
+         '<button class="cc-btn gris" onclick="cv2aAnulacion(\'' + id + '\')">↩ Solicitar anulación del cierre</button> ' +
+         '<span style="font-size:11.5px;color:#8a6f5f;">Lo autoriza Chan. Rompe el cierre' + (s.aceptada_version ? ' y la aceptación del chofer' : '') + '.</span>';
+  }
+  if ((r.excepciones || []).length) {
+    h += '<div style="margin:6px 0;padding:6px 8px;border:1px solid #E0B4B4;border-radius:8px;background:#FFF8F8;"><b>Excepciones</b>' + cv2xExcepcionesHtml(r.excepciones) +
+         (hayPend && cfg.autoriza_excepcion ? '<button class="cc-btn rojo" onclick="cv2xRevisar().then(cv2xPendientes)">Autorizar / rechazar</button>' : '') + '</div>';
   }
   (r.retiros || []).forEach(function (rt) {
-    h += '<div style="margin:6px 0;padding:6px 8px;border:1px solid #E0B4B4;border-radius:8px;background:#FFF5F5;">📦 Retiro N° ' + rt.id + ' · ' +
-         (rt.estado === 'pendiente_descarga' ? '<b>esperando que Depósito descargue</b>' : 'recibido por ' + cv2aEsc(rt.recibido_por) + ' ' + cv2aHora(rt.recibido_at)) +
-         ' · inició ' + cv2aEsc(rt.iniciado_por) + ' ' + cv2aHora(rt.iniciado_at) + '<br>' +
-         (rt.items || []).map(function (it) { return cv2aEsc(it.cantidad_retiro) + ' ' + cv2aEsc(it.producto) + ' (pedido ' + cv2aEsc(it.pedido_id) + ')'; }).join(' · ') +
-         '<br><span style="color:#8a6f5f;">' + cv2aEsc(rt.nota) + '</span></div>';
+    var est = { pendiente_descarga: '<b>esperando que Depósito descargue</b>', recibido_completo: 'recibido completo',
+                recibido_parcial: '<b>recibido PARCIAL</b>', no_recibido: '<b>NO RECIBIDO</b>' }[rt.estado] || rt.estado;
+    h += '<div style="margin:6px 0;padding:6px 8px;border:1px solid #E0B4B4;border-radius:8px;background:#FFF5F5;">📦 Retiro N° ' + rt.id + ' · ' + est +
+         (rt.recibido_por ? ' (' + cv2aEsc(rt.recibido_por) + ' ' + cv2aHora(rt.recibido_at) + ')' : '') + ' · pidió ' + cv2aEsc(rt.iniciado_por) + '<br>' +
+         (rt.items || []).map(function (it) { return cv2aEsc(it.producto) + ' (pedido ' + cv2aEsc(it.pedido_id) + '): retirar ' + cv2aEsc(it.cantidad_retiro) +
+           (it.cantidad_recibida != null ? ', recibido ' + cv2aEsc(it.cantidad_recibida) : ''); }).join(' · ') +
+         '<br><span style="color:#8a6f5f;">' + cv2aEsc(rt.nota) + (rt.diferencia_nota ? ' · ' + cv2aEsc(rt.diferencia_nota) : '') + '</span>' +
+         (rt.diferencia_estado === 'pendiente' ? ' <span class="vc-tag warn">diferencia pendiente</span>' +
+            (cfg.tarea_admin ? ' <button class="cc-btn gris" onclick="cv2aNota(\'Resolver diferencia del retiro\', function (n) { return cv2aRpc(\'carga_retiro_diferencia_resolver\', { p_retiro_id: ' + rt.id + ', p_nota: n }); }, \'' + id + '\')">Resolver diferencia</button>' : '') : '') +
+         (rt.conciliado_at ? ' <span class="vc-tag ok">conciliado</span>' : '') + '</div>';
   });
   (r.regularizaciones || []).forEach(function (g) {
     var acc = { nota_credito: 'nota de crédito', ajuste_pedido: 'ajuste del pedido', cuenta_corriente: 'cuenta corriente', investigacion: 'investigación' };
     h += '<div style="margin:4px 0;">🧾 Regularizar pedido <b>' + cv2aEsc(g.pedido_id) + '</b> (' + cv2aEsc((g.detalle || {}).cliente || '') + ') · ' +
          (g.estado === 'resuelta'
            ? '<span class="vc-tag ok">resuelta por ' + cv2aEsc(g.resuelta_por) + ': ' + (g.acciones || []).map(function (a) { return acc[a] || a; }).join(', ') + '</span>'
-           : (cfg.autoriza_retiro ? '<button class="cc-btn gris" onclick="cv2aRegularizar(\'' + id + '\',' + g.id + ')">Resolver</button>' : '<span class="vc-tag warn">pendiente</span>')) + '</div>';
+           : (cfg.tarea_admin ? '<button class="cc-btn gris" onclick="cv2aRegularizar(\'' + id + '\',' + g.id + ')">Resolver</button>' : '<span class="vc-tag warn">pendiente</span>')) + '</div>';
+  });
+  // Mercadería no entregada que vuelve a depósito
+  (r.retornos || []).forEach(function (t) {
+    var est = { pendiente_recibir: '<b>a cargo del chofer, falta que Depósito la reciba</b>', diferencia_pendiente: '<b>DIFERENCIA PENDIENTE</b>',
+                recibido_completo: 'recibido completo', recibido_parcial: 'recibido parcial', no_recibido: 'no recibido', conciliado: 'conciliado' }[t.estado] || t.estado;
+    var b = function (campo, val, txt) {
+      return '<button class="cc-btn gris" onclick="cv2aRetorno(\'' + id + '\',\'' + t.id + '\',\'' + campo + '\',\'' + val + '\')">' + txt + '</button>';
+    };
+    h += '<div style="margin:6px 0;padding:6px 8px;border:1px solid #BCAAA4;border-radius:8px;background:#FBF7F4;">🔁 ' +
+         (t.tipo === 'parcial' ? 'Devolución parcial' : 'No entregado') + ' <b>' + cv2aEsc(t.pedido_id) +
+         '</b> (' + cv2aEsc(t.cliente || '') + ') · ' + est + ' · ' + cv2aEsc(t.motivo) + '<br>' +
+         (t.items || []).map(function (i) { return cv2aEsc(i.producto) + ': declarado ' + i.esperado + (i.recibido != null ? ', recibido ' + i.recibido : ''); }).join(' · ') + '<br>' +
+         'NC: <b>' + cv2aEsc(t.nc_estado) + (t.nc_numero ? ' ' + cv2aEsc(t.nc_numero) : '') + '</b> · Stock: <b>' + cv2aEsc(t.stock_estado) + '</b> · Cta cte: <b>' + cv2aEsc(t.cc_estado) + '</b>' +
+         (t.estado !== 'conciliado' && cfg.tarea_admin ? '<br>' +
+           (t.nc_estado === 'pendiente' ? b('nc', 'emitida', 'NC emitida') + b('nc', 'no_corresponde', 'NC no corresponde') : '') +
+           (t.stock_estado === 'pendiente' && t.recepcion_estado !== 'pendiente' ? b('stock', 'ajustado', 'Stock ajustado') + b('stock', 'no_corresponde', 'Stock no corresponde') : '') +
+           (t.cc_estado === 'pendiente' ? b('cc', 'ajustada', 'Cta cte ajustada') + b('cc', 'no_corresponde', 'Cta cte no corresponde') : '') +
+           (t.diferencia_estado === 'pendiente' ? b('diferencia', 'resuelta', 'Resolver diferencia') : '') : '') + '</div>';
   });
   var inc = r.incidencias || [];
   if (inc.length) {
@@ -59483,10 +59524,10 @@ function cv2aRetiro(id) {
   });
   cv2aMotivos().then(function (ms) {
     var ops = ms.filter(function (m) { return m.ambito === 'retiro'; });
-    var h = '<h3>📦 Retirar mercadería de carga cerrada</h3>' +
+    var h = '<h3>📦 Solicitar retiro de mercadería (carga cerrada)</h3>' +
       '<div style="font-size:13px;background:#FFEBEE;border-radius:8px;padding:8px;">Se rompe formalmente el cierre de Depósito' +
       (e.sesion && e.sesion.aceptada_version ? ' y se <b>anula la aceptación de ' + cv2aEsc(e.sesion.aceptada_por) + '</b>' : '') +
-      '. Depósito tiene que descargar y confirmar lo recibido; después se genera la planilla nueva, se cierra de nuevo y el chofer vuelve a aceptar.</div>' +
+      '. Lo autoriza Chan. Depósito descarga y registra lo recibido; después: planilla nueva, nuevo cierre y nueva aceptación del chofer.</div>' +
       '<div style="max-height:260px;overflow:auto;margin:8px 0;">' + filas.map(function (f, i) {
         return '<div style="display:flex;gap:8px;align-items:center;padding:3px 0;border-bottom:1px solid #eee;"><div style="flex:1;font-size:13px;">' +
           cv2aEsc(f.producto) + (f.calibre ? ' ' + cv2aEsc(f.calibre) : '') + ' · ' + cv2aEsc(f.cliente) + ' <span style="color:#888;">(' + f.max + ')</span></div>' +
@@ -59495,7 +59536,7 @@ function cv2aRetiro(id) {
       '<select id="cv2a-ret-mot" style="width:100%;padding:8px;margin:6px 0;"><option value="">— Motivo —</option>' +
       ops.map(function (m) { return '<option value="' + m.codigo + '">' + cv2aEsc(m.texto) + '</option>'; }).join('') + '</select>' +
       '<textarea id="cv2a-ret-nota" rows="3" style="width:100%;padding:8px;box-sizing:border-box;" placeholder="Detalle obligatorio (mínimo 15 caracteres)"></textarea>' +
-      '<div style="display:flex;gap:8px;margin-top:10px;"><button class="cc-btn rojo" style="flex:1" id="cv2a-ret-ok">Romper el cierre e iniciar el retiro</button>' +
+      '<div style="display:flex;gap:8px;margin-top:10px;"><button class="cc-btn rojo" style="flex:1" id="cv2a-ret-ok">Pedir autorización del retiro</button>' +
       '<button class="cc-btn gris" onclick="this.closest(\'.vc-modal-bk\').remove()">Cancelar</button></div>';
     var bk = cv2aModal(h);
     bk.querySelector('#cv2a-ret-ok').onclick = async function () {
@@ -59508,11 +59549,9 @@ function cv2aRetiro(id) {
       var mot = bk.querySelector('#cv2a-ret-mot').value;
       if (!mot) return cv2aToast('Elegí el motivo', 'err');
       this.disabled = true;
-      var r;
-      try { r = await cv2aRpc('carga_retiro_iniciar', { p_viaje_id: id, p_items: items, p_motivo_codigo: mot, p_nota: bk.querySelector('#cv2a-ret-nota').value, p_request_id: 'adm-' + Date.now() }); }
-      catch (err) { r = { ok: false, message: err.message }; }
+      var r = await cv2xSolicitar(id, 'retiro', items, mot, bk.querySelector('#cv2a-ret-nota').value);
       this.disabled = false;
-      if (r && r.ok) { bk.remove(); cv2aToast('Retiro N° ' + r.retiro_id + ' iniciado. Depósito tiene que descargar.', 'ok'); cv2aCargar(id); }
+      if (r && r.ok) { bk.remove(); cv2aToast('Pedido de retiro N° ' + r.excepcion_id + ' enviado a Chan', 'ok'); cv2aCargar(id); }
       else cv2aToast('⛔ ' + ((r && r.message) || 'No se pudo iniciar'), 'err');
     };
   });
@@ -59537,6 +59576,60 @@ function cv2aRegularizar(id, regId) {
 function cv2aPdfFinal(id, modo) {
   cv2PdfFinal(cv2aRpc, id, null, modo).catch(function (err) { cv2aToast('⛔ ' + err.message, 'err'); });
 }
+
+function cv2aAnulacion(id) {
+  var e = CV2A.est[id]; if (!e) return;
+  cv2aMotivos().then(function (ms) {
+    cv2xPedirAnulacion(id, (e.lineas || []).filter(function (l) { return l.estado !== 'anulada' && (Number(l.requerido) > 0 || Number(l.contado) > 0); }),
+                       ms, function () { cv2aCargar(id); });
+  });
+}
+function cv2aNota(titulo, fn, viajeId) {
+  var bk = cv2aModal('<h3>' + cv2aEsc(titulo) + '</h3><textarea id="cv2a-gn" rows="3" style="width:100%;padding:8px;box-sizing:border-box;" placeholder="Detalle obligatorio (mínimo 15 caracteres)"></textarea>' +
+    '<div style="display:flex;gap:8px;margin-top:10px;"><button class="cc-btn rojo" style="flex:1" id="cv2a-gn-ok">Confirmar</button>' +
+    '<button class="cc-btn gris" onclick="this.closest(\'.vc-modal-bk\').remove()">Cancelar</button></div>');
+  bk.querySelector('#cv2a-gn-ok').onclick = async function () {
+    var r;
+    try { r = await fn(bk.querySelector('#cv2a-gn').value); } catch (err) { r = { ok: false, message: err.message }; }
+    if (r && r.ok) { bk.remove(); cv2aToast('Listo', 'ok'); cv2aCargar(viajeId); }
+    else cv2aToast('⛔ ' + ((r && r.message) || 'No se pudo'), 'err');
+  };
+}
+function cv2aRetorno(viajeId, rid, campo, valor) {
+  if (campo === 'nc' && valor === 'emitida') {
+    var bk = cv2aModal('<h3>Nota de crédito emitida</h3><input id="cv2a-ncn" style="width:100%;padding:8px;box-sizing:border-box;" placeholder="Número de la NC">' +
+      '<div style="display:flex;gap:8px;margin-top:10px;"><button class="cc-btn rojo" style="flex:1" id="cv2a-ncn-ok">Guardar</button>' +
+      '<button class="cc-btn gris" onclick="this.closest(\'.vc-modal-bk\').remove()">Cancelar</button></div>');
+    bk.querySelector('#cv2a-ncn-ok').onclick = async function () {
+      var r = await cv2aRpc('carga_retorno_admin', { p_id: rid, p_campo: 'nc', p_valor: 'emitida', p_numero: bk.querySelector('#cv2a-ncn').value });
+      if (r && r.ok) { bk.remove(); cv2aToast('NC registrada', 'ok'); cv2aCargar(viajeId); } else cv2aToast('⛔ ' + ((r && r.message) || 'No se pudo'), 'err');
+    };
+    return;
+  }
+  if (campo === 'diferencia') {
+    return cv2aNota('Resolver diferencia de la devolución', function (n) {
+      return cv2aRpc('carga_retorno_admin', { p_id: rid, p_campo: 'diferencia', p_valor: 'resuelta', p_nota: n });
+    }, viajeId);
+  }
+  cv2aRpc('carga_retorno_admin', { p_id: rid, p_campo: campo, p_valor: valor }).then(function (r) {
+    if (r && r.ok) { cv2aToast(r.conciliado ? '✔ Devolución conciliada' : 'Guardado', 'ok'); cv2aCargar(viajeId); }
+    else cv2aToast('⛔ ' + ((r && r.message) || 'No se pudo'), 'err');
+  });
+}
+// Autorizaciones de Chan también desde Admin
+(function cv2aInitExcepciones() {
+  var intentos = 0;
+  var t = setInterval(function () {
+    intentos++;
+    try {
+      if (typeof cv2aOn === 'function' && cv2aOn() && typeof rolActual !== 'undefined' && rolActual && typeof cv2xInit === 'function') {
+        clearInterval(t);
+        cv2xInit({ rpc: cv2aRpc, toast: cv2aToast, gas: function (q) { try { cv2aGAS(q); } catch (e) {} } });
+      }
+    } catch (e) {}
+    if (intentos > 600) clearInterval(t);
+  }, 2000);
+})();
 
 /* ═══ CARGA V2 · PLANILLA FINAL DE CARGA (documento inmutable) ═══════
    Compartido por TCK Ventas (Depósito y chofer) y TCK Admin.
@@ -59675,6 +59768,161 @@ async function cv2PdfFinal(rpc, viajeId, id, modo) {
   if (modo === 'imprimir') doc.autoPrint();
   var w = window.open(doc.output('bloburl'), '_blank');
   if (!w) doc.save(nombre);
+}
+
+/* ═══ CARGA V2 · EXCEPCIONES ANTES DE SALIR (regla del piloto 16/09) ═══
+   Anular cierre por error de conteo / retiro de mercadería: se PIDEN y las autoriza
+   únicamente la persona designada (Chan). Cada paso dispara el aviso al grupo.
+   Compartido por TCK Ventas y TCK Admin: cv2xInit({ rpc, toast, gas }).            */
+var CV2X = { rpc: null, toast: null, gas: null, autoriza: null, pend: [], t: null };
+
+function cv2xEsc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function cv2xFecha(ts) {
+  try { return new Date(ts).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+  catch (e) { return String(ts || ''); }
+}
+function cv2xInit(opts) {
+  CV2X.rpc = opts.rpc; CV2X.toast = opts.toast; CV2X.gas = opts.gas;
+  if (CV2X.t) return;
+  cv2xRevisar();
+  CV2X.t = setInterval(cv2xRevisar, 30000);
+}
+// Dispara el envío inmediato de los avisos pendientes (el Apps Script tiene además un disparador de respaldo)
+function cv2xAvisar() { try { if (CV2X.gas) CV2X.gas('accion=cargaV2Avisos'); } catch (e) {} }
+
+async function cv2xRevisar() {
+  if (!CV2X.rpc || CV2X.autoriza === false) return;
+  var r;
+  try { r = await CV2X.rpc('carga_excepciones', {}); } catch (e) { return; }
+  if (!r || !r.ok) return;
+  CV2X.autoriza = !!r.autoriza;
+  if (!CV2X.autoriza) { cv2xFab(0); if (CV2X.t) { clearInterval(CV2X.t); CV2X.t = null; } return; }
+  var antes = CV2X.pend.length;
+  CV2X.pend = r.excepciones || [];
+  cv2xFab(CV2X.pend.length);
+  if (CV2X.pend.length > antes && CV2X.toast) CV2X.toast('⚠ Hay ' + CV2X.pend.length + ' excepción(es) de carga para autorizar', 'err');
+  var md = document.getElementById('cv2x-modal');
+  if (md && md.getAttribute('data-vista') === 'pendientes') cv2xPendientes();
+}
+function cv2xFab(n) {
+  var el = document.getElementById('cv2x-fab');
+  if (!n) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('button');
+    el.id = 'cv2x-fab';
+    el.style.cssText = 'position:fixed;right:14px;bottom:84px;z-index:99990;background:#C62828;color:#fff;border:0;border-radius:24px;' +
+                       'padding:12px 16px;font-weight:800;font-size:14px;box-shadow:0 4px 14px rgba(0,0,0,.3);cursor:pointer;';
+    el.onclick = cv2xPendientes;
+    document.body.appendChild(el);
+  }
+  el.textContent = '⚠ ' + n + ' excepción' + (n === 1 ? '' : 'es') + ' de carga para autorizar';
+}
+function cv2xModal(html, vista) {
+  var md = document.getElementById('cv2x-modal');
+  if (!md) {
+    md = document.createElement('div');
+    md.id = 'cv2x-modal';
+    md.style.cssText = 'position:fixed;inset:0;z-index:99995;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px 10px;';
+    md.onclick = function (ev) { if (ev.target === md) md.remove(); };
+    document.body.appendChild(md);
+  }
+  md.setAttribute('data-vista', vista || '');
+  md.innerHTML = '<div style="background:#fff;color:#2a1a10;border-radius:14px;max-width:640px;width:100%;padding:16px;font-size:14px;line-height:1.4;">' + html + '</div>';
+  return md;
+}
+function cv2xCerrar() { var md = document.getElementById('cv2x-modal'); if (md) md.remove(); }
+function cv2xItemsHtml(x) {
+  return (x.items || []).map(function (i) {
+    return '<div>· ' + cv2xEsc(i.producto || i.clave) + (i.calibre ? ' ' + cv2xEsc(i.calibre) : '') +
+      (i.pedido_id ? ' — pedido ' + cv2xEsc(i.pedido_id) : '') +
+      (i.cantidad_retiro != null ? ': <b>' + cv2xEsc(i.cantidad_retiro) + '</b>' : (i.cantidad != null ? ': contado ' + cv2xEsc(i.cantidad) : '')) + '</div>';
+  }).join('');
+}
+function cv2xPendientes() {
+  var h = '<div style="display:flex;justify-content:space-between;align-items:center;"><b style="font-size:17px;">Excepciones de carga para autorizar</b>' +
+          '<button onclick="cv2xCerrar()" style="border:0;background:#eee;border-radius:8px;padding:6px 10px;">Cerrar</button></div>' +
+          '<div style="font-size:12.5px;color:#7a5a4a;margin:4px 0 10px;">Autorizás la excepción; Depósito y el chofer mantienen sus controles. Cada decisión se avisa al grupo.</div>';
+  if (!CV2X.pend.length) h += '<div>No hay pedidos pendientes.</div>';
+  CV2X.pend.forEach(function (x) {
+    h += '<div style="border:2px solid #E0B4B4;border-radius:10px;padding:10px;margin:8px 0;background:#FFF8F8;">' +
+         '<b>N° ' + x.id + ' · ' + (x.tipo === 'retiro' ? '📦 Retiro de mercadería' : '↩ Anular cierre por error de conteo') + '</b><br>' +
+         cv2xEsc(x.viaje) + '<br>Versión cerrada v' + x.version + ' · <span style="font-family:monospace;">' + cv2xEsc(String(x.hash).slice(0, 8)) + '</span><br>' +
+         'Pidió <b>' + cv2xEsc(x.solicitada_por) + '</b> (' + cv2xEsc(x.solicitada_rol) + ') · ' + cv2xFecha(x.solicitada_at) + '<br>' +
+         'Motivo: ' + cv2xEsc(x.nota) + '<div style="margin:6px 0;">' + cv2xItemsHtml(x) + '</div>' +
+         '<textarea id="cv2x-nota-' + x.id + '" rows="2" style="width:100%;box-sizing:border-box;padding:6px;" placeholder="Motivo de tu decisión (obligatorio, mínimo 15 caracteres)"></textarea>' +
+         '<div style="display:flex;gap:8px;margin-top:6px;">' +
+         '<button onclick="cv2xDecidir(' + x.id + ',true)" style="flex:1;border:0;border-radius:8px;padding:10px;background:#2E7D32;color:#fff;font-weight:800;">Autorizar</button>' +
+         '<button onclick="cv2xDecidir(' + x.id + ',false)" style="flex:1;border:0;border-radius:8px;padding:10px;background:#B71C1C;color:#fff;font-weight:800;">Rechazar</button></div></div>';
+  });
+  cv2xModal(h, 'pendientes');
+}
+async function cv2xDecidir(id, autoriza) {
+  var ta = document.getElementById('cv2x-nota-' + id);
+  var nota = ta ? ta.value : '';
+  var r;
+  try {
+    r = autoriza ? await CV2X.rpc('carga_excepcion_autorizar', { p_id: id, p_nota: nota, p_request_id: 'x' + id + '-' + Date.now() })
+                 : await CV2X.rpc('carga_excepcion_rechazar', { p_id: id, p_nota: nota });
+  } catch (e) { r = { ok: false, message: e.message }; }
+  if (r && r.ok) {
+    cv2xAvisar();
+    if (CV2X.toast) CV2X.toast(autoriza ? '✔ Excepción ' + id + ' autorizada' : 'Excepción ' + id + ' rechazada', 'ok');
+    CV2X.pend = CV2X.pend.filter(function (x) { return x.id !== id; });
+    cv2xFab(CV2X.pend.length);
+    cv2xPendientes();
+    cv2xRevisar();
+  } else if (CV2X.toast) CV2X.toast('⛔ ' + ((r && r.message) || 'No se pudo'), 'err');
+}
+
+// Pedido de excepción (Depósito o Administración)
+async function cv2xSolicitar(viajeId, tipo, items, motivo, nota) {
+  var r;
+  try {
+    r = await CV2X.rpc('carga_excepcion_solicitar', { p_viaje_id: viajeId, p_tipo: tipo, p_items: items, p_motivo_codigo: motivo, p_nota: nota,
+                                                      p_request_id: 'xs' + Date.now() });
+  } catch (e) { r = { ok: false, message: e.message }; }
+  if (r && r.ok) cv2xAvisar();
+  return r;
+}
+function cv2xExcepcionesHtml(lista) {
+  return (lista || []).slice(-4).map(function (x) {
+    var est = { pendiente: '⏳ esperando autorización de Chan', autorizada: '✔ autorizada por ' + cv2xEsc(x.resuelta_por),
+                rechazada: '✖ rechazada por ' + cv2xEsc(x.resuelta_por) }[x.estado] || x.estado;
+    return '<div style="padding:4px 0;">' + (x.tipo === 'retiro' ? '📦 Retiro' : '↩ Anulación de cierre') + ' N° ' + x.id +
+           ' · pidió ' + cv2xEsc(x.solicitada_por) + ' · <b>' + est + '</b>' + (x.resolucion_nota ? ' — ' + cv2xEsc(x.resolucion_nota) : '') + '</div>';
+  }).join('');
+}
+function cv2xPedirAnulacion(viajeId, lineas, motivos, alTerminar) {
+  var ops = (motivos || []).filter(function (m) { return m.ambito === 'anulacion'; });
+  var h = '<b style="font-size:17px;">↩ Anular cierre por error de conteo</b>' +
+    '<div style="font-size:13px;background:#FFF3E0;border-radius:8px;padding:8px;margin:8px 0;">El cierre y la planilla final quedan ANULADOS (se conservan). ' +
+    'Si el chofer ya aceptó, su aceptación se anula. Solo se corrige el control físico: los pedidos no cambian. Lo autoriza Chan.</div>' +
+    '<div style="font-weight:700;">¿Qué productos hay que volver a contar?</div>' +
+    (lineas || []).map(function (l, i) {
+      return '<label style="display:block;padding:3px 0;"><input type="checkbox" class="cv2x-lin" value="' + cv2xEsc(l.clave) + '"> ' +
+             cv2xEsc(l.producto) + (l.calibre ? ' ' + cv2xEsc(l.calibre) : '') + ' <span style="color:#888;">(contado ' + cv2xEsc(l.contado) + ')</span></label>';
+    }).join('') +
+    '<select id="cv2x-mot" style="width:100%;padding:8px;margin:8px 0;"><option value="">— Motivo —</option>' +
+    ops.map(function (m) { return '<option value="' + m.codigo + '">' + cv2xEsc(m.texto) + '</option>'; }).join('') + '</select>' +
+    '<textarea id="cv2x-nota" rows="3" style="width:100%;box-sizing:border-box;padding:8px;" placeholder="Qué pasó (obligatorio, mínimo 15 caracteres)"></textarea>' +
+    '<div style="display:flex;gap:8px;margin-top:10px;"><button id="cv2x-ok" style="flex:1;border:0;border-radius:8px;padding:10px;background:#E65100;color:#fff;font-weight:800;">Pedir la anulación</button>' +
+    '<button onclick="cv2xCerrar()" style="border:0;border-radius:8px;padding:10px;background:#eee;">Cancelar</button></div>';
+  var md = cv2xModal(h, 'anulacion');
+  md.querySelector('#cv2x-ok').onclick = async function () {
+    var items = Array.prototype.slice.call(md.querySelectorAll('.cv2x-lin:checked')).map(function (c) { return { clave: c.value }; });
+    if (!items.length) return CV2X.toast && CV2X.toast('Marcá qué productos hay que recontar', 'err');
+    var mot = md.querySelector('#cv2x-mot').value;
+    if (!mot) return CV2X.toast && CV2X.toast('Elegí el motivo', 'err');
+    this.disabled = true;
+    var r = await cv2xSolicitar(viajeId, 'anulacion_conteo', items, mot, md.querySelector('#cv2x-nota').value);
+    this.disabled = false;
+    if (r && r.ok) { cv2xCerrar(); if (CV2X.toast) CV2X.toast('Pedido de anulación N° ' + r.excepcion_id + ' enviado a Chan', 'ok'); if (alTerminar) alTerminar(); }
+    else if (CV2X.toast) CV2X.toast('⛔ ' + ((r && r.message) || 'No se pudo'), 'err');
+  };
 }
 </script>
 </body>
