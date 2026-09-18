@@ -1,5 +1,22 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.235.0 — 18/09/2026
+     v13.235.0: SE CORTA EL POLLING AUTOMÁTICO CONTRA APPS SCRIPT.
+       (sobre v13.234.0. Un solo camino cambiado, nada más.)
+       · El tick de 20 s (setInterval L21418) llamaba cargarPedidos(true), que
+         disparaba dupCargarNoDuplicados() SIEMPRE, y ésa sale por
+         ?accion=listarNoDuplicados contra el Web App. Con el Admin abierto:
+         ~180 doGet por hora, y como el tick no espera al anterior, cuando
+         Apps Script tarda más de 20 s las llamadas se solapan (las duplicadas).
+       · Ahora dupCargarNoDuplicados(forzar) sólo sale a la red en el refresco
+         MANUAL. El automático reusa el Set en memoria, que dupMarcarNoDuplicados
+         ya mantiene al día localmente.
+       · El tick de 20 s SIGUE ANDANDO: refresca la lista desde la hoja publicada
+         como CSV (docs.google.com /pub?output=csv), que no ejecuta Apps Script
+         ni consume cuota de UrlFetch. No se degrada el refresco de pedidos.
+       · Las 60 llamadas manuales a Apps Script quedan EXACTAMENTE igual.
+       DEPLOY: subir como index.html y version.json a 13.235.0.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.234.0 — 18/09/2026
      v13.234.0: SE PRENDE LA PANTALLA DE CARGA V2 PARA EL PILOTO.
        (sobre v13.233.0. Un solo cambio funcional, nada mas.)
@@ -21703,7 +21720,9 @@ async function cargarPedidos(silencioso) {
     // lista (round-trip a Supabase ANTES de bajar el CSV). Las promesas se
     // esperan mas abajo, justo antes de la deteccion de duplicados, asi que la
     // logica no cambia: los datos siguen estando listos antes de usarse.
-    var _pNoDups     = (typeof dupCargarNoDuplicados === 'function') ? dupCargarNoDuplicados().catch(function(){}) : Promise.resolve();
+    // v13.235.0 — !silencioso = refresco MANUAL: ahí sí se refrescan los pares.
+    //             silencioso  = tick de 20s y refrescos de fondo: no salen a la red.
+    var _pNoDups     = (typeof dupCargarNoDuplicados === 'function') ? dupCargarNoDuplicados(!silencioso).catch(function(){}) : Promise.resolve();
     var _pSucursales = pedidoSucursalesMapCargar().catch(function(){});
     var _pFacturas   = _factMapCargar().catch(function(){});   // v13.105: nº de factura por pedido
     var res = await fetch(SHEET_CSV_RECIENTES + '&t=' + Date.now());
@@ -43886,8 +43905,20 @@ function dupEstaMarcadoComoDistinto(pedidoIdA, pedidoIdB) {
   return window._dupNoDupSet.has(key);
 }
 
-// Cargar pares "no duplicado" de los últimos 7 días desde Supabase
-async function dupCargarNoDuplicados() {
+// Cargar pares "no duplicado" de los últimos 7 días.
+// OJO: el comentario viejo decía "desde Supabase" pero esto sale por
+// APPS_SCRIPT_URL (doGet). Era la ÚNICA llamada a Apps Script que disparaba
+// un temporizador: el tick de 20s -> cargarPedidos(true) -> acá. Con el Admin
+// abierto eso son 180 doGet por hora, y como el tick no espera a que termine
+// el anterior, cuando Apps Script tarda más de 20s las llamadas se solapan y
+// se ven duplicadas.
+//
+// v13.235.0 — ahora sólo sale a la red si se la llama con forzar=true, que es
+// lo que hace el refresco MANUAL. Los refrescos automáticos reusan el Set que
+// ya está en memoria. No se pierde información: dupMarcarNoDuplicados agrega
+// la clave al Set local apenas se marca el par.
+async function dupCargarNoDuplicados(forzar) {
+  if (!forzar) return;                 // refresco automático: no se pega a Apps Script
   try {
     var url = APPS_SCRIPT_URL + '?accion=listarNoDuplicados&dias=7';
     var resp = await fetch(url);
@@ -50603,7 +50634,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.234.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
+var TCK_VERSION = '13.235.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
