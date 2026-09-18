@@ -1,6 +1,51 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.229.0 — 17/09/2026
+     TCK ADMIN — v13.232.0 — 18/09/2026
+     v13.232.0: BANDEJA DE INCIDENCIAS DEL MANIFIESTO.
+       (sobre v13.231.0, que NO se publicó)
+       · Todo pedido que quedó fuera de la versión cerrada y aceptada aparece
+         acá con su CAUSA: agregado después del cierre, agregado después de la
+         salida, retirado, sin factura o CAE, no cargado físicamente, versión
+         incorrecta, u otra inconsistencia.
+       · Con la ruta ya empezada la bandeja NO ofrece incorporar el pedido al
+         viaje. La única salida es programarlo para otro. No es una limitación
+         de la pantalla: el trigger cv2_entregas_post_salida lo impide en la
+         base, así que tampoco se puede por REST.
+       · La incidencia se marca revisada con motivo y queda auditada.
+       Requiere tck_carga_v2_cierre_v4.sql. Ventas 14.203.0, Apps Script v25.145.0.
+       DEPLOY: subir como index.html y version.json a 13.232.0.
+     ─────────────────────────────────────────────────────────────────────
+     TCK ADMIN — v13.231.0 — 18/09/2026 (NO PUBLICADO — base de este)
+     v13.231.0: CONSOLIDADO. Sobre v13.230.0, que NO se publicó.
+       · FIX DE DEPLOY: TCK_VERSION decía '13.229.0' en un archivo llamado
+         13.230.0. El banner de "nueva versión" no se disparaba y los usuarios
+         se quedaban con el HTML viejo cacheado. Ahora dice 13.231.0.
+       · PLANILLA FIRMADA: la sube DEPÓSITO desde acá (rol deposito / operaciones
+         / dueño / recepción), a un bucket PRIVADO, y se mira con URL firmada
+         que vence a los 5 minutos. El chofer ya no tiene ese botón.
+       · CIERRE ADMINISTRATIVO: panel con lo que falta para cerrar cada viaje,
+         dinero incluido, y botón de cierre que usa el motor idempotente.
+       · GUARDIA DE COBRANZAS en la web: admMontoAR (espejo exacto de
+         fn_monto_ar), techo por entrega y evaluación antes de guardar un ajuste.
+       · PARSER DE IMPORTES: se elimina replace(/[^\d]/g,'') de todos los
+         campos de dinero. Era la causa raíz de los recibos de $10.149.081 y
+         $14.589.168.
+       · CUENTA CORRIENTE: no se puede cargar en operaciones nuevas. Los tabs
+         históricos (Ctas Ctes, Cta. Cte. 2026) siguen para consulta.
+       Requiere tck_carga_v2_cierre_v3.sql. Ventas 14.202.0, Apps Script v25.145.0.
+       DEPLOY: subir como index.html y version.json a 13.231.0.
+     ─────────────────────────────────────────────────────────────────────
+     TCK ADMIN — v13.230.0 — 17/09/2026 (NO PUBLICADO — base de este)
+     v13.230.0: CARGA V2 TAMBIÉN EN TRENQUE LAUQUEN.
+       (rebase sobre v13.229.0 productivo: no cambia cobranzas, devoluciones,
+       cuenta corriente ni el cambio de fecha/turno. Carga v2 sigue en 'off'.)
+       · El Centro de Control muestra el MISMO bloque de Carga v2 para TL:
+         estado del control físico, incidencias, autorizaciones y retornos,
+         en preparación, con la carga cerrada y en ruta.
+       · Un viaje TL vacío sigue oculto sólo si además no entró al circuito.
+       Requiere tck_carga_v2_unificado.sql. Ventas 14.201.0, Apps Script v25.144.0.
+     ─────────────────────────────────────────────────────────────────────
+     TCK ADMIN — v13.230.0 — 17/09/2026
      v13.229.0: CARGA V2 · REGLAS DEL PILOTO (rebase sobre v13.228.0 productivo;
        no cambia nada de la separación de cuenta corriente ni del histórico).
        · Administración PIDE retiro o anulación del cierre: lo autoriza Chan.
@@ -19941,6 +19986,120 @@ var _rvCobro = {};      // entrega.id -> {efectivo,transferencia,cheque,cuenta_c
 var _rvIncluir = {};    // entrega.id -> bool (entra en la rendición)
 var _rvEdit = {};       // entrega.id -> bool (fila expandida para ajustar)
 var _rvEfeContado = null, _rvCerrando = false;
+
+// ══════════════════════════════════════════════════════════════════════
+// v13.231.0 — GUARDIA DE COBRANZAS EN LA WEB
+// ══════════════════════════════════════════════════════════════════════
+// admMontoAR es el espejo EXACTO de fn_monto_ar(text) de Postgres — la misma
+// función con la que la Guardia decide si un cobro es imposible. Verificado
+// contra la base sobre 31 casos límite: 31/31 idénticos.
+//
+// El parser que reemplaza, replace(/[^\d]/g,''), borra la coma decimal:
+//   "$104.200,01"  -> 10420001    (recibo X-0001-00028046, $10.149.081)
+//   "145.891,68"   -> 14589168    (recibo X-0001-00027893, $14.589.168)
+// De 31 casos probados, el viejo se equivocaba en 14.
+function admMontoAR(txt) {
+  if (txt === null || txt === undefined) return null;
+  var s = String(txt).replace(/[^0-9,.\-]/g, '');
+  if (s === '') return null;
+  var neg = s.charAt(0) === '-';
+  s = s.replace(/-/g, '');
+  if (s === '') return null;
+  if (s.indexOf(',') >= 0) {
+    s = s.replace(/\./g, '').replace(/,/g, '.');
+    while ((s.split('.').length - 1) > 1) s = s.replace('.', '');
+  } else {
+    var np = s.split('.').length - 1;
+    if (np === 1) {
+      var decs = s.length - s.lastIndexOf('.') - 1;
+      if (decs !== 1 && decs !== 2) s = s.replace(/\./g, '');
+    } else if (np > 1) {
+      s = s.replace(/\./g, '');
+    }
+  }
+  if (s === '' || s === '.') return null;
+  var n = Number(s);
+  if (!isFinite(n)) return null;
+  return neg ? -n : n;
+}
+
+// ── estado de la Guardia (lo decide el servidor, acá sólo se muestra) ──
+var COBRO_FACTOR_DURO   = 5.0;
+var COBRO_FACTOR_BLANDO = 1.15;
+var COBRO_PISO_BLANDO   = 1000;
+var DETALLE_COBRO_VACIO = 'DETALLE_COBRO_VACIO';
+var _cobModoCache = null;
+
+async function cobModo() {
+  if (_cobModoCache !== null) return _cobModoCache;
+  try { _cobModoCache = await sbFetch('rpc/tck_cobro_guardia_modo', { method: 'POST', body: '{}' }); }
+  catch (e) { _cobModoCache = 'off'; }
+  return _cobModoCache;
+}
+
+// Techo real del pedido, calculado por el servidor (fn_cobro_techo).
+async function cobTecho(entregaId) {
+  try {
+    var r = await sbFetch('rpc/fn_cobro_techo', { method: 'POST', body: JSON.stringify({ p_entrega_id: entregaId }) });
+    return (r && (r.ok === true || r.ok === 'true')) ? Number(r.techo) || 0 : 0;
+  } catch (e) { return 0; }
+}
+
+// Evaluación: se le pregunta a la MISMA función que usa el trigger.
+// Si no se puede consultar, se cae al espejo local con los mismos factores.
+async function cobEvaluarImporte(entregaId, importe, instrumento) {
+  try {
+    var r = await sbFetch('rpc/fn_cobro_validar', { method: 'POST', body: JSON.stringify({
+      p_entrega_id: entregaId, p_instrumento: instrumento || 'total',
+      p_importe: importe, p_total_cobro: importe }) });
+    if (r && r.decision) return r;
+  } catch (e) { console.warn('[guardia] fn_cobro_validar no respondió, uso el espejo local:', e && e.message); }
+  var techo = await cobTecho(entregaId);
+  if (!(importe > 0)) return { decision: 'ok', motivo: 'SIN_IMPORTE' };
+  if (!(techo > 0))  return { decision: 'revisar', motivo: 'SIN_TECHO', techo: 0,
+    mensaje: 'El pedido no tiene factura ni monto cargado: no hay contra qué validar el importe.' };
+  var ratio = importe / techo;
+  if (importe > techo * COBRO_FACTOR_DURO) return { decision: 'rechazo', motivo: 'SUPERA_FACTOR_DURO', techo: techo, ratio: ratio,
+    mensaje: 'El cobro de $' + Math.round(importe).toLocaleString('es-AR') + ' es ' + ratio.toFixed(1) +
+             'x el total del pedido ($' + Math.round(techo).toLocaleString('es-AR') + '). Casi seguro es un error de coma decimal.' };
+  if (importe > techo * COBRO_FACTOR_BLANDO + COBRO_PISO_BLANDO) return { decision: 'revisar', motivo: 'SUPERA_SALDO', techo: techo, ratio: ratio,
+    mensaje: 'El cobro de $' + Math.round(importe).toLocaleString('es-AR') + ' supera el total del pedido ($' +
+             Math.round(techo).toLocaleString('es-AR') + ') en $' + Math.round(importe - techo).toLocaleString('es-AR') + '.' };
+  return { decision: 'ok', techo: techo, ratio: ratio };
+}
+
+// Rendir una entrega: pasa por la Guardia antes de confirmar. Si el importe
+// es imposible contra la factura, NO se confirma y queda en el log del navegador
+// con el motivo. Esto es lo que evita que una rendición mal tipeada dispare un
+// recibo en Xubio por un importe que no existe.
+async function cobRpcRendir(entregaId, payload, totalCobrado) {
+  var g = await cobEvaluarImporte(entregaId, totalCobrado, 'total');
+  if (g && g.decision === 'rechazo') {
+    console.error('[guardia] rendición rechazada, entrega ' + entregaId + ': ' + (g.motivo || ''));
+    return { ok: false, decision: 'rechazo', mensaje: g.mensaje };
+  }
+  if (g && g.decision === 'revisar') {
+    if (!confirm('⚠️ ' + (g.mensaje || 'El importe supera el total del pedido.') + '\n\n¿Confirmás igual esta rendición?')) {
+      return { ok: false, decision: 'cancelado' };
+    }
+  }
+  await sbFetch('entregas?id=eq.' + encodeURIComponent(entregaId),
+                { method: 'PATCH', body: JSON.stringify(payload), prefer: 'return=minimal' });
+  return { ok: true, decision: (g && g.decision) || 'ok' };
+}
+
+// ── cuenta corriente: fuera del circuito nuevo ──
+// Se sigue LEYENDO (167 entregas históricas la tienen y los tabs Ctas Ctes y
+// Cta. Cte. 2026 se mantienen para consulta). Lo que no se puede es CARGARLA
+// en una operación nueva.
+var COBRO_INSTR_NUEVOS = ['efectivo', 'transferencia', 'cheque'];
+function cobSinCtaCte(det) {
+  var o = {}, k;
+  for (k in det) { if (COBRO_INSTR_NUEVOS.indexOf(k) >= 0 && (Number(det[k]) || 0) > 0) o[k] = Math.round(Number(det[k])); }
+  return o;
+}
+
+// _RV_INSTR se conserva con los 4 para poder LEER el histórico.
 var _RV_INSTR = ['efectivo','transferencia','cheque','cuenta_corriente'];
 // v13.72: corte Xubio. Viajes con fecha_salida < RV_CORTE_XUBIO = histórico
 // (ya cargados a Xubio a mano por contaduría). Se marcan con badge y, pasados
@@ -20182,8 +20341,12 @@ function rvRenderPanel(){
         '<div class="rv-chips" id="rv-chips-'+e.id+'">'+chips.join('')+'</div>'+
         (edit?(
           '<div class="rv-editbox">'+_RV_INSTR.map(function(k){
-            var lbl={efectivo:'Efectivo',transferencia:'Transfer.',cheque:'Cheque',cuenta_corriente:'Fiado'}[k];
-            return '<label class="rv-il"><span>'+lbl+'</span><input inputmode="decimal" value="'+Math.round(_rvN(c[k])).toLocaleString("es-AR")+'" oninput="rvSetCobro(\''+e.id+'\',\''+k+'\',this.value)"></label>';
+            var lbl={efectivo:'Efectivo',transferencia:'Transfer.',cheque:'Cheque',cuenta_corriente:'Fiado (histórico)'}[k];
+            // v13.231.0 — el fiado se VE si la entrega vieja lo tiene, pero no se
+            // puede cargar ni modificar: cuenta corriente no existe más.
+            var _hist=(k==='cuenta_corriente');
+            if(_hist && _rvN(c[k])<=0) return '';
+            return '<label class="rv-il"><span>'+lbl+'</span><input inputmode="decimal"'+(_hist?' disabled title="Cuenta corriente: sólo consulta. No se puede cargar en una rendición nueva."':'')+' value="'+Math.round(_rvN(c[k])).toLocaleString("es-AR")+'"'+(_hist?'':' oninput="rvSetCobro(\''+e.id+'\',\''+k+'\',this.value)"')+'></label>';
           }).join('')+'</div>'
         ):'')+
       '</div>'+
@@ -20229,7 +20392,11 @@ async function _rvCerrar(){
   var ok=0,err=0,ahora=new Date().toISOString(),quien=(typeof usuarioActual!=='undefined'&&usuarioActual)?usuarioActual:'admin';
   for(var i=0;i<inc.length;i++){
     var e=inc[i], c=_rvCobro[e.id];
-    var det={}; _RV_INSTR.forEach(function(k){ if(_rvN(c[k])>0) det[k]=Math.round(_rvN(c[k])); });
+    // v13.231.0 — la rendición nueva no escribe cuenta corriente (decisión 8).
+    // Si venía de una entrega vieja se deja constancia y se descarta.
+    var det=cobSinCtaCte(c);
+    if(_rvN(c.cuenta_corriente)>0) console.warn('[v13.231.0] cuenta_corriente descartada al rendir la entrega '+e.id+' ($'+_rvN(c.cuenta_corriente)+')');
+    if(Object.keys(det).length===0){ console.error('['+DETALLE_COBRO_VACIO+'] rendición sin instrumentos, entrega '+e.id); err++; continue; }
     var cobr=_rvCobrado(c), tot=_rvTot(e);   // v13.123: la diferencia se mide contra el esperado neto de devolución
     var payload={
       detalle_cobro: JSON.stringify(det),
@@ -20244,11 +20411,16 @@ async function _rvCerrar(){
       payload.estado='entregado';
       payload.fecha_entrega=ahora;
       var domK='efectivo', domV=-1;   // forma_cobro = instrumento dominante (el desglose va en detalle_cobro)
-      _RV_INSTR.forEach(function(k){ if(_rvN(c[k])>domV){ domV=_rvN(c[k]); domK=k; } });
+      COBRO_INSTR_NUEVOS.forEach(function(k){ if(_rvN(c[k])>domV){ domV=_rvN(c[k]); domK=k; } });   // v13.231.0
       payload.forma_cobro=domK;
     }
     // NO tocar transfer_conciliada (MP) ni monto_cobrado_real (lo postean las vistas por instrumento)
-    try{ await sbFetch('entregas?id=eq.'+encodeURIComponent(e.id),{method:'PATCH',body:JSON.stringify(payload),prefer:'return=minimal'}); ok++; }
+    // v13.231.0 — la rendición pasa por la Guardia antes de confirmarse.
+    try{
+      var _rr = await cobRpcRendir(e.id, payload, cobr);
+      if(_rr && _rr.ok){ ok++; }
+      else { err++; if(_rr && _rr.mensaje) alert('⛔ NO SE RINDIÓ '+(e.cliente||e.pedido_id||'')+'\n\n'+_rr.mensaje); }
+    }
     catch(ex){ console.error('[rv] confirmar',e.id,ex); err++; }
   }
   _rvCerrando=false;
@@ -21823,7 +21995,7 @@ function actualizarStats() {
   var mis = pedidosFiltrados();
   var activos = mis.filter(function(p){return p.estado!=='Cancelado';});
   var total = activos.reduce(function(acc,p){
-    var n = parseInt((p.total||'0').replace(/[^\d]/g,''));
+    var n = admMontoAR((p.total||'0'));
     return acc + (isNaN(n)?0:n);
   }, 0);
   document.getElementById('stat-total').textContent = activos.length;
@@ -21908,7 +22080,7 @@ async function renderAlertasBanner() {
           var f = fechaPedido(p); if (!f) return;
           f.setHours(0,0,0,0);
           if (f.getTime() === hoy.getTime()) {
-            montoHoy += parseInt((p.total||'').replace(/[^\d]/g,'')) || 0;
+            montoHoy += admMontoAR((p.total||'')) || 0;
           }
         });
         var pct = Math.round((montoHoy / objMonto) * 100);
@@ -22325,7 +22497,7 @@ function _renderDupModal() {
       });
     });
     var totalUnido = activos.reduce(function(acc, p) {
-      var n = parseInt((p.total || '').replace(/[^\d]/g,'')) || 0;
+      var n = admMontoAR((p.total || '')) || 0;
       return acc + n;
     }, 0);
     var totalUnidoFmt = '$' + totalUnido.toLocaleString('es-AR');
@@ -22894,7 +23066,7 @@ async function _dupUnirPedidos() {
 
   // 2) SUMAR TOTALES (suma aritmética de los totales originales)
   var totalUnido = activos.reduce(function(acc, p) {
-    var n = parseInt((p.total || '').replace(/[^\d]/g,'')) || 0;
+    var n = admMontoAR((p.total || '')) || 0;
     return acc + n;
   }, 0);
 
@@ -23307,7 +23479,7 @@ function renderPedidos() {
 }
 
 function fmtTotal(t) {
-  var n = parseInt((t||'').replace(/[^\d]/g,''));
+  var n = admMontoAR((t||''));
   return isNaN(n) ? (t||'') : '$' + n.toLocaleString('es-AR');
 }
 
@@ -23909,7 +24081,7 @@ function abrirExport() {
   else if (filtroFecha === 'ayer') filtroLabel = 'Ayer' + filtroLabel;
   else if (filtroFecha === 'semana') filtroLabel = 'Esta semana' + filtroLabel;
   var sub = document.getElementById('export-hdr-sub');
-  var montoActivos = activos.reduce(function(a,p){ return a+(parseInt((p.total||'').replace(/[^\d]/g,''))||0); },0);
+  var montoActivos = activos.reduce(function(a,p){ return a+(admMontoAR((p.total||''))||0); },0);
   if (sub) sub.textContent = activos.length + ' pedidos · $' + montoActivos.toLocaleString('es-AR') + (filtroLabel ? ' · ' + filtroLabel : '');
 
   // Mostrar/ocultar opción camión según si es admin o tiene filtro todos
@@ -23943,7 +24115,7 @@ function generarMensaje(modo) {
   var pend    = activos.filter(function(p){ return p.estado === 'Pendiente'; });
   var conf    = activos.filter(function(p){ return p.estado === 'Confirmado'; });
   var entr    = activos.filter(function(p){ return p.estado === 'Entregado'; });
-  var totalMonto = activos.reduce(function(acc,p){ return acc+(parseInt((p.total||'').replace(/[^\d]/g,''))||0); }, 0);
+  var totalMonto = activos.reduce(function(acc,p){ return acc+(admMontoAR((p.total||''))||0); }, 0);
 
   var hoy = new Date().toLocaleDateString('es-AR', {weekday:'long', day:'numeric', month:'long'});
   var sep = '━━━━━━━━━━━━━━━';
@@ -23989,7 +24161,7 @@ function generarMensaje(modo) {
     if (esAdmin) {
       msg += '\n' + sep + '\n';
       var byVend = {};
-      activos.forEach(function(p){ var v=p.vendedor||'Sin asignar'; if(!byVend[v]) byVend[v]={n:0,m:0}; byVend[v].n++; byVend[v].m+=parseInt((p.total||'').replace(/[^\d]/g,''))||0; });
+      activos.forEach(function(p){ var v=p.vendedor||'Sin asignar'; if(!byVend[v]) byVend[v]={n:0,m:0}; byVend[v].n++; byVend[v].m+=admMontoAR((p.total||''))||0; });
       Object.keys(byVend).sort().forEach(function(v) {
         msg += '👤 ' + v + ': ' + byVend[v].n + ' ped · $' + byVend[v].m.toLocaleString('es-AR') + '\n';
       });
@@ -24009,7 +24181,7 @@ function generarMensaje(modo) {
       activos.forEach(function(p){ var v=p.vendedor||'Sin asignar'; if(!byVend[v]) byVend[v]=[]; byVend[v].push(p); });
       Object.keys(byVend).sort().forEach(function(v) {
         var ps = byVend[v];
-        var sub = ps.reduce(function(a,p){ return a+(parseInt((p.total||'').replace(/[^\d]/g,''))||0); },0);
+        var sub = ps.reduce(function(a,p){ return a+(admMontoAR((p.total||''))||0); },0);
         msg += sep + '\n';
         msg += '👤 *' + v + '*  ' + ps.length + ' ped · $' + sub.toLocaleString('es-AR') + '\n\n';
         ps.forEach(function(p){ msg += lineaBase(p) + '\n'; });
@@ -24042,7 +24214,7 @@ function generarMensaje(modo) {
       activos.forEach(function(p){ var v=p.vendedor||'Sin asignar'; if(!byVend[v]) byVend[v]=[]; byVend[v].push(p); });
       Object.keys(byVend).sort().forEach(function(v) {
         var ps = byVend[v];
-        var sub = ps.reduce(function(a,p){ return a+(parseInt((p.total||'').replace(/[^\d]/g,''))||0); },0);
+        var sub = ps.reduce(function(a,p){ return a+(admMontoAR((p.total||''))||0); },0);
         msg += sep + '\n';
         msg += '👤 *' + v + '*  ' + ps.length + ' ped · $' + sub.toLocaleString('es-AR') + '\n\n';
         ps.forEach(function(p){ msg += lineaDetalle(p) + '\n'; });
@@ -28107,8 +28279,8 @@ function renderReportes() {
     return f.getTime() === ayer.getTime() && p.estado !== 'Cancelado' && misVend;
   });
 
-  var montoHoy  = pedidosHoy.reduce(function(a,p){ return a+(parseInt((p.total||'').replace(/[^\d]/g,''))||0); },0);
-  var montoAyer = pedidosAyer.reduce(function(a,p){ return a+(parseInt((p.total||'').replace(/[^\d]/g,''))||0); },0);
+  var montoHoy  = pedidosHoy.reduce(function(a,p){ return a+(admMontoAR((p.total||''))||0); },0);
+  var montoAyer = pedidosAyer.reduce(function(a,p){ return a+(admMontoAR((p.total||''))||0); },0);
   var pendHoy   = pedidosHoy.filter(function(p){ return p.estado==='Pendiente'; }).length;
   var ticketHoy = pedidosHoy.length ? Math.round(montoHoy/pedidosHoy.length) : 0;
 
@@ -28187,7 +28359,7 @@ function renderReportes() {
     titulo.innerHTML = _repVendedor === 'todos' ? '📈 Todos los vendedores' : '📈 ' + _repVendedor;
   }
 
-  var totalMonto   = datos.reduce(function(a,p){ return a+(parseInt((p.total||'').replace(/[^\d]/g,''))||0); },0);
+  var totalMonto   = datos.reduce(function(a,p){ return a+(admMontoAR((p.total||''))||0); },0);
   var totalPedidos = datos.length;
   var ticket       = totalPedidos ? Math.round(totalMonto/totalPedidos) : 0;
 
@@ -28232,7 +28404,7 @@ function renderGrafico(datos) {
     var f = fechaPedido(p);
     var key = f.getFullYear() + '-' + String(f.getMonth()+1).padStart(2,'0') + '-' + String(f.getDate()).padStart(2,'0');
     if (!diasMap[key]) diasMap[key] = { monto: 0, pedidos: 0, fecha: f };
-    diasMap[key].monto   += parseInt((p.total||'').replace(/[^\d]/g,''))||0;
+    diasMap[key].monto   += admMontoAR((p.total||''))||0;
     diasMap[key].pedidos += 1;
   });
 
@@ -28396,7 +28568,7 @@ function renderVendedoresHoy(pedidosHoy) {
   pedidosHoy.forEach(function(p) {
     var v = p.vendedor || 'Sin asignar';
     if (!vendMap[v]) vendMap[v] = { monto:0, pedidos:0, pendientes:0 };
-    vendMap[v].monto   += parseInt((p.total||'').replace(/[^\d]/g,''))||0;
+    vendMap[v].monto   += admMontoAR((p.total||''))||0;
     vendMap[v].pedidos += 1;
     if (p.estado === 'Pendiente') vendMap[v].pendientes++;
   });
@@ -28529,7 +28701,7 @@ function renderLocalidadesHoy(pedidosHoy) {
     var loc = rawLoc ? _ciudadCanonizar(rawLoc) : '?';
     if (!locMap[loc]) locMap[loc] = { monto: 0, pedidos: 0 };
     locMap[loc].pedidos += 1;
-    locMap[loc].monto += parseInt((p.total||'').replace(/[^\d]/g,''))||0;
+    locMap[loc].monto += admMontoAR((p.total||''))||0;
   });
 
   var locs = Object.entries(locMap).sort(function(a,b){ return b[1].pedidos - a[1].pedidos; }).slice(0, 6);
@@ -28566,7 +28738,7 @@ function renderVendedores(datos) {
   datos.forEach(function(p) {
     var v = p.vendedor || 'Sin asignar';
     if (!vendMap[v]) vendMap[v] = { nombre: v, monto: 0, pedidos: 0 };
-    vendMap[v].monto   += parseInt((p.total||'').replace(/[^\d]/g,''))||0;
+    vendMap[v].monto   += admMontoAR((p.total||''))||0;
     vendMap[v].pedidos += 1;
   });
 
@@ -28642,7 +28814,7 @@ function renderLocalidades(datos) {
     var rawLoc = (p.localidad || '').trim();
     var loc = rawLoc ? _ciudadCanonizar(rawLoc) : '?';
     if (!locMap[loc]) locMap[loc] = { monto: 0, pedidos: 0, clientes: new Set() };
-    locMap[loc].monto   += parseInt((p.total||'').replace(/[^\d]/g,''))||0;
+    locMap[loc].monto   += admMontoAR((p.total||''))||0;
     locMap[loc].pedidos += 1;
     if (p.cliente) locMap[loc].clientes.add(p.cliente.trim().toLowerCase());
   });
@@ -28714,7 +28886,7 @@ function agruparClientesFuzzy(pedidos) {
     var raw      = p.cliente.trim();
     var normRaw  = normalizarNombre(raw);
     var tel      = p.telCliente || '';
-    var monto    = parseInt((p.total||'').replace(/[^\d]/g,''))||0;
+    var monto    = admMontoAR((p.total||''))||0;
     var fecha    = fechaPedido(p);
 
     // Buscar grupo existente
@@ -28979,8 +29151,8 @@ function renderComparativa(actual, anterior) {
   // La comparativa se oculta para 'todos' (histórico completo no tiene "período anterior" útil)
   if (!wrap || _repPeriodo === 'todos') { if (wrap) wrap.innerHTML = ''; return; }
 
-  var montoAct  = actual.reduce(function(a,p)  { return a + (parseInt((p.total||'').replace(/[^\d]/g,''))||0); }, 0);
-  var montoAnt  = anterior.reduce(function(a,p) { return a + (parseInt((p.total||'').replace(/[^\d]/g,''))||0); }, 0);
+  var montoAct  = actual.reduce(function(a,p)  { return a + (admMontoAR((p.total||''))||0); }, 0);
+  var montoAnt  = anterior.reduce(function(a,p) { return a + (admMontoAR((p.total||''))||0); }, 0);
   var pedAct    = actual.length;
   var pedAnt    = anterior.length;
 
@@ -29023,8 +29195,8 @@ function renderAlertas(actual, anterior) {
 
   // 1. Caída de facturación > 30%
   if (_repPeriodo !== 'todos' && anterior.length > 0) {
-    var montoAct = actual.reduce(function(a,p)  { return a + (parseInt((p.total||'').replace(/[^\d]/g,''))||0); }, 0);
-    var montoAnt = anterior.reduce(function(a,p) { return a + (parseInt((p.total||'').replace(/[^\d]/g,''))||0); }, 0);
+    var montoAct = actual.reduce(function(a,p)  { return a + (admMontoAR((p.total||''))||0); }, 0);
+    var montoAnt = anterior.reduce(function(a,p) { return a + (admMontoAR((p.total||''))||0); }, 0);
     if (montoAnt > 0) {
       var caida = Math.round(((montoAnt - montoAct) / montoAnt) * 100);
       if (caida >= ALERTA_CAIDA_PCT) {
@@ -29290,7 +29462,7 @@ function getClientesData(periodo) {
         fechas: []
       };
     }
-    mapa[key].monto   += parseInt((p.total||'').replace(/[^\d]/g,''))||0;
+    mapa[key].monto   += admMontoAR((p.total||''))||0;
     mapa[key].pedidos += 1;
     var m = (p.pedidoId||'').match(/TCK-(\d{4})(\d{2})(\d{2})/);
     if (m) {
@@ -29605,7 +29777,7 @@ function avVentasDia() {
     if (mm) iso = mm[1] + '-' + mm[2] + '-' + mm[3];
     else if ((p.fechaHora || '').length >= 10) iso = p.fechaHora.substring(0, 10);
     if (!iso) return;
-    var monto = parseInt((p.total || '0').replace(/[^\d]/g, ''), 10) || 0;
+    var monto = admMontoAR((p.total || '0')) || 0;
     if (!mapa[iso]) mapa[iso] = { total: 0, pend: 0, n: 0, np: 0, ori: {} };
     if (p.estado === 'Confirmado') {
       mapa[iso].total += monto; mapa[iso].n++;
@@ -29647,7 +29819,7 @@ function avPedidosDelDia(iso) {
     var mm = (p.pedidoId || '').match(/TCK-(\d{4})(\d{2})(\d{2})/);
     var pi = mm ? mm[1] + '-' + mm[2] + '-' + mm[3] : ((p.fechaHora || '').substring(0, 10));
     if (pi !== iso) return;
-    out.push({ cliente: p.cliente || p.comercio || '—', monto: parseInt((p.total || '0').replace(/[^\d]/g, ''), 10) || 0, estado: p.estado, origen: (p.origen || '').toLowerCase() });
+    out.push({ cliente: p.cliente || p.comercio || '—', monto: admMontoAR((p.total || '0')) || 0, estado: p.estado, origen: (p.origen || '').toLowerCase() });
   });
   out.sort(function(a, b) { return b.monto - a.monto; });
   return out;
@@ -31233,7 +31405,7 @@ async function mapaCargarHistorialCliente(nombreCliente, popupId) {
     }).sort(function(a,b) { return fechaPedido(b) - fechaPedido(a); });
 
     var ultimoPedido = pedidos.length ? pedidos[0] : null;
-    var totalMonto   = pedidos.reduce(function(a,p){ return a+(parseInt((p.total||'').replace(/[^\d]/g,''))||0); },0);
+    var totalMonto   = pedidos.reduce(function(a,p){ return a+(admMontoAR((p.total||''))||0); },0);
     var diasSinComprar = ultimoPedido
       ? Math.floor((new Date() - fechaPedido(ultimoPedido)) / 86400000)
       : null;
@@ -31280,7 +31452,7 @@ async function mapaCargarHistorialCliente(nombreCliente, popupId) {
       var sinColor = diasSinComprar > 14 ? '#C62828' : diasSinComprar > 7 ? '#E65100' : '#2E7D32';
       html += '<div style="margin-bottom:8px;padding:6px 8px;background:#fff3e0;border-radius:8px;font-size:12px;">'
         + '🛒 Última compra: <b style="color:' + sinColor + '">hace ' + diasSinComprar + ' días</b><br>'
-        + '<span style="color:#666;">' + fechaPedido(ultimoPedido).toLocaleDateString('es-AR') + ' · ' + fmt(parseInt((ultimoPedido.total||'').replace(/[^\d]/g,''))||0) + '</span>'
+        + '<span style="color:#666;">' + fechaPedido(ultimoPedido).toLocaleDateString('es-AR') + ' · ' + fmt(admMontoAR((ultimoPedido.total||''))||0) + '</span>'
         + '</div>';
     } else {
       html += '<div style="margin-bottom:8px;padding:6px 8px;background:#fce4ec;border-radius:8px;font-size:12px;color:#C62828;">⚠️ Sin pedidos registrados</div>';
@@ -31746,7 +31918,7 @@ function renderObjetivos() {
     // ⚠️ p.total viene como string "$196.000" desde Google Sheets.
     // Hay que limpiar el formato y parsear a número antes de sumar.
     var montoReal = pedidosVend.reduce(function(s, p) {
-      var n = parseInt((p.total || '').toString().replace(/[^\d]/g, '')) || 0;
+      var n = admMontoAR((p.total || '').toString()) || 0;
       return s + n;
     }, 0);
     var cantPedidos = pedidosVend.length;
@@ -33590,7 +33762,11 @@ function lzRenderViajes(el) {
   const viajesVisibles = _lzViajes.filter(v => {
     const totalPed = Number(v.total_pedidos) || 0;
     if (totalPed > 0) return true;       // tiene pedidos → siempre mostrar
-    if (esTL(v.zona)) return false;      // TL vacío → ocultar
+    // v13.230.0 — un viaje TL vacío se oculta sólo si además NO entró al circuito
+    // de Carga v2. Apenas tiene planilla o salió de "planificado", hay algo que
+    // controlar y tiene que verse.
+    if (esTL(v.zona) && !(Number(v.planilla_version) > 0) && v.estado === 'planificado') return false;
+    if (esTL(v.zona) && totalPed === 0 && !(Number(v.planilla_version) > 0) && v.estado !== 'planificado') return true;
     return true;                          // zona grande vacía → mostrar
   });
 
@@ -38792,7 +38968,7 @@ function transferAjustarMonto(id) {
     '</div>';
   document.body.appendChild(m);
   function actualizarDif() {
-    var v = Number((document.getElementById('lt-ajuste-input').value || '').replace(/[^\d]/g, '')) || 0;
+    var v = admMontoAR((document.getElementById('lt-ajuste-input').value || '')) || 0;
     var d = facturaTot - v;
     var el = document.getElementById('lt-ajuste-dif');
     if (v <= 0) { el.style.color = '#B71C1C'; el.textContent = 'Ingresá un monto válido'; }
@@ -38807,15 +38983,40 @@ function transferAjustarMonto(id) {
   document.getElementById('lt-ajuste-saveconc').onclick = function(){ _transferAjustarGuardar(id, document.getElementById('lt-ajuste-input').value, true, m); };
 }
 
-async function _transferAjustarGuardar(id, valStr, conciliar, modalEl) {
-  var nuevo = Number(String(valStr || '').replace(/[^\d]/g, '')) || 0;
+async function _transferAjustarGuardar(id, valStr, conciliar, modalEl) { return cobRpcAjustar(id, valStr, conciliar, modalEl); }
+
+// v13.231.0 — ACÁ ESTABA EL BUG. Antes:
+//     var nuevo = admMontoAR(String(valStr||'')) || 0;
+// con "$104.200,01" eso da 10420001 y el recibo sale por $10.149.081.
+// Ahora: admMontoAR (espejo de fn_monto_ar) + la Guardia opina ANTES de guardar.
+async function cobRpcAjustar(id, valStr, conciliar, modalEl) {
+  var nuevo = admMontoAR(valStr) || 0;
   if (nuevo <= 0) { toast('Monto inválido', 'err'); return; }
   var e = _ltState.rows.find(function(r){ return r.id === id; });
   if (!e) { toast('No encontré la entrega', 'err'); return; }
-  var det = _rvParseDet(e);          // {efectivo,transferencia,cheque,cuenta_corriente} con fallback
+
+  // ── Guardia: ¿este importe es posible contra la factura del pedido? ──
+  var _g = await cobEvaluarImporte(id, nuevo, 'transferencia');
+  if (_g && _g.decision === 'rechazo') {
+    alert('⛔ IMPORTE IMPOSIBLE — NO SE GUARDÓ\n\n' + (_g.mensaje || '') +
+          '\n\nRevisá el importe. Si de verdad es así, hay que resolverlo con el contador.');
+    return;
+  }
+  if (_g && _g.decision === 'revisar') {
+    if (!confirm('⚠️ ' + (_g.mensaje || 'El importe supera el total del pedido.') +
+                 '\n\n¿Lo guardás igual?')) return;
+  }
+
+  var det = _rvParseDet(e);          // lee los 4 instrumentos (incluye el histórico)
   det.transferencia = nuevo;         // ajusto SOLO el componente transferencia
-  var detJson = {};
-  ['efectivo','transferencia','cheque','cuenta_corriente'].forEach(function(k){ if ((Number(det[k]) || 0) > 0) detJson[k] = Math.round(Number(det[k])); });
+  // v13.231.0 — cuenta corriente fuera: un ajuste nuevo no la arrastra.
+  var _cc = Number(det.cuenta_corriente) || 0;
+  var detJson = cobSinCtaCte(det);
+  if (_cc > 0) console.warn('[v13.231.0] se descartó cuenta_corriente ($' + _cc + ') del ajuste de la entrega ' + id);
+  if (Object.keys(detJson).length === 0) {
+    console.error('[' + DETALLE_COBRO_VACIO + '] ajuste sin instrumentos, entrega ' + id);
+    toast('❌ El detalle quedó vacío: no se guardó', 'err'); return;
+  }
   // v13.198.0 — el ajuste del detalle_cobro sigue siendo un PATCH (no es
   // una conciliacion). La conciliacion sale del payload y va por el RPC,
   // con via='ajuste', que es exactamente lo que es.
@@ -47315,7 +47516,7 @@ function mgEscRender(cid){
 
 function mgEscSet(cid, i, v){
   var e = _mgEsc[cid]; if (!e) return;
-  var n = parseInt(String(v).replace(/[^\d]/g, ''), 10);
+  var n = admMontoAR(String(v));
   if (!isNaN(n) && n > 0) e.edit[i].precio = n;
   mgEscRender(cid);
 }
@@ -50286,7 +50487,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.229.0';
+var TCK_VERSION = '13.232.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
@@ -51239,7 +51440,7 @@ function vcBloque(v) {
 
   // Control físico + cierre
   var _vcPuede = (typeof vcPuedeOperarCarga !== 'function') || vcPuedeOperarCarga(); // v13.157.0
-  if (typeof cv2aOn === 'function' && cv2aOn() && String(v.zona || '').indexOf('tl') !== 0 && (est === 'preparando' || est === 'carga_cerrada')) {
+  if (typeof cv2aOn === 'function' && cv2aOn() && (est === 'preparando' || est === 'carga_cerrada')) {   // v13.230.0: TL incluido
     // v13.226.0 — carga v2: la preparación y el cierre son de Depósito; el arranque, del chofer
     h += cv2aBloqueHtml(v);
     if (_vcPuede && est === 'carga_cerrada') {
@@ -51261,7 +51462,7 @@ function vcBloque(v) {
          '<button class="cc-btn azul" onclick="vcReabrirYSumar(\'' + v.id + '\')">➕ Abrir y sumar pedidos</button>' +
          '<button class="cc-btn verde" onclick="vcArrancar(\'' + v.id + '\')">🚚 Arrancar viaje</button></div>';
   } else if (est === 'en_ruta') {
-    if (typeof cv2aOn === 'function' && cv2aOn() && String(v.zona || '').indexOf('tl') !== 0) h += cv2aBloqueHtml(v);   // v13.226.0
+    if (typeof cv2aOn === 'function' && cv2aOn()) h += cv2aBloqueHtml(v);   // v13.230.0: TL incluido
     // v13.157.0 — pedido Braian: meter pedidos de última hora aunque el
     // viaje figure en ruta (el botón legacy lo pone en_ruta sin que el
     // camión haya salido). Reabre, elegís qué sumar y regenera la planilla.
@@ -56281,7 +56482,7 @@ function tckAbrirPrecioManual(nombre, ctx) {
     + 'Tabla para ' + Math.max(1, qty) + ' u.: $' + piso.toLocaleString('es-AR') + ' (mínimo)\n'
     + 'Solo se cobra HACIA ARRIBA. Para vender abajo de tabla: foto de la oferta a Braian.', String(piso));
   if (v === null) return;
-  var n = parseInt(String(v).replace(/[^\d]/g, ''), 10);
+  var n = admMontoAR(String(v));
   if (isNaN(n) || n <= 0) return;
   if (n < piso) {
     toast('$' + n.toLocaleString('es-AR') + ' está ABAJO de la tabla ($' + piso.toLocaleString('es-AR') + '). Para eso: circuito de defensa con Braian.', 'err');
@@ -59332,6 +59533,289 @@ async function cv2aMotivos() {
   try { CV2A.motivos = await sbFetch('carga_motivo?select=codigo,ambito,texto,exige_nota&activo=eq.true') || []; } catch (e) { CV2A.motivos = []; }
   return CV2A.motivos;
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// v13.231.0 — PLANILLA FIRMADA (la sube Depósito) Y CIERRE ADMINISTRATIVO
+// ══════════════════════════════════════════════════════════════════════
+// En el candidato 14.201.0 este botón había quedado en la app del CHOFER, y
+// la RPC exige rol de Depósito: devolvía ROL_NO_PERMITIDO siempre. Va acá.
+//
+// El archivo va a un bucket PRIVADO ('planillas-firmadas'). No hay URL pública:
+// para verla se pide una URL firmada que vence a los 5 minutos.
+var CV2PF = { subiendo: {} };
+
+function cv2pfRutaDe(viajeId, version, nombre) {
+  var ext = /\.pdf$/i.test(nombre || '') ? 'pdf' : 'jpg';
+  return viajeId + '/v' + version + '/' + Date.now() + '.' + ext;
+}
+
+async function cv2pfEstado(viajeId) {
+  try { return await cv2aRpc('carga_planilla_firmada_ver', { p_viaje_id: viajeId }); }
+  catch (e) { return { ok: false, message: e && e.message }; }
+}
+
+async function cv2pfSubir(viajeId) {
+  if (CV2PF.subiendo[viajeId]) return;
+  var est = await cv2pfEstado(viajeId);
+  if (!est || est.ok !== true) { cv2aToast('⛔ ' + ((est && est.message) || 'No pude leer la planilla'), 'err'); return; }
+  if (!est.hay_planilla) { cv2aToast('⛔ Todavía no hay planilla final: Depósito tiene que cerrar la carga.', 'err'); return; }
+  if (!est.aceptada_at)  { cv2aToast('⛔ El chofer todavía no aceptó esta carga.', 'err'); return; }
+
+  var inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = 'image/*,application/pdf'; inp.capture = 'environment';
+  inp.onchange = async function () {
+    var f = inp.files && inp.files[0];
+    if (!f) return;
+    if (f.size > 12 * 1024 * 1024) { cv2aToast('⛔ El archivo supera los 12 MB.', 'err'); return; }
+    CV2PF.subiendo[viajeId] = true;
+    try {
+      var esPdf = /pdf/i.test(f.type) || /\.pdf$/i.test(f.name || '');
+      var ruta = cv2pfRutaDe(viajeId, est.version, f.name);
+      // El bucket es privado: se sube con el JWT del usuario, NO con la anon key.
+      var resp = await fetch(SUPABASE_URL + '/storage/v1/object/planillas-firmadas/' + ruta, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY),
+          'Content-Type': esPdf ? 'application/pdf' : (f.type || 'image/jpeg'),
+          'x-upsert': 'true'
+        },
+        body: f
+      });
+      if (!resp.ok) {
+        var t = await resp.text();
+        cv2aToast('⛔ No se pudo subir el archivo (' + resp.status + ').', 'err');
+        console.error('[planilla firmada] storage:', resp.status, t);
+        return;
+      }
+      var r = await cv2aRpc('carga_planilla_firmada_subir', {
+        p_viaje_id: viajeId, p_version: est.version, p_hash: est.hash, p_ruta: ruta,
+        p_tipo: esPdf ? 'pdf' : 'foto', p_nombre: f.name || null,
+        p_request_id: 'pf:' + viajeId + ':' + est.version + ':' + Date.now()
+      });
+      if (r && r.ok) {
+        cv2aToast('✅ Planilla v' + r.version + ' guardada (firmó ' + (r.chofer || '—') + ').', 'ok');
+        cv2aCargar(viajeId);
+      } else {
+        cv2aToast('⛔ ' + ((r && r.message) || 'No se pudo guardar la planilla firmada.'), 'err');
+      }
+    } catch (e) {
+      cv2aToast('⛔ ' + (e && e.message ? e.message : 'Error al subir la planilla.'), 'err');
+    } finally { CV2PF.subiendo[viajeId] = false; }
+  };
+  inp.click();
+}
+
+// URL firmada temporal: el archivo nunca queda accesible sin autenticación.
+async function cv2pfVer(viajeId) {
+  var est = await cv2pfEstado(viajeId);
+  if (!est || est.ok !== true || !est.hay_archivo) { cv2aToast('No hay planilla firmada subida.', 'err'); return; }
+  try {
+    var r = await fetch(SUPABASE_URL + '/storage/v1/object/sign/planillas-firmadas/' + est.ruta, {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expiresIn: 300 })
+    });
+    if (!r.ok) { cv2aToast('⛔ No se pudo generar el link (' + r.status + ').', 'err'); return; }
+    var j = await r.json();
+    var url = SUPABASE_URL + '/storage/v1' + (j.signedURL || j.signedUrl || '');
+    window.open(url, '_blank', 'noopener');
+  } catch (e) { cv2aToast('⛔ ' + (e && e.message), 'err'); }
+}
+
+async function cv2pfBloque(viajeId) {
+  var el = document.getElementById('cv2pf-' + viajeId);
+  if (!el) return;
+  var est = await cv2pfEstado(viajeId);
+  if (!est || est.ok !== true) { el.innerHTML = ''; return; }          // sin permiso: ni se muestra
+  if (!est.hay_planilla) { el.innerHTML = ''; return; }
+  var h = '<div style="margin:6px 0;padding:6px 8px;border:1px solid #8D6E63;border-radius:8px;background:#EFEBE9;">' +
+          '<b>📄 Planilla firmada</b> · v' + cv2aEsc(est.version) + ' · aceptada por ' + cv2aEsc(est.aceptada_por || '—');
+  if (est.hay_archivo) {
+    h += ' <span class="vc-tag ok">subida por ' + cv2aEsc(est.subida_por) + ' ' + cv2aHora(est.subida_at) + '</span>' +
+         ' <button class="cc-btn gris" onclick="cv2pfVer(\'' + viajeId + '\')">Ver</button>' +
+         ' <button class="cc-btn gris" onclick="cv2pfSubir(\'' + viajeId + '\')">Reemplazar</button>';
+  } else if (est.aceptada_at) {
+    h += ' <span class="vc-tag warn">falta subirla</span>' +
+         ' <button class="cc-btn azul" onclick="cv2pfSubir(\'' + viajeId + '\')">📄 Subir planilla firmada</button>';
+  } else {
+    h += ' <span class="vc-tag warn">el chofer todavía no aceptó la carga</span>';
+  }
+  h += '</div>';
+  el.innerHTML = h;
+}
+
+// ── Cierre administrativo: qué falta, y el botón que usa el motor ──
+async function cv2ciBloque(viajeId) {
+  var el = document.getElementById('cv2ci-' + viajeId);
+  if (!el) return;
+  var p;
+  try { p = await cv2aRpc('carga_cierre_pendientes', { p_viaje: viajeId }); }
+  catch (e) { el.innerHTML = ''; return; }
+  if (!p || typeof p !== 'object') { el.innerHTML = ''; return; }
+  var claves = Object.keys(p);
+  if (!claves.length) {
+    el.innerHTML = '<div style="margin:6px 0;padding:8px;border:2px solid #2E7D32;border-radius:10px;background:#E8F5E9;">' +
+      '<b>✅ Este viaje no tiene ningún pendiente.</b> Se puede cerrar.' +
+      ' <button class="cc-btn verde" onclick="cv2ciCerrar(\'' + viajeId + '\')">Cerrar viaje</button>' +
+      '<div style="font-size:11.5px;color:#33691E;margin-top:4px;">Con cierre_auto prendido, el sistema lo cierra solo apenas desaparece el último pendiente.</div></div>';
+    return;
+  }
+  var lbl = {
+    entregas_sin_resolver: 'entregas sin resultado',
+    efectivo_sin_confirmar: 'efectivo sin confirmar por Tesorería',
+    cheques_declarados_sin_recibir: 'cheques declarados que Tesorería no recibió',
+    transferencias_sin_conciliar: 'transferencias sin conciliar',
+    transferencias_en_disputa: 'transferencias en disputa',
+    entregas_con_cuenta_corriente: 'entregas con cuenta corriente (no debería haber)',
+    devoluciones_sin_nc: 'devoluciones sin nota de crédito',
+    devoluciones_recibidas_sin_nc: 'devoluciones recibidas ANTES de la NC',
+    devoluciones_sin_recibir: 'devoluciones que Depósito no recibió',
+    devoluciones_sin_conciliar: 'devoluciones sin conciliar',
+    stock_sin_reingresar: 'stock sin reingresar',
+    diferencias_pendientes: 'diferencias sin resolver',
+    cuenta_corriente_devoluciones: 'cuenta corriente de devoluciones sin ajustar',
+    retiros_sin_conciliar: 'retiros sin conciliar',
+    incidencias_abiertas: 'incidencias sin revisar',
+    excepciones_abiertas: 'excepciones sin resolver',
+    recorrido_sin_finalizar: 'el recorrido todavía no terminó',
+    planilla_firmada_faltante: 'falta la planilla firmada'
+  };
+  el.innerHTML = '<div style="margin:6px 0;padding:8px;border:2px solid #E65100;border-radius:10px;background:#FFF3E0;">' +
+    '<b>⏳ Falta para poder cerrar el viaje (' + claves.length + ')</b>' +
+    claves.map(function (k) {
+      return '<div style="padding:2px 0;">• ' + cv2aEsc(lbl[k] || k.replace(/_/g, ' ')) + ': <b>' + cv2aEsc(p[k]) + '</b></div>';
+    }).join('') +
+    '<div style="font-size:11.5px;color:#8a6f5f;margin-top:4px;">El chofer no cierra nada. Cuando no quede ninguno de estos, el sistema cierra el viaje solo.</div></div>';
+}
+
+async function cv2ciCerrar(viajeId) {
+  if (!confirm('¿Cerrar este viaje?\n\nSe revisa de nuevo que no quede ningún pendiente antes de cerrarlo.')) return;
+  try {
+    var r = await cv2aRpc('carga_cierre_intentar', { p_viaje: viajeId, p_origen: 'admin' });
+    if (r && r.cerrado) { cv2aToast('✅ Viaje cerrado', 'ok'); }
+    else { cv2aToast('⛔ Todavía falta: ' + ((r && r.detalle) || 'hay pendientes'), 'err'); }
+    cv2aCargar(viajeId);
+  } catch (e) { cv2aToast('⛔ ' + cv2aLimpiarMsg(e && e.message), 'err'); }
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// v13.232.0 — BANDEJA DE INCIDENCIAS DEL MANIFIESTO
+// ══════════════════════════════════════════════════════════════════════
+// Un pedido que no pertenece a la versión cerrada y aceptada NO se le muestra
+// al chofer, no es responsabilidad suya y no frena el cierre del manifiesto
+// válido. Pero no desaparece: cae acá, con su causa.
+//
+// Lo que esta pantalla NO hace, a propósito: si la ruta ya empezó, no ofrece
+// ningún botón para meter el pedido en el viaje. Y si alguien lo intentara por
+// REST, el trigger cv2_entregas_post_salida lo rechaza igual. La pantalla y la
+// base dicen lo mismo.
+var CV2BI = { filtro: 'abiertas', viaje: null, datos: [] };
+
+var CV2BI_CAUSAS = {
+  agregado_post_cierre:   { txt: 'Agregado después del cierre',  ico: '➕', col: '#E65100' },
+  agregado_post_salida:   { txt: 'Agregado después de la salida', ico: '⛔', col: '#B71C1C' },
+  retirado:               { txt: 'Retirado de la carga',          ico: '📤', col: '#6A1B9A' },
+  sin_factura_cae:        { txt: 'Sin factura o sin CAE',         ico: '🧾', col: '#BF360C' },
+  no_cargado_fisicamente: { txt: 'No se cargó físicamente',       ico: '📦', col: '#4E342E' },
+  version_incorrecta:     { txt: 'Versión de manifiesto incorrecta', ico: '🔢', col: '#1565C0' },
+  otra_inconsistencia:    { txt: 'Otra inconsistencia',           ico: '❓', col: '#546E7A' }
+};
+
+async function cv2biCargar(viajeId) {
+  CV2BI.viaje = viajeId || null;
+  var el = document.getElementById('cv2bi-' + (viajeId || 'all'));
+  if (el) el.innerHTML = '<div class="vc-row">⏳ Leyendo la bandeja…</div>';
+  var r;
+  try {
+    r = await cv2aRpc('carga_manifiesto_incidencias', {
+      p_viaje_id: viajeId || null,
+      p_solo_abiertas: (CV2BI.filtro === 'abiertas')
+    });
+  } catch (e) { r = { ok: false, message: e && e.message }; }
+  if (!r || r.ok !== true) {
+    if (el) el.innerHTML = '<div class="vc-row">⛔ ' + cv2aEsc((r && r.message) || 'No se pudo leer la bandeja') + '</div>';
+    return;
+  }
+  CV2BI.datos = r.incidencias || [];
+  if (el) el.innerHTML = cv2biHtml(CV2BI.datos);
+}
+
+function cv2biHtml(rows) {
+  if (!rows.length) {
+    return '<div style="margin:6px 0;padding:8px;border:1px solid #A5D6A7;border-radius:10px;background:#E8F5E9;">' +
+           '✅ Ningún pedido quedó fuera del manifiesto.</div>';
+  }
+  // agrupadas por causa: lo primero que hay que ver es de qué tipo son
+  var porCausa = {};
+  rows.forEach(function (i) {
+    var c = i.causa || 'otra_inconsistencia';
+    (porCausa[c] = porCausa[c] || []).push(i);
+  });
+
+  var h = '<div style="margin:6px 0;padding:8px;border:2px solid #E65100;border-radius:10px;background:#FFF3E0;">' +
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
+      '<b>📋 Pedidos fuera del manifiesto (' + rows.length + ')</b>' +
+      '<span style="flex:1"></span>' +
+      '<button class="cc-btn gris" onclick="cv2biFiltro(\'' + (CV2BI.filtro === 'abiertas' ? 'todas' : 'abiertas') + '\')">' +
+        (CV2BI.filtro === 'abiertas' ? 'Ver también las revisadas' : 'Ver sólo las abiertas') + '</button>' +
+    '</div>';
+
+  Object.keys(porCausa).sort().forEach(function (c) {
+    var meta = CV2BI_CAUSAS[c] || CV2BI_CAUSAS.otra_inconsistencia;
+    h += '<div style="margin:8px 0 3px;font-weight:900;color:' + meta.col + ';">' +
+         meta.ico + ' ' + cv2aEsc(meta.txt) + ' (' + porCausa[c].length + ')</div>';
+    porCausa[c].forEach(function (i) {
+      var bloqueada = !!i.ruta_ya_empezo;
+      h += '<div style="margin:4px 0;padding:6px 8px;border-left:3px solid ' + meta.col +
+           ';background:#fff;border-radius:0 8px 8px 0;">' +
+        '<div><b>' + cv2aEsc(i.pedido_id || '—') + '</b>' +
+          (i.zona ? ' · ' + cv2aEsc(i.zona) : '') +
+          (i.fecha_salida ? ' ' + cv2aEsc(i.fecha_salida) : '') +
+          (i.chofer ? ' · ' + cv2aEsc(i.chofer) : '') +
+          ' <span class="vc-tag ' + (i.abierta ? 'warn' : 'ok') + '">' +
+            (i.abierta ? 'abierta' : 'revisada por ' + cv2aEsc(i.revisada_por || '—')) + '</span>' +
+        '</div>' +
+        '<div style="font-size:11.5px;color:#6D4C41;margin-top:2px;">' +
+          cv2aEsc(i.que_se_puede_hacer || '') + '</div>' +
+        (i.nota ? '<div style="font-size:11.5px;color:#8a6f5f;">' + cv2aEsc(i.nota) + '</div>' : '') +
+        (i.abierta
+          ? '<div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
+              '<button class="cc-btn gris" onclick="cv2biRevisar(' + i.id + ')">Marcar revisada</button>' +
+              (bloqueada
+                // ⛔ ruta empezada: no hay botón para incorporarlo. No es que esté
+                //    deshabilitado: directamente no existe.
+                ? '<span class="vc-tag warn">⛔ La ruta ya salió: se programa para otro viaje</span>'
+                : '<span style="font-size:11.5px;color:#33691E;">Todavía se puede corregir antes de la salida</span>') +
+            '</div>'
+          : '') +
+      '</div>';
+    });
+  });
+  return h + '</div>';
+}
+
+function cv2biFiltro(f) {
+  CV2BI.filtro = f;
+  cv2biCargar(CV2BI.viaje);
+}
+
+function cv2biRevisar(id) {
+  cv2aMotivoModal('Marcar incidencia como revisada', '__ninguno__',
+    '<div style="font-size:13px;">Contá qué se hizo con este pedido. Si la ruta ya salió, ' +
+    'lo que corresponde es programarlo para otro viaje: <b>no se incorpora a éste</b>.</div>',
+    async function (mot, nota) {
+      await cv2aRpc('carga_incidencia_revisar', { p_id: id, p_nota: nota });
+      cv2biCargar(CV2BI.viaje);
+    });
+}
+
+function cv2biBloqueHtml(viajeId) {
+  setTimeout(function () { cv2biCargar(viajeId); }, 0);
+  return '<div id="cv2bi-' + (viajeId || 'all') + '"></div>';
+}
+
 function cv2aBloqueHtml(v) {
   setTimeout(function () { cv2aCargar(v.id); }, 0);
   return '<div id="cv2a-' + v.id + '" class="vc-row" style="display:block;">⏳ Leyendo la carga de Depósito…</div>';
@@ -59445,7 +59929,15 @@ async function cv2aCargar(id) {
       ? '🔒 El camión ya salió: carga, versión aceptada y custodia congeladas. No hay reapertura: devolución e incidencia pos-salida.'
       : '🔒 Carga cerrada por Depósito: congelada. No se agregan, editan ni sacan pedidos; los nuevos van a la próxima salida.') + '</div>';
   }
+  // v13.231.0 — contenedores de la planilla firmada y del cierre administrativo
+  h += '<div id="cv2pf-' + id + '"></div><div id="cv2ci-' + id + '"></div>';
+  // v13.232.0 — bandeja de incidencias del manifiesto de ESTE viaje
+  h += cv2biBloqueHtml(id);
   el.innerHTML = h;
+  setTimeout(function () {
+    try { cv2pfBloque(id); } catch (e) { console.warn('[planilla firmada]', e); }
+    try { cv2ciBloque(id); } catch (e) { console.warn('[cierre]', e); }
+  }, 0);
   if (r.congelado) {   // sin "reabrir" ni "sumar pedidos" sobre un viaje que ya salió
     var cont = el.parentElement;
     if (cont) cont.querySelectorAll('button').forEach(function (b) {
