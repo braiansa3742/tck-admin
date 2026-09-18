@@ -1,5 +1,17 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.234.0 — 18/09/2026
+     v13.234.0: SE PRENDE LA PANTALLA DE CARGA V2 PARA EL PILOTO.
+       (sobre v13.233.0. Un solo cambio funcional, nada mas.)
+       · CARGA_V2_ADMIN.modo pasa de 'off' a 'piloto'. Con esto el Admin
+         muestra el bloque de Carga v2 en los viajes: estado del control,
+         planilla firmada, cierre e incidencias.
+       · NO cambia quien ve que: del lado del servidor sigue mandando la
+         fila de carga_v2_piloto. Un viaje que no este habilitado no entra
+         al circuito aunque la pantalla se vea.
+       · No se toco ninguna otra linea de 13.233.0.
+       DEPLOY: subir como index.html y version.json a 13.234.0.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.233.0 — 18/09/2026
      v13.233.0: CONFIGURAR VIAJE SIN APPS SCRIPT.
        · Apps Script agotó la cuota diaria de UrlFetch y no se podían armar
@@ -50591,7 +50603,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.233.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
+var TCK_VERSION = '13.234.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
@@ -59597,7 +59609,7 @@ async function abrirEditarPedidoAdmin(pedido) {
    el avance real de Depósito y del chofer, y solo habilita lo que le toca
    a Administración: autorizar diferencias, contingencia fiscal y
    arranque de contingencia (todas con motivo de catálogo y auditadas). */
-var CARGA_V2_ADMIN = { modo: 'off' };
+var CARGA_V2_ADMIN = { modo: 'piloto' };   /* v13.234.0 - piloto zona 2B */
 function cv2aOn() { return CARGA_V2_ADMIN.modo === 'on' || CARGA_V2_ADMIN.modo === 'piloto'; }
 // Helpers propios: ccEsc/ccHora/vcModal/ccGAS/ccToast viven dentro de una IIFE y no son globales.
 function cv2aEsc(x) {
