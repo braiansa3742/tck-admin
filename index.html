@@ -1,5 +1,24 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.233.0 — 18/09/2026
+     v13.233.0: CONFIGURAR VIAJE SIN APPS SCRIPT.
+       · Apps Script agotó la cuota diaria de UrlFetch y no se podían armar
+         los viajes: lzGuardarConfigViaje() salía por el Web App con
+         accion=viajeAsignarChofer y no volvía nunca.
+       · Ahora llama a rpc/carga_viaje_configurar, directo a Supabase.
+         SIN fallback a Apps Script: si falla, falla con un motivo claro.
+       · La RPC hace lo que el .gs NO hacía: verifica que el viaje exista,
+         que esté en planificado/preparando, que el chofer sea un usuario
+         activo con rol chofer, que el vehículo esté en la flota y activo,
+         y que quien lo pide tenga rol autorizado. Actualiza viaje y entregas
+         en UNA transacción y deja auditoría en ops_eventos y carga_evento.
+       · El desplegable de chofer ya no está escrito a mano: sale de
+         carga_choferes_disponibles(). Así no ofrece a alguien que el
+         servidor va a rechazar — es lo que pasaba con "Francisco (reparto)",
+         que tiene rol operaciones y no chofer.
+       · Requiere tck_viaje_configurar_v1.sql (ya aplicado el 18/09).
+       DEPLOY: subir como index.html y version.json a 13.233.0.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.232.0 — 18/09/2026
      v13.232.0: BANDEJA DE INCIDENCIAS DEL MANIFIESTO.
        (sobre v13.231.0, que NO se publicó)
@@ -33380,9 +33399,65 @@ function _lzRenderSiVisible() {
   renderLogistica();
 }
 
+
+// ══════════════════════════════════════════════════════════════════════
+// v13.233.0 — CHOFERES Y VEHÍCULOS: LA LISTA LA DA EL SERVIDOR
+// ══════════════════════════════════════════════════════════════════════
+// Estaba escrita a mano en el HTML y se fue desfasando: ofrecía
+// "Francisco (reparto)", que en app_usuarios tiene rol 'operaciones'. La RPC
+// nueva lo rechaza (CHOFER_SIN_ROL), así que ofrecerlo era mandar al usuario
+// a un error. Ahora la lista sale de carga_choferes_disponibles(), que
+// devuelve exactamente lo que el servidor va a aceptar.
+//
+// Se cachea al cargar los viajes. Si la llamada falla, se usa la lista de
+// abajo — la misma de siempre PERO sin Francisco, por lo dicho.
+var _lzCfgSrv = null;   // { choferes:[{nombre}], vehiculos:[{alias,patente}], puede_configurar }
+
+var CHOFERES_FALLBACK = [
+  { nombre: 'Joan' }, { nombre: 'Juan Pablo' }, { nombre: 'Nahuel' },
+  { nombre: 'Cesar' }, { nombre: 'Comodin' },
+  { nombre: 'Chan Chofer' }, { nombre: 'Roman Chofer' }
+];
+
+// Etiqueta linda para el desplegable. Si aparece un chofer nuevo que no está
+// acá, se muestra su nombre tal cual: no se lo esconde.
+var CHOFER_ETIQUETA = {
+  'Joan': '🟢 Joan', 'Juan Pablo': '🔵 Ian', 'Nahuel': '🔵 Nahuel',
+  'Cesar': '🔵 César', 'Comodin': '🔵 Comodín',
+  'Chan Chofer': '🔵 Chan (chofer)', 'Roman Chofer': '🔵 Román (chofer)'
+};
+
+async function lzCargarCfgViaje() {
+  try {
+    var r = await cv2aRpc('carga_choferes_disponibles', {});
+    if (r && r.ok === true) { _lzCfgSrv = r; return r; }
+    console.warn('[v13.233.0] carga_choferes_disponibles:', r && r.message);
+  } catch (e) {
+    console.warn('[v13.233.0] no pude traer la lista de choferes:', e && e.message);
+  }
+  return null;
+}
+
+function lzChoferesDisponibles() {
+  if (_lzCfgSrv && Array.isArray(_lzCfgSrv.choferes) && _lzCfgSrv.choferes.length) {
+    return _lzCfgSrv.choferes;
+  }
+  return CHOFERES_FALLBACK;
+}
+
+function lzVehiculosDisponibles() {
+  if (_lzCfgSrv && Array.isArray(_lzCfgSrv.vehiculos) && _lzCfgSrv.vehiculos.length) {
+    return _lzCfgSrv.vehiculos.map(function (v) { return v.alias; });
+  }
+  return VEHICULOS_DISPONIBLES;
+}
+
 async function lzCargarViajes() {
   if (_lzViajesLoading) return;
   _lzViajesLoading = true;
+  // v13.233.0 — una sola vez por sesión, para que el desplegable de
+  // "Configurar viaje" ofrezca lo mismo que el servidor acepta.
+  if (!_lzCfgSrv) { lzCargarCfgViaje().catch(function () {}); }
   try {
     // ═══ v13.166.0 — viajes DIRECTO de Supabase, sin Apps Script ═══════
     // Medido en produccion: accion=viajeListar tardaba 5.336 ms. Adentro
@@ -34649,16 +34724,23 @@ function lzRenderDetalleViaje() {
   html += '      <div class="v-detalle-config-field">';
   html += '        <label>Chofer</label>';
   if (editable) {
+    // v13.233.0 — la lista la da el servidor (carga_choferes_disponibles).
     html += '        <select id="v-chofer-sel" onchange="lzMarcarConfigCambiada()">';
     html += '          <option value="">— Elegir —</option>';
-    html += '          <option value="Joan"' + (v.chofer === 'Joan' ? ' selected' : '') + '>🟢 Joan</option>';
-    html += '          <option value="Juan Pablo"' + (v.chofer === 'Juan Pablo' ? ' selected' : '') + '>🔵 Ian</option>';
-    html += '          <option value="Nahuel"' + (v.chofer === 'Nahuel' ? ' selected' : '') + '>🔵 Nahuel</option>';
-    html += '          <option value="Cesar"' + (v.chofer === 'Cesar' ? ' selected' : '') + '>🔵 César</option>';
-    html += '          <option value="Comodin"' + (v.chofer === 'Comodin' ? ' selected' : '') + '>🔵 Comodín</option>';
-    html += '          <option value="Chan Chofer"' + (v.chofer === 'Chan Chofer' ? ' selected' : '') + '>🔵 Chan (chofer)</option>';
-    html += '          <option value="Roman Chofer"' + (v.chofer === 'Roman Chofer' ? ' selected' : '') + '>🔵 Román (chofer)</option>';
-    html += '          <option value="Francisco"' + (v.chofer === 'Francisco' ? ' selected' : '') + '>🔵 Francisco (reparto)</option>';
+    lzChoferesDisponibles().forEach(function (c) {
+      var nom = c.nombre;
+      var et = CHOFER_ETIQUETA[nom] || ('🔵 ' + nom);
+      html += '          <option value="' + lzEsc(nom) + '"' + (v.chofer === nom ? ' selected' : '') +
+              '>' + lzEsc(et) + '</option>';
+    });
+    // Si el viaje ya tiene un chofer que hoy NO está disponible (se dio de
+    // baja, o le cambiaron el rol), se muestra igual y marcado: si no, el
+    // desplegable aparecería vacío y parecería que nunca se configuró.
+    if (v.chofer && v.chofer !== '—' && v.chofer !== '-' &&
+        !lzChoferesDisponibles().some(function (c) { return c.nombre === v.chofer; })) {
+      html += '          <option value="' + lzEsc(v.chofer) + '" selected>⚠️ ' + lzEsc(v.chofer) +
+              ' (ya no disponible)</option>';
+    }
     html += '        </select>';
   } else {
     html += '        <div class="v-detalle-static">' + lzEsc(tieneChofer ? v.chofer : '—') + '</div>';
@@ -34669,7 +34751,7 @@ function lzRenderDetalleViaje() {
   if (editable) {
     html += '        <select id="v-vehiculo-sel" onchange="lzMarcarConfigCambiada()">';
     html += '          <option value="">— Elegir —</option>';
-    VEHICULOS_DISPONIBLES.forEach(veh => {
+    lzVehiculosDisponibles().forEach(veh => {
       const sel = (v.vehiculo === veh) ? ' selected' : '';
       html += '          <option value="' + lzEsc(veh) + '"' + sel + '>' + lzEsc(veh) + '</option>';
     });
@@ -35374,39 +35456,61 @@ async function _lzGuardarConfigViaje() {
     btn.textContent = 'Guardando...';
   }
 
+  // v13.233.0 — DIRECTO A SUPABASE. Antes salía por Apps Script
+  // (accion=viajeAsignarChofer) y con la cuota de UrlFetch agotada no se podía
+  // armar ningún viaje. NO hay fallback al Web App a propósito: si el .gs no
+  // responde, un fallback sólo agregaría 30 s de espera antes del mismo error.
+  //
+  // El request_id hace que un doble clic no escriba dos veces: el servidor
+  // reconoce el reintento y devuelve la respuesta ya guardada.
+  var _reqId = 'cfg:' + _vDetalleId + ':' + Date.now() + ':' +
+               Math.random().toString(36).slice(2, 8);
   try {
-    const url = APPS_SCRIPT_URL +
-      '?accion=viajeAsignarChofer' +
-      '&viaje_id=' + encodeURIComponent(_vDetalleId) +
-      '&chofer=' + encodeURIComponent(chofer) +
-      '&vehiculo=' + encodeURIComponent(vehiculo);
-    const resp = await fetch(url);
-    const data = await resp.json();
-    if (data.status === 'ok') {
-      toast('✅ Chofer asignado', 'ok');
-      // Actualizar en memoria
-      _vDetalleData.chofer = chofer;
-      _vDetalleData.vehiculo = vehiculo;
-      _vDetalleData.estado = 'preparando';
-      // Re-render del modal
+    var data = await cv2aRpc('carga_viaje_configurar', {
+      p_viaje_id:   _vDetalleId,
+      p_chofer:     chofer,
+      p_vehiculo:   vehiculo,
+      p_request_id: _reqId
+    });
+
+    if (data && data.ok === true) {
+      toast(data.sin_cambios ? '✅ Ya estaba configurado así'
+                             : ('✅ ' + (data.message || 'Viaje configurado')), 'ok');
+      // Se actualiza con lo que CONFIRMÓ el servidor, no con lo que se pidió:
+      // la RPC normaliza el nombre del chofer y el alias del vehículo.
+      _vDetalleData.chofer   = data.chofer   || chofer;
+      _vDetalleData.vehiculo = data.vehiculo || vehiculo;
+      _vDetalleData.estado   = data.estado   || 'preparando';
       const overlay = document.getElementById('v-detalle-overlay');
       if (overlay) overlay.innerHTML = lzRenderDetalleViaje();
-      // Recargar lista de viajes en background
       lzCargarViajes();
+      return;
+    }
+
+    // Rechazo del servidor: se muestra el motivo real, no "Error al asignar".
+    var _msg = (data && data.message) || 'No se pudo configurar el viaje';
+    if (data && data.code === 'CHOFER_SIN_ROL') {
+      _msg += '\n\nPedile a Braian que le cree un usuario con rol chofer.';
+    }
+    if (data && (data.code === 'NO_AUTENTICADO' || data.code === 'ROL_NO_PERMITIDO')) {
+      alert('⛔ ' + _msg);
     } else {
-      toast('❌ ' + (data.message || 'Error al asignar'), 'err');
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = '💾 Guardar cambios';
-      }
+      toast('⛔ ' + _msg, 'err');
     }
+    console.warn('[v13.233.0] configurar viaje rechazado:', data && data.code, data);
   } catch(err) {
-    toast('❌ Error de conexión', 'err');
-    console.error('[lz] guardarConfig error:', err);
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = '💾 Guardar cambios';
+    // Acá sólo caen errores HTTP (401/403/5xx) o falta de red.
+    console.error('[v13.233.0] guardarConfig error:', err);
+    var _txt = String((err && err.message) || err);
+    if (/401|403/.test(_txt)) {
+      alert('🔒 TU SESIÓN VENCIÓ\n\nSalí y volvé a entrar con tu PIN, después guardá de nuevo.');
+    } else {
+      toast('❌ No se pudo guardar: ' + _txt.slice(0, 120), 'err');
     }
+  }
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = '💾 Guardar cambios';
   }
 }
 
@@ -50487,7 +50591,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.232.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
+var TCK_VERSION = '13.233.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
