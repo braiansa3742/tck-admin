@@ -1,5 +1,22 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.237.0 — 18/09/2026
+     v13.237.0: CREAR PRESUPUESTO PASA A SUPABASE (solo el Admin).
+       · El boton "📄 Crear presupuesto" y el lote nuevo llaman a la Edge
+         Function crear-presupuesto en vez de ?accion=crearPresupuestoXubio.
+       · Lote SECUENCIAL: uno por uno, se detiene ante el primer error y
+         marca el resto como "No se intento". Los pedidos con calibres a
+         elegir van de a uno desde el boton (hay que repartir las cajas).
+       · Si la Edge crea el presupuesto pero NO logra anotar el Sheet, eso
+         se trata como ERROR y corta el lote: la col 16 del Sheet es la
+         guarda anti-duplicado que lee el .gs.
+       · VENTAS NO SE TOCO y el camino PEDIDOS del .gs sigue ENCENDIDO.
+         Los 4 puntos de Ventas (tomador, check-in, boton manual, cola
+         offline) siguen creando por Apps Script. Se migran despues.
+       · No se toco facturar (fpFacturarPedido), ni el mostrador, ni
+         Carga v2, ni las sincronizaciones.
+       DEPLOY: primero el .gs v25.148.0, despues este index.html + version.json.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.236.0 — 18/09/2026
      v13.236.0: FACTURAR PASA A LA EDGE FUNCTION. LOTE SECUENCIAL.
        · Facturar uno y facturar lote llaman EXCLUSIVAMENTE a
@@ -14588,6 +14605,13 @@ input.canales-exp-input[type="date"] {
         <button class="filtro-btn"     onclick="setFiltroOrigen('campo',this)"    title="Visita con check-in">📍 Visita</button>
       </div>
     </div>
+    <div id="cp-lote-bar" style="display:none;margin:8px 0 4px;">
+      <button onclick="cpLote()" style="width:100%;padding:11px;border:0;border-radius:10px;
+background:#0f766e;color:#fff;font-weight:600;font-size:14px;cursor:pointer;"
+        title="Crea el presupuesto en Xubio de todos los pedidos Pendientes sin presupuesto, uno por uno. Se detiene ante el primer error.">
+        📄 Crear presupuestos pendientes
+      </button>
+    </div>
     <div id="lista-pedidos"></div>
   </div>
 
@@ -23494,6 +23518,7 @@ function pedidosFiltrados() {
 
 // ── RENDER ────────────────────────────────────────────────────────
 function renderPedidos() {
+  try { if (typeof cpMostrarBarra === 'function') setTimeout(cpMostrarBarra, 0); } catch (e) {}
   acuCargarClientes();   // v13.31.0: cache de clientes con acuerdo (1 sola vez)
   acuCargarCostosBg();   // v13.33.0: mapa de costos para chip/banner (1 sola vez)
   actualizarStats();
@@ -43380,6 +43405,84 @@ function xubioSeleccionarVariante(pedidoId, id, idx, prodId, prodNombre) {
 }
 
 // ── Ejecutar remito ───────────────────────────────────────────────
+// ══ v13.237.0 · CREAR PRESUPUESTO CONTRA SUPABASE ════════════════════
+// Reemplaza a ?accion=crearPresupuestoXubio del Apps Script para el boton
+// del Admin y para el lote. Ventas sigue yendo por el .gs: no se apago.
+//
+// El modo por defecto de la Edge es SIMULACION. Crear de verdad exige
+// modo:'crear' + confirmar:true, igual que facturar-pedido exige emitir.
+var CP_URL = SUPABASE_URL + '/functions/v1/crear-presupuesto';
+
+async function cpCrearPresupuesto(pedidoId, clienteId, calibres, fecha, crear) {
+  var cuerpo = { pedido_id: pedidoId };
+  if (clienteId) cuerpo.cliente_xubio_id = Number(clienteId);
+  if (calibres && Object.keys(calibres).length) cuerpo.calibres = calibres;
+  if (fecha) cuerpo.fecha = fecha;
+  if (crear) { cuerpo.modo = 'crear'; cuerpo.confirmar = true; }
+  var r = await fetch(CP_URL, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY),
+      'apikey': SUPABASE_KEY,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(cuerpo)
+  });
+  var j = null; try { j = await r.json(); } catch (e) { j = null; }
+  if (!j) throw new Error('respuesta ilegible de crear-presupuesto (HTTP ' + r.status + ')');
+  return j;
+}
+
+// Traduce la respuesta a { clase, cortar, meta }.
+//   clase: 'ok' | 'ya' | 'omitido' | 'error'
+//   cortar: si el lote tiene que frenarse acá
+function cpLeer(j) {
+  if (!j) return { clase: 'error', cortar: true, meta: 'sin respuesta' };
+
+  if (j.ok && j.creo) {
+    var meta = 'Presupuesto ' + (j.presupuesto_nro ? '#' + j.presupuesto_nro : j.presupuesto_id);
+    // El Sheet NO es cosmetico: es la guarda anti-duplicado que lee el .gs.
+    // Si no se anoto, el proximo que toque el boton en Ventas crea OTRO
+    // presupuesto para el mismo pedido. El lote se frena acá.
+    if (j.sheet_anotado === false) {
+      return { clase: 'error', cortar: true,
+               meta: '⚠️ ' + meta + ' creado PERO el Sheet no se anoto (' +
+                     (j.sheet_detalle || 'sin detalle') + '). Riesgo de duplicado: anotalo a mano.' };
+    }
+    return { clase: 'ok', cortar: false, meta: meta };
+  }
+
+  if (j.ok && !j.creo) {
+    var e = j.estado || '';
+    if (e === 'ya_tiene_presupuesto' || e === 'adoptado_espejo' || e === 'adoptado_xubio') {
+      return { clase: 'ya', cortar: false,
+               meta: 'Ya existia · ' + (j.presupuesto_nro || j.presupuesto_id || '') };
+    }
+    if (e === 'omitido') {
+      return { clase: 'omitido', cortar: false, meta: (j.motivos || []).join(' · ') || 'omitido' };
+    }
+    return { clase: 'ya', cortar: false, meta: e || 'sin cambios' };
+  }
+
+  // errores
+  if (j.code === 'PRODUCTOS_SIN_MAPEAR') {
+    return { clase: 'error', cortar: true,
+             meta: 'Sin mapear en Xubio: ' + (j.faltantes || []).join(', ') };
+  }
+  if (j.code === 'SIN_FUENTE_DE_ITEMS') {
+    return { clase: 'error', cortar: true,
+             meta: 'Supabase no tiene el detalle de este pedido — crealo desde Ventas' };
+  }
+  if (j.code === 'TOTAL_NO_COINCIDE' || j.code === 'SPLIT_INCONSISTENTE') {
+    return { clase: 'error', cortar: true, meta: j.message || j.detalle || j.code };
+  }
+  if (j.code === 'XUBIO_AMBIGUO') {
+    return { clase: 'error', cortar: true,
+             meta: '⚠️ Xubio no confirmo. NO se reintento para no duplicar. Revisalo en Xubio.' };
+  }
+  return { clase: 'error', cortar: true, meta: j.message || j.code || 'error' };
+}
+
 // ── Crear presupuesto en Xubio (v10) ──────────────────────────────
 // Antes de crear, chequea si el pedido tiene Pollo A/B genéricos
 // que requieren selección de calibre → abre modal.
@@ -43700,42 +43803,175 @@ function _xubioEjecutarCrearPresupuesto(pedidoId, fila, id, calibres, fechaPresu
     params.set('adminNombre', 'Francisco');
   }
 
-  fetch(APPS_SCRIPT_URL + '?' + params.toString())
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (data.status === 'ok') {
-        toast('✅ Presupuesto N° ' + data.nroPresupuesto + ' creado', 'ok');
+  // ══ v13.237.0 — esto ya no va a Apps Script ════════════════════════
+  // `params` quedo armado arriba y no se usa mas para la red: se conserva
+  // porque de ahi salen los calibres y la fecha, y porque documenta que
+  // creadoPorAdmin/adminNombre dejaron de viajar (la Edge arma la
+  // descripcion con el vendedor del pedido, igual que el .gs).
+  var _cpFecha = params.get('fechaPresupuesto') || '';
+
+  cpCrearPresupuesto(pedidoId, sel.clienteId, calibres || null, _cpFecha, true)
+    .then(function(j) {
+      var v = cpLeer(j);
+
+      if (v.clase === 'ok' || v.clase === 'ya') {
+        toast((v.clase === 'ok' ? '✅ ' : 'ℹ️ ') + v.meta, v.clase === 'ok' ? 'ok' : 'err');
         _xubioActivo = false;
-        // Actualizar el pedido en memoria
         var pedido = todosLosPedidos.find(function(x) { return x.pedidoId === pedidoId; });
         if (pedido) {
           pedido.estado = 'Confirmado';
-          pedido.xubioNroPresupuesto = data.nroPresupuesto;
-          pedido.xubioTransaccionid = data.transaccionid || '';
+          pedido.xubioNroPresupuesto = j.presupuesto_nro || '';
+          pedido.xubioTransaccionid = j.presupuesto_id || '';
           pedido.xubioEstado = 'creado';
         }
         renderPedidos();
         actualizarMiDiaSiAbierto && actualizarMiDiaSiAbierto();
-      } else {
-        // Manejo de errores específicos
-        if (data.code === 'PRODUCTOS_SIN_MAPEAR' && data.faltantes) {
-          xubioMostrarErrorFaltantes(data.faltantes);
-        } else if (data.code === 'YA_TIENE_PRESUPUESTO') {
-          toast('Este pedido ya tiene presupuesto #' + data.nroPresupuesto, 'err');
-          // Recargar pedidos para reflejar estado real
-          cargarPedidos(true);
-        } else {
-          toast('Error: ' + (data.message || 'No se pudo crear el presupuesto'), 'err');
+        // El Sheet lo anota la Edge; el CSV tarda hasta un minuto en reflejarlo.
+        if (j.sheet_anotado === false) {
+          alert('⚠️ El presupuesto SE CREO (' + v.meta + ') pero no se pudo anotar en la planilla.' +
+                '\n\nDetalle: ' + (j.sheet_detalle || '—') +
+                '\n\nHasta que la planilla se actualice, NO toques "Crear presupuesto" en Ventas' +
+                ' para este pedido: crearia un segundo presupuesto.');
         }
-        _xubioActivo = false;
-        if (btn) { btn.disabled = false; btn.textContent = '📄 Crear presupuesto'; }
+        return;
       }
+
+      if (j.code === 'PRODUCTOS_SIN_MAPEAR' && j.faltantes) {
+        xubioMostrarErrorFaltantes(j.faltantes);
+      } else {
+        toast('Error: ' + v.meta, 'err');
+      }
+      _xubioActivo = false;
+      if (btn) { btn.disabled = false; btn.textContent = '📄 Crear presupuesto'; }
     })
-    .catch(function() {
-      toast('Error de conexión', 'err');
+    .catch(function(e) {
+      toast('Error de conexión: ' + (e && e.message ? e.message : e), 'err');
       _xubioActivo = false;
       if (btn) { btn.disabled = false; btn.textContent = '📄 Crear presupuesto'; }
     });
+}
+
+// ══ v13.237.0 · LOTE DE PRESUPUESTOS · SECUENCIAL Y SE FRENA ═════════
+// De a uno a proposito: las capas anti-duplicado de crear-presupuesto miran
+// el estado del pedido y la lista de presupuestos de hoy en Xubio. En
+// paralelo, la capa 3 puede no ver todavia lo que acaba de crear la llamada
+// anterior. Ante el primer error el lote SE DETIENE y el resto queda
+// explicitamente sin intentar.
+function cpLotePendientes() {
+  if (typeof todosLosPedidos === 'undefined' || !Array.isArray(todosLosPedidos)) return [];
+  return todosLosPedidos.filter(function(p) {
+    if (!p) return false;
+    if (String(p.estado || '').trim() !== 'Pendiente') return false;
+    if (p.xubioNroPresupuesto) return false;
+    if (p.xubioTransaccionid) return false;
+    return true;
+  });
+}
+
+function _cpRender(st) {
+  var ov = document.getElementById('cp-lote-ov');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'cp-lote-ov';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;' +
+      'display:flex;align-items:center;justify-content:center;padding:16px;';
+    ov.innerHTML = '<div id="cp-lote-box" style="background:var(--bg,#fff);color:var(--text,#111);' +
+      'border-radius:14px;max-width:560px;width:100%;max-height:80vh;overflow:auto;padding:18px;' +
+      'font-size:14px;box-shadow:0 18px 50px rgba(0,0,0,.35);"></div>';
+    document.body.appendChild(ov);
+  }
+  var box = document.getElementById('cp-lote-box');
+  var filas = st.orden.map(function(pid) {
+    var e = st.st[pid] || {};
+    var ico = e.status === 'ok' ? '✅' : e.status === 'ya' ? 'ℹ️' :
+              e.status === 'err' ? '❌' : e.status === 'activa' ? '⏳' : '·';
+    return '<div style="padding:6px 0;border-bottom:1px solid var(--border,#eee);">' +
+           ico + ' <b>' + (e.cli || pid) + '</b><br>' +
+           '<span style="font-size:12px;color:var(--text2,#666);">' + (e.meta || '') + '</span></div>';
+  }).join('');
+  box.innerHTML =
+    '<div style="font-weight:700;font-size:16px;margin-bottom:4px;">📄 Creando presupuestos</div>' +
+    '<div style="font-size:12px;color:var(--text2,#666);margin-bottom:10px;">' +
+      st.hechas + ' creados · ' + st.ya + ' ya existian · ' + st.err + ' con error · ' +
+      st.tanda + ' de ' + st.n + '</div>' + filas +
+    (st.terminado
+      ? '<button onclick="_cpCerrar()" style="margin-top:14px;width:100%;padding:10px;' +
+        'border:0;border-radius:9px;background:#2563eb;color:#fff;font-weight:600;cursor:pointer;">Cerrar</button>'
+      : '');
+}
+// La barra del lote solo existe para ADMIN. Se resuelve en runtime porque
+// vendedorActual se define despues del login.
+function cpMostrarBarra() {
+  var bar = document.getElementById('cp-lote-bar');
+  if (!bar) return;
+  var esAdmin = (typeof vendedorActual !== 'undefined' && vendedorActual === 'ADMIN');
+  var hay = esAdmin && cpLotePendientes().length > 0;
+  bar.style.display = hay ? 'block' : 'none';
+}
+
+function _cpCerrar() {
+  var ov = document.getElementById('cp-lote-ov');
+  if (ov) ov.remove();
+  cargarPedidos(true);
+}
+
+async function cpLote() {
+  if (typeof vendedorActual !== 'undefined' && vendedorActual !== 'ADMIN') {
+    toast('Solo un admin puede crear presupuestos en lote', 'err'); return;
+  }
+  var pend = cpLotePendientes();
+  if (!pend.length) { toast('No hay pedidos pendientes sin presupuesto', 'ok'); return; }
+
+  var lista = pend.slice(0, 15).map(function(p) {
+    return '• ' + (p.cliente || p.pedidoId);
+  }).join('\n');
+  var extra = pend.length > 15 ? '\n…y ' + (pend.length - 15) + ' mas' : '';
+  if (!confirm('📄 CREAR PRESUPUESTO PARA ' + pend.length + ' PEDIDO' + (pend.length > 1 ? 'S' : '') +
+      '\n\n' + lista + extra +
+      '\n\nSe crean UNO POR UNO en Xubio. Ante el primer error el lote SE DETIENE y el resto' +
+      ' queda sin intentar. Los pedidos con calibres a elegir hay que hacerlos de a uno' +
+      ' desde el boton, para poder repartir las cajas. ¿Confirmar?')) return;
+
+  var st = {}, orden = [];
+  pend.forEach(function(p) {
+    st[p.pedidoId] = { cli: p.cliente || p.pedidoId, status: 'cola', meta: 'En cola' };
+    orden.push(p.pedidoId);
+  });
+  var hechas = 0, ya = 0, err = 0, errores = [];
+  _cpRender({ orden: orden, st: st, n: orden.length, hechas: 0, ya: 0, err: 0, tanda: 0, terminado: false });
+
+  for (var i = 0; i < orden.length; i++) {
+    var pid = orden[i];
+    var e = st[pid];
+    if (e) { e.status = 'activa'; e.meta = 'Creando en Xubio…'; }
+    _cpRender({ orden: orden, st: st, n: orden.length, hechas: hechas, ya: ya, err: err, tanda: i + 1, terminado: false });
+
+    var v;
+    try {
+      v = cpLeer(await cpCrearPresupuesto(pid, null, null, '', true));
+    } catch (ex) {
+      v = { clase: 'error', cortar: true, meta: 'red: ' + (ex && ex.message ? ex.message : ex) };
+    }
+
+    if (v.clase === 'ok')           { hechas++; if (e) { e.status = 'ok';  e.meta = v.meta; } }
+    else if (v.clase === 'ya')      { ya++;     if (e) { e.status = 'ya';  e.meta = v.meta; } }
+    else if (v.clase === 'omitido') {           if (e) { e.status = 'ya';  e.meta = '⏭ ' + v.meta; } }
+    else { err++; errores.push(pid + ': ' + v.meta); if (e) { e.status = 'err'; e.meta = v.meta; } }
+
+    _cpRender({ orden: orden, st: st, n: orden.length, hechas: hechas, ya: ya, err: err, tanda: i + 1, terminado: false });
+
+    if (v.cortar) {
+      for (var k = i + 1; k < orden.length; k++) {
+        var q = st[orden[k]];
+        if (q) { q.status = 'cola'; q.meta = 'No se intento — el lote se detuvo antes'; }
+      }
+      errores.push('LOTE DETENIDO en ' + pid + ' (' + (i + 1) + ' de ' + orden.length + ')');
+      break;
+    }
+  }
+
+  _cpRender({ orden: orden, st: st, n: orden.length, hechas: hechas, ya: ya, err: err, tanda: orden.length, terminado: true });
+  if (errores.length) console.warn('[cpLote] ' + errores.join(' | '));
 }
 
 // ── Modal de fecha del presupuesto (v11) ──────────────────────────
@@ -50748,7 +50984,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.236.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
+var TCK_VERSION = '13.237.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
