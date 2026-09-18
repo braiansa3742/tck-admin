@@ -1,5 +1,22 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.236.0 — 18/09/2026
+     v13.236.0: FACTURAR PASA A LA EDGE FUNCTION. LOTE SECUENCIAL.
+       · Facturar uno y facturar lote llaman EXCLUSIVAMENTE a
+         SUPABASE_URL/functions/v1/facturar-pedido con modo:'emitir' y
+         confirmar:true. Ya no se llama ?accion=facturarLote.
+       · El lote va DE A UNO, secuencial. En paralelo no sirve: las capas
+         anti-duplicado de facturar-pedido leen el estado del pedido y las
+         facturas del día en Xubio, y una llamada no vería lo que acaba de
+         emitir otra.
+       · Se DETIENE ante el primer error real (rechazo de Xubio, respuesta
+         ambigua, sin CAE, problema de sesión). Los que quedaban se marcan
+         'No se intentó' para que se vea dónde cortó.
+       · Un salteo documentado (stock negativo, pedido en Pendiente, sin
+         presupuesto) NO corta el lote: se marca ⏭ y sigue.
+       · Requiere Apps Script v25.146.0, que apaga el facturador viejo.
+       DEPLOY: subir como index.html y version.json a 13.236.0.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.235.0 — 18/09/2026
      v13.235.0: SE CORTA EL POLLING AUTOMÁTICO CONTRA APPS SCRIPT.
        (sobre v13.234.0. Un solo camino cambiado, nada más.)
@@ -49656,26 +49673,87 @@ function _fcMotivoOmitido(r) {
   }
 }
 
+/* ═══ v13.236.0 — LA EMISIÓN VA POR LA EDGE FUNCTION, NO POR APPS SCRIPT ═══
+   El facturador del .gs quedó apagado del lado servidor en v25.146.0
+   (FACTURADOR_EMISION_BLOQUEADA): devuelve status:'deshabilitado' y ni
+   siquiera llega a POST /facturar. Acá se deja de llamarlo.
+
+   facturar-pedido emite de a UN pedido y sólo con confirmar:true. El lote
+   se arma de este lado, secuencial, para que el chequeo anti-duplicado de
+   cada pedido corra contra el estado ya actualizado por el anterior.        */
+var FP_URL = SUPABASE_URL + '/functions/v1/facturar-pedido';
+
+async function fpFacturarPedido(pedidoId, emitir) {
+  var r = await fetch(FP_URL, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + (_JWT || SUPABASE_KEY),
+      'apikey': SUPABASE_KEY,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(emitir
+      ? { pedido_id: pedidoId, modo: 'emitir', confirmar: true }
+      : { pedido_id: pedidoId })
+  });
+  var j = null;
+  try { j = await r.json(); } catch (e) { j = null; }
+  if (!j) throw new Error('respuesta ilegible de facturar-pedido (HTTP ' + r.status + ')');
+  return j;
+}
+
+/* Traduce la respuesta de facturar-pedido a algo que la UI ya sabe mostrar.
+   clase: 'ok' | 'ya' | 'omitido' | 'error'
+   cortar: true  -> el lote SE DETIENE (algo salió mal de verdad)
+   Un 'omitido' (guard) NO corta: es un salteo documentado — stock negativo,
+   pedido en Pendiente, etc. Cortar por eso trabaría el lote entero por un
+   solo pedido. */
+function fpLeer(j) {
+  if (!j) return { clase: 'error', cortar: true, meta: 'sin respuesta' };
+  if (j.ok && j.emitio && j.estado === 'facturada') {
+    return { clase: 'ok', cortar: false,
+             meta: 'Facturada · ' + (j.factura_nro || j.factura_id || '') + (j.cae ? ' · CAE ok' : '') };
+  }
+  if (j.estado === 'sin_cae') {
+    return { clase: 'error', cortar: true,
+             meta: '⚠ Comprobante creado SIN CAE — revisalo en Xubio antes de seguir' };
+  }
+  if (j.ok && !j.emitio && (j.estado === 'ya_facturada' || j.estado === 'ya_facturada_adoptada')) {
+    return { clase: 'ya', cortar: false, meta: 'Ya existía · ' + (j.factura_id || '') };
+  }
+  if (j.ok && j.estado === 'sin_presupuesto') {
+    return { clase: 'omitido', cortar: false, meta: 'Sin presupuesto en Xubio todavía' };
+  }
+  if (j.code === 'GUARD') {
+    return { clase: 'omitido', cortar: false,
+             meta: (j.frenado_por && j.frenado_por.join(' · ')) || 'omitido' };
+  }
+  if (j.code === 'AMBIGUO') {
+    return { clase: 'error', cortar: true,
+             meta: '⛔ RESPUESTA AMBIGUA DE XUBIO — no se reintentó a propósito. Revisá en Xubio.' };
+  }
+  if (j.code === 'EN_CURSO') {
+    return { clase: 'error', cortar: true, meta: 'Otra ejecución lo está emitiendo' };
+  }
+  if (j.code === 'NO_AUTENTICADO' || j.code === 'ROL_NO_PERMITIDO') {
+    return { clase: 'error', cortar: true, meta: j.message || j.code };
+  }
+  return { clase: 'error', cortar: true, meta: j.message || j.code || 'error desconocido' };
+}
+
 function fcSustFacturar(){ if (_contBloq('facturar')) return; return _fcSustFacturar.apply(this, arguments); }
 async function _fcSustFacturar(pedidoId) {
   fcSustCerrar();
   toast('Facturando ' + pedidoId + '…'); // sin tipo: solo existen .toast.ok y .toast.err
   try {
-    var resp = await fetch(APPS_SCRIPT_URL + '?accion=facturarLote&ids=' + encodeURIComponent(pedidoId));
-    var data = await resp.json();
-    var r = (data.resultados && data.resultados[0]) || {};
-    var _omit = _fcMotivoOmitido(r);   // v13.154.0
-    if (r.status === 'facturada' || r.status === 'ya_facturada') {
-      toast('✅ Facturado: FC ' + (r.factura_nro || r.factura_id || ''), 'ok');
-    } else if (r.status === 'sin_cae') {
-      toast('⚠️ Comprobante creado SIN CAE — revisalo en Xubio', 'err');
-    } else if (_omit) {
-      toast(_omit, 'err');
-    } else {
-      toast('Sigue trabado: ' + (r.error || data.message || r.status || 'error desconocido'), 'err');
-    }
+    // v13.236.0 — Edge Function, no Apps Script.
+    var j = await fpFacturarPedido(pedidoId, true);
+    var v = fpLeer(j);
+    if (v.clase === 'ok')          toast('✅ ' + v.meta, 'ok');
+    else if (v.clase === 'ya')     toast('ℹ️ ' + v.meta, 'ok');
+    else if (v.clase === 'omitido') toast('⏭ ' + v.meta, 'err');
+    else                            toast('⛔ ' + v.meta, 'err');
   } catch (e) {
-    toast('Error de conexión: ' + e.message, 'err');
+    toast('Error de conexión con facturar-pedido: ' + e.message, 'err');
   }
   fcCargar();
 }
@@ -49931,7 +50009,7 @@ function _fcpRender(o){
     '<div class="fcp-list">'+rows+'</div>'+
     '<div class="fcp-foot">'+
       (o.terminado && o.err ? '<div class="fcp-err-note">⚠️ '+o.err+' pedido(s) quedaron en rojo. Revisalos en Xubio o reintentá la zona.</div>' : '')+
-      '<div class="fcp-tanda">'+(o.terminado?'':'Tanda '+o.tanda+' · de a '+FCP_CHUNK)+'</div>'+
+      '<div class="fcp-tanda">'+(o.terminado?'':'Pedido '+o.tanda+' de '+o.n+' · uno por uno')+'</div>'+
       '<button class="fcp-btn '+(o.terminado?'done':'')+'" '+(o.terminado?'onclick="_fcpCerrar()"':'disabled')+'>'+
         (o.terminado?'Cerrar':'⏳ Facturando…')+'</button>'+
     '</div></div></div>';
@@ -49947,7 +50025,7 @@ async function _fcFacturarLista(pend, etiqueta) {
   var extra = pend.length > 15 ? '\n…y ' + (pend.length - 15) + ' más' : '';
   if (!confirm('🧾 FACTURAR ' + pend.length + ' PEDIDO' + (pend.length > 1 ? 'S' : '') + (etiqueta ? ' — ' + etiqueta : '') +
       '\nTotal: ' + _fcMoneda(total) + '\n\n' + lista + extra +
-      '\n\nXubio va a emitir las facturas (CAE) una por una. ¿Confirmar?')) return;
+      '\n\nSe emiten UNA POR UNA contra Xubio (CAE). Ante el primer error el lote SE DETIENE y el resto queda sin intentar. ¿Confirmar?')) return;
 
   var ids = pend.map(function (s) { return s.pedido_id; });
   var btns = document.querySelectorAll('.fc-fact-btn');
@@ -49964,12 +50042,48 @@ async function _fcFacturarLista(pend, etiqueta) {
   var hechas = 0, yaEst = 0, errN = 0, errores = [], dry = false, tanda = 0;
   _fcpRender({ nombre: _fnom, orden: _ford, st: _fst, n: _fn, hechas: 0, ya: 0, err: 0, tanda: 1, terminado: false });
   try {
-    while (ids.length) {
+    // ══ v13.236.0 — SECUENCIAL, DE A UNO, Y SE DETIENE ANTE EL PRIMER ERROR ══
+    // De a uno a propósito: las 4 capas anti-duplicado de facturar-pedido
+    // consultan el estado del pedido, y en paralelo la capa 4 (facturas de hoy
+    // en Xubio) puede no ver todavía lo que acaba de emitir la llamada anterior.
+    for (var _i = 0; _i < ids.length; _i++) {
+      var _pid = ids[_i];
+      var _e = _fst[_pid];
+      if (_e) { _e.status = 'activa'; _e.meta = 'Emitiendo…'; }
+      _fcpRender({ nombre: _fnom, orden: _ford, st: _fst, n: _fn, hechas: hechas, ya: yaEst, err: errN, tanda: _i + 1, terminado: false });
+
+      var _v;
+      try {
+        _v = fpLeer(await fpFacturarPedido(_pid, true));
+      } catch (_ex) {
+        _v = { clase: 'error', cortar: true, meta: 'red: ' + _ex.message };
+      }
+
+      if (_v.clase === 'ok')      { hechas++; if (_e) { _e.status = 'ok'; _e.meta = _v.meta; } }
+      else if (_v.clase === 'ya') { yaEst++;  if (_e) { _e.status = 'ya'; _e.meta = _v.meta; } }
+      else if (_v.clase === 'omitido') {      if (_e) { _e.status = 'ya'; _e.meta = '⏭ ' + _v.meta; } }
+      else { errN++; errores.push(_pid + ': ' + _v.meta); if (_e) { _e.status = 'err'; _e.meta = _v.meta; } }
+
+      _fcpRender({ nombre: _fnom, orden: _ford, st: _fst, n: _fn, hechas: hechas, ya: yaEst, err: errN, tanda: _i + 1, terminado: false });
+
+      if (_v.cortar) {
+        // Los que quedaban en cola se marcan como NO intentados: que se vea
+        // exactamente dónde se cortó y qué falta.
+        for (var _k = _i + 1; _k < ids.length; _k++) {
+          var _q = _fst[ids[_k]];
+          if (_q) { _q.status = 'cola'; _q.meta = 'No se intentó — el lote se detuvo antes'; }
+        }
+        errores.push('LOTE DETENIDO en ' + _pid + ' (' + (_i + 1) + ' de ' + ids.length + ')');
+        break;
+      }
+    }
+    // ── el motor viejo queda abajo, inalcanzable, sólo como referencia ──
+    while (false) {
       tanda++;
       var chunk = ids.splice(0, FCP_CHUNK);
       chunk.forEach(function (id) { if (_fst[id]) { _fst[id].status = 'activa'; _fst[id].meta = 'Facturando en Xubio…'; } });
       _fcpRender({ nombre: _fnom, orden: _ford, st: _fst, n: _fn, hechas: hechas, ya: yaEst, err: errN, tanda: tanda, terminado: false });
-      var resp = await fetch(APPS_SCRIPT_URL + '?accion=facturarLote&ids=' + encodeURIComponent(chunk.join(',')));
+      var resp = await fetch(APPS_SCRIPT_URL + '?accion=facturarLote&ids=' + encodeURIComponent(chunk.join(',')));  // (muerto: ver v13.236.0)
       var j = await resp.json();
 
       if (j.status === 'deshabilitado') {
@@ -50634,7 +50748,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.235.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
+var TCK_VERSION = '13.236.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
