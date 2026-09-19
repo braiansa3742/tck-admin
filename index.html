@@ -37378,21 +37378,33 @@ async function cargarAsignaciones() {
 }
 
 // ── PICKER CHOFER ─────────────────────────────────────────────
+// v13.240.0 (19/09) - el picker estaba cableado a mano y se habia desfasado:
+// ofrecia "Juan Pablo" (etiquetado "Ian") cuando ese usuario ya se llama 'Ian'
+// en app_usuarios, y ofrecia "Francisco", que tiene rol 'operaciones'. Cada
+// nombre que no existe en app_usuarios ensucia entregas.chofer y rompe los
+// reportes por chofer: al 19/09 habia 1714 entregas a nombre de 'Juan Pablo'
+// (la ultima del 16/09) contra solo 139 a nombre de 'Ian'. Ahora sale de la
+// MISMA fuente que el resto: la lista del servidor (app_usuarios activos con
+// rol chofer), igual que el desplegable de Configurar viaje.
 function mostrarPickerChofer(btn, event) {
   event.stopPropagation();
   const pedidoId = btn.getAttribute('data-pedido');
   const wrap = btn.parentElement;
+  var lista = (typeof lzChoferesDisponibles === 'function' ? lzChoferesDisponibles() : []) || [];
+  var htmlBtns = lista.map(function (c) {
+    var n = (c && c.nombre) || '';
+    if (!n) return '';
+    var et = (typeof CHOFER_ETIQUETA === 'object' && CHOFER_ETIQUETA[n]) || n;
+    return '<button class="chofer-picker-btn" data-pid="' + pedidoId +
+           '" data-chofer="' + n.replace(/"/g, '&quot;') +
+           '" onclick="asignarChoferBtn(this,event)">\uD83D\uDE9A ' + et + '</button>';
+  }).join('');
+  if (!htmlBtns) {
+    htmlBtns = '<div style="padding:8px;font-size:13px;">No pude traer la lista de choferes. ' +
+               'Recarga la pagina y proba de nuevo.</div>';
+  }
   wrap.innerHTML =
-    '<div class="chofer-picker">' +
-      '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Joan" onclick="asignarChoferBtn(this,event)">🚚 Joan</button>' +
-      '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Juan Pablo" onclick="asignarChoferBtn(this,event)">🚚 Ian</button>' +
-      '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Nahuel" onclick="asignarChoferBtn(this,event)">🚚 Nahuel</button>' +
-      '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Cesar" onclick="asignarChoferBtn(this,event)">🚚 César</button>' +
-      '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Comodin" onclick="asignarChoferBtn(this,event)">🚚 Comodín</button>' +
-      '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Chan Chofer" onclick="asignarChoferBtn(this,event)">🚚 Chan (chofer)</button>' +
-      '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Roman Chofer" onclick="asignarChoferBtn(this,event)">🚚 Román (chofer)</button>' +
-      '<button class="chofer-picker-btn" data-pid="' + pedidoId + '" data-chofer="Francisco" onclick="asignarChoferBtn(this,event)">🚚 Francisco</button>' +
-    '</div>' +
+    '<div class="chofer-picker">' + htmlBtns + '</div>' +
     '<button class="chofer-picker-cancel" data-pid="' + pedidoId + '" onclick="cancelarPickerChoferBtn(this,event)">Cancelar</button>';
 }
 
@@ -51013,9 +51025,43 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.239.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
+var TCK_VERSION = '13.240.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
+  /* ════════════════════════════════════════════════════════════════
+     BADGE DE VERSION VISIBLE (Braian 19/09)
+     Hasta ahora la unica forma de saber que version tenia un celular
+     era abrir la consola. Con 7 personas usando la app desde su propio
+     telefono, eso hacia imposible responder "actualizaste?" sin ir a
+     mirar el aparato. El badge lee la MISMA constante que el banner de
+     actualizacion, asi que no puede desfasarse.
+     Arriba a la derecha, chiquito, sin capturar clicks (pointer-events
+     none) para que no pueda tapar ningun boton del header.
+     ════════════════════════════════════════════════════════════════ */
+  function _tckBadgeVersion(){
+    try {
+      if (document.getElementById('tck-ver-badge')) return;
+      var b = document.createElement('div');
+      b.id = 'tck-ver-badge';
+      b.textContent = 'v' + TCK_UPD_LOCAL;
+      b.style.cssText = [
+        'position:fixed', 'top:0', 'right:0', 'z-index:2147483000',
+        'font:600 9px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace',
+        'letter-spacing:.3px', 'padding:2px 6px 3px',
+        'color:rgba(255,255,255,.72)', 'background:rgba(0,0,0,.34)',
+        'border-radius:0 0 0 7px', 'pointer-events:none',
+        'user-select:none', '-webkit-user-select:none'
+      ].join(';');
+      (document.body || document.documentElement).appendChild(b);
+    } catch (e) {}
+  }
+  /* Se pinta apenas hay body y se reasegura por si algo limpia el DOM. */
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _tckBadgeVersion);
+  } else { _tckBadgeVersion(); }
+  setInterval(_tckBadgeVersion, 5000);
+  try { window.TCK_BADGE_VERSION = _tckBadgeVersion; } catch (eB) {}
+
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
   var _updUltChequeo = 0;
 
