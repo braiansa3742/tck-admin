@@ -1,5 +1,26 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.238.0 — 18/09/2026
+     v13.238.0: EL CENTRO DE CONTROL YA NO PASA POR APPS SCRIPT.
+       (sobre v13.237.0 publicada. Solo front: no se toca Supabase ni el .gs.)
+       · ccCargar() llamaba ?accion=centroControl al abrir y cada 5 min por
+         pestaña abierta: 14 GET del .gs a Supabase por corrida. El 18/09
+         fueron 964 corridas, ~70% de las llamadas salientes del Apps
+         Script. A la tarde se le agotaba la cuota de UrlFetch: guardarPedido
+         dejaba pedidos en la hoja sin pedidos_zona y los presupuestos de
+         Ventas no salian (caso Lisandro / SUCESION DE PEÑA, 18/09).
+       · Ahora ccLeerCircuito() hace las MISMAS 14 consultas (filtros,
+         selects, orden y limites) directo a Supabase con el JWT de la
+         sesion. Es el mismo port que la app nueva (ViewCentroControl.tsx).
+         Tarjetas, badge y botones: iguales.
+       · A proposito distinto del .gs: si una consulta falla se ve el error.
+         El .gs se tragaba el error y podia pintar "todo en orden" falso.
+       · Sin sesion no consulta: con la anon key daria 401 y el cartel de
+         sesion vencida saldria cada 5 min en la pantalla del PIN.
+       · Los botones de las tarjetas (reintentar, resolver, reagendar,
+         reparar) siguen por Apps Script: son a mano y no pesan en la cuota.
+       DEPLOY: subir como index.html y version.json a 13.238.0.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.237.0 — 18/09/2026
      v13.237.0: CREAR PRESUPUESTO PASA A SUPABASE (solo el Admin).
        · El boton "📄 Crear presupuesto" y el lote nuevo llaman a la Edge
@@ -50984,7 +51005,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.237.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
+var TCK_VERSION = '13.238.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
@@ -51706,13 +51727,108 @@ var CC_TITULOS = {
   pedido_viaje_fecha_distinta: ['🟡', 'Pedido y viaje con fechas distintas']
 };
 
+// ── v13.238.0 — LECTURA DEL CIRCUITO DIRECTO A SUPABASE ─────────────────────
+// Reemplaza a ?accion=centroControl. centroControlOperativo (Código.gs
+// v25.113.0) solo hacia GETs a PostgREST sobre pedidos_zona / viajes /
+// entregas / ops_eventos: ni Sheet ni Xubio. Aca van las mismas 14 consultas
+// con el JWT de la sesion (pedidos_zona sin RLS; viajes y entregas con policy
+// *_rw_authenticated; ops_eventos con ope_select_auth). Mismo port que la app
+// nueva (apps/admin/components/ViewCentroControl.tsx, ccLeerCircuito).
+var CC_FACT_DESDE = '2026-06-15';   // Código.gs FACT_DESDE (corte del facturador)
+function ccHoyBA() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires',
+    year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+}
+async function ccLeerCircuito() {
+  var hoy = ccHoyBA();
+  var selPed = '&select=pedido_id,cliente,vendedor,zona,estado,total,salida_planificada,' +
+               'facturacion_estado,facturacion_error,facturacion_intentos,viaje_id';
+  function q(path) { return sbFetch(path).then(function (r) { return r || []; }); }
+  var r = await Promise.all([
+    // R1 — entregado sin factura (mercaderia afuera, IVA sin declarar)
+    q('pedidos_zona?estado=eq.Entregado&xubio_factura_id=is.null&xubio_factura_nro=is.null' +
+      '&salida_planificada=gte.' + CC_FACT_DESDE + selPed + '&order=salida_planificada.asc&limit=100'),
+    // R2 — requiere accion (incluye escalados por agotar reintentos)
+    q('pedidos_zona?facturacion_estado=eq.requiere_accion&xubio_factura_id=is.null' +
+      '&estado=in.(Confirmado,Entregado,Pendiente)' + selPed + '&order=salida_planificada.asc&limit=100'),
+    // R3 — sin viaje con salida hoy o vencida (solo ruta)
+    q('pedidos_zona?viaje_id=is.null&zona=neq.mostrador&estado=in.(Confirmado,Entregado)' +
+      '&salida_planificada=lte.' + hoy + selPed + '&order=salida_planificada.asc&limit=100'),
+    // R4 — viajes vencidos sin cerrar
+    q('viajes?estado=in.(planificado,preparando,carga_cerrada,en_ruta,rindiendo)&fecha_salida=lt.' + hoy +
+      '&select=id,zona,fecha_salida,estado,chofer,total_pedidos,monto_total&order=fecha_salida.asc&limit=50'),
+    // R5 — carga cerrada con planilla desactualizada (contradiccion operativa)
+    q('viajes?estado=eq.carga_cerrada&planilla_desactualizada=eq.true' +
+      '&select=id,zona,fecha_salida,chofer,planilla_version&limit=50'),
+    // R6 — eventos criticos sin resolver
+    q('ops_eventos?severidad=eq.critica&resuelto=eq.false' +
+      '&select=id,ts,tipo,pedido_id,viaje_id,motivo&order=ts.desc&limit=100'),
+    // R7 — inconsistencias de estado
+    q('pedidos_zona?estado=eq.Cancelado&xubio_factura_nro=not.is.null' +
+      '&salida_planificada=gte.' + CC_FACT_DESDE + selPed + '&limit=50'),
+    q('pedidos_zona?estado=eq.Pendiente&xubio_factura_nro=not.is.null' +
+      '&salida_planificada=gte.' + CC_FACT_DESDE + selPed + '&limit=50'),
+    // A1 — bloqueados por stock (se reintentan solos; mirar si crece)
+    q('pedidos_zona?facturacion_estado=eq.bloqueado_stock&xubio_factura_id=is.null' +
+      '&estado=in.(Confirmado,Entregado)' + selPed + '&order=salida_planificada.asc&limit=100'),
+    // A2 — planillas desactualizadas en viajes vigentes
+    q('viajes?planilla_desactualizada=eq.true&estado=in.(planificado,preparando)&fecha_salida=gte.' + hoy +
+      '&select=id,zona,fecha_salida,chofer,planilla_version,planilla_generada_at&limit=50'),
+    // A3 — pendientes viejos (nunca reconfirmados: no se facturan por diseño)
+    q('pedidos_zona?estado=eq.Pendiente&salida_planificada=lt.' + hoy +
+      '&salida_planificada=gte.' + CC_FACT_DESDE + selPed + '&limit=50'),
+    // A4 — entregas entregadas sin rendicion confirmada
+    q('entregas?estado=eq.entregado&rendicion_estado=not.eq.confirmada' +
+      '&select=pedido_id,cliente,chofer,monto,viaje_id&limit=200'),
+    // A5 — insumos: viajes y pedidos de hoy en adelante
+    q('viajes?fecha_salida=gte.' + hoy + '&select=id,fecha_salida,zona&limit=300'),
+    q('pedidos_zona?viaje_id=not.is.null&estado=in.(Confirmado,Entregado)&salida_planificada=gte.' + hoy +
+      '&select=pedido_id,cliente,total,salida_planificada,viaje_id,zona&limit=500')
+  ]);
+  // A5 — pedido cuyo viaje tiene OTRA fecha (reagendos a medias)
+  var viajesMap = {};
+  r[12].forEach(function (vj) { viajesMap[vj.id] = vj; });
+  var desalineados = [];
+  r[13].forEach(function (p) {
+    var vv = viajesMap[p.viaje_id];
+    if (vv && String(vv.fecha_salida) !== String(p.salida_planificada)) {
+      desalineados.push({ pedido_id: p.pedido_id, cliente: p.cliente, salida_pedido: p.salida_planificada,
+                          salida_viaje: vv.fecha_salida, viaje_id: p.viaje_id });
+    }
+  });
+  // El orden de las claves es el orden de las tarjetas (mismo que el .gs).
+  var out = { status: 'ok', generado: new Date().toISOString(), hoy: hoy, resumen: {},
+    rojo: {
+      entregado_sin_factura: r[0], factura_requiere_accion: r[1], sin_viaje_urgente: r[2],
+      viajes_vencidos_abiertos: r[3], carga_cerrada_con_diferencias: r[4], eventos_criticos: r[5],
+      cancelado_con_factura: r[6], pendiente_con_factura: r[7]
+    },
+    amarillo: {
+      bloqueado_stock: r[8], planillas_desactualizadas: r[9], pendientes_vencidos: r[10],
+      entregado_sin_rendir: r[11], pedido_viaje_fecha_distinta: desalineados
+    }
+  };
+  function tot(arr) {
+    var s2 = 0;
+    for (var i = 0; i < arr.length; i++) s2 += Number(arr[i].total || arr[i].monto || arr[i].monto_total || 0);
+    return Math.round(s2);
+  }
+  ['rojo', 'amarillo'].forEach(function (g) {
+    Object.keys(out[g]).forEach(function (k) { out.resumen[k] = { n: out[g][k].length, monto: tot(out[g][k]) }; });
+  });
+  return out;
+}
+
 window.ccCargar = async function () {
   if (_ccCargando) return;
+  // v13.238.0 — sin sesion no se consulta (la anon key da 401 y el cartel de
+  // sesion vencida saldria cada 5 min en la pantalla del PIN).
+  if (!_JWT) return;
   _ccCargando = true;
   var cont = document.getElementById('cc-cont');
   if (cont && !_ccData) cont.innerHTML = '<div style="padding:30px;text-align:center;color:#8a6f5f;">Cargando circuito…</div>';
   try {
-    var d = await ccGAS('accion=centroControl');
+    var d = await ccLeerCircuito();   // v13.238.0 — antes ccGAS('accion=centroControl')
     if (d.status !== 'ok') throw new Error(d.message || 'respuesta inesperada');
     _ccData = d;
     ccRender();
