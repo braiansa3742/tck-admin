@@ -33507,18 +33507,26 @@ function _lzRenderSiVisible() {
 // abajo — la misma de siempre PERO sin Francisco, por lo dicho.
 var _lzCfgSrv = null;   // { choferes:[{nombre}], vehiculos:[{alias,patente}], puede_configurar }
 
+// v13.239.0 (19/09) - el fallback ofrecia 'Juan Pablo', que ya NO existe en
+// app_usuarios: ese usuario pasó a llamarse 'Ian'. Asignar un nombre que no
+// matchea deja el viaje imposible de arrancar (el backend compara
+// viajes.chofer contra app_usuarios.nombre EXACTO y devuelve SIN_CHOFER /
+// NO_AUTORIZADO). Esta lista ahora espeja app_usuarios rol='chofer' activos.
+// Si se da de alta un chofer nuevo, la RPC ya lo trae sola; esto es solo la
+// red de seguridad para cuando la RPC no responde.
 var CHOFERES_FALLBACK = [
-  { nombre: 'Joan' }, { nombre: 'Juan Pablo' }, { nombre: 'Nahuel' },
-  { nombre: 'Cesar' }, { nombre: 'Comodin' },
-  { nombre: 'Chan Chofer' }, { nombre: 'Roman Chofer' }
+  { nombre: 'Cesar' }, { nombre: 'Chan Chofer' }, { nombre: 'Comodin' },
+  { nombre: 'Ian' }, { nombre: 'Joan' }, { nombre: 'Nahuel' },
+  { nombre: 'Roman Chofer' }
 ];
 
 // Etiqueta linda para el desplegable. Si aparece un chofer nuevo que no está
 // acá, se muestra su nombre tal cual: no se lo esconde.
 var CHOFER_ETIQUETA = {
-  'Joan': '🟢 Joan', 'Juan Pablo': '🔵 Ian', 'Nahuel': '🔵 Nahuel',
+  'Joan': '🟢 Joan', 'Ian': '🔵 Ian', 'Nahuel': '🔵 Nahuel',
   'Cesar': '🔵 César', 'Comodin': '🔵 Comodín',
-  'Chan Chofer': '🔵 Chan (chofer)', 'Roman Chofer': '🔵 Román (chofer)'
+  'Chan Chofer': '🔵 Chan (chofer)', 'Roman Chofer': '🔵 Román (chofer)',
+  'Juan Pablo': '⚠️ Juan Pablo (usuario viejo - no usar)'
 };
 
 async function lzCargarCfgViaje() {
@@ -51005,7 +51013,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.238.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
+var TCK_VERSION = '13.239.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   var TCK_UPD_INTERVALO = 10 * 60 * 1000;   /* chequeo de fondo: 10 min */
