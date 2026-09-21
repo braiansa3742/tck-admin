@@ -1,5 +1,34 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.241.0 — 21/09/2026
+     v13.241.0: UNA SOLA FORMA DE ARMAR LA PLANILLA · CANCELAR AVISA · NC A LA CARGA.
+       (sobre v13.240.0 publicada. Requiere tools/migracion_carga_nc_cancelacion_2109.sql,
+        ya aplicada. Salida del viaje 1A del 21/09, que se trabó más de una hora.)
+       · LA PLANILLA SALE DEL MISMO MOTOR QUE DEPÓSITO. "Generar planilla", la vista
+         previa y "Imprimir" iban por Apps Script (planillaGenerar / planillaImprimir
+         / planillaVigente), que NO conoce los ajustes por Nota de Crédito. Cada vez
+         que se generaba desde acá volvían a aparecer productos y pedidos ya
+         acreditados (v8 y v12 del 1A: Estefanía Leal, el Medallón con Cheddar, las
+         Rotiseras, 2 Pollo B x6), Pancho regeneraba desde Depósito y se iban. Ahora
+         las tres van a rpc/carga_planilla_generar y a viajes_planillas, igual que
+         Depósito y que la app nueva (port de planillaPdf.ts). Un renglón que una NC
+         dejó en 0 no se imprime.
+       · CANCELAR YA NO MIENTE. Cancelar salía por Apps Script con mode:'no-cors':
+         no se leía la respuesta y siempre decía "Estado: Cancelado". Si el camión
+         ya se estaba armando, la base lo rechazaba y la hoja quedaba Cancelado con
+         la base en Confirmado (caso Claudia Peralta). Ahora se pregunta ANTES
+         (rpc/pedido_cancelacion_verificar) y, si no se puede, se muestra el motivo
+         y no se toca nada. Después de CUALQUIER cambio de estado se verifica que
+         la base lo haya tomado.
+       · NOTA DE CRÉDITO → CARGA. Cuando entra una NC de un pedido con el camión
+         por salir aparece un aviso rojo en el Centro de Control con el botón
+         "Aplicar a la carga": trae la sugerencia (pedido entero, un renglón o una
+         unidad) y, si el importe no alcanza para decidir, deja elegir el producto.
+         Llama a rpc/carga_ajuste_nc_registrar (dueño / operaciones). Si la NC salió
+         por un importe distinto al facturado, la carga se ajusta igual y queda un
+         aviso para corregir la NC. "Resolver" también dejó de pasar por Apps Script.
+       DEPLOY: subir como index.html y version.json a 13.241.0.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.238.0 — 18/09/2026
      v13.238.0: EL CENTRO DE CONTROL YA NO PASA POR APPS SCRIPT.
        (sobre v13.237.0 publicada. Solo front: no se toca Supabase ni el .gs.)
@@ -22798,9 +22827,18 @@ async function _dupCancelarPedido(pedidoId) {
   var ok = await dupConfirmModal('Cancelar pedido', cuerpo, '✕ Sí, cancelar');
   if (!ok) return;
 
+  // v13.241.0 — preguntar antes y confirmar después (ver pzCancelacionVerificar)
+  var _vcD = await pzCancelacionVerificar(pedidoId);
+  if (!_vcD.puede) { pzAvisoNoCancelable(_vcD); return; }
+
   try {
     var params = new URLSearchParams({ accion: 'cambiarEstado', pedidoId: pedidoId, fila: p.fila, estado: 'Cancelado' });
     await fetch(APPS_SCRIPT_URL + '?' + params.toString(), { mode: 'no-cors' });
+    var _cfD = await pzEstadoConfirmar(pedidoId, 'Cancelado');
+    if (!_cfD.ok) {
+      alert('⛔ EL PEDIDO NO QUEDÓ CANCELADO EN LA BASE\n\nSigue en "' + _cfD.estado_real + '". Avisá a sistemas: ' + pedidoId);
+      return;
+    }
     p.estado = 'Cancelado';
     _estadosCambiados[pedidoId] = { estado: 'Cancelado', ts: Date.now() };
     _dupModalState.cancelados.add(pedidoId);
@@ -24423,17 +24461,65 @@ function confirmarCancelar(pedidoId, fila, event) {
   }
 }
 
+// ═══ v13.241.0 — EL CAMBIO DE ESTADO SE VERIFICA CONTRA LA BASE ═══════════════
+// El cambio sale por Apps Script con mode:'no-cors': la respuesta NO se puede leer.
+// El .gs escribe la hoja y después intenta Supabase dentro de un try/catch mudo: si
+// un trigger lo rechaza (CARGA_EN_CURSO, PEDIDO_EN_REPARTO) nadie se enteraba, la
+// hoja quedaba Cancelado y la base Confirmado.
+//   · pzCancelacionVerificar: pregunta ANTES (rpc/pedido_cancelacion_verificar, espejo
+//     del trigger). Si no se puede, NO se llama al .gs: la hoja no se toca.
+//   · pzEstadoConfirmar: DESPUÉS de cualquier cambio, mira que pedidos_zona lo tomó.
+// Las dos son tolerantes: si la consulta falla (red, sesión) no frenan la operación.
+async function pzCancelacionVerificar(pedidoId) {
+  try {
+    var r = await sbFetch('rpc/pedido_cancelacion_verificar', { method: 'POST', body: JSON.stringify({ p_pedido_id: pedidoId }) });
+    if (r && r.ok === true && r.puede === false) return { puede: false, code: r.code || '', message: r.message || 'No se puede cancelar.' };
+  } catch (e) { console.warn('[v13.241.0] no pude verificar la cancelación:', e && e.message); }
+  return { puede: true };
+}
+async function pzEstadoConfirmar(pedidoId, esperado) {
+  function norm(x) { return String(x || '').trim().toLowerCase(); }
+  try {
+    for (var i = 0; i < 2; i++) {
+      var f = await sbFetch('pedidos_zona?pedido_id=eq.' + encodeURIComponent(pedidoId) + '&select=estado&limit=1');
+      if (!Array.isArray(f) || !f.length) return { ok: true, sin_fila: true };      // pedido que no vive en pedidos_zona
+      if (norm(f[0].estado).indexOf(norm(esperado)) === 0) return { ok: true };
+      if (i === 0) await new Promise(function (ok) { setTimeout(ok, 2500); });
+      else return { ok: false, estado_real: f[0].estado };
+    }
+  } catch (e) { console.warn('[v13.241.0] no pude confirmar el estado:', e && e.message); }
+  return { ok: true, sin_verificar: true };
+}
+function pzAvisoNoCancelable(v) {
+  alert('⛔ NO SE CANCELÓ\n\n' + (v.message || '') +
+        (v.code === 'CARGA_EN_CURSO' ? '\n\nSi ya hay Nota de Crédito: Centro de Control → "Aplicar a la carga".' : ''));
+}
+
 function cambiarEstado(){ if (_contBloq('cambiar el estado de un pedido')) return; return _cambiarEstado.apply(this, arguments); }
 async function _cambiarEstado(pedidoId, fila, nuevoEstado, event) {
   event.stopPropagation();
   var btn = event.target;
   var txtOrig = btn.textContent;
   btn.disabled = true; btn.textContent = 'Guardando...';
+  // v13.241.0 — cancelar: preguntar antes. Si la base lo va a rechazar, no se toca la hoja.
+  if (nuevoEstado === 'Cancelado') {
+    var _vc = await pzCancelacionVerificar(pedidoId);
+    if (!_vc.puede) { btn.disabled = false; btn.textContent = txtOrig; pzAvisoNoCancelable(_vc); return; }
+  }
   try {
     // Siempre mandamos pedidoId además de fila — el Apps Script puede buscar por pedidoId
     // si la fila está desactualizada (ej: pedidos de campo recién enviados)
     var params = new URLSearchParams({accion:'cambiarEstado', pedidoId:pedidoId, fila:fila, estado:nuevoEstado});
     await fetch(APPS_SCRIPT_URL+'?'+params.toString(), {mode:'no-cors'});
+    // v13.241.0 — ¿la base lo tomó? (la respuesta del .gs no se puede leer)
+    var _cf = await pzEstadoConfirmar(pedidoId, nuevoEstado);
+    if (!_cf.ok) {
+      btn.disabled = false; btn.textContent = txtOrig;
+      alert('⛔ EL CAMBIO NO QUEDÓ EN LA BASE\n\nPediste "' + nuevoEstado + '" y el pedido sigue en "' + _cf.estado_real +
+            '".\nLa base lo rechazó (suele ser porque el viaje ya se está cargando o salió).\n' +
+            'Ojo: la hoja puede haber quedado distinta. Avisá a sistemas con el número de pedido: ' + pedidoId);
+      return;
+    }
     var p = todosLosPedidos.find(function(x){return x.pedidoId===pedidoId;});
     if (p) p.estado = nuevoEstado;
     // Guardar cambio local para que el auto-refresh no lo pise
@@ -51025,7 +51111,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.240.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
+var TCK_VERSION = '13.241.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   /* ════════════════════════════════════════════════════════════════
@@ -51902,6 +51988,15 @@ function ccItemHTML(clave, r) {
       acciones =
         '<button class="cc-btn verde" onclick="ccColaReabrir(' + r.id + ',\'' + ccEsc(r.pedido_id) + '\',\'' + ccEsc(r.viaje_id) + '\')">Reabrir e incorporar</button>' +
         '<button class="cc-btn azul" onclick="ccColaProxima(' + r.id + ',\'' + ccEsc(r.pedido_id) + '\')">Próx. salida</button>';
+    } else if (r.tipo === 'nc_sin_aplicar_a_carga' && r.pedido_id) {
+      // v13.241.0 — la NC todavía no impactó en la planilla
+      linea1 = '<b>🧾 Nota de crédito sin aplicar a la carga</b>';
+      acciones =
+        '<button class="cc-btn verde" onclick="ncAplicarACarga(' + r.id + ',\'' + ccEsc(r.pedido_id) + '\')">Aplicar a la carga</button>' +
+        '<button class="cc-btn gris" onclick="ccResolverEvento(' + r.id + ', this)">Ya está</button>';
+    } else if (r.tipo === 'nc_importe_no_coincide') {
+      linea1 = '<b>🧾 Nota de crédito con importe distinto al facturado</b>';
+      acciones = '<button class="cc-btn gris" onclick="ccResolverEvento(' + r.id + ', this)">NC corregida</button>';
     } else {
       acciones = '<button class="cc-btn gris" onclick="ccResolverEvento(' + r.id + ', this)">Resolver</button>';
     }
@@ -51999,11 +52094,99 @@ window.ccReintentarFactura = async function (pedidoId, btn) {
   ccCargar(); ccRefrescarFacturacion();
 };
 
+// v13.241.0 — resolver por rpc/ops_evento_resolver (antes ?accion=opsEventoResolver del .gs).
+// "Quién" sale del JWT. Devuelve true/false para que otros flujos lo encadenen.
+async function ccEventoResolverSb(id) {
+  try {
+    var r = await sbFetch('rpc/ops_evento_resolver', { method: 'POST', body: JSON.stringify({ p_id: Number(id) }) });
+    if (r && (r.ok === false || r.status === 'error')) return { ok: false, message: r.message || '' };
+    return { ok: true };
+  } catch (e) { return { ok: false, message: (e && e.message) || '' }; }
+}
 window.ccResolverEvento = async function (id, btn) {
   if (btn) btn.disabled = true;
-  var d = await ccGAS('accion=opsEventoResolver&id=' + id + '&quien=' + encodeURIComponent(ccQuien()));
-  ccToast(d.status === 'ok' ? 'Evento resuelto' : ('No se pudo: ' + (d.message || '')), d.status === 'ok' ? 'ok' : 'err');
+  var d = await ccEventoResolverSb(id);
+  ccToast(d.ok ? 'Evento resuelto' : ('No se pudo: ' + (d.message || '')), d.ok ? 'ok' : 'err');
   ccCargar();
+};
+
+// ═══ v13.241.0 — APLICAR UNA NOTA DE CRÉDITO A LA CARGA ═════════════════════════
+// La planilla solo descuenta una NC si existe una fila en tck_carga_ajuste, y hasta hoy
+// nadie tenía un botón para crearla (se hacía por SQL). vw_nc_pendientes_carga trae la
+// sugerencia por importe: 'total' (todo el pedido), 'renglon', 'unidad' o 'revisar'.
+// El espejo de Xubio NO trae los renglones de la NC: cuando el importe no alcanza para
+// decidir (dos renglones del mismo valor, NC mal emitida) elige la persona.
+window.ncAplicarACarga = async function (eventoId, pedidoId) {
+  var ncs, items;
+  try {
+    ncs = await sbFetch('vw_nc_pendientes_carga?pedido_id=eq.' + encodeURIComponent(pedidoId) + '&select=*') || [];
+    items = await sbFetch('pedidos_items?pedido_id=eq.' + encodeURIComponent(pedidoId) +
+                          '&select=producto_tck_nombre,calibre,cantidad,precio_unitario,subtotal&order=id') || [];
+  } catch (e) { return ccToast('⛔ No pude leer la nota de crédito: ' + ((e && e.message) || ''), 'err'); }
+  if (!ncs.length) {
+    ccToast('Esa nota de crédito ya está aplicada (o el camión ya salió).', 'ok');
+    await ccEventoResolverSb(eventoId); ccCargar(); return;
+  }
+  var nc = ncs[0];
+  window._ncAplCtx = { eventoId: eventoId, pedidoId: pedidoId, nc: nc, items: items };
+  var esTotal = nc.sugerencia === 'total';
+  var opciones = items.map(function (it, i) {
+    var sel = (nc.producto_sugerido === it.producto_tck_nombre && String(nc.calibre_sugerido || '') === String(it.calibre || '')) ? ' selected' : '';
+    return '<option value="' + i + '"' + sel + '>' + ccEsc(it.producto_tck_nombre) + (it.calibre ? ' ' + ccEsc(it.calibre) : '') +
+           ' · ' + it.cantidad + ' × ' + ccMon(it.precio_unitario) + '</option>';
+  }).join('');
+  var h = '<h3>🧾 Aplicar NC ' + ccEsc(nc.nc_numero || '') + ' a la carga</h3>' +
+    '<div style="font-size:13px;color:#8a6f5f;">' + ccEsc(nc.cliente || '') + ' · ' + ccEsc(pedidoId) + '<br>' +
+    'NC por <b>' + ccMon(nc.nc_importe) + '</b> · pedido de ' + ccMon(nc.total_pedido) + ' · ' + ccEsc(nc.zona || '') + ' ' + ccEsc(nc.fecha_salida || '') + '</div>' +
+    (ncs.length > 1 ? '<div class="vc-check">Este pedido tiene ' + ncs.length + ' notas de crédito sin aplicar. Se aplican de a una: después volvé a tocar el botón.</div>' : '') +
+    '<div style="margin-top:12px;font-size:13.5px;">' +
+      '<label style="display:block;margin-bottom:8px;"><input type="radio" name="ncapl-tipo" value="total"' + (esTotal ? ' checked' : '') + '> ' +
+        '<b>Todo el pedido</b> — no viaja nada de este cliente</label>' +
+      '<label style="display:block;"><input type="radio" name="ncapl-tipo" value="parcial"' + (esTotal ? '' : ' checked') + '> ' +
+        '<b>Un producto</b></label>' +
+      '<div style="margin:6px 0 0 22px;">' +
+        '<select id="ncapl-item" style="width:100%;padding:7px;border:1.5px solid #E8DCC8;border-radius:8px;">' + opciones + '</select>' +
+        '<div style="margin-top:6px;">Cantidad que NO viaja: <input id="ncapl-cant" type="number" min="1" step="1" value="' + (Number(nc.cantidad_sugerida) || 1) + '" style="width:70px;padding:5px;border:1.5px solid #E8DCC8;border-radius:8px;text-align:center;"></div>' +
+      '</div>' +
+    '</div>' +
+    (nc.sugerencia === 'revisar'
+      ? '<div class="vc-check">⚠️ El importe de la NC no coincide con ningún renglón ni con el total: elegí vos qué producto es. Si la NC se emitió por otro importe, la carga se ajusta igual y queda un aviso para corregirla.</div>'
+      : '<div style="font-size:12px;color:#8a6f5f;margin-top:8px;">Sugerencia por importe: <b>' + ccEsc(nc.sugerencia) + '</b>. Revisá que sea lo que dice la NC.</div>') +
+    '<textarea id="ncapl-nota" rows="2" style="width:100%;margin-top:10px;padding:8px;box-sizing:border-box;border:1.5px solid #E8DCC8;border-radius:8px;" placeholder="Nota (ej: sin stock, va Pollo C x6 en su lugar)"></textarea>' +
+    '<div style="display:flex;gap:8px;margin-top:14px;">' +
+      '<button class="cc-btn verde" style="flex:1" id="ncapl-ok" onclick="ncAplicarConfirmar(this)">Aplicar a la carga</button>' +
+      '<button class="cc-btn gris" onclick="this.closest(\'.vc-modal-bk\').remove()">Cancelar</button></div>';
+  vcModal(h);
+};
+
+window.ncAplicarConfirmar = async function (btn) {
+  var c = window._ncAplCtx; if (!c) return;
+  var tipoEl = document.querySelector('input[name="ncapl-tipo"]:checked');
+  var tipo = tipoEl ? tipoEl.value : 'parcial';
+  var args = { p_pedido_id: c.pedidoId, p_nc_transaccion_id: Number(c.nc.nc_transaccion_id),
+               p_nota: (document.getElementById('ncapl-nota').value || '').trim() || null,
+               p_request_id: 'nc:' + c.nc.nc_transaccion_id };
+  if (tipo === 'parcial') {
+    var it = c.items[Number(document.getElementById('ncapl-item').value)];
+    var cant = Number(document.getElementById('ncapl-cant').value);
+    if (!it) return ccToast('Elegí el producto.', 'err');
+    if (!(cant > 0) || cant > Number(it.cantidad)) return ccToast('La cantidad tiene que estar entre 1 y ' + it.cantidad + '.', 'err');
+    args.p_producto = it.producto_tck_nombre; args.p_calibre = it.calibre || null; args.p_cantidad = cant;
+  }
+  btn.disabled = true; btn.textContent = 'Aplicando…';
+  var r;
+  try { r = await sbFetch('rpc/carga_ajuste_nc_registrar', { method: 'POST', body: JSON.stringify(args) }); }
+  catch (e) { r = { ok: false, message: (e && e.message) || 'sin respuesta' }; }
+  if (!r || r.ok !== true) {
+    btn.disabled = false; btn.textContent = 'Aplicar a la carga';
+    return alert('⛔ NO SE APLICÓ\n\n' + ((r && r.message) || 'Error desconocido'));
+  }
+  var bk = btn.closest('.vc-modal-bk'); if (bk) bk.remove();
+  await ccEventoResolverSb(c.eventoId);
+  alert('✅ ' + (r.message || 'Ajuste registrado.') + (r.aviso ? '\n\n' + r.aviso : '') +
+        '\n\nFalta un paso: generá la planilla UNA vez para que Depósito vea las cantidades nuevas.');
+  ccCargar();
+  try { if (c.nc.viaje_id && typeof vcGenerarPlanilla === 'function' && confirm('¿Generar la planilla ahora?')) vcGenerarPlanilla(c.nc.viaje_id); } catch (e) {}
 };
 
 window.ccColaReabrir = async function (eventoId, pedidoId, viajeId) {
@@ -52016,7 +52199,7 @@ window.ccColaReabrir = async function (eventoId, pedidoId, viajeId) {
     var r2 = await ccGAS('accion=viajeAgregarPedido&viaje_id=' + encodeURIComponent(viajeId) +
       '&pedido_id=' + encodeURIComponent(pedidoId) + '&quien=' + encodeURIComponent(ccQuien()) + '&force_reabierto=1');
     if (r2.status !== 'ok') return ccToast('Reabierta pero no se pudo asociar: ' + (r2.message || ''), 'err');
-    await ccGAS('accion=opsEventoResolver&id=' + eventoId + '&quien=' + encodeURIComponent(ccQuien()));
+    await ccEventoResolverSb(eventoId);   // v13.241.0 — rpc/ops_evento_resolver
     ccToast('✅ Carga reabierta e incorporado ' + pedidoId + '. Generá la planilla nueva y verificá la carga extra.', 'ok');
   } catch (e) { ccToast('Error: ' + e.message, 'err'); }
   ccCargar(); if (typeof lzCargarViajes === 'function') lzCargarViajes();
@@ -52027,7 +52210,7 @@ window.ccColaProxima = async function (eventoId, pedidoId) {
   var d = await ccGAS('accion=pedidoReagendar&pedido_id=' + encodeURIComponent(pedidoId) +
     '&quien=' + encodeURIComponent(ccQuien()) + '&motivo=' + encodeURIComponent('Choque con carga cerrada'));
   if (d.status === 'ok') {
-    await ccGAS('accion=opsEventoResolver&id=' + eventoId + '&quien=' + encodeURIComponent(ccQuien()));
+    await ccEventoResolverSb(eventoId);   // v13.241.0 — rpc/ops_evento_resolver
     ccToast('✅ Reagendado a ' + ((d.registro && d.registro.salida_planificada) || 'próxima salida'), 'ok');
   } else if (/Cambiar fecha\/turno/.test(d.message || '')) {
     ceeAbrir(pedidoId, 'centro_control');   // v13.222.0 — TL
@@ -52180,11 +52363,12 @@ function vcRefrescarDetalle(viajeId) {
 }
 
 window.vcGenerarPlanilla = async function (viajeId) {
-  var d = await ccGAS('accion=planillaGenerar&viaje_id=' + encodeURIComponent(viajeId) +
-                      '&quien=' + encodeURIComponent(ccQuien()));
+  // v13.241.0 — rpc/carga_planilla_generar (antes ?accion=planillaGenerar del .gs, que no conoce
+  // los ajustes por Nota de Crédito). Mismo motor que Depósito: ver plvSbGenerar.
+  var d = await window.plvSbGenerar(viajeId);
   if (d.status !== 'ok') return ccToast('⛔ ' + (d.message || 'No se pudo generar'), 'err');
   var ag = d.agregados || [], qt = d.quitados || [];
-  var h = '<h3>📄 Planilla v' + d.version + ' generada</h3>' +
+  var h = '<h3>📄 Planilla v' + d.version + (d.sin_cambios ? ' · ya estaba al día' : ' generada') + '</h3>' +
     '<div style="font-size:12.5px;color:#8a6f5f;">' + d.total_pedidos + ' pedidos · ' + ccMon(d.monto_total) +
     ' · hash ' + ccEsc(String(d.hash || '').substring(0, 8)) + '</div>';
   if (ag.length || qt.length) {
@@ -52587,8 +52771,7 @@ window.vcReabrirYSumar = async function (viajeId) {
             '&pedido_id=' + encodeURIComponent(elegidos[i]) + '&quien=' + encodeURIComponent(ccQuien()) + '&force_reabierto=1');
           if (r2.status === 'ok') okN++; else { errN++; console.warn('[vcReabrirYSumar]', elegidos[i], r2); }
         }
-        var r3 = await ccGAS('accion=planillaGenerar&viaje_id=' + encodeURIComponent(viajeId) +
-          '&quien=' + encodeURIComponent(ccQuien()));
+        var r3 = await window.plvSbGenerar(viajeId);   // v13.241.0 — mismo motor que Depósito (antes ?accion=planillaGenerar)
         document.getElementById('vcrs-modal').remove();
         ccToast('✅ Viaje reabierto · ' + okN + ' pedido(s) sumado(s)' + (errN ? ' · ⚠ ' + errN + ' con error' : '') +
           (r3.status === 'ok' ? ' · planilla v' + (r3.version || '?') + ' lista para imprimir' : ' · ⚠ generá la planilla a mano'), errN ? 'warn' : 'ok');
@@ -52669,6 +52852,119 @@ async function _plvGAS(qs) {
   return r.json();
 }
 
+// ═══ v13.241.0 — LA PLANILLA POR SUPABASE (mismo motor que Depósito) ═════════════
+// Port de apps/admin/components/logistica/planillaPdf.ts (planillaGenerarSb /
+// planillaVigenteSb). Reemplaza planillaGenerar, planillaImprimir y planillaVigente del
+// .gs, cuyo snapshot no conoce tck_carga_ajuste: cada planilla generada desde el Admin
+// volvía a meter lo que una NC había sacado (viaje 1A del 21/09, v8 y v12).
+function _plvSbError(e) {
+  var t = (e && e.message) ? e.message : String(e);
+  if (/ 40[13] /.test(t) || /HTTP (401|403)/.test(t)) return 'Tu sesión venció. Salí y volvé a entrar con tu PIN.';
+  return t;
+}
+function _plvSbReqId(pref, viajeId) {
+  return pref + ':' + viajeId + ':' + Date.now() + ':' + Math.random().toString(36).slice(2, 8);
+}
+// Un renglón que una NC dejó en 0 no viaja: no se imprime (el snapshot lo conserva
+// con cantidad 0 y ajuste_motivo para la auditoría).
+function _plvSbSinCeros(pedidos, consolidado) {
+  var ped = (pedidos || []).map(function (p) {
+    var q = {}; for (var k in p) q[k] = p[k];
+    q.items = (p.items || []).filter(function (it) { return Number(it.cantidad || 0) > 0; });
+    return q;
+  });
+  var cons = (consolidado || []).filter(function (c) { return Number(c.requerido || 0) > 0; });
+  return { pedidos: ped, consolidado: cons };
+}
+function _plvSbSinFactura(pedidos) {
+  return (pedidos || []).filter(function (p) { return !p.facturado; }).map(function (p) {
+    return { pedido_id: p.pedido_id, cliente: p.cliente, total: p.total, facturacion_estado: p.facturacion_estado };
+  });
+}
+async function _plvSbCabecera(viajeId) {
+  var vq = await sbFetch('viajes?id=eq.' + encodeURIComponent(viajeId) +
+    '&select=id,zona,fecha_salida,estado,chofer,vehiculo,planilla_version,planilla_desactualizada,carga_cerrada_at,carga_cerrada_por&limit=1');
+  return (vq && vq[0]) || null;
+}
+
+/** Congela la versión siguiente (o devuelve la vigente si el contenido no cambió: es
+ *  idempotente por hash). Misma forma que devolvían planillaGenerar / planillaImprimir. */
+window.plvSbGenerar = async function (viajeId) {
+  function err(m, code) { return { status: 'error', message: m, code: code, version: 0, total_pedidos: 0, monto_total: 0, pedidos: [], consolidado: [], agregados: [], quitados: [] }; }
+  var r;
+  try {
+    r = await sbFetch('rpc/carga_planilla_generar', { method: 'POST',
+      body: JSON.stringify({ p_viaje_id: viajeId, p_request_id: _plvSbReqId('plg', viajeId) }) });
+  } catch (e) { return err(_plvSbError(e)); }
+  if (!r || r.ok !== true) return err((r && r.message) || 'No se pudo generar la planilla', r && r.code);
+
+  var agregados = [], quitados = [];
+  var prevVer = Number(r.version_anterior || 0);
+  if (!r.sin_cambios && prevVer > 0) {
+    try {   // el diff es informativo: la versión ya quedó generada
+      var prev = await sbFetch('viajes_planillas?viaje_id=eq.' + encodeURIComponent(viajeId) + '&version=eq.' + prevVer + '&select=pedidos&limit=1');
+      var prevPed = (prev && prev[0] && prev[0].pedidos) || [];
+      var prevIds = {}, nowIds = {};
+      prevPed.forEach(function (p) { prevIds[p.pedido_id] = 1; });
+      (r.pedidos || []).forEach(function (p) { nowIds[p.pedido_id] = 1; });
+      agregados = (r.pedidos || []).filter(function (p) { return !prevIds[p.pedido_id]; });
+      quitados = prevPed.filter(function (p) { return !nowIds[p.pedido_id]; });
+    } catch (e) {}
+  }
+  var lim = _plvSbSinCeros(r.pedidos, r.consolidado);
+  var cab = null; try { cab = await _plvSbCabecera(viajeId); } catch (e) {}
+  return { status: 'ok', message: r.message, sin_cambios: !!r.sin_cambios, version: Number(r.version || 0),
+           hash: r.hash || null, total_pedidos: Number(r.total_pedidos || 0), monto_total: r.monto_total || 0,
+           pedidos: lim.pedidos, consolidado: lim.consolidado,
+           viaje: cab ? { id: cab.id, zona: cab.zona, fecha_salida: cab.fecha_salida, estado: cab.estado, chofer: cab.chofer, vehiculo: cab.vehiculo } : {},
+           generada_at: r.generada_at || r.server_ts || null, generada_por: r.generada_por || null,
+           agregados: agregados, quitados: quitados, aviso: r.aviso };
+};
+
+/** Lectura de una versión guardada (sin version = la vigente). NO genera versiones. */
+window.plvSbVigente = async function (viajeId, version) {
+  function no(status, message, extra) {
+    var o = { status: status, message: message, version: 0, viaje: {}, total_pedidos: 0, monto_total: 0, pedidos: null, consolidado: null };
+    for (var k in (extra || {})) o[k] = extra[k];
+    return o;
+  }
+  if (!viajeId) return no('error', 'Falta viaje_id');
+  try {
+    var viaje = await _plvSbCabecera(viajeId);
+    if (!viaje) return no('error', 'Viaje no encontrado');
+    var cab = { id: viaje.id, zona: viaje.zona, fecha_salida: viaje.fecha_salida, estado: viaje.estado, chofer: viaje.chofer, vehiculo: viaje.vehiculo };
+    var ver = Number(version || viaje.planilla_version || 0);
+    if (!ver) return no('sin_planilla', 'Este viaje todavia no tiene planilla generada', { requiere: 'planillaGenerar', viaje: cab });
+
+    var pl = await sbFetch('viajes_planillas?viaje_id=eq.' + encodeURIComponent(viajeId) + '&version=eq.' + ver + '&select=*&limit=1');
+    var g = pl && pl[0];
+    if (!g) return no('error', 'No existe la planilla v' + ver);
+
+    // ¿La versión guardada sigue representando al viaje? Foto viva del MISMO motor.
+    var vivo = null;
+    try { vivo = await sbFetch('rpc/_cv2_planilla_snapshot', { method: 'POST', body: JSON.stringify({ p_viaje: viajeId }) }); } catch (e) { vivo = null; }
+    var hashG = g.hash_contenido || g.hash;
+    var vivoOk = !!vivo && typeof vivo.hash === 'string';
+    var coincide = vivoOk ? (vivo.hash === hashG)
+                          : (ver === Number(viaje.planilla_version || 0) && !viaje.planilla_desactualizada);
+
+    var lim = _plvSbSinCeros(g.pedidos, g.consolidado);
+    var sf = _plvSbSinFactura(lim.pedidos);
+    var out = { status: 'ok', viaje: cab, version: ver,
+      es_la_ultima: ver === Number(viaje.planilla_version || 0),
+      carga_cerrada_at: viaje.carga_cerrada_at || null, carga_cerrada_por: viaje.carga_cerrada_por || null,
+      generada_at: g.generada_at, generada_por: g.generada_por, hash: hashG,
+      vigente: coincide, desactualizada_flag: !!viaje.planilla_desactualizada,
+      total_pedidos: Number(g.total_pedidos || 0), monto_total: Number(g.monto_total || 0),
+      pedidos: lim.pedidos, consolidado: lim.consolidado,
+      sin_factura: sf, monto_sin_factura: sf.reduce(function (s2, x) { return s2 + Number(x.total || 0); }, 0) };
+    if (!coincide && ver === Number(viaje.planilla_version || 0)) {
+      out.aviso = 'El viaje cambio despues de generar la v' + ver + ': genera la v' + (ver + 1) + ' antes de cargar.';
+    }
+    return out;
+  } catch (e) { return no('error', _plvSbError(e)); }
+};
+
 /**
  * Devuelve la versión vigente de la planilla del viaje, resolviendo los casos
  * borde ANTES de imprimir:
@@ -52689,9 +52985,10 @@ window._plvObtener = async function (viajeId) {
   window._plvLock = true;
   var _t0 = Date.now();
   try {
-    var r = await _plvGAS('accion=planillaImprimir&viaje_id=' + encodeURIComponent(viajeId) +
-                          '&quien=' + encodeURIComponent(_plvQuien()));
-    console.log('[TCK Planilla PERF] planillaImprimir ' + ((Date.now() - _t0) / 1000).toFixed(2) + 's');
+    // v13.241.0 — rpc/carga_planilla_generar: si el contenido no cambió devuelve la vigente y,
+    // si cambió, congela la siguiente. Lo mismo que hacía planillaImprimir, con el motor de Depósito.
+    var r = await window.plvSbGenerar(viajeId);
+    console.log('[TCK Planilla PERF] carga_planilla_generar ' + ((Date.now() - _t0) / 1000).toFixed(2) + 's');
 
     if (!r || r.status !== 'ok') {
       if (typeof toast === 'function') {
@@ -53161,10 +53458,8 @@ window.plvVistaPrevia = async function (viajeId, version) {
 
   var pv;
   try {
-    var qs = 'accion=planillaVigente&viaje_id=' + encodeURIComponent(viajeId) +
-             (version ? '&version=' + Number(version) : '') + '&_cb=' + Date.now();
-    var r = await fetch(APPS_SCRIPT_URL + '?' + qs);
-    pv = await r.json();
+    // v13.241.0 — lectura directa de viajes_planillas (antes ?accion=planillaVigente del .gs)
+    pv = await window.plvSbVigente(viajeId, version ? Number(version) : null);
   } catch (e) {
     document.getElementById('plv-cont').innerHTML =
       '<div class="plv-aviso rojo">No pude leer la planilla: ' + esc(e.message) + '</div>';
