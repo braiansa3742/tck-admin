@@ -1,6 +1,22 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.241.0 — 21/09/2026
+     TCK ADMIN — v13.242.0 — 22/09/2026
+     v13.242.0: CENTRO DE CONTROL — PEDIDOS SIN CAMIÓN (paquete SQL pedido-sin-viaje v2.2).
+       (sobre v13.241.0 publicada. Solo front, cambio mínimo. Funciona con o sin el SQL
+        v2.2 instalado: sin él, las incidencias nuevas simplemente no existen.)
+       · Caso Sucesión de Peña (TCK-20260918-1841-LIS-WLSL4): quedó Confirmado sin viaje
+         el 18/09 y "Con salida y sin viaje" (R3) NO lo mostraba: la consulta trae los
+         100 más viejos (129 confirmados sin viaje de abril–agosto tapaban a los nuevos).
+         Ahora R3 (rojo) = últimos 7 días de salida y "Sin viaje · histórico" (amarillo)
+         = los anteriores, para conciliar (marcar Entregado si se entregó, o cancelar + NC).
+       · Eventos críticos: título legible y acciones para las incidencias del paquete
+         (entrega_incumplida, pedido_desasignado, asignacion_requiere_decision,
+         pedido_confirmado_sin_viaje, entrega_no_creada, entrega_inconsistente):
+         "Próx. salida" (pedidoReagendar, el mismo camino que ya usa el Centro de
+         Control), "Ver pedido" (abre Pedidos filtrado por ese ID), "Ver viaje" y
+         "Resolver". Cerrar la alerta a mano NO reemplaza la decisión: un pedido sacado
+         de un camión sigue bloqueando el cierre de ese reparto hasta tener destino.
+       · Fix: la hora del evento se leía de r.creado_at (no existe): ahora r.ts.
      v13.241.0: UNA SOLA FORMA DE ARMAR LA PLANILLA · CANCELAR AVISA · NC A LA CARGA.
        (sobre v13.240.0 publicada. Requiere tools/migracion_carga_nc_cancelacion_2109.sql,
         ya aplicada. Salida del viaje 1A del 21/09, que se trabó más de una hora.)
@@ -51111,7 +51127,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.241.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
+var TCK_VERSION = '13.242.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   /* ════════════════════════════════════════════════════════════════
@@ -51864,8 +51880,24 @@ var CC_TITULOS = {
   planillas_desactualizadas:   ['🟡', 'Planillas desactualizadas'],
   pendientes_vencidos:         ['🟡', 'Pendientes con salida vencida'],
   entregado_sin_rendir:        ['🟡', 'Entregas sin rendir'],
-  pedido_viaje_fecha_distinta: ['🟡', 'Pedido y viaje con fechas distintas']
+  pedido_viaje_fecha_distinta: ['🟡', 'Pedido y viaje con fechas distintas'],
+  sin_viaje_historico:         ['🟡', 'Sin viaje · histórico (salida hace más de 7 días, conciliar)']
 };
+// v13.242.0 — títulos legibles de las incidencias del paquete pedido-sin-viaje
+var CC_EVENTO_TITULOS = {
+  entrega_incumplida:           '🚫 Entrega incumplida: la fecha prometida pasó sin camión',
+  pedido_confirmado_sin_viaje:  '🚫 Confirmado sin camión (el reparador reintenta cada 15 min)',
+  pedido_desasignado:           '✂️ Sacado del camión: sin destino (bloquea el cierre de ese reparto)',
+  asignacion_requiere_decision: '🧭 Sin camión válido para su fecha: decidir destino',
+  pedido_vs_carga_cerrada:      '🔒 Confirmado con la carga de su fecha ya cerrada',
+  entrega_no_creada:            '📋 En el camión pero SIN entrega operativa (el chofer no lo ve)',
+  entrega_inconsistente:        '📋 Entrega operativa en otro camión o duplicada'
+};
+function ccHace7() {
+  var d = new Date(Date.now() - 7 * 86400000);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires',
+    year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
 
 // ── v13.238.0 — LECTURA DEL CIRCUITO DIRECTO A SUPABASE ─────────────────────
 // Reemplaza a ?accion=centroControl. centroControlOperativo (Código.gs
@@ -51891,9 +51923,10 @@ async function ccLeerCircuito() {
     // R2 — requiere accion (incluye escalados por agotar reintentos)
     q('pedidos_zona?facturacion_estado=eq.requiere_accion&xubio_factura_id=is.null' +
       '&estado=in.(Confirmado,Entregado,Pendiente)' + selPed + '&order=salida_planificada.asc&limit=100'),
-    // R3 — sin viaje con salida hoy o vencida (solo ruta)
+    // R3 — sin viaje con salida hoy o vencida en los últimos 7 días (solo ruta).
+    //      v13.242.0: antes traía los 100 más viejos y tapaba a los nuevos (caso Peña).
     q('pedidos_zona?viaje_id=is.null&zona=neq.mostrador&estado=in.(Confirmado,Entregado)' +
-      '&salida_planificada=lte.' + hoy + selPed + '&order=salida_planificada.asc&limit=100'),
+      '&salida_planificada=lte.' + hoy + '&salida_planificada=gte.' + ccHace7() + selPed + '&order=salida_planificada.desc&limit=100'),
     // R4 — viajes vencidos sin cerrar
     q('viajes?estado=in.(planificado,preparando,carga_cerrada,en_ruta,rindiendo)&fecha_salida=lt.' + hoy +
       '&select=id,zona,fecha_salida,estado,chofer,total_pedidos,monto_total&order=fecha_salida.asc&limit=50'),
@@ -51923,7 +51956,11 @@ async function ccLeerCircuito() {
     // A5 — insumos: viajes y pedidos de hoy en adelante
     q('viajes?fecha_salida=gte.' + hoy + '&select=id,fecha_salida,zona&limit=300'),
     q('pedidos_zona?viaje_id=not.is.null&estado=in.(Confirmado,Entregado)&salida_planificada=gte.' + hoy +
-      '&select=pedido_id,cliente,total,salida_planificada,viaje_id,zona&limit=500')
+      '&select=pedido_id,cliente,total,salida_planificada,viaje_id,zona&limit=500'),
+    // A6 — v13.242.0: sin viaje histórico (salida hace más de 7 días). El reparador NO los
+    //      toca: se concilian uno por uno (Entregado si se entregó, o cancelar + NC).
+    q('pedidos_zona?viaje_id=is.null&zona=neq.mostrador&estado=eq.Confirmado' +
+      '&salida_planificada=lt.' + ccHace7() + selPed + '&order=salida_planificada.desc&limit=300')
   ]);
   // A5 — pedido cuyo viaje tiene OTRA fecha (reagendos a medias)
   var viajesMap = {};
@@ -51945,7 +51982,8 @@ async function ccLeerCircuito() {
     },
     amarillo: {
       bloqueado_stock: r[8], planillas_desactualizadas: r[9], pendientes_vencidos: r[10],
-      entregado_sin_rendir: r[11], pedido_viaje_fecha_distinta: desalineados
+      entregado_sin_rendir: r[11], pedido_viaje_fecha_distinta: desalineados,
+      sin_viaje_historico: r[14]
     }
   };
   function tot(arr) {
@@ -51982,9 +52020,24 @@ function ccItemHTML(clave, r) {
   var linea1 = '', meta = '', extra = '', acciones = '';
   var pid = r.pedido_id || '', vid = r.id || r.viaje_id || '';
   if (clave === 'eventos_criticos') {
-    linea1 = '<b>' + ccEsc(r.tipo || 'evento') + '</b>';
-    meta = ccEsc(r.motivo || '') + (r.pedido_id ? ' · ' + ccEsc(r.pedido_id) : '') + ' · ' + ccHora(r.creado_at);
-    if (r.tipo === 'pedido_vs_carga_cerrada' && r.pedido_id && r.viaje_id) {
+    linea1 = '<b>' + ccEsc(CC_EVENTO_TITULOS[r.tipo] || r.tipo || 'evento') + '</b>';
+    meta = ccEsc(r.motivo || '') + (r.pedido_id ? ' · ' + ccEsc(r.pedido_id) : '') + ' · ' + ccHora(r.ts || r.creado_at);
+    var esLogi = !!CC_EVENTO_TITULOS[r.tipo];
+    if (esLogi && r.tipo !== 'pedido_vs_carga_cerrada' && r.pedido_id) {
+      // v13.242.0 — incidencias del paquete pedido-sin-viaje v2.2
+      var verPed = '<button class="cc-btn gris" onclick="ccIrPedido(\'' + ccEsc(r.pedido_id) + '\')">Ver pedido</button>';
+      var verVia = r.viaje_id ? '<button class="cc-btn gris" onclick="ccIrViaje(\'' + ccEsc(r.viaje_id) + '\')">Ver viaje</button>' : '';
+      if (r.tipo === 'entrega_no_creada' || r.tipo === 'entrega_inconsistente') {
+        // el reparador la crea solo si el camión sigue abierto; si no, Admin decide desde el viaje
+        acciones = verVia + verPed +
+          '<button class="cc-btn gris" onclick="ccResolverEvento(' + r.id + ', this)">Resolver</button>';
+      } else {
+        acciones =
+          '<button class="cc-btn azul" onclick="ccColaProxima(' + r.id + ',\'' + ccEsc(r.pedido_id) + '\')">Próx. salida</button>' +
+          verVia + verPed +
+          '<button class="cc-btn gris" onclick="ccResolverEvento(' + r.id + ', this)" title="Cerrar la alerta NO reemplaza la decisión: si sigue confirmado sin camión vuelve a aparecer">Resolver</button>';
+      }
+    } else if (r.tipo === 'pedido_vs_carga_cerrada' && r.pedido_id && r.viaje_id) {
       acciones =
         '<button class="cc-btn verde" onclick="ccColaReabrir(' + r.id + ',\'' + ccEsc(r.pedido_id) + '\',\'' + ccEsc(r.viaje_id) + '\')">Reabrir e incorporar</button>' +
         '<button class="cc-btn azul" onclick="ccColaProxima(' + r.id + ',\'' + ccEsc(r.pedido_id) + '\')">Próx. salida</button>';
@@ -52018,7 +52071,12 @@ function ccItemHTML(clave, r) {
       acciones = '<button class="cc-btn verde" onclick="ccReintentarFactura(\'' + ccEsc(pid) + '\', this)">🔁 Reintentar</button>';
     }
     if (clave === 'sin_viaje_urgente') {
-      acciones = '<button class="cc-btn azul" onclick="ccRepararUno(\'' + ccEsc(pid) + '\', this)">Asignar viaje</button>';
+      acciones = '<button class="cc-btn azul" onclick="ccRepararUno(\'' + ccEsc(pid) + '\', this)">Asignar viaje</button>' +
+                 '<button class="cc-btn gris" onclick="ccIrPedido(\'' + ccEsc(pid) + '\')">Ver pedido</button>';
+    }
+    if (clave === 'sin_viaje_historico') {
+      // v13.242.0 — no se reasigna solo: conciliar (Entregado si se entregó, o cancelar + NC)
+      acciones = '<button class="cc-btn gris" onclick="ccIrPedido(\'' + ccEsc(pid) + '\')">Ver pedido</button>';
     }
   }
   return '<div class="cc-row"><div style="flex:1;min-width:180px;">' + linea1 +
@@ -52245,6 +52303,22 @@ window.ccRepararSinViaje = async function (btn) {
   } catch (e) { ccToast('Error: ' + e.message, 'err'); }
   if (btn) btn.disabled = false;
   ccCargar(); if (typeof lzCargarViajes === 'function') lzCargarViajes();
+};
+
+// v13.242.0 — abrir el tab Pedidos filtrado por un ID (fecha: Todos)
+window.ccIrPedido = function (pedidoId) {
+  cambiarTab('pedidos');
+  setTimeout(function () {
+    try {
+      var btnTodos = null;
+      document.querySelectorAll('#filtros-fecha .filtro-btn').forEach(function (b) {
+        if ((b.getAttribute('onclick') || '').indexOf("'todos'") >= 0) btnTodos = b;
+      });
+      if (btnTodos) setFiltroFecha('todos', btnTodos);
+      var inp = document.getElementById('buscador');
+      if (inp) { inp.value = pedidoId; if (typeof filtrar === 'function') filtrar(); inp.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+    } catch (e) {}
+  }, 400);
 };
 
 window.ccIrViaje = function (viajeId) {
