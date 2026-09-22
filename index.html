@@ -1,22 +1,120 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     TCK ADMIN — v13.242.0 — 22/09/2026
-     v13.242.0: CENTRO DE CONTROL — PEDIDOS SIN CAMIÓN (paquete SQL pedido-sin-viaje v2.2).
-       (sobre v13.241.0 publicada. Solo front, cambio mínimo. Funciona con o sin el SQL
-        v2.2 instalado: sin él, las incidencias nuevas simplemente no existen.)
-       · Caso Sucesión de Peña (TCK-20260918-1841-LIS-WLSL4): quedó Confirmado sin viaje
-         el 18/09 y "Con salida y sin viaje" (R3) NO lo mostraba: la consulta trae los
-         100 más viejos (129 confirmados sin viaje de abril–agosto tapaban a los nuevos).
-         Ahora R3 (rojo) = últimos 7 días de salida y "Sin viaje · histórico" (amarillo)
-         = los anteriores, para conciliar (marcar Entregado si se entregó, o cancelar + NC).
-       · Eventos críticos: título legible y acciones para las incidencias del paquete
-         (entrega_incumplida, pedido_desasignado, asignacion_requiere_decision,
-         pedido_confirmado_sin_viaje, entrega_no_creada, entrega_inconsistente):
-         "Próx. salida" (pedidoReagendar, el mismo camino que ya usa el Centro de
-         Control), "Ver pedido" (abre Pedidos filtrado por ese ID), "Ver viaje" y
-         "Resolver". Cerrar la alerta a mano NO reemplaza la decisión: un pedido sacado
-         de un camión sigue bloqueando el cierre de ese reparto hasta tener destino.
-       · Fix: la hora del evento se leía de r.creado_at (no existe): ahora r.ts.
+     TCK ADMIN — v13.245.0 — 22/09/2026
+     v13.245.0: PARCHE DE CIERRE (rev5) — saldos, medios de pago, diferencias y hoja verificada.
+       (sobre v13.244.0. Requiere 01/02/03 v3 de rev5 en Supabase.)
+       · HOJA AUTOMÁTICA: solo se da por aplicada cuando se LEE el estado real de la hoja y coincide.
+         Una falla de lectura o de red deja el cambio PENDIENTE y reintentable (nunca "aplicado"), y antes
+         de cerrarlo se comprueba que todavía corresponda (si el pedido volvió a tener pendientes, no se aplica).
+       · DIFERENCIAS DE RECEPCIÓN: al resolver hay que decir qué pasó con las unidades. Solo "volvieron a
+         cámara", "eran de otro pedido" o "error de registro" las devuelven al stock disponible; lo dañado,
+         vencido, descartado o no recibido sigue descontado.
+       · SALDOS: se distingue el saldo de ESTE PEDIDO del saldo del CLIENTE, y el saldo verificado muestra
+         los pagos que Xubio todavía no refleja.
+       · COBROS: al imputar se elige el instrumento (efectivo / transferencia / cheque) con su tope real.
+       · Una entrega registrada como entregada con una incidencia abierta se muestra como contradicha.
+       DEPLOY: subir como index.html y version.json a 13.245.0.
+     ─────────────────────────────────────────────────────────────────────
+     TCK ADMIN — v13.244.0 — 21/09/2026
+     v13.244.0: RESOLVER = COMPLETAR LO PENDIENTE (rev4).
+       (sobre v13.243.0. Requiere en Supabase: 01_tck_nc_motor_v3.sql, 02_tck_nc_emision_v3.sql,
+        03_tck_stock_cuarentena_v3.sql. Instalado = apagado: nc_auto_aplicar, nc_emision_habilitada,
+        cierre_v2 y resolucion_auto en false; la pantalla lo muestra.)
+       · FICHA DEL PEDIDO (misma desde Pedidos / Facturación / Viaje / Centro de Control): cada pendiente
+         dice QUÉ falta, QUIÉN debe actuar y tiene la ACCIÓN a mano (crear NC, revisar NC, recibir,
+         resolver diferencia, imputar cobro, verificar saldo, cumplir obligación con evidencia).
+       · OBLIGACIONES: decidir no es ejecutar. Reposición / NC emitida / producto equivocado / cobro sin
+         imputar / diferencia de recepción dejan una obligación abierta con responsable; el pedido no está
+         resuelto ni el viaje se cierra hasta cumplirla. pendiente_acuerdo sigue pendiente; una resolución
+         forzada queda marcada y a la vista.
+       · HOJA AUTOMÁTICA (interruptor resolucion_auto): cuando no queda nada abierto, la base registra la
+         resolución y encola el cambio de hoja; esta pantalla lo aplica sola por el camino de siempre
+         (Apps Script cambiarEstado + verificación en pedidos_zona) y registra el resultado.
+       · RECEPCIÓN POR CONTEO: diferencias (faltante / sobrante / producto distinto / condición) con
+         responsable, evidencia y seguimiento; Administración puede recibir en lugar de Depósito con nota.
+       · CONTRA BOLETA (clientes autorizados): cobros imputados a la factura elegida, "saldo en revisión",
+         verificación de saldo contra Xubio, cobros a identificar. La rendición muestra a qué factura fue
+         cada cobro.
+       · NC sin detalle de factura: se intenta traer el detalle desde Xubio; si no se puede, se explica qué
+         falta y cómo resolverlo. Nunca se reemplaza por el pedido ni por el catálogo.
+       · Centro de Control: tarjeta "Pendientes del circuito" (quién / qué / acción) y hoja en cola.
+       DEPLOY: subir como index.html y version.json a 13.244.0.
+     ─────────────────────────────────────────────────────────────────────
+     TCK ADMIN — v13.243.0 — 21/09/2026
+     v13.243.0: DEVOLUCIÓN / NOTA DE CRÉDITO DESDE EL PEDIDO (rev3).
+       (sobre v13.242.0 = 13.241.0 publicada + Centro de Control visible. Requiere en Supabase:
+        01_tck_nc_motor_v2.sql, 02_tck_nc_emision_v2.sql, 03_tck_stock_cuarentena_v2.sql y las
+        Edge Functions emitir-nc v1.1 / xubio-consulta v1.1. Instalado = apagado: nc_auto_aplicar
+        y nc_emision_habilitada en false; la pantalla lo muestra.)
+       · ENTRADA PRINCIPAL: tarjeta del pedido → "🧾 Devolución / Nota de crédito" (ncPedidoAbrir).
+         Muestra la factura original (si hay varias, hay que elegir cuál), lo facturado, lo
+         entregado real (Carga v2), lo retornado/recibido, lo acreditado, las incidencias del
+         chofer y qué falta para dar el pedido por resuelto (pedido_situacion). Desde ahí:
+         crear la NC sobre ESA factura, resolver incidencias, resolver NC en revisión y
+         registrar la resolución del pedido (pedido_resolver) sin tocar pedidos_zona.estado:
+         si conviene cambiar la hoja, se ofrece el botón de siempre (cambiarEstado).
+       · FORMULARIO DE NC: motivo anulación / faltante / devolución / producto equivocado (con
+         "qué recibió el cliente en su lugar" y de qué pedido); máximo acreditable por producto;
+         total con precios, descuentos e IVA de la factura original; al confirmar, la solicitud
+         se valida y muestra el resultado y los pasos pendientes. Al emitirse (CAE) los efectos
+         inequívocos los aplica la base sola (efectos + pasos pendientes en la respuesta).
+       · Facturación (🧾 junto al PDF) abre el mismo formulario. Centro de Control = bandeja
+         transversal: + "Pedidos sin resolver", + "Incidencias del chofer", eventos
+         "NC requiere revisión" con la pantalla de revisión (elegir devolución / retorno
+         esperado / sin retorno / económica; traer renglones desde Xubio).
+       · Detalle del viaje: incidencias del chofer y pedidos sin resolver del viaje, con acceso
+         a la pantalla del pedido.
+       DEPLOY: subir como index.html y version.json a 13.243.0.
+     ─────────────────────────────────────────────────────────────────────
+     TCK ADMIN — v13.242.0 — 21/09/2026
+     v13.242.0: EL CENTRO DE CONTROL VUELVE A VERSE · NOTAS DE CRÉDITO DESDE LA APP.
+       (sobre v13.241.0 publicada. Requiere en Supabase: 01_tck_nc_motor_v1.sql,
+        02_tck_nc_emision_v1.sql, 03_tck_stock_cuarentena_v1.sql y las Edge
+        Functions emitir-nc y xubio-consulta. Nada de esto emite solo.)
+       · CENTRO DE CONTROL INVISIBLE, DOS BUGS. (1) v13.215.0 rediseñó el menú
+         "Más" y sacó el botón de ccontrol ("su view existe pero esta vacia"):
+         no había forma de llegar, y ccBadge() buscaba menu-mas-ccontrol-badge,
+         que ya no existía. (2) Había DOS id="cc-cont": el de Cuentas Corrientes
+         (view-cc) y el que ccInitView() inyecta en view-ccontrol. getElementById
+         devuelve el primero, así que el Centro de Control se pintaba dentro del
+         panel de cuentas corrientes, que arranca en display:none. Ahora el
+         contenedor del Centro de Control es ccontrol-cont y el botón está en
+         "Más → Operación" con su badge de críticos. Sin cambios de permisos:
+         puedeVer('ccontrol') sigue decidiendo por rol. (3) view-ccontrol tenía
+         style="display:none" inline, que le gana a .view.active: aun llegando
+         al tab, la pantalla quedaba en blanco. Se quita el inline. (4) El
+         módulo definía window.ccCargar, el MISMO nombre que el loader de
+         Cuentas Corrientes (v13.63.0): el tab "Ctas Ctes" y su botón
+         "⟳ Actualizar" llamaban al Centro de Control y la pantalla quedaba en
+         "Cargando cuentas corrientes…" para siempre (reproducido navegando la
+         v13.241.0). El loader del Centro de Control pasa a llamarse
+         ccontrolCargar; Cuentas Corrientes recupera el suyo sin tocarlo.
+       · NOTAS DE CRÉDITO (sección nueva del Centro de Control). Bandeja de
+         solicitudes (vw_nc_bandeja) con la acción concreta por estado, y
+         "Crear NC desde factura": busca por pedido o número, refresca los
+         renglones en vivo (xubio-consulta), muestra lo acreditable por producto
+         (nc_acreditable: descuenta NC previas de cualquier origen, ajustes de
+         carga y solicitudes reservadas), crea y VALIDA la solicitud (precios,
+         descuentos e IVA congelados de la factura original) y recién después
+         permite Simular (no emite) y Emitir (una sola vez, con confirmación).
+         Ambigua → Verificar / Rearmar. Sin CAE → Verificar. Autorizada →
+         Registrar aplicación (factura destino, importe, evidencia). La
+         aplicación en Xubio sigue manual.
+       · El panel de carga v2 del detalle del viaje (devoluciones, "falta para
+         cerrar", planilla firmada) ahora también se muestra con el viaje en
+         "rindiendo": antes desaparecía justo cuando aparecen las devoluciones.
+       · TRES ENTRADAS AL MISMO CIRCUITO (mismas pantallas, mismas funciones):
+         Pedidos → tarjeta → "🧾 Nota de crédito"; Facturación → 🧾 al lado del
+         PDF; Logística → panel del viaje → "Crear NC" en cada devolución
+         pendiente + lista "NC de este viaje". El Centro de Control concentra
+         las excepciones de todos los viajes; no es la única puerta.
+       · NC automáticas: las inequívocas que entran por sync ya no requieren
+         "Aplicar a la carga" (las aplica el motor 01 y quedan en el historial
+         del viaje). Solo las que requieren decisión aparecen como evento, con
+         motivo y acción.
+       DEPLOY: subir como index.html y version.json a 13.242.0.
+     ─────────────────────────────────────────────────────────────────────
+     TCK ADMIN — v13.241.0 — 21/09/2026
      v13.241.0: UNA SOLA FORMA DE ARMAR LA PLANILLA · CANCELAR AVISA · NC A LA CARGA.
        (sobre v13.240.0 publicada. Requiere tools/migracion_carga_nc_cancelacion_2109.sql,
         ya aplicada. Salida del viaje 1A del 21/09, que se trabó más de una hora.)
@@ -15546,7 +15644,7 @@ background:#0f766e;color:#fff;font-weight:600;font-size:14px;cursor:pointer;"
   </div>
 
   <!-- ═══ VIEW LOGÍSTICA ═══ -->
-  <div class="view" id="view-ccontrol" style="display:none;"></div>
+  <div class="view" id="view-ccontrol"></div>   <!-- v13.242.0: sin display:none inline; la muestra .view.active como a todas -->
 
   <div class="view" id="view-logistica">
     <div class="planilla-wrap">
@@ -18442,7 +18540,7 @@ function cbvGate() {
     <!-- v13.215.0 — una sola columna, buscador y cuatro grupos.
            Los grupos son SOLO presentacion: cada boton conserva su id, su
            onclick y su badge, asi el gating por rol sigue funcionando igual.
-           ccontrol no se expone: su view existe pero esta vacia. -->
+           v13.242.0: ccontrol vuelve a exponerse (Operación → Centro de Control). -->
       <div class="menu-mas-buscar">
         <input type="search" id="menu-mas-q" placeholder="Buscar destino…" autocomplete="off"
                oninput="menuMasFiltrar(this.value)" onkeydown="menuMasTecla(event)">
@@ -18451,6 +18549,7 @@ function cbvGate() {
         <div class="menu-mas-grp" data-grp="operación">Operación</div>
         <button class="menu-mas-item" id="menu-mas-stock" data-mm="stock" data-tipo="tab" onclick="cambiarTab('stock');cerrarMenuMas()"><span class="menu-mas-icon">&#128230;</span><span class="menu-mas-lbl">Stock</span><span class="menu-mas-badge" id="menu-mas-stock-badge" style="display:none"></span></button>
         <button class="menu-mas-item" id="menu-mas-compras" data-mm="compras" data-tipo="tab" onclick="cambiarTab('compras');cerrarMenuMas()"><span class="menu-mas-icon">&#128722;</span><span class="menu-mas-lbl">Compras</span><span class="menu-mas-badge" id="menu-mas-compras-badge" style="display:none"></span></button>
+        <button class="menu-mas-item" id="menu-mas-ccontrol" data-mm="ccontrol" data-tipo="tab" onclick="cambiarTab('ccontrol');cerrarMenuMas()"><span class="menu-mas-icon">&#129517;</span><span class="menu-mas-lbl">Centro de Control</span><span class="menu-mas-badge" id="menu-mas-ccontrol-badge" style="display:none"></span></button>
         <button class="menu-mas-item" id="menu-mas-rendiciones" data-mm="rendiciones" data-tipo="tab" onclick="cambiarTab('rendiciones');cerrarMenuMas()"><span class="menu-mas-icon">&#128176;</span><span class="menu-mas-lbl">Rendiciones</span><span class="menu-mas-badge" id="menu-mas-rend-badge" style="display:none"></span></button>
         <button class="menu-mas-item" id="menu-mas-buffet" data-mm="buffet" data-tipo="tab" onclick="cambiarTab('buffet');cerrarMenuMas()"><span class="menu-mas-icon">&#127828;</span><span class="menu-mas-lbl">Buffet</span></button>
         <div class="menu-mas-grp" data-grp="clientes y ventas">Clientes y ventas</div>
@@ -19763,6 +19862,7 @@ function admRendModalRender() {
   }
 
   body.innerHTML = html;
+  admRendImputLabels(_admRendActivaEntregas);   // v13.244.0 — contra boleta: a qué factura fue cada cobro
 }
 
 function admRendSetModo(modo) {
@@ -19796,7 +19896,7 @@ function admRendRenderModoUno() {
         '<div class="adm-pedido-conf-hdr">' +
           '<div class="adm-pedido-conf-info">' +
             '<div class="adm-pedido-conf-cli">' + cli + '</div>' +
-            '<div class="adm-pedido-conf-meta">📍 ' + ciudad + (pid ? ' · ' + pid : '') + '</div>' +
+            '<div class="adm-pedido-conf-meta">📍 ' + ciudad + (pid ? ' · ' + pid : '') + '<span data-rend-imput="' + e.id + '"></span></div>' +
           '</div>' +
           '<div class="adm-pedido-conf-monto-wrap">' +
             '<div class="adm-pedido-conf-monto">' + fmt(monto) + '</div>' +
@@ -23719,6 +23819,10 @@ function renderCard(p) {
   // v13.143.0 — 🪪 Datos del cliente: CUIT/dirección/comercio para dar
   // el alta en Xubio sin salir a buscarlos. Visible en todo estado.
   btns += '<button class="btn-estado" style="background:#F3E5F5;color:#6A1B9A;border-color:#6A1B9A;" onclick="pdcAbrir(\'' + p.pedidoId + '\',event)">\uD83E\uDEAA Datos del cliente</button>';
+  // v13.242.0 — misma pantalla de NC que el Centro de Control, entrando por el pedido.
+  if (esAdmin && !esContador() && (p.estado === 'Confirmado' || p.estado === 'Entregado') && typeof ncCrearDesdePedido === 'function') {
+    btns += '<button class="btn-estado" style="background:#FFF8E1;color:#B45309;border-color:#B45309;" onclick="ncPedidoAbrir(\'' + p.pedidoId + '\',event,' + (p.fila || 0) + ')">\uD83E\uDDFE Devolución / Nota de crédito</button>';
+  }
 
   if (p.estado === 'En revisión') {
     if (esAdmin) {
@@ -27220,6 +27324,7 @@ function mostrarTabs() {
   _tckSetDisp('menu-mas-clientes',    puedeVer('clientes'));
   _tckSetDisp('menu-mas-visitas',     puedeVer('gps'));
   _tckSetDisp('menu-mas-rendiciones', puedeVer('rendiciones'));
+  _tckSetDisp('menu-mas-ccontrol',    puedeVer('ccontrol'));    // v13.242.0 — dueno/operaciones/admin/contador (ALL); cobranzas no
   _tckSetDisp('menu-mas-acc-dup',     puedeVer('acc-dup'));
   _tckSetDisp('menu-mas-prod-canon',  puedeVer('prod-canon'));
   _tckSetDisp('menu-mas-ccanon',      puedeVer('ccanon'));
@@ -49619,6 +49724,7 @@ function fcRender() {
                   ? '<span class="fc-chip rojo" title="El comprobante existe en Xubio pero ARCA no le dio CAE">⚠️ CAE pendiente</span>'
                   : '<span class="fc-chip verde">FC ' + _fcEsc(s.xubio_factura_nro || '') + '</span>')
                 + '<button class="fc-fbtn" onclick="_fcPdfOficial(' + ((s.xubio_factura_id || 0)) + ')" title="PDF oficial de Xubio">📄</button>'
+                + (s.xubio_factura_id && !esContador() ? '<button class="fc-fbtn" onclick="ncCrearAbrir(' + s.xubio_factura_id + ')" title="Nota de crédito sobre esta factura">🧾</button>' : '')   // v13.242.0
               : '<span class="fc-chip rojo">SIN FACTURA</span>') +
             '</div>';
         });
@@ -51127,7 +51233,7 @@ async function _fcCandadoPlanilla(pedidos, ctx) {
    "Nueva version disponible" aparecia en cada sesion, para todos los usuarios.
    Ahora hay UNA sola constante global y el banner la lee de ahi.
    DEPLOY: bump de TCK_VERSION aca Y de version.json en el repo. Nada mas. */
-var TCK_VERSION = '13.242.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
+var TCK_VERSION = '13.245.0';   /* v13.231.0 — 13.230.0 lo dejó en 13.229.0 y el banner no se disparaba */
 (function(){
   var TCK_UPD_LOCAL = TCK_VERSION;       /* <-- unica fuente: TCK_VERSION */
   /* ════════════════════════════════════════════════════════════════
@@ -51881,23 +51987,10 @@ var CC_TITULOS = {
   pendientes_vencidos:         ['🟡', 'Pendientes con salida vencida'],
   entregado_sin_rendir:        ['🟡', 'Entregas sin rendir'],
   pedido_viaje_fecha_distinta: ['🟡', 'Pedido y viaje con fechas distintas'],
-  sin_viaje_historico:         ['🟡', 'Sin viaje · histórico (salida hace más de 7 días, conciliar)']
+  pedidos_sin_resolver:        ['🔴', 'Pedidos sin resolver (NC / devolución / no entregado)'],   // v13.243.0
+  incidencias_chofer:          ['🔴', 'Incidencias del chofer sin resolver'],                       // v13.243.0
+  pendientes_circuito:         ['🧭', 'Pendientes del circuito: qué falta, quién actúa, acción']     // v13.244.0
 };
-// v13.242.0 — títulos legibles de las incidencias del paquete pedido-sin-viaje
-var CC_EVENTO_TITULOS = {
-  entrega_incumplida:           '🚫 Entrega incumplida: la fecha prometida pasó sin camión',
-  pedido_confirmado_sin_viaje:  '🚫 Confirmado sin camión (el reparador reintenta cada 15 min)',
-  pedido_desasignado:           '✂️ Sacado del camión: sin destino (bloquea el cierre de ese reparto)',
-  asignacion_requiere_decision: '🧭 Sin camión válido para su fecha: decidir destino',
-  pedido_vs_carga_cerrada:      '🔒 Confirmado con la carga de su fecha ya cerrada',
-  entrega_no_creada:            '📋 En el camión pero SIN entrega operativa (el chofer no lo ve)',
-  entrega_inconsistente:        '📋 Entrega operativa en otro camión o duplicada'
-};
-function ccHace7() {
-  var d = new Date(Date.now() - 7 * 86400000);
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires',
-    year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
-}
 
 // ── v13.238.0 — LECTURA DEL CIRCUITO DIRECTO A SUPABASE ─────────────────────
 // Reemplaza a ?accion=centroControl. centroControlOperativo (Código.gs
@@ -51923,10 +52016,9 @@ async function ccLeerCircuito() {
     // R2 — requiere accion (incluye escalados por agotar reintentos)
     q('pedidos_zona?facturacion_estado=eq.requiere_accion&xubio_factura_id=is.null' +
       '&estado=in.(Confirmado,Entregado,Pendiente)' + selPed + '&order=salida_planificada.asc&limit=100'),
-    // R3 — sin viaje con salida hoy o vencida en los últimos 7 días (solo ruta).
-    //      v13.242.0: antes traía los 100 más viejos y tapaba a los nuevos (caso Peña).
+    // R3 — sin viaje con salida hoy o vencida (solo ruta)
     q('pedidos_zona?viaje_id=is.null&zona=neq.mostrador&estado=in.(Confirmado,Entregado)' +
-      '&salida_planificada=lte.' + hoy + '&salida_planificada=gte.' + ccHace7() + selPed + '&order=salida_planificada.desc&limit=100'),
+      '&salida_planificada=lte.' + hoy + selPed + '&order=salida_planificada.asc&limit=100'),
     // R4 — viajes vencidos sin cerrar
     q('viajes?estado=in.(planificado,preparando,carga_cerrada,en_ruta,rindiendo)&fecha_salida=lt.' + hoy +
       '&select=id,zona,fecha_salida,estado,chofer,total_pedidos,monto_total&order=fecha_salida.asc&limit=50'),
@@ -51957,10 +52049,11 @@ async function ccLeerCircuito() {
     q('viajes?fecha_salida=gte.' + hoy + '&select=id,fecha_salida,zona&limit=300'),
     q('pedidos_zona?viaje_id=not.is.null&estado=in.(Confirmado,Entregado)&salida_planificada=gte.' + hoy +
       '&select=pedido_id,cliente,total,salida_planificada,viaje_id,zona&limit=500'),
-    // A6 — v13.242.0: sin viaje histórico (salida hace más de 7 días). El reparador NO los
-    //      toca: se concilian uno por uno (Entregado si se entregó, o cancelar + NC).
-    q('pedidos_zona?viaje_id=is.null&zona=neq.mostrador&estado=eq.Confirmado' +
-      '&salida_planificada=lt.' + ccHace7() + selPed + '&order=salida_planificada.desc&limit=300')
+    // v13.243.0 — R8 pedidos sin resolución (NC / devolución / incidencia / no entregado) · R9 incidencias del chofer
+    q('vw_pedidos_sin_resolver?select=*&order=salida_planificada.desc&limit=100'),
+    q('entrega_incidencias?estado=in.(abierta,vinculada)&select=id,pedido_id,viaje_id,chofer,tipo,items,entregado_json,hecho_at,registrado_at,nota,foto_pendiente,estado&order=registrado_at.desc&limit=100'),
+    // v13.244.0 — bandeja transversal: qué falta / quién / acción (todos los viajes; la base no filtra por fecha para el cierre)
+    sbFetch('rpc/cc_pendientes', { method: 'POST', body: JSON.stringify({ p_dias: 60 }) }).then(function (r) { return Array.isArray(r) ? r : []; }).catch(function () { return []; })
   ]);
   // A5 — pedido cuyo viaje tiene OTRA fecha (reagendos a medias)
   var viajesMap = {};
@@ -51978,12 +52071,13 @@ async function ccLeerCircuito() {
     rojo: {
       entregado_sin_factura: r[0], factura_requiere_accion: r[1], sin_viaje_urgente: r[2],
       viajes_vencidos_abiertos: r[3], carga_cerrada_con_diferencias: r[4], eventos_criticos: r[5],
-      cancelado_con_factura: r[6], pendiente_con_factura: r[7]
+      cancelado_con_factura: r[6], pendiente_con_factura: r[7],
+      pendientes_circuito: r[16],                              // v13.244.0 (reemplaza la lista plana de pedidos sin resolver)
+      incidencias_chofer: r[15]   // v13.243.0
     },
     amarillo: {
       bloqueado_stock: r[8], planillas_desactualizadas: r[9], pendientes_vencidos: r[10],
-      entregado_sin_rendir: r[11], pedido_viaje_fecha_distinta: desalineados,
-      sin_viaje_historico: r[14]
+      entregado_sin_rendir: r[11], pedido_viaje_fecha_distinta: desalineados
     }
   };
   function tot(arr) {
@@ -51997,13 +52091,13 @@ async function ccLeerCircuito() {
   return out;
 }
 
-window.ccCargar = async function () {
+window.ccontrolCargar = async function () {
   if (_ccCargando) return;
   // v13.238.0 — sin sesion no se consulta (la anon key da 401 y el cartel de
   // sesion vencida saldria cada 5 min en la pantalla del PIN).
   if (!_JWT) return;
   _ccCargando = true;
-  var cont = document.getElementById('cc-cont');
+  var cont = document.getElementById('ccontrol-cont');   // v13.242.0: id propio (cc-cont es el de Cuentas Corrientes)
   if (cont && !_ccData) cont.innerHTML = '<div style="padding:30px;text-align:center;color:#8a6f5f;">Cargando circuito…</div>';
   try {
     var d = await ccLeerCircuito();   // v13.238.0 — antes ccGAS('accion=centroControl')
@@ -52011,6 +52105,7 @@ window.ccCargar = async function () {
     _ccData = d;
     ccRender();
     ccBadge();
+    hojaColaProcesar();   // v13.244.0 — cambios de hoja encolados por la base (Apps Script de siempre + verificación)
   } catch (err) {
     if (cont) cont.innerHTML = '<div class="cc-err" style="padding:20px;">No se pudo cargar el Centro de Control: ' + ccEsc(err.message) + '</div>';
   } finally { _ccCargando = false; }
@@ -52020,24 +52115,9 @@ function ccItemHTML(clave, r) {
   var linea1 = '', meta = '', extra = '', acciones = '';
   var pid = r.pedido_id || '', vid = r.id || r.viaje_id || '';
   if (clave === 'eventos_criticos') {
-    linea1 = '<b>' + ccEsc(CC_EVENTO_TITULOS[r.tipo] || r.tipo || 'evento') + '</b>';
-    meta = ccEsc(r.motivo || '') + (r.pedido_id ? ' · ' + ccEsc(r.pedido_id) : '') + ' · ' + ccHora(r.ts || r.creado_at);
-    var esLogi = !!CC_EVENTO_TITULOS[r.tipo];
-    if (esLogi && r.tipo !== 'pedido_vs_carga_cerrada' && r.pedido_id) {
-      // v13.242.0 — incidencias del paquete pedido-sin-viaje v2.2
-      var verPed = '<button class="cc-btn gris" onclick="ccIrPedido(\'' + ccEsc(r.pedido_id) + '\')">Ver pedido</button>';
-      var verVia = r.viaje_id ? '<button class="cc-btn gris" onclick="ccIrViaje(\'' + ccEsc(r.viaje_id) + '\')">Ver viaje</button>' : '';
-      if (r.tipo === 'entrega_no_creada' || r.tipo === 'entrega_inconsistente') {
-        // el reparador la crea solo si el camión sigue abierto; si no, Admin decide desde el viaje
-        acciones = verVia + verPed +
-          '<button class="cc-btn gris" onclick="ccResolverEvento(' + r.id + ', this)">Resolver</button>';
-      } else {
-        acciones =
-          '<button class="cc-btn azul" onclick="ccColaProxima(' + r.id + ',\'' + ccEsc(r.pedido_id) + '\')">Próx. salida</button>' +
-          verVia + verPed +
-          '<button class="cc-btn gris" onclick="ccResolverEvento(' + r.id + ', this)" title="Cerrar la alerta NO reemplaza la decisión: si sigue confirmado sin camión vuelve a aparecer">Resolver</button>';
-      }
-    } else if (r.tipo === 'pedido_vs_carga_cerrada' && r.pedido_id && r.viaje_id) {
+    linea1 = '<b>' + ccEsc(r.tipo || 'evento') + '</b>';
+    meta = ccEsc(r.motivo || '') + (r.pedido_id ? ' · ' + ccEsc(r.pedido_id) : '') + ' · ' + ccHora(r.creado_at);
+    if (r.tipo === 'pedido_vs_carga_cerrada' && r.pedido_id && r.viaje_id) {
       acciones =
         '<button class="cc-btn verde" onclick="ccColaReabrir(' + r.id + ',\'' + ccEsc(r.pedido_id) + '\',\'' + ccEsc(r.viaje_id) + '\')">Reabrir e incorporar</button>' +
         '<button class="cc-btn azul" onclick="ccColaProxima(' + r.id + ',\'' + ccEsc(r.pedido_id) + '\')">Próx. salida</button>';
@@ -52050,6 +52130,14 @@ function ccItemHTML(clave, r) {
     } else if (r.tipo === 'nc_importe_no_coincide') {
       linea1 = '<b>🧾 Nota de crédito con importe distinto al facturado</b>';
       acciones = '<button class="cc-btn gris" onclick="ccResolverEvento(' + r.id + ', this)">NC corregida</button>';
+    } else if (r.tipo === 'nc_requiere_revision') {   // v13.243.0
+      linea1 = '<b>🧾 NC que requiere revisión</b>';
+      acciones = '<button class="cc-btn verde" onclick="ncRevisionModal(' + (r.valor_nuevo && r.valor_nuevo.nc_transaccion_id || 0) + ')">Revisar NC</button>' +
+        (r.pedido_id ? '<button class="cc-btn gris" onclick="ncPedidoAbrir(\'' + ccEsc(r.pedido_id) + '\')">Ver pedido</button>' : '');
+    } else if (r.tipo === 'entrega_incidencia' || r.tipo === 'nc_retorno_esperado' || r.tipo === 'nc_economica') {   // v13.243.0
+      linea1 = '<b>' + (r.tipo === 'entrega_incidencia' ? '⚠️ Incidencia del chofer' : r.tipo === 'nc_retorno_esperado' ? '🔁 Retorno esperado por NC' : '💲 NC económica (aplicar en cta cte)') + '</b>';
+      acciones = (r.pedido_id ? '<button class="cc-btn verde" onclick="ncPedidoAbrir(\'' + ccEsc(r.pedido_id) + '\')">Ver pedido</button>' : '') +
+        '<button class="cc-btn gris" onclick="ccResolverEvento(' + r.id + ', this)">Resolver</button>';
     } else {
       acciones = '<button class="cc-btn gris" onclick="ccResolverEvento(' + r.id + ', this)">Resolver</button>';
     }
@@ -52057,6 +52145,30 @@ function ccItemHTML(clave, r) {
     linea1 = '<b>' + ccEsc(r.zona || '') + '</b> · ' + ccEsc(r.fecha_salida || '') + ' · ' + ccEsc(r.estado || '');
     meta = (r.chofer ? 'Chofer ' + ccEsc(r.chofer) + ' · ' : '') + (r.total_pedidos != null ? r.total_pedidos + ' pedidos · ' : '') + ccMon(r.monto_total);
     acciones = '<button class="cc-btn gris" onclick="ccIrViaje(\'' + ccEsc(vid) + '\')">Ver viaje</button>';
+  } else if (clave === 'pedidos_sin_resolver') {   // v13.243.0
+    linea1 = '<b>' + ccEsc(r.cliente || r.pedido_id || '') + '</b>' + (r.total ? ' · ' + ccMon(r.total) : '');
+    meta = ccEsc(r.zona || '') + ' · sale ' + ccEsc(r.salida_planificada || '') + ' · hoja ' + ccEsc(r.estado_hoja || '') + ' · entrega ' + ccEsc(r.entrega_estado || '—') +
+           (Number(r.nc_con_cae) ? ' · NC con CAE ' + ccMon(r.nc_con_cae) : '') + (Number(r.devoluciones_abiertas) ? ' · ' + r.devoluciones_abiertas + ' devolución(es) abierta(s)' : '') +
+           (Number(r.incidencias_abiertas) ? ' · ' + r.incidencias_abiertas + ' incidencia(s)' : '') + (Number(r.nc_en_revision) ? ' · ' + r.nc_en_revision + ' NC en revisión' : '') + ' · ' + ccEsc(pid);
+    acciones = '<button class="cc-btn verde" onclick="ncPedidoAbrir(\'' + ccEsc(pid) + '\')">Ver / resolver</button>';
+  } else if (clave === 'pendientes_circuito') {   // v13.244.0
+    if (r.tipo === 'hoja_pendiente') {
+      linea1 = '<b>📄 Hoja en cola</b> · ' + ccEsc(r.cliente || r.pedido_id || '');
+      meta = ccEsc(r.que || '') + ' · quién: ' + ccEsc(r.quien || '') + ' · ' + ccEsc(pid);
+      acciones = '<button class="cc-btn azul" onclick="hojaColaAplicarUno(' + Number(r.ref) + ', this)">Aplicar ahora</button>' +
+                 '<button class="cc-btn gris" onclick="ncPedidoAbrir(\'' + ccEsc(pid) + '\')">Ver pedido</button>';
+    } else {
+      linea1 = '<b>' + ccEsc(r.cliente || pid) + '</b>' + (r.total ? ' · ' + ccMon(r.total) : '') + ' <span class="vc-tag" style="background:#FFF3E0;color:#B45309;">quién: ' + ccEsc(r.quien || '') + '</span>';
+      meta = ccEsc(r.que || '') + ' · ' + ccEsc(r.zona || '') + ' · sale ' + ccEsc(r.salida || '') + ' · hoja ' + ccEsc(r.estado_hoja || '') + ' · entrega ' + ccEsc(r.entrega_estado || '—') + ' · ' + ccEsc(pid);
+      acciones = '<button class="cc-btn verde" onclick="ncPedidoAbrir(\'' + ccEsc(pid) + '\')">Abrir ficha / actuar</button>';
+    }
+  } else if (clave === 'incidencias_chofer') {   // v13.243.0
+    var its = (r.items || []).map(function (i) { return (i.cantidad || '') + '× ' + (i.producto || i.nombre || i.producto_xubio_id); }).join(', ');
+    linea1 = '<b>' + ({ faltante: '🚫 Faltante', producto_equivocado: '🔀 Producto equivocado', devolucion: '↩️ Devolución', contingencia: '📵 Contingencia', otro: '❓ Otro' }[r.tipo] || ccEsc(r.tipo)) + '</b> · ' + ccEsc(r.pedido_id || '');
+    meta = ccEsc(r.chofer || '') + ' · hecho ' + ccHora(r.hecho_at) + ' · registrado ' + ccHora(r.registrado_at) + (its ? ' · ' + ccEsc(its) : '') +
+           (r.entregado_json && r.entregado_json.length ? ' · recibió: ' + ccEsc(r.entregado_json.map(function (x) { return (x.cantidad || '') + '× ' + (x.producto || x.producto_xubio_id) + (x.pedido_origen ? ' (' + x.pedido_origen + ')' : ''); }).join(', ')) : '') +
+           (r.foto_pendiente ? ' · <span style="color:#B71C1C">FOTO PENDIENTE</span>' : '') + (r.nota ? ' · ' + ccEsc(r.nota) : '');
+    acciones = '<button class="cc-btn verde" onclick="ncPedidoAbrir(\'' + ccEsc(pid) + '\')">Ver pedido / resolver</button>';
   } else if (clave === 'entregado_sin_rendir') {
     linea1 = '<b>' + ccEsc(r.cliente || r.pedido_id || '') + '</b>';
     meta = ccEsc(r.zona || '') + ' · entregado ' + ccHora(r.fecha_entrega) + ' · ' + ccMon(r.monto_cobrado_real || r.total);
@@ -52071,12 +52183,7 @@ function ccItemHTML(clave, r) {
       acciones = '<button class="cc-btn verde" onclick="ccReintentarFactura(\'' + ccEsc(pid) + '\', this)">🔁 Reintentar</button>';
     }
     if (clave === 'sin_viaje_urgente') {
-      acciones = '<button class="cc-btn azul" onclick="ccRepararUno(\'' + ccEsc(pid) + '\', this)">Asignar viaje</button>' +
-                 '<button class="cc-btn gris" onclick="ccIrPedido(\'' + ccEsc(pid) + '\')">Ver pedido</button>';
-    }
-    if (clave === 'sin_viaje_historico') {
-      // v13.242.0 — no se reasigna solo: conciliar (Entregado si se entregó, o cancelar + NC)
-      acciones = '<button class="cc-btn gris" onclick="ccIrPedido(\'' + ccEsc(pid) + '\')">Ver pedido</button>';
+      acciones = '<button class="cc-btn azul" onclick="ccRepararUno(\'' + ccEsc(pid) + '\', this)">Asignar viaje</button>';
     }
   }
   return '<div class="cc-row"><div style="flex:1;min-width:180px;">' + linea1 +
@@ -52098,7 +52205,7 @@ function ccSeccion(color, clave, rows) {
 }
 
 function ccRender() {
-  var cont = document.getElementById('cc-cont');
+  var cont = document.getElementById('ccontrol-cont');   // v13.242.0
   if (!cont || !_ccData) return;
   var d = _ccData, html = '';
   var rojoN = 0, amaN = 0;
@@ -52106,7 +52213,7 @@ function ccRender() {
   Object.keys(d.amarillo || {}).forEach(function (k) { amaN += (d.amarillo[k] || []).length; });
   html += '<div class="cc-hdr">🧭 Centro de Control</div>';
   html += '<div class="cc-sub">¿Algo impide vender, facturar, cargar, entregar o rendir? · actualizado ' + ccHora(d.generado) +
-          ' · <a href="javascript:ccCargar()" style="color:#0D47A1;">refrescar</a></div>';
+          ' · <a href="javascript:ccontrolCargar()" style="color:#0D47A1;">refrescar</a></div>';
   Object.keys(d.rojo || {}).forEach(function (k) { html += ccSeccion('rojo', k, d.rojo[k]); });
   Object.keys(d.amarillo || {}).forEach(function (k) { html += ccSeccion('amarillo', k, d.amarillo[k]); });
   if (!rojoN && !amaN) {
@@ -52117,6 +52224,7 @@ function ccRender() {
             '<div class="cc-ok-box">No hay nada que frene la operación de hoy. Quedan los amarillos de arriba.</div></div>';
   }
   cont.innerHTML = html;
+  try { ncBandejaCargar(); } catch (e) { console.warn('[ncBandeja]', e && e.message); }   // v13.242.0
 }
 
 function ccBadge() {
@@ -52149,7 +52257,7 @@ window.ccReintentarFactura = async function (pedidoId, btn) {
     }
   } catch (e) { ccToast('Error de red: ' + e.message, 'err'); }
   if (btn) { btn.disabled = false; btn.textContent = '🔁 Reintentar'; }
-  ccCargar(); ccRefrescarFacturacion();
+  ccontrolCargar(); ccRefrescarFacturacion();
 };
 
 // v13.241.0 — resolver por rpc/ops_evento_resolver (antes ?accion=opsEventoResolver del .gs).
@@ -52165,7 +52273,7 @@ window.ccResolverEvento = async function (id, btn) {
   if (btn) btn.disabled = true;
   var d = await ccEventoResolverSb(id);
   ccToast(d.ok ? 'Evento resuelto' : ('No se pudo: ' + (d.message || '')), d.ok ? 'ok' : 'err');
-  ccCargar();
+  ccontrolCargar();
 };
 
 // ═══ v13.241.0 — APLICAR UNA NOTA DE CRÉDITO A LA CARGA ═════════════════════════
@@ -52183,7 +52291,7 @@ window.ncAplicarACarga = async function (eventoId, pedidoId) {
   } catch (e) { return ccToast('⛔ No pude leer la nota de crédito: ' + ((e && e.message) || ''), 'err'); }
   if (!ncs.length) {
     ccToast('Esa nota de crédito ya está aplicada (o el camión ya salió).', 'ok');
-    await ccEventoResolverSb(eventoId); ccCargar(); return;
+    await ccEventoResolverSb(eventoId); ccontrolCargar(); return;
   }
   var nc = ncs[0];
   window._ncAplCtx = { eventoId: eventoId, pedidoId: pedidoId, nc: nc, items: items };
@@ -52243,7 +52351,7 @@ window.ncAplicarConfirmar = async function (btn) {
   await ccEventoResolverSb(c.eventoId);
   alert('✅ ' + (r.message || 'Ajuste registrado.') + (r.aviso ? '\n\n' + r.aviso : '') +
         '\n\nFalta un paso: generá la planilla UNA vez para que Depósito vea las cantidades nuevas.');
-  ccCargar();
+  ccontrolCargar();
   try { if (c.nc.viaje_id && typeof vcGenerarPlanilla === 'function' && confirm('¿Generar la planilla ahora?')) vcGenerarPlanilla(c.nc.viaje_id); } catch (e) {}
 };
 
@@ -52260,7 +52368,7 @@ window.ccColaReabrir = async function (eventoId, pedidoId, viajeId) {
     await ccEventoResolverSb(eventoId);   // v13.241.0 — rpc/ops_evento_resolver
     ccToast('✅ Carga reabierta e incorporado ' + pedidoId + '. Generá la planilla nueva y verificá la carga extra.', 'ok');
   } catch (e) { ccToast('Error: ' + e.message, 'err'); }
-  ccCargar(); if (typeof lzCargarViajes === 'function') lzCargarViajes();
+  ccontrolCargar(); if (typeof lzCargarViajes === 'function') lzCargarViajes();
 };
 
 window.ccColaProxima = async function (eventoId, pedidoId) {
@@ -52273,7 +52381,7 @@ window.ccColaProxima = async function (eventoId, pedidoId) {
   } else if (/Cambiar fecha\/turno/.test(d.message || '')) {
     ceeAbrir(pedidoId, 'centro_control');   // v13.222.0 — TL
   } else ccToast('No se pudo reagendar: ' + (d.message || ''), 'err');
-  ccCargar();
+  ccontrolCargar();
 };
 
 window.ccRepararUno = async function (pedidoId, btn) {
@@ -52286,7 +52394,7 @@ window.ccRepararUno = async function (pedidoId, btn) {
     return;
   }
   ccToast(d.status === 'ok' ? '✅ ' + pedidoId + ' asignado' : '⛔ ' + (d.message || ''), d.status === 'ok' ? 'ok' : 'err');
-  ccCargar();
+  ccontrolCargar();
 };
 
 window.ccRepararSinViaje = async function (btn) {
@@ -52302,23 +52410,7 @@ window.ccRepararSinViaje = async function (btn) {
     ccToast(d.status === 'ok' ? '✅ Reparados: ' + (d.reparados != null ? d.reparados : n) : '⛔ ' + (d.message || ''), d.status === 'ok' ? 'ok' : 'err');
   } catch (e) { ccToast('Error: ' + e.message, 'err'); }
   if (btn) btn.disabled = false;
-  ccCargar(); if (typeof lzCargarViajes === 'function') lzCargarViajes();
-};
-
-// v13.242.0 — abrir el tab Pedidos filtrado por un ID (fecha: Todos)
-window.ccIrPedido = function (pedidoId) {
-  cambiarTab('pedidos');
-  setTimeout(function () {
-    try {
-      var btnTodos = null;
-      document.querySelectorAll('#filtros-fecha .filtro-btn').forEach(function (b) {
-        if ((b.getAttribute('onclick') || '').indexOf("'todos'") >= 0) btnTodos = b;
-      });
-      if (btnTodos) setFiltroFecha('todos', btnTodos);
-      var inp = document.getElementById('buscador');
-      if (inp) { inp.value = pedidoId; if (typeof filtrar === 'function') filtrar(); inp.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
-    } catch (e) {}
-  }, 400);
+  ccontrolCargar(); if (typeof lzCargarViajes === 'function') lzCargarViajes();
 };
 
 window.ccIrViaje = function (viajeId) {
@@ -52385,6 +52477,8 @@ function vcBloque(v) {
          '<button class="cc-btn gris" onclick="vcReabrirCarga(\'' + v.id + '\')">↩ Reabrir</button>' +
          '<button class="cc-btn azul" onclick="vcReabrirYSumar(\'' + v.id + '\')">➕ Abrir y sumar pedidos</button>' +
          '<button class="cc-btn verde" onclick="vcArrancar(\'' + v.id + '\')">🚚 Arrancar viaje</button></div>';
+  } else if (est === 'rindiendo') {
+    if (typeof cv2aOn === 'function' && cv2aOn()) h += cv2aBloqueHtml(v);   // v13.242.0: devoluciones, "qué falta para cerrar" y NC del viaje, también después de la ruta
   } else if (est === 'en_ruta') {
     if (typeof cv2aOn === 'function' && cv2aOn()) h += cv2aBloqueHtml(v);   // v13.230.0: TL incluido
     // v13.157.0 — pedido Braian: meter pedidos de última hora aunque el
@@ -52878,6 +52972,751 @@ window.vcArrancar = async function (viajeId) {
   } else ccToast('⛔ ' + (d.message || ''), 'err');
 };
 
+
+// ═══ v13.242.0 — NOTAS DE CRÉDITO DESDE LA APP ══════════════════════════════
+// Tres registros distintos, tres pasos distintos: (1) solicitud → validación (precios congelados de la
+// factura original) → emisión en Xubio vía Edge emitir-nc (lease, POST único, relectura); (2) autorización
+// fiscal = CAE; (3) aplicación en cuenta corriente = manual en Xubio + registro con evidencia acá.
+// El efecto operativo (carga) lo hace el motor de la base al entrar la NC al espejo: esta pantalla no lo toca.
+var NC_EDGE_EMITIR = SUPABASE_URL + '/functions/v1/emitir-nc';
+var NC_EDGE_CONSULTA = SUPABASE_URL + '/functions/v1/xubio-consulta';
+var _ncBandeja = [];
+var _ncCtx = null;
+
+function ncMon(n) { return '$' + Math.round(Number(n) || 0).toLocaleString('es-AR'); }
+async function ncEdge(url, body) {
+  if (!_JWT) return { ok: false, code: 'SIN_SESION', message: 'Sesión vencida: entrá de nuevo con tu PIN.' };
+  var ctrl = new AbortController(); var tid = setTimeout(function () { ctrl.abort(); }, 60000);
+  try {
+    var r = await fetch(url, { method: 'POST', signal: ctrl.signal, headers: { 'Authorization': 'Bearer ' + _JWT, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    clearTimeout(tid);
+    var j = null; try { j = await r.json(); } catch (e) { j = { ok: false, code: 'HTTP_' + r.status, message: 'respuesta ilegible' }; }
+    if (j && j.ok === undefined) j.ok = r.ok;
+    return j;
+  } catch (e) { clearTimeout(tid); return { ok: false, code: 'RED', message: 'Sin respuesta de la función (' + ((e && e.message) || '') + '). Si era una emisión, NO vuelvas a emitir: usá Verificar.' }; }
+}
+async function ncRpc(name, args) {
+  try { return await sbFetch('rpc/' + name, { method: 'POST', body: JSON.stringify(args || {}) }); }
+  catch (e) { return { ok: false, code: 'RPC', message: (e && e.message) || 'error' }; }
+}
+
+// ── Bandeja ──
+window.ncBandejaCargar = async function () {
+  var cont = document.getElementById('ccnc-cont'); if (!cont) return;
+  if (!_JWT) { cont.innerHTML = ''; return; }
+  try { _ncBandeja = await sbFetch('vw_nc_bandeja?select=*&order=solicitud_id.desc&limit=100') || []; }
+  catch (e) { cont.innerHTML = '<div class="cc-card amarillo"><div class="cc-card-hd">🧾 Notas de crédito</div><div class="cc-row cc-meta">No pude leer la bandeja: ' + ccEsc((e && e.message) || '') + '</div></div>'; return; }
+  var pend = _ncBandeja.filter(function (r) { return r.estado !== 'autorizada'; });
+  var apl = _ncBandeja.filter(function (r) { return r.estado === 'autorizada'; });
+  try { _ncCfg = await ncRpc('nc_config', {}); } catch (e) { _ncCfg = null; }   // v13.243.0
+  var h = '<div class="cc-card ' + (pend.some(function (r) { return r.estado === 'ambigua' || r.estado === 'emitida_sin_cae'; }) ? 'rojo' : (pend.length ? 'amarillo' : 'verde')) + '">' +
+    '<div class="cc-card-hd">🧾 Notas de crédito <span class="cc-n">' + _ncBandeja.length + '</span></div>' +
+    (_ncCfg ? '<div class="cc-row cc-meta">Emisión desde la app: <b>' + (_ncCfg.nc_emision_habilitada ? 'ENCENDIDA' : 'apagada') + '</b> · efectos automáticos de NC externas: <b>' + (_ncCfg.nc_auto_aplicar ? 'ENCENDIDOS' : 'apagados') + '</b> · barrido: ' + (_ncCfg.cron_barrido_activo ? 'activo' : 'inactivo') +
+      ' · cierre v2: <b>' + (_ncCfg.cierre_v2 ? 'ENCENDIDO' : 'apagado') + '</b> · resolución/hoja automática: <b>' + (_ncCfg.resolucion_auto ? 'ENCENDIDA' : 'apagada') + '</b>' + (!_ncCfg.nc_emision_habilitada ? ' · Simular y Verificar funcionan; Emitir devuelve EMISION_DESHABILITADA.' : '') + '</div>' : '') +
+    '<div class="cc-row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
+      '<input id="ncnew-q" placeholder="Pedido (TCK-…) o Nº de factura (A-00008-…)" style="flex:1;min-width:220px;padding:7px;border:1.5px solid #E8DCC8;border-radius:8px;">' +
+      '<button class="cc-btn verde" onclick="ncCrearBuscar()">🧾 Crear NC desde factura</button>' +
+      '<button class="cc-btn gris" onclick="ncBandejaCargar()">⟳</button></div>';
+  if (!_ncBandeja.length) h += '<div class="cc-ok-box">Sin solicitudes pendientes ni NC por aplicar.</div>';
+  pend.concat(apl).forEach(function (r) { h += ncFilaHTML(r); });
+  h += '</div>';
+  cont.innerHTML = h;
+};
+function ncEstadoPill(e) {
+  var c = { solicitada: '#8a6f5f', validada: '#1565C0', emitiendo: '#EF6C00', ambigua: '#B71C1C', emitida_sin_cae: '#B71C1C', rechazada: '#6D4C41', autorizada: '#1E8449' }[e] || '#555';
+  return '<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:' + c + ';color:#fff;font-size:11px;font-weight:700;">' + ccEsc(e) + '</span>';
+}
+function ncFilaHTML(r) {
+  var items = (r.items || []).map(function (i) { return (i.cantidad || '') + '× ' + (i.nombre || i.producto_xubio_id); }).join(', ');
+  var acc = '';
+  var id = Number(r.solicitud_id);
+  if (r.estado === 'solicitada') acc = '<button class="cc-btn verde" onclick="ncValidar(' + id + ', this)">✔ Validar y confirmar</button><button class="cc-btn gris" onclick="ncCancelar(' + id + ')">Cancelar</button>';
+  else if (r.estado === 'validada') acc = '<button class="cc-btn azul" onclick="ncSimular(' + id + ', this)">🔍 Simular</button><button class="cc-btn verde" onclick="ncEmitir(' + id + ', this)">⚡ Emitir en Xubio</button><button class="cc-btn gris" onclick="ncCancelar(' + id + ')">Cancelar</button>';
+  else if (r.estado === 'emitiendo') acc = '<span class="cc-meta">en curso… si pasaron más de 5 min, Verificar</span><button class="cc-btn azul" onclick="ncVerificar(' + id + ', this)">🔎 Verificar</button>';
+  else if (r.estado === 'ambigua') acc = '<button class="cc-btn azul" onclick="ncVerificar(' + id + ', this)">🔎 Verificar en Xubio</button><button class="cc-btn gris" onclick="ncRearmar(' + id + ')">↺ Rearmar (no existe en Xubio)</button>';
+  else if (r.estado === 'emitida_sin_cae') acc = '<button class="cc-btn azul" onclick="ncVerificar(' + id + ', this)">🔎 Verificar CAE</button>';
+  else if (r.estado === 'rechazada') acc = '<button class="cc-btn verde" onclick="ncValidar(' + id + ', this)">✔ Validar de nuevo</button><button class="cc-btn gris" onclick="ncCancelar(' + id + ')">Cancelar</button>';
+  else if (r.estado === 'autorizada') acc = '<button class="cc-btn verde" onclick="ncAplicacionModal(' + id + ')">📒 Registrar aplicación</button>';
+  return '<div class="cc-row"><div><b>#' + id + '</b> ' + ncEstadoPill(r.estado) + ' · ' + ccEsc(r.cliente || '') + ' · ' + ccEsc(r.factura_numero || '') +
+    (r.nc_numero ? ' → NC <b>' + ccEsc(r.nc_numero) + '</b>' + (r.cae ? ' · CAE ✓' : ' · <span style="color:#B71C1C">sin CAE</span>') : '') +
+    ' · ' + ccEsc(r.motivo) + (r.tipo === 'total' ? ' (TOTAL)' : '') + ' · ' + ncMon(r.importe_previsto) + '</div>' +
+    '<div class="cc-meta">' + ccEsc(items) + (r.error ? ' · <span style="color:#B71C1C">' + ccEsc(r.error) + '</span>' : '') + (r.ambigua_detalle ? ' · ' + ccEsc(r.ambigua_detalle) : '') +
+    ' · ' + ccEsc(r.origen === 'chofer' ? 'informó ' + (r.solicitada_por || 'chofer') : 'cargó ' + (r.solicitada_por || '')) + '</div>' +
+    '<div class="cc-meta">→ ' + ccEsc(r.accion || '') + ((r.pasos_pendientes || []).length ? ' · pendiente: ' + ccEsc(r.pasos_pendientes.join(' · ')) : '') + '</div>' +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;">' + acc + (r.pedido_id ? '<button class="cc-btn gris" onclick="ncPedidoAbrir(\'' + ccEsc(r.pedido_id) + '\')">Ver pedido</button>' : '') + '</div></div>';
+}
+
+// ── Crear NC desde factura ──
+window.ncCrearBuscar = function () {
+  var q = (document.getElementById('ncnew-q').value || '').trim(); if (!q) return ccToast('Escribí un pedido o un número de factura.', 'err');
+  return ncCrearPorRef(q);
+};
+// Entrada desde la tarjeta del pedido (Pedidos) y desde la devolución del viaje (Logística): misma pantalla.
+window.ncCrearDesdePedido = function (pedidoId, ev) {
+  if (ev && ev.stopPropagation) ev.stopPropagation();
+  if (typeof _contBloq === 'function' && _contBloq('crear notas de crédito')) return;
+  return ncCrearPorRef(String(pedidoId || '').trim());
+};
+async function ncCrearPorRef(q) {
+  var rows = [];
+  try { rows = await sbFetch('facturas_xubio?tipo=eq.1&or=(pedido_id.eq.' + encodeURIComponent(q) + ',numero.eq.' + encodeURIComponent(q) + ')&select=transaccion_id,numero,pedido_id,cliente_nombre,importe_total,fecha&order=fecha.desc&limit=5') || []; }
+  catch (e) { return ccToast('No pude buscar: ' + ((e && e.message) || ''), 'err'); }
+  if (!rows.length) return ccToast('No encontré una factura (tipo 1) para "' + q + '" en el espejo de Xubio.', 'err');
+  if (rows.length > 1) { ccToast('Hay ' + rows.length + ' facturas para ese pedido: elegí cuál desde la pantalla del pedido.', 'err'); return ncPedidoAbrir(rows[0].pedido_id); }   // v13.243.0
+  ncCrearAbrir(rows[0].transaccion_id);
+}
+// Logística → panel del viaje: las solicitudes de NC de los pedidos de ESTE viaje, con las mismas acciones que la bandeja.
+window.ncViajeBloque = async function (viajeId) {
+  var el = document.getElementById('cv2nc-' + viajeId); if (!el || !_JWT) return;
+  var rows = [];
+  try { rows = await sbFetch('vw_nc_bandeja?viaje_id=eq.' + encodeURIComponent(viajeId) + '&select=*&order=solicitud_id.desc') || []; }
+  catch (e) { el.innerHTML = ''; return; }
+  var incs = [], sinres = [];
+  try { incs = await sbFetch('entrega_incidencias?viaje_id=eq.' + encodeURIComponent(viajeId) + '&estado=in.(abierta,vinculada)&select=*&order=registrado_at.desc') || []; } catch (e) {}
+  try { sinres = await sbFetch('vw_pedidos_sin_resolver?viaje_id=eq.' + encodeURIComponent(viajeId) + '&select=*&order=pedido_id') || []; } catch (e) {}
+  if (!rows.length && !incs.length && !sinres.length) { el.innerHTML = ''; return; }
+  rows.forEach(function (r) { if (!_ncBandeja.some(function (x) { return x.solicitud_id === r.solicitud_id; })) _ncBandeja.push(r); });
+  var h = '';
+  if (incs.length) h += '<div style="margin:6px 0;padding:6px 8px;border:1px solid #FFB74D;border-radius:8px;background:#FFF8F0;"><b>⚠️ Incidencias del chofer (' + incs.length + ')</b>' +
+    incs.map(function (i) { return '<div class="cc-row">' + ccItemHTML('incidencias_chofer', i) + '</div>'; }).join('') + '</div>';
+  if (sinres.length) h += '<div style="margin:6px 0;padding:6px 8px;border:1px solid #E0B4B4;border-radius:8px;background:#FFF8F8;"><b>🧩 Pedidos del viaje sin resolver (' + sinres.length + ')</b>' +
+    sinres.map(function (p) { return ccItemHTML('pedidos_sin_resolver', p); }).join('') + '</div>';
+  if (rows.length) h += '<div style="margin:6px 0;padding:6px 8px;border:1px solid #E8DCC8;border-radius:8px;background:#FFFDF7;"><b>🧾 Notas de crédito de este viaje (' + rows.length + ')</b>' + rows.map(ncFilaHTML).join('') + '</div>';
+  el.innerHTML = h;
+};
+window.ncCrearAbrir = async function (facturaId, ctx) {
+  ctx = ctx || {};
+  var ld = vcModal('<h3>🧾 Crear nota de crédito</h3><div class="cc-meta">Leyendo la factura en vivo desde Xubio…</div>');   // vcModal apila: se saca antes de pintar el definitivo
+  var live = await ncEdge(NC_EDGE_CONSULTA, { op: 'comprobante', id: Number(facturaId) });
+  var aviso = live.ok ? '' : '<div class="vc-check">⚠️ No pude leer la factura en vivo (' + ccEsc(live.code || '') + '): uso los renglones del espejo. Si la factura se editó en Xubio, la emisión lo detecta igual.</div>';
+  var acr = await ncRpc('nc_acreditable', { p_factura_transaccion_id: Number(facturaId) });
+  ld.remove();
+  if (!acr || acr.ok !== true) {
+    // v13.244.0 — ya se intentó traer el detalle desde Xubio (arriba). Si sigue faltando, se explica qué falta y cómo
+    // resolverlo. NUNCA se arma la NC con los renglones del pedido ni del catálogo: la NC se emite sobre lo facturado.
+    var falta = '';
+    if (acr && acr.code === 'FACTURA_SIN_ITEMS') {
+      falta = '<div class="vc-check"><b>Falta el detalle de renglones de esta factura en el espejo</b> y no se pudo traer de Xubio' + (live && !live.ok ? ' (' + ccEsc(live.code || '') + (live.message ? ': ' + ccEsc(live.message) : '') + ')' : ' (Xubio respondió sin renglones)') + '.' +
+              '<div style="margin-top:6px;">Cómo resolverlo:<br>1) Reintentá en un minuto (Xubio puede estar lento).<br>2) Si la factura existe en Xubio, verificá que la transacción ' + ccEsc(String(facturaId)) + ' sea la correcta (Facturación → 🧾).<br>3) Si Xubio no la devuelve, la NC se hace en Xubio y entra por sincronización; el motor la vincula al llegar.</div>' +
+              '<div class="cc-meta" style="margin-top:6px;">No se usa el detalle del pedido ni del catálogo: la NC tiene que salir de lo facturado.</div></div>' +
+              '<div style="margin-top:8px;"><button class="cc-btn azul" onclick="this.closest(\'.vc-modal-bk\').remove();ncCrearAbrir(' + Number(facturaId) + ', ' + JSON.stringify(ctx || {}).replace(/"/g, '&quot;') + ')">⬇️ Reintentar traer el detalle desde Xubio</button></div>';
+    } else if (acr && acr.code === 'NC_EXTERNA_SIN_DETALLE') {
+      falta = '<div class="vc-check">Esta factura ya tiene una NC hecha en Xubio sin renglones: el saldo por producto no es determinable hasta traerlos. Abrí la NC en revisión (ficha del pedido → Acreditado → Revisar → Traer renglones) y volvé.</div>';
+    }
+    return vcModal('<h3>🧾 Crear nota de crédito</h3><div class="vc-check">⛔ ' + ccEsc((acr && (acr.message || acr.code)) || 'error') + '</div>' + falta + '<div style="margin-top:12px;"><button class="cc-btn gris" onclick="this.closest(\'.vc-modal-bk\').remove()">Cerrar</button></div>');
+  }
+  _ncCtx = { facturaId: Number(facturaId), acr: acr, incidencia: ctx.incidencia || null, pedidoId: acr.pedido_id, fila: ctx.fila || 0 };
+  // prellenado desde la incidencia del chofer (cantidades y "qué recibió en su lugar")
+  var pre = {}; var preEntregado = null; var preMotivo = null;
+  if (ctx.incidencia) {
+    (ctx.incidencia.items || []).forEach(function (i) { pre[String(i.producto_xubio_id)] = Number(i.cantidad) || 0; });
+    preEntregado = (ctx.incidencia.entregado_json || ctx.incidencia.entregado || null);
+    preMotivo = ctx.incidencia.tipo === 'producto_equivocado' ? 'producto_equivocado' : ctx.incidencia.tipo === 'devolucion' ? 'devolucion' : ctx.incidencia.tipo === 'faltante' ? 'faltante' : null;
+  }
+  var filas = (acr.items || []).map(function (i, k) {
+    var max = Number(i.cantidad_acreditable) || 0;
+    return '<tr><td style="padding:4px 6px;">' + ccEsc(i.nombre) + '</td><td style="text-align:center;">' + i.cantidad_factura + '</td>' +
+      '<td style="text-align:center;">' + i.cantidad_nc_emitidas + '</td><td style="text-align:center;">' + i.cantidad_reservada + '</td>' +
+      '<td style="text-align:center;font-weight:700;">' + max + '</td><td style="text-align:right;">' + ncMon(i.precio_civa) + (Number(i.descuento_pct) ? ' (−' + i.descuento_pct + '%)' : '') + '</td>' +
+      '<td style="text-align:center;"><input type="number" min="0" max="' + max + '" step="1" value="' + Math.min(max, pre[String(i.producto_xubio_id)] || 0) + '" data-k="' + k + '" class="ncnew-cant" style="width:64px;padding:4px;border:1.5px solid #E8DCC8;border-radius:6px;text-align:center;"' + (max <= 0 ? ' disabled' : '') + ' oninput="ncCrearTotal()"></td></tr>';
+  }).join('');
+  var h = '<h3>🧾 Crear NC sobre ' + ccEsc(acr.factura_numero) + '</h3>' +
+    '<div style="font-size:13px;color:#8a6f5f;">' + ccEsc(acr.cliente_nombre || '') + ' · ' + ccEsc(acr.pedido_id) + ' · factura ' + ncMon(acr.importe_factura) +
+    ' · ya en NC ' + ncMon(acr.importe_nc_emitidas) + ' · reservado ' + ncMon(acr.importe_reservado) + ' · <b>acreditable ' + ncMon(acr.importe_acreditable) + '</b></div>' + aviso +
+    (acr.bloqueo ? '<div class="vc-check">⚠️ ' + ccEsc(acr.bloqueo) + ': esta factura tiene una NC hecha en Xubio sin detalle de renglones. Se puede anular por el total, pero no por producto.</div>' : '') +
+    (ctx.incidencia ? '<div class="vc-check">⚠️ Desde la incidencia del chofer (' + ccEsc(ctx.incidencia.tipo) + ', ' + ccHora(ctx.incidencia.hecho_at) + '): ' + ccEsc(ctx.incidencia.nota || '') + '</div>' : '') +
+    '<div style="margin-top:10px;font-size:13.5px;">' +
+      '<label style="margin-right:12px;"><input type="radio" name="ncnew-motivo" value="anulacion" onchange="ncCrearTotal()"> <b>Anulación total</b></label>' +
+      '<label style="margin-right:12px;"><input type="radio" name="ncnew-motivo" value="faltante"' + (preMotivo === 'faltante' || !preMotivo ? ' checked' : '') + ' onchange="ncCrearTotal()"> Faltante (no subió al camión)</label>' +
+      '<label style="margin-right:12px;"><input type="radio" name="ncnew-motivo" value="devolucion"' + (preMotivo === 'devolucion' ? ' checked' : '') + ' onchange="ncCrearTotal()"> Devolución (el cliente la rechazó)</label>' +
+      '<label><input type="radio" name="ncnew-motivo" value="producto_equivocado"' + (preMotivo === 'producto_equivocado' ? ' checked' : '') + ' onchange="ncCrearTotal()"> Producto equivocado</label></div>' +
+    '<div id="ncnew-equiv" style="display:none;margin-top:8px;padding:8px;border:1.5px solid #FFB74D;border-radius:8px;background:#FFF8F0;font-size:13px;"><b>¿Qué recibió el cliente en lugar de lo facturado?</b>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"><input id="ncnew-eq-prod" placeholder="Producto entregado" value="' + ccEsc(preEntregado && preEntregado[0] ? (preEntregado[0].producto || preEntregado[0].nombre || '') : '') + '" style="flex:2;min-width:160px;padding:6px;border:1.5px solid #E8DCC8;border-radius:6px;">' +
+      '<input id="ncnew-eq-cant" type="number" min="1" step="1" value="' + (preEntregado && preEntregado[0] && preEntregado[0].cantidad || 1) + '" style="width:70px;padding:6px;border:1.5px solid #E8DCC8;border-radius:6px;">' +
+      '<input id="ncnew-eq-ped" placeholder="Pedido de origen (TCK-…)" value="' + ccEsc(preEntregado && preEntregado[0] ? (preEntregado[0].pedido_origen || '') : '') + '" style="flex:1;min-width:150px;padding:6px;border:1.5px solid #E8DCC8;border-radius:6px;"></div>' +
+      '<div class="cc-meta">La NC acredita lo facturado que no quedó en el cliente (vuelve a cámara como retorno esperado). Lo que el cliente conserva se factura o se retira: queda como paso pendiente del pedido.</div></div>' +
+    '<table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px;"><thead><tr style="color:#8a6f5f;"><th style="text-align:left;">Producto</th><th>Fact.</th><th>En NC</th><th>Reserv.</th><th>Acredit.</th><th style="text-align:right;">Precio c/IVA</th><th>Cant. NC</th></tr></thead><tbody>' + filas + '</tbody></table>' +
+    '<div id="ncnew-total" style="margin-top:8px;font-weight:700;">Total NC: $0</div>' +
+    '<textarea id="ncnew-nota" rows="2" style="width:100%;margin-top:8px;padding:8px;box-sizing:border-box;border:1.5px solid #E8DCC8;border-radius:8px;" placeholder="Nota (motivo, quién lo pidió…)"></textarea>' +
+    '<div class="cc-meta" style="margin-top:6px;">Al confirmar se crea y valida la solicitud (precios, descuentos e IVA congelados de la factura original). La emisión en Xubio es un paso aparte, con Simular primero.</div>' +
+    '<div style="display:flex;gap:8px;margin-top:12px;"><button class="cc-btn verde" style="flex:1" id="ncnew-ok" onclick="ncCrearConfirmar(this)">Crear y validar solicitud</button>' +
+    '<button class="cc-btn gris" onclick="this.closest(\'.vc-modal-bk\').remove()">Cancelar</button></div>';
+  vcModal(h); ncCrearTotal();
+};
+window.ncCrearTotal = function () {
+  var c = _ncCtx; if (!c) return;
+  var mot = (document.querySelector('input[name="ncnew-motivo"]:checked') || {}).value;
+  var eq = document.getElementById('ncnew-equiv'); if (eq) eq.style.display = mot === 'producto_equivocado' ? '' : 'none';   // v13.243.0
+  var tot = 0;
+  if (mot === 'anulacion') { tot = Number(c.acr.importe_factura) || 0; document.querySelectorAll('.ncnew-cant').forEach(function (el) { el.disabled = true; }); }
+  else {
+    document.querySelectorAll('.ncnew-cant').forEach(function (el) {
+      var i = c.acr.items[Number(el.dataset.k)]; var max = Number(i.cantidad_acreditable) || 0; el.disabled = max <= 0;
+      var v = Math.max(0, Math.min(max, Number(el.value) || 0)); if (Number(el.value) !== v) el.value = v;
+      tot += v * (Number(i.precio_civa) || 0) * (1 - (Number(i.descuento_pct) || 0) / 100);
+    });
+  }
+  var el = document.getElementById('ncnew-total'); if (el) el.textContent = 'Total NC: ' + ncMon(tot) + (mot === 'anulacion' ? ' (anulación total: todos los renglones)' : '');
+};
+window.ncCrearConfirmar = async function (btn) {
+  var c = _ncCtx; if (!c) return;
+  var mot = (document.querySelector('input[name="ncnew-motivo"]:checked') || {}).value || 'faltante';
+  var items = [];
+  if (mot !== 'anulacion') {
+    document.querySelectorAll('.ncnew-cant').forEach(function (el) { var v = Number(el.value) || 0; if (v > 0) items.push({ producto_xubio_id: Number(c.acr.items[Number(el.dataset.k)].producto_xubio_id), cantidad: v }); });
+    if (!items.length) return ccToast('Indicá al menos una cantidad.', 'err');
+  }
+  if (mot === 'anulacion' && !confirm('¿Anular la factura ' + c.acr.factura_numero + ' por el TOTAL (' + ncMon(c.acr.importe_factura) + ')?')) return;
+  btn.disabled = true; btn.textContent = 'Creando…';
+  var reqId = 'admin:nc:' + c.facturaId + ':' + Date.now();
+  var entregado = null;   // v13.243.0 — producto equivocado
+  if (mot === 'producto_equivocado') {
+    var eqp = (document.getElementById('ncnew-eq-prod').value || '').trim();
+    if (!eqp) { btn.disabled = false; btn.textContent = 'Crear y validar solicitud'; return ccToast('Decí qué recibió el cliente en su lugar.', 'err'); }
+    entregado = [{ producto: eqp, cantidad: Number(document.getElementById('ncnew-eq-cant').value) || 1, pedido_origen: (document.getElementById('ncnew-eq-ped').value || '').trim() || null }];
+  }
+  var r = await ncRpc('nc_solicitud_crear', { p_factura_transaccion_id: c.facturaId, p_motivo: mot, p_tipo: mot === 'anulacion' ? 'total' : 'items', p_items: items, p_nota: (document.getElementById('ncnew-nota').value || '').trim() || null, p_request_id: reqId,
+                                            p_entregado: entregado, p_incidencia_id: c.incidencia ? c.incidencia.id : null });
+  if (!r || r.ok !== true) { btn.disabled = false; btn.textContent = 'Crear y validar solicitud'; return alert('⛔ NO SE CREÓ\n\n' + ((r && (r.message || r.code)) || 'Error desconocido')); }
+  var v = await ncRpc('nc_solicitud_validar', { p_id: Number(r.solicitud_id) });
+  var bk = btn.closest('.vc-modal-bk'); if (bk) bk.remove();
+  if (!v || v.ok !== true) { alert('Solicitud #' + r.solicitud_id + ' creada pero NO validada:\n' + ((v && (v.message || v.code)) || '') + '\n\nQueda en la bandeja para validar.'); }
+  else {
+    // v13.243.0 — resultado claro + pasos pendientes, con las acciones a mano
+    var pasos = []; try { var b = await sbFetch('vw_nc_bandeja?solicitud_id=eq.' + r.solicitud_id + '&select=pasos_pendientes'); pasos = (b && b[0] && b[0].pasos_pendientes) || []; } catch (e) {}
+    vcModal('<h3>✅ Solicitud #' + r.solicitud_id + ' validada</h3><div style="font-size:13.5px;">' + ncMon(v.importe_previsto) + ' · ' + ccEsc(v.external_id) + ' · factura ' + ccEsc(v.factura_numero || '') + '</div>' +
+      '<div class="cc-meta" style="margin-top:6px;">Precios, descuentos e IVA congelados de la factura original. Todavía no se emitió nada.</div>' +
+      '<div style="margin-top:8px;font-size:13px;"><b>Pasos pendientes</b><ul style="margin:4px 0 0 18px;padding:0;">' + (pasos.length ? pasos.map(function (p) { return '<li>' + ccEsc(p) + '</li>'; }).join('') : '<li>Emitir en Xubio</li>') + '</ul></div>' +
+      (_ncCfg && !_ncCfg.nc_emision_habilitada ? '<div class="vc-check" style="margin-top:8px;">La emisión desde la app está apagada: se puede Simular; Emitir devuelve EMISION_DESHABILITADA hasta encenderla.</div>' : '') +
+      '<div style="display:flex;gap:8px;margin-top:12px;"><button class="cc-btn azul" onclick="this.closest(\'.vc-modal-bk\').remove();ncSimular(' + r.solicitud_id + ', null)">🔍 Simular</button>' +
+      '<button class="cc-btn verde" onclick="this.closest(\'.vc-modal-bk\').remove();ncEmitir(' + r.solicitud_id + ', null)">⚡ Emitir en Xubio</button>' +
+      '<button class="cc-btn gris" onclick="this.closest(\'.vc-modal-bk\').remove()">Después</button></div>');
+  }
+  ncBandejaCargar();
+  if (c.pedidoId && document.getElementById('ncped-cont')) ncPedidoRefrescar(c.pedidoId);
+};
+
+// ── Acciones de bandeja ──
+window.ncValidar = async function (id, btn) {
+  if (btn) btn.disabled = true;
+  var v = await ncRpc('nc_solicitud_validar', { p_id: id });
+  if (!v || v.ok !== true) alert('⛔ NO SE VALIDÓ\n\n' + ((v && (v.message || v.code)) || '')); else ccToast('Solicitud #' + id + ' validada por ' + ncMon(v.importe_previsto), 'ok');
+  ncBandejaCargar();
+};
+window.ncCancelar = async function (id) {
+  var m = prompt('Cancelar la solicitud #' + id + '. Motivo (queda auditado):'); if (m === null) return; if (!m.trim()) return ccToast('Motivo obligatorio.', 'err');
+  var r = await ncRpc('nc_solicitud_cancelar', { p_id: id, p_motivo: m.trim() });
+  ccToast(r && r.ok ? 'Cancelada' : ('No se pudo: ' + ((r && (r.message || r.code)) || '')), r && r.ok ? 'ok' : 'err'); ncBandejaCargar();
+};
+window.ncSimular = async function (id, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Simulando…'; }
+  var r = await ncEdge(NC_EDGE_EMITIR, { solicitud_id: id });
+  if (btn) { btn.disabled = false; btn.textContent = '🔍 Simular'; }
+  if (!r.ok) return alert('⛔ NO SE PUEDE EMITIR ASÍ\n\n' + (r.code || '') + ': ' + (r.message || JSON.stringify(r.detalle || {})));
+  var p = r.payload_que_enviaria, cmp = r.comparacion || {};
+  var ren = (cmp.renglones || []).map(function (x) { return '<tr><td>' + ccEsc(x.nombre) + '</td><td style="text-align:center;">' + x.cantidad + '</td><td style="text-align:right;">' + ncMon(x.precio_civa_congelado) + '</td><td style="text-align:right;">' + ncMon(x.precio_civa_vivo) + '</td><td style="text-align:center;">' + (x.coincide ? '✓' : '✗') + '</td></tr>'; }).join('');
+  vcModal('<h3>🔍 Simulación NC #' + id + '</h3><div class="cc-meta">tipo ' + p.tipo + ' · comprobanteAsociado ' + p.comprobanteAsociado + ' · externalId ' + ccEsc(p.externalId) + ' · condición ' + ccEsc(cmp.condicion_fiscal || '') + (cmp.aplica_division_iva ? ' (precio neto)' : ' (precio c/IVA)') + '</div>' +
+    '<table style="width:100%;font-size:12.5px;border-collapse:collapse;margin-top:8px;"><thead><tr style="color:#8a6f5f;"><th style="text-align:left;">Renglón</th><th>Cant.</th><th style="text-align:right;">c/IVA validado</th><th style="text-align:right;">c/IVA en vivo</th><th>OK</th></tr></thead><tbody>' + ren + '</tbody></table>' +
+    '<div style="margin-top:8px;font-weight:700;">Total en vivo ' + ncMon(cmp.total_vivo_civa) + ' · previsto ' + ncMon(cmp.importe_previsto) + '</div>' +
+    '<div class="cc-meta" style="margin-top:6px;">descripcion: ' + ccEsc(p.descripcion) + '</div>' +
+    '<details style="margin-top:8px;"><summary class="cc-meta">payload completo</summary><pre style="font-size:11px;white-space:pre-wrap;">' + ccEsc(JSON.stringify(p, null, 1)) + '</pre></details>' +
+    '<div style="display:flex;gap:8px;margin-top:12px;"><button class="cc-btn verde" style="flex:1" onclick="this.closest(\'.vc-modal-bk\').remove();ncEmitir(' + id + ', null)">⚡ Emitir en Xubio</button><button class="cc-btn gris" onclick="this.closest(\'.vc-modal-bk\').remove()">Cerrar</button></div>');
+};
+window.ncEmitir = async function (id, btn) {
+  if (!confirm('Vas a EMITIR una nota de crédito REAL en Xubio (solicitud #' + id + ').\n\nSe hace UNA sola vez. Si la conexión se corta, NO vuelvas a emitir: usá Verificar.\n\n¿Confirmás?')) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Emitiendo…'; }
+  var r = await ncEdge(NC_EDGE_EMITIR, { solicitud_id: id, modo: 'emitir', confirmar: true });
+  if (r.ok && r.emitio) {
+    var ef = r.efectos || {}; var pasos = r.pasos_pendientes || [];
+    var efTxt = ef.aplicado ? 'Efectos aplicados solos: ' + (ef.renglones_aplicados || 0) + ' renglón(es) (' + ccEsc(ef.decision || '') + ')' + (ef.renglones_revisar ? ' · ' + ef.renglones_revisar + ' para revisar' : '')
+                : (ef.bloqueo ? 'Sin efectos todavía: ' + ccEsc(ef.bloqueo) : 'Sin efectos automáticos (' + ccEsc(ef.motivo || ef.decision || '—') + ')');
+    alert('✅ NC ' + (r.nc && r.nc.numero) + (r.nc && r.nc.cae ? ' · CAE ' + r.nc.cae : ' · SIN CAE (Verificar más tarde)') + (r.via_relectura ? '\n(adoptada por relectura tras respuesta ambigua)' : '') +
+          '\n\n' + efTxt + (pasos.length ? '\n\nPendiente:\n· ' + pasos.join('\n· ') : ''));
+  }
+  else alert('⛔ ' + (r.code || '') + '\n\n' + (r.message || '') + (r.code === 'AMBIGUO' ? '\n\nNO vuelvas a emitir. Usá Verificar en Xubio.' : ''));
+  ncBandejaCargar();
+};
+window.ncVerificar = async function (id, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Verificando…'; }
+  var r = await ncEdge(NC_EDGE_EMITIR, { solicitud_id: id, modo: 'verificar' });
+  if (!r.ok) alert('⛔ ' + (r.code || '') + ': ' + (r.message || ''));
+  else if (r.encontrada === false) alert('No existe en Xubio ningún comprobante con ese externalId (ni en externalId ni en descripción).\n\nSi lo confirmás mirando Xubio, usá "Rearmar" para volver a emitir.');
+  else if (r.encontrada) alert('✅ Encontrada en Xubio: ' + (r.nc && r.nc.numero) + (r.nc && r.nc.cae ? ' con CAE' : ' sin CAE') + '. Adoptada.' + (r.externalId_devuelto_por_xubio ? '\n(Xubio devuelve externalId)' : '\n(Xubio NO devolvió externalId: se identificó por la descripción)'));
+  else if (r.accion) alert(r.accion === 'cae_obtenido' ? '✅ CAE obtenido: ' + r.cae : 'Sigue sin CAE: ' + (r.detalle || ''));
+  ncBandejaCargar();
+};
+window.ncRearmar = async function (id) {
+  var m = prompt('Rearmar la solicitud #' + id + ' para volver a emitir.\nSOLO si verificaste en Xubio que la NC NO existe. ¿Qué verificaste?'); if (m === null) return;
+  var r = await ncRpc('nc_solicitud_rearmar', { p_id: id, p_motivo: m.trim() });
+  ccToast(r && r.ok ? 'Rearmada: vuelve a validada' : ('No se pudo: ' + ((r && (r.message || r.code)) || '')), r && r.ok ? 'ok' : 'err'); ncBandejaCargar();
+};
+window.ncAplicacionModal = function (id) {
+  var r = _ncBandeja.find(function (x) { return Number(x.solicitud_id) === Number(id); }); if (!r) return;
+  _ncCtx = { apl: r };
+  vcModal('<h3>📒 Registrar aplicación de ' + ccEsc(r.nc_numero || '') + '</h3><div class="cc-meta">' + ccEsc(r.cliente || '') + ' · NC por ' + ncMon(r.importe_previsto) + ' · la aplicación se hace EN XUBIO; acá se registra con evidencia.</div>' +
+    '<div style="margin-top:10px;font-size:13.5px;">Factura destino (id Xubio) <input id="ncapl-fact" value="' + r.factura_transaccion_id + '" style="width:130px;padding:5px;border:1.5px solid #E8DCC8;border-radius:6px;"> <span class="cc-meta">(por defecto, la original ' + ccEsc(r.factura_numero || '') + ')</span></div>' +
+    '<div style="margin-top:8px;font-size:13.5px;">Importe aplicado <input id="ncapl-imp" type="number" step="0.01" value="' + (Number(r.importe_previsto) || 0) + '" style="width:130px;padding:5px;border:1.5px solid #E8DCC8;border-radius:6px;"></div>' +
+    '<input id="ncapl-evid" placeholder="Evidencia: nº de recibo / referencia en Xubio (obligatorio)" style="width:100%;margin-top:8px;padding:7px;box-sizing:border-box;border:1.5px solid #E8DCC8;border-radius:8px;">' +
+    '<div style="display:flex;gap:8px;margin-top:12px;"><button class="cc-btn verde" style="flex:1" onclick="ncAplicacionConfirmar(this)">Registrar</button><button class="cc-btn gris" onclick="this.closest(\'.vc-modal-bk\').remove()">Cancelar</button></div>');
+};
+window.ncAplicacionConfirmar = async function (btn) {
+  var r = _ncCtx && _ncCtx.apl; if (!r) return;
+  var ev = (document.getElementById('ncapl-evid').value || '').trim(); if (!ev) return ccToast('La evidencia es obligatoria.', 'err');
+  btn.disabled = true;
+  var x = await ncRpc('nc_aplicacion_registrar', { p_nc_transaccion_id: Number(r.nc_transaccion_id), p_factura_transaccion_id: Number(document.getElementById('ncapl-fact').value), p_importe: Number(document.getElementById('ncapl-imp').value), p_evidencia: ev });
+  var bk = btn.closest('.vc-modal-bk'); if (bk) bk.remove();
+  if (!x || x.ok !== true) alert('⛔ ' + ((x && (x.message || x.code)) || '')); else ccToast(x.completa ? 'Aplicación completa registrada' : ('Registrado. Aplicado ' + ncMon(x.aplicado_total) + ' de ' + ncMon(x.nc_importe)), 'ok');
+  ncBandejaCargar();
+};
+
+
+// ═══ v13.243.0 — DEVOLUCIÓN / NOTA DE CRÉDITO DESDE EL PEDIDO ═══════════════
+// Una sola pantalla: factura original (elección explícita si hay varias), facturado / entregado real /
+// retornado / acreditado, incidencias del chofer, NC en revisión y la resolución del pedido.
+var _ncCfg = null; var _ncPed = null;
+var NC_RESOLUCIONES = [['entregado', 'Entregado (sin novedades)'], ['entregado_con_ajuste', 'Entregado con ajuste (devolución/NC conciliadas)'], ['anulado_nc', 'Anulado por NC (no se entregó, sin retorno físico pendiente)'],
+  ['no_entregado_devuelto', 'No entregado, mercadería devuelta y NC aplicada'], ['no_salio', 'No salió (anulado antes de cargar / cancelado)'], ['credito_sin_retorno', 'Crédito sin retorno físico (cliente conserva)'], ['pendiente_acuerdo', 'Pendiente de acuerdo con el cliente']];
+function ncPedFmtItems(arr, campos) {
+  if (!arr || !arr.length) return '<span class="cc-meta">—</span>';
+  return arr.map(function (i) { return campos.map(function (c) { return i[c] == null ? '' : ccEsc(i[c]); }).filter(Boolean).join(' × '); }).join(' · ');
+}
+window.ncPedidoAbrir = async function (pedidoId, ev, fila) {
+  if (ev && ev.stopPropagation) ev.stopPropagation();
+  if (typeof _contBloq === 'function' && esContador()) { /* el contador ve, no opera */ }
+  var bk = vcModal('<h3>🧾 Devolución / Nota de crédito</h3><div class="cc-meta">Leyendo el pedido…</div>');
+  bk.querySelector('.vc-modal').id = 'ncped-modal';
+  _ncPed = { pedidoId: pedidoId, fila: fila || 0 };
+  await ncPedidoRefrescar(pedidoId);
+};
+window.ncPedidoRefrescar = async function (pedidoId) {
+  var m = document.getElementById('ncped-modal'); if (!m) return;
+  var sit = await ncRpc('pedido_situacion', { p_pedido_id: pedidoId });
+  var fac = await ncRpc('nc_facturas_del_pedido', { p_pedido_id: pedidoId });
+  if (!_ncCfg) { try { _ncCfg = await ncRpc('nc_config', {}); } catch (e) {} }
+  if (!sit || sit.ok !== true) { m.innerHTML = '<h3>🧾 ' + ccEsc(pedidoId) + '</h3><div class="vc-check">⛔ ' + ccEsc((sit && (sit.message || sit.code)) || 'No se pudo leer') + '</div><button class="cc-btn gris" onclick="this.closest(\'.vc-modal-bk\').remove()">Cerrar</button>'; return; }
+  _ncPed.sit = sit; _ncPed.fac = fac;
+  var facturas = (fac && fac.facturas) || []; var incs = (fac && fac.incidencias) || [];
+  var h = '<h3>🧾 ' + ccEsc(sit.cliente || '') + ' <span class="cc-meta">' + ccEsc(pedidoId) + '</span></h3>' +
+    '<div style="font-size:12.5px;color:#8a6f5f;">hoja: <b>' + ccEsc(sit.estado_hoja || '') + '</b>' + (sit.viaje ? ' · viaje ' + ccEsc(sit.viaje.zona) + ' ' + ccEsc(sit.viaje.fecha_salida) + ' (' + ccEsc(sit.viaje.estado) + ', ' + ccEsc(sit.viaje.chofer || '') + ')' : ' · sin viaje') +
+    (sit.entrega ? ' · entrega <b>' + ccEsc(sit.entrega.estado) + '</b>' + (sit.entrega.forma_cobro ? ' · ' + ccEsc(sit.entrega.forma_cobro) : '') + (sit.entrega.cta_cte_autorizada ? ' · cta cte autorizada' : '') : '') + '</div>' +
+    // v13.245.0 · la entrega dice una cosa y la incidencia del chofer dice otra: se avisa en vez de darla por buena
+    (sit.entrega && sit.entrega.estado === 'entregado' && Number(sit.incidencias_abiertas) > 0
+      ? '<div class="vc-check">⚠️ La entrega figura <b>registrada como entregada</b>, pero el chofer informó ' + sit.incidencias_abiertas + ' incidencia(s) sin resolver: lo entregado todavía no está confirmado. Resolvé la incidencia (NC o "resolver sin NC") antes de darla por cerrada.</div>' : '') +
+    (sit.entrega && sit.entrega.estado !== 'entregado' && Number(sit.importes && sit.importes.cobrado) > 0
+      ? '<div class="vc-check">⚠️ La entrega NO figura como entregada y sin embargo hay ' + ncMon(sit.importes.cobrado) + ' cobrados: revisá qué pasó antes de resolver.</div>' : '');
+  // 1 · factura original (elección explícita)
+  h += '<div style="margin-top:8px;"><b>1 · Factura original</b>';
+  if (!facturas.length) h += '<div class="vc-check">Este pedido no tiene factura en el espejo: se resuelve por el circuito previo a facturación (Facturación / Carga). No corresponde una NC.</div>';
+  else {
+    if (facturas.length > 1) h += '<div class="vc-check">⚠️ El pedido tiene ' + facturas.length + ' facturas: elegí explícitamente cuál corrige la NC.</div>';
+    facturas.forEach(function (f) {
+      h += '<div class="cc-row" style="border-top:1px solid #F4ECDD;"><div style="flex:1;"><b>' + ccEsc(f.numero) + '</b>' + (f.es_la_del_pedido ? ' <span class="vc-tag ok">la del pedido</span>' : '') + ' · ' + ccEsc(f.fecha) + ' · ' + ncMon(f.importe) + (f.cae ? ' · CAE ✓' : ' · <span style="color:#B71C1C">sin CAE</span>') + (f.con_renglones ? '' : ' · <span style="color:#B71C1C">sin renglones en el espejo</span>') +
+        ((f.nc_emitidas || []).length ? '<div class="cc-meta">NC: ' + f.nc_emitidas.map(function (n) { return ccEsc(n.numero) + ' ' + ncMon(n.importe) + (n.cae ? '' : ' (sin CAE)'); }).join(', ') + '</div>' : '') + '</div>' +
+        (esContador() ? '' : '<button class="cc-btn verde" onclick="ncCrearAbrir(' + f.transaccion_id + ', {pedidoId:\'' + ccEsc(pedidoId) + '\'})">🧾 Crear NC sobre esta factura</button>') + '</div>';
+    });
+  }
+  h += '</div>';
+  // 2 · lo que pasó de verdad
+  h += '<div style="margin-top:8px;"><b>2 · Facturado / entregado / retornado</b>' +
+    '<table style="width:100%;font-size:12.5px;border-collapse:collapse;margin-top:4px;"><tr><td style="width:110px;color:#8a6f5f;vertical-align:top;">Facturado</td><td>' + ncPedFmtItems(sit.facturado, ['cantidad', 'nombre']) + '</td></tr>' +
+    '<tr><td style="color:#8a6f5f;vertical-align:top;">Entregado real</td><td>' + (sit.entregado_real && sit.entregado_real.length ? sit.entregado_real.map(function (i) { return ccEsc(i.entregada) + ' de ' + ccEsc(i.pedida) + ' × ' + ccEsc(i.producto) + (i.motivo ? ' (' + ccEsc(i.motivo) + ')' : ''); }).join(' · ') : '<span class="cc-meta">' + (sit.entrega && sit.entrega.estado === 'entregado' ? 'sin detalle por producto (entrega previa a Carga v2)' : '—') + '</span>') + '</td></tr>' +
+    '<tr><td style="color:#8a6f5f;vertical-align:top;">Retornado</td><td>' + (sit.retornado && sit.retornado.length ? sit.retornado.map(function (d) {
+      return '<div>' + ({ parcial: '↩️ parcial', no_entrega_total: '↩️ no entregado', producto_equivocado: '🔀 producto equivocado' }[d.tipo] || ccEsc(d.tipo)) + (d.origen === 'nc' ? ' (retorno esperado por NC)' : d.origen === 'admin' ? ' (decidido por Administración)' : '') + ': ' +
+        ncPedFmtItems(d.items, ['esperado', 'producto']) + ' · hecho ' + ccHora(d.hecho_at || d.registrado_at) + ' · recepción <b>' + ccEsc(d.recepcion) + '</b>' + (d.recibida_hecho_en ? ' (entró ' + ccHora(d.recibida_hecho_en) + ', registrado ' + ccHora(d.recibida_en) + ')' : '') +
+        ' · NC ' + ccEsc(d.nc_estado) + (d.nc_numero ? ' ' + ccEsc(d.nc_numero) : '') + ' · stock ' + ccEsc(d.stock) + ' · cta cte ' + ccEsc(d.cc) +
+        (d.entregado_en_su_lugar && d.entregado_en_su_lugar.length ? '<div class="cc-meta">el cliente recibió en su lugar: ' + ccEsc(d.entregado_en_su_lugar.map(function (x) { return (x.cantidad || '') + '× ' + (x.producto || x.nombre) + (x.pedido_origen ? ' (' + x.pedido_origen + ')' : ''); }).join(', ')) + '</div>' : '') + '</div>';
+    }).join('') : '<span class="cc-meta">—</span>') + '</td></tr>' +
+    '<tr><td style="color:#8a6f5f;vertical-align:top;">Acreditado</td><td>' + (sit.acreditado && sit.acreditado.length ? sit.acreditado.map(function (n) {
+      return '<div>' + ccEsc(n.numero) + ' ' + ncMon(n.importe) + (n.cae ? '' : ' <span style="color:#B71C1C">sin CAE</span>') + (n.pendiente_revision ? ' · <span style="color:#B71C1C">requiere revisión</span> <button class="cc-btn azul" style="padding:3px 8px;" onclick="ncRevisionModalPorNumero(\'' + ccEsc(n.numero) + '\')">Revisar</button>' : '') +
+        ((n.cobertura || []).length ? '<div class="cc-meta">cubre: ' + n.cobertura.map(function (c) { return (c.cantidad || 0) + ' → ' + ccEsc(c.destino) + ' (' + ccEsc(c.motivo) + ')'; }).join(', ') + '</div>' : '<div class="cc-meta">sin cobertura registrada (sin renglones o sin clasificar)</div>') + '</div>';
+    }).join('') : '<span class="cc-meta">—</span>') + '</td></tr>' +
+    '<tr><td style="color:#8a6f5f;">Importes</td><td>facturado ' + ncMon(sit.importes.facturado) + ' · acreditado c/CAE ' + ncMon(sit.importes.acreditado_con_cae) + ' · cobrado ' + ncMon(sit.importes.cobrado || 0) + ' · <b>saldo de ESTE pedido</b> ' + ncMon(sit.importes.saldo_pedido !== undefined ? sit.importes.saldo_pedido : sit.importes.saldo_cliente_estimado) + (Number(sit.importes.saldo_pedido !== undefined ? sit.importes.saldo_pedido : sit.importes.saldo_cliente_estimado) < 0 ? ' (a favor del cliente)' : '') +
+  '<div class="cc-meta">Es lo que queda de esta factura, no el saldo del cliente: la cuenta corriente del cliente está más abajo (y lo que la app no puede demostrar se verifica en Xubio).</div></td></tr></table></div>';
+  // 3 · incidencias del chofer
+  if (incs.length) {
+    h += '<div style="margin-top:8px;"><b>3 · Incidencias del chofer</b>' + incs.map(function (i) {
+      return '<div class="cc-row" style="border-top:1px solid #F4ECDD;"><div style="flex:1;"><b>' + ccEsc(i.tipo) + '</b> · ' + ccEsc(i.chofer || '') + ' · hecho ' + ccHora(i.hecho_at) + ' · registrado ' + ccHora(i.registrado_at) + (i.foto_pendiente ? ' · <span style="color:#B71C1C">FOTO PENDIENTE</span>' : '') +
+        '<div class="cc-meta">' + ncPedFmtItems(i.items, ['cantidad', 'producto']) + (i.entregado && i.entregado.length ? ' · recibió: ' + ccEsc(i.entregado.map(function (x) { return (x.cantidad || '') + '× ' + (x.producto || x.nombre) + (x.pedido_origen ? ' (' + x.pedido_origen + ')' : ''); }).join(', ')) : '') + (i.nota ? ' · ' + ccEsc(i.nota) : '') + ' · estado ' + ccEsc(i.estado) + '</div></div>' +
+        (esContador() || i.estado !== 'abierta' ? '' : (facturas.length ? '<button class="cc-btn verde" onclick="ncCrearDesdeIncidencia(\'' + i.id + '\')">🧾 Crear NC desde esta incidencia</button>' : '') +
+        '<button class="cc-btn gris" onclick="ncIncidenciaResolverUI(\'' + i.id + '\')">Resolver sin NC</button>') + '</div>';
+    }).join('') + '</div>';
+  }
+  // v13.244.0 · pendientes: qué falta, quién y la acción a mano
+  var pend = sit.pendientes || [];
+  h += '<div style="margin-top:8px;padding:8px;border:1.5px solid ' + (pend.length ? '#E65100' : '#2E7D32') + ';border-radius:10px;background:' + (pend.length ? '#FFF8F0' : '#F1F8E9') + ';"><b>' + (incs.length ? '4' : '3') + ' · Qué falta · quién · acción</b>' +
+    (pend.length ? pend.map(function (p) { return '<div class="cc-row" style="border-top:1px solid #F4ECDD;"><div style="flex:1;">' + ccEsc(p.que || '') + ' <span class="vc-tag" style="background:#FFF3E0;color:#B45309;">' + ccEsc(p.quien || '') + '</span></div>' + ncPendienteBoton(p) + '</div>'; }).join('')
+                : '<div class="cc-meta">Nada pendiente en este pedido.</div>') + '</div>';
+  // obligaciones (abiertas y últimas cumplidas)
+  var obls = sit.obligaciones || [];
+  if (obls.length) {
+    h += '<div style="margin-top:8px;"><b>Obligaciones</b> <span class="cc-meta">(decidir no es ejecutar: se cumplen registrando el hecho)</span>' + obls.map(function (o) {
+      return '<div class="cc-row" style="border-top:1px solid #F4ECDD;"><div style="flex:1;">' + (o.estado === 'abierta' ? '🔴' : o.estado === 'cumplida' ? '✅' : '⚪') + ' <b>' + ccEsc(o.tipo) + '</b> · ' + ccEsc(o.descripcion) + ' <span class="cc-meta">' + ccEsc(o.responsable) + ' · ' + ccHora(o.creada_at) + (o.cumplida_at ? ' → ' + ccEsc(o.estado) + ' ' + ccHora(o.cumplida_at) + ' por ' + ccEsc(o.cumplida_por || '') + (o.nota ? ' · ' + ccEsc(o.nota) : '') : '') + '</span>' +
+        (o.estado === 'abierta' ? '<div class="cc-meta">→ ' + ccEsc(o.accion || '') + '</div>' : '') + '</div>' +
+        (o.estado === 'abierta' && !esContador() ? ncObligacionBoton(o) : '') + '</div>';
+    }).join('') + '</div>';
+  }
+  // diferencias de recepción
+  if (Number(sit.diferencias_abiertas)) {
+    h += '<div style="margin-top:8px;"><b>Diferencias de recepción (' + sit.diferencias_abiertas + ')</b> <button class="cc-btn azul" style="padding:3px 8px;" onclick="ncDiferenciasModal(\'' + ccEsc(pedidoId) + '\')">Ver / resolver</button></div>';
+  }
+  // cobros e imputaciones (contra boleta / cuenta corriente autorizada)
+  if (sit.cta_cte && sit.cta_cte.modalidad) {
+    var fcs = (sit.cta_cte.facturas || []);
+    h += '<div style="margin-top:8px;padding:8px;border:1.5px solid #BBDEFB;border-radius:10px;background:#F3F8FF;"><b>Cuenta corriente autorizada · ' + ccEsc(sit.cta_cte.modalidad) + '</b>' +
+      '<div class="cc-meta"><b>Saldo del CLIENTE</b> (todas sus facturas, no solo este pedido). Solo lo que la app puede demostrar: lo que está "en revisión" se verifica contra Xubio.</div>' +
+      (fcs.length ? fcs.map(function (f) {
+        var est = f.estado === 'verificada_app' ? '<span class="vc-tag ok">pendiente verificada (app)</span>' : f.estado === 'verificada_admin' ? '<span class="vc-tag ok">pendiente verificada (' + ccEsc(f.verificacion || '') + ')</span>' : f.estado === 'saldada' ? '<span class="vc-tag">saldada</span>' : '<span class="vc-tag" style="background:#FFF3E0;color:#B45309;">SALDO EN REVISIÓN</span>';
+        return '<div class="cc-row" style="border-top:1px solid #E3EEFF;"><div style="flex:1;"><b>' + ccEsc(f.numero) + '</b> · ' + ccEsc(f.fecha) + ' · ' + ncMon(f.importe) + (Number(f.nc) ? ' · NC ' + ncMon(f.nc) : '') + ' · cobrado ' + ncMon(f.cobrado) + (Number(f.imputado) ? ' · imputado ' + ncMon(f.imputado) : '') + ' · residual <b>' + ncMon(f.residual) + '</b> ' + est +
+          (f.saldo_verificado_original !== undefined && f.saldo_verificado_original !== null && Number(f.pagos_post_verificacion) ? '<div class="cc-meta">verificado ' + ncMon(f.saldo_verificado_original) + ' − pagos que Xubio todavía no refleja ' + ncMon(f.pagos_post_verificacion) + ' = <b>' + ncMon(f.saldo_verificado) + '</b></div>' : '') +
+          (f.explicacion ? '<div class="cc-meta">' + ccEsc(f.explicacion) + '</div>' : '') + '</div>' +
+          (!esContador() && f.estado !== 'saldada' ? '<button class="cc-btn gris" style="padding:3px 8px;" onclick="ncFacturaVerificarUI(' + f.transaccion_id + ', \'' + ccEsc(f.numero) + '\', ' + Number(f.residual) + ')">Verificar saldo (Xubio)</button>' : '') + '</div>';
+      }).join('') : '<div class="cc-meta">Sin facturas pendientes demostrables.</div>') +
+      ((sit.imputaciones || []).length ? '<div style="margin-top:6px;"><b>Cobros imputados</b>' + sit.imputaciones.map(function (i) { return '<div class="cc-meta">' + ncMon(i.monto) + ' ' + ccEsc(i.medio || '') + ' → ' + (i.estado === 'a_identificar' ? '<span style="color:#B71C1C">A IDENTIFICAR (saldo en revisión)</span>' + (!esContador() ? ' <button class="cc-btn azul" style="padding:2px 6px;" onclick="ncCobroIdentificarUI(' + i.id + ', ' + Number(i.monto) + ')">Imputar</button>' : '') : ccEsc(i.factura || '')) + ' · ' + ccEsc(i.por || '') + ' ' + ccHora(i.at) + '</div>'; }).join('') + '</div>' : '') +
+      (Number(sit.cobro_sin_imputar) > 0.5 && sit.entrega && !esContador() ? '<div style="margin-top:6px;"><span style="color:#B71C1C">Cobro sin imputar: ' + ncMon(sit.cobro_sin_imputar) + '</span> <button class="cc-btn verde" style="padding:3px 8px;" onclick="ncCobroImputarUI(\'' + sit.entrega.id + '\')">Imputar cobro</button></div>' : '') + '</div>';
+  }
+  // 4 · resolución
+  var bl = sit.bloqueos || [];
+  h += '<div style="margin-top:8px;padding:8px;border:2px solid ' + (bl.length ? '#E65100' : '#2E7D32') + ';border-radius:10px;background:' + (bl.length ? '#FFF3E0' : '#E8F5E9') + ';"><b>' + (incs.length ? '4' : '3') + ' · Resolución del pedido</b>' +
+    (sit.resolucion ? '<div style="font-size:13px;">' + (sit.resolucion.resolucion === 'pendiente_acuerdo' ? '⏳ <b>Pendiente de acuerdo</b> (sigue pendiente)' : sit.resolucion.forzada ? '⚠️ Resolución <b>FORZADA</b>: <b>' + ccEsc(sit.resolucion.resolucion) + '</b> con bloqueos a la vista; la hoja no se toca hasta completar' : (sit.resolucion.terminal ? '✅ ' : '') + 'Resuelto: <b>' + ccEsc(sit.resolucion.resolucion) + '</b>') + ' por ' + ccEsc(sit.resolucion.por) + ' ' + ccHora(sit.resolucion.at) + (sit.resolucion.nota ? ' · ' + ccEsc(sit.resolucion.nota) : '') + '</div>' : '') +
+    (sit.hoja_cola ? '<div style="font-size:13px;">📄 Hoja → <b>' + ccEsc(sit.hoja_cola.estado_destino) + '</b> en cola (se aplica automáticamente por Apps Script + verificación' + (sit.hoja_cola.intentos ? '; ' + sit.hoja_cola.intentos + ' intento(s)' : '') + ') <button class="cc-btn azul" style="padding:2px 8px;" onclick="hojaColaAplicarUno(' + sit.hoja_cola.id + ', this)">Aplicar ahora</button></div>' : '') +
+    (bl.length ? '<div style="font-size:13px;">Falta: ' + bl.map(function (b) { return '<div>• ' + ccEsc(b) + '</div>'; }).join('') + '</div>' : '<div style="font-size:13px;">Sin bloqueos.' + (sit.resolucion_sugerida ? ' Sugerido: <b>' + ccEsc(sit.resolucion_sugerida) + '</b>' : '') + '</div>') +
+    (esContador() ? '' : '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center;"><select id="ncped-res" style="padding:6px;border:1.5px solid #E8DCC8;border-radius:6px;">' +
+      NC_RESOLUCIONES.map(function (r) { return '<option value="' + r[0] + '"' + (r[0] === (sit.resolucion_sugerida || (bl.length ? 'pendiente_acuerdo' : '')) ? ' selected' : '') + '>' + ccEsc(r[1]) + '</option>'; }).join('') + '</select>' +
+      '<input id="ncped-nota" placeholder="Nota (qué se acordó / qué se hizo)" style="flex:1;min-width:180px;padding:6px;border:1.5px solid #E8DCC8;border-radius:6px;">' +
+      '<button class="cc-btn verde" onclick="ncPedidoResolver(this)">Registrar resolución</button></div>' +
+      '<div class="cc-meta">' + (_ncCfg && _ncCfg.resolucion_auto ? 'Cuando no quede nada abierto, la hoja (Cancelado / Entregado) se actualiza sola por el camino de siempre (Apps Script + verificación).' : 'Resolución/hoja automática apagada: la hoja se cambia con el botón de siempre cuando corresponda.') + ' Forzar una resolución con bloqueos la deja marcada y a la vista, no la oculta.</div>') + '</div>';
+  h += '<div style="display:flex;gap:8px;margin-top:12px;"><button class="cc-btn gris" onclick="ncPedidoRefrescar(\'' + ccEsc(pedidoId) + '\')">⟳ Actualizar</button><button class="cc-btn gris" onclick="this.closest(\'.vc-modal-bk\').remove()">Cerrar</button></div>';
+  m.innerHTML = '<div id="ncped-cont">' + h + '</div>';
+};
+window.ncCrearDesdeIncidencia = function (incId) {
+  var fac = _ncPed && _ncPed.fac; if (!fac) return;
+  var inc = (fac.incidencias || []).find(function (i) { return i.id === incId; }); if (!inc) return;
+  var fs = fac.facturas || [];
+  if (fs.length !== 1) return ccToast(fs.length ? 'Elegí primero sobre qué factura (hay ' + fs.length + '): usá "Crear NC sobre esta factura".' : 'El pedido no tiene factura.', 'err');
+  ncCrearAbrir(fs[0].transaccion_id, { incidencia: inc, pedidoId: _ncPed.pedidoId });
+};
+window.ncIncidenciaResolverUI = async function (incId) {
+  var res = prompt('Resolver sin NC. Escribí: reposicion | ajuste_cta_cte | cambio_mercaderia | sin_efecto | descartada'); if (res === null) return;
+  var nota = prompt('Qué se acordó con el cliente (obligatorio):'); if (nota === null) return;
+  var r = await ncRpc('entrega_incidencia_resolver', { p_id: incId, p_resolucion: (res || '').trim(), p_nota: (nota || '').trim() });
+  if (!r || r.ok !== true) return alert('⛔ ' + ((r && (r.message || r.code)) || ''));
+  ccToast('Incidencia ' + r.estado, 'ok'); if (_ncPed) ncPedidoRefrescar(_ncPed.pedidoId);
+};
+window.ncPedidoResolver = async function (btn) {
+  var sel = document.getElementById('ncped-res'); var nota = (document.getElementById('ncped-nota').value || '').trim();
+  btn.disabled = true;
+  var r = await ncRpc('pedido_resolver', { p_pedido_id: _ncPed.pedidoId, p_resolucion: sel.value, p_nota: nota || null });
+  btn.disabled = false;
+  if (!r || r.ok !== true) {
+    if (r && r.code === 'BLOQUEOS' && confirm('⛔ NO SE RESOLVIÓ\n\n' + (r.message || '') + '\n\n¿Registrarla igual como FORZADA? Queda marcada y a la vista, no oculta los bloqueos ni las obligaciones; la hoja no se toca.')) {
+      r = await ncRpc('pedido_resolver', { p_pedido_id: _ncPed.pedidoId, p_resolucion: sel.value, p_nota: nota || null, p_forzar: true });
+      if (!r || r.ok !== true) return alert('⛔ ' + ((r && (r.message || r.code)) || ''));
+    } else return alert('⛔ NO SE RESOLVIÓ\n\n' + ((r && (r.message || r.code)) || ''));
+  }
+  ccToast(r.message || 'Resolución registrada', 'ok');
+  if (r.hoja_encolada) { hojaColaProcesar(); }
+  else if (r.hoja_estado_sugerido && !r.forzada && !(r.obligaciones_abiertas > 0) && !(_ncCfg && _ncCfg.resolucion_auto) && typeof cambiarEstado === 'function' && confirm('Resuelto como ' + sel.value + '.\n\n¿Marcar el pedido como "' + r.hoja_estado_sugerido + '" en la hoja ahora? (mismo camino de siempre: Apps Script + verificación)')) {
+    var fake = { stopPropagation: function () {}, target: btn };
+    try { await cambiarEstado(_ncPed.pedidoId, _ncPed.fila || 0, r.hoja_estado_sugerido, fake); } catch (e) { alert('No se pudo cambiar la hoja: ' + (e && e.message)); }
+  }
+  ncPedidoRefrescar(_ncPed.pedidoId);
+  if (typeof ccontrolCargar === 'function') setTimeout(ccontrolCargar, 500);
+};
+// ── NC en revisión: qué haría el motor renglón por renglón, y la decisión ──
+window.ncRevisionModalPorNumero = async function (numero) {
+  var rows = await sbFetch('facturas_xubio?tipo=eq.3&numero=eq.' + encodeURIComponent(numero) + '&select=transaccion_id&limit=1') || [];
+  if (!rows.length) return ccToast('No encuentro la NC ' + numero, 'err');
+  ncRevisionModal(rows[0].transaccion_id);
+};
+window.ncRevisionModal = async function (ncId) {
+  var ld = vcModal('<h3>🧾 Revisión de NC</h3><div class="cc-meta">Calculando el plan…</div>');
+  var plan = await ncRpc('nc_plan', { p_nc_transaccion_id: Number(ncId), p_ctx: {} });
+  var devs = []; try { var f = await ncRpc('nc_facturas_del_pedido', { p_pedido_id: plan.pedido_id }); devs = (f && f.devoluciones) || []; } catch (e) {}
+  ld.remove();
+  var h = '<h3>🧾 NC ' + ccEsc(plan.nc_numero || ncId) + ' · ' + ncMon(plan.nc_importe) + '</h3>' +
+    '<div class="cc-meta">' + ccEsc(plan.pedido_id || '') + (plan.factura_numero ? ' · factura ' + ccEsc(plan.factura_numero) : '') + (plan.estado_viaje ? ' · viaje ' + ccEsc(plan.estado_viaje) : '') + (plan.entrega_estado ? ' · entrega ' + ccEsc(plan.entrega_estado) : '') + ' · CAE ' + (plan.cae_ok ? '✓' : '<span style="color:#B71C1C">no</span>') + '</div>' +
+    '<div style="margin-top:6px;">Decisión del motor: <b>' + ccEsc(plan.decision || '') + '</b> · ' + ccEsc(plan.motivo || '') + (plan.accion ? '<div class="vc-check">' + ccEsc(plan.accion) + '</div>' : '') + '</div>';
+  if (plan.motivo === 'NC_SIN_RENGLONES' || plan.motivo === 'FACTURA_SIN_RENGLONES' || plan.motivo === 'FACTURA_ASOCIADA_NO_EN_ESPEJO') {
+    h += '<div style="margin-top:8px;"><button class="cc-btn azul" onclick="ncTraerRenglones(' + Number(ncId) + ', ' + (plan.motivo === 'FACTURA_SIN_RENGLONES' ? (plan.factura_transaccion_id || 0) : 0) + ')">⬇️ Traer renglones desde Xubio y reclasificar</button></div>';
+  }
+  (plan.renglones || []).forEach(function (r) {
+    h += '<div class="cc-row" style="border-top:1px solid #F4ECDD;"><div style="flex:1;"><b>' + ccEsc(r.cantidad) + ' × ' + ccEsc(r.nombre) + '</b> · ' + ncMon(r.total_civa) + ' · destino <b>' + ccEsc(r.destino) + '</b> (' + ccEsc(r.motivo) + ')' +
+      (r.precio_factura != null && r.precio_civa != null && Math.abs(r.precio_factura - r.precio_civa) > 5 ? '<div class="cc-meta">precio NC ' + ncMon(r.precio_civa) + ' vs facturado ' + ncMon(r.precio_factura) + '</div>' : '') + (r.accion ? '<div class="cc-meta">' + ccEsc(r.accion) + '</div>' : '') + '</div>';
+    if (r.destino === 'revisar' && !esContador() && plan.cae_ok) {
+      var pid = r.producto_xubio_id;
+      var opts = devs.filter(function (d) { return (d.items || []).some(function (i) { return Number(i.xubio_producto_id) === Number(pid) || (i.producto || '').toLowerCase() === (r.nombre || '').toLowerCase(); }); })
+        .map(function (d) { return '<option value="' + d.id + '">' + ccEsc(d.tipo) + ' · ' + ccEsc((d.items || []).map(function (i) { return (i.esperado || i.cantidad) + '× ' + i.producto; }).join(', ')) + ' · ' + ccHora(d.hecho_at) + ' · ' + ccEsc(d.recepcion) + '</option>'; }).join('');
+      h += '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
+        (opts ? '<select id="ncrev-dev-' + pid + '" style="padding:5px;border:1.5px solid #E8DCC8;border-radius:6px;">' + opts + '</select><button class="cc-btn verde" onclick="ncRevisionDecidir(' + Number(ncId) + ',' + pid + ',\'devolucion\')">Cubre esa devolución</button>' : '') +
+        '<button class="cc-btn azul" onclick="ncRevisionDecidir(' + Number(ncId) + ',' + pid + ',\'retorno_esperado\')">Retorno esperado</button>' +
+        '<button class="cc-btn gris" onclick="ncRevisionDecidir(' + Number(ncId) + ',' + pid + ',\'sin_retorno\')">Sin retorno (crédito)</button>' +
+        '<button class="cc-btn gris" onclick="ncRevisionDecidir(' + Number(ncId) + ',' + pid + ',\'economica\')">Económica</button></div>';
+    }
+    h += '</div>';
+  });
+  h += '<div style="display:flex;gap:8px;margin-top:12px;">' + (plan.pedido_id ? '<button class="cc-btn gris" onclick="this.closest(\'.vc-modal-bk\').remove();ncPedidoAbrir(\'' + ccEsc(plan.pedido_id) + '\')">Ver pedido</button>' : '') + '<button class="cc-btn gris" onclick="this.closest(\'.vc-modal-bk\').remove()">Cerrar</button></div>';
+  vcModal(h);
+};
+window.ncRevisionDecidir = async function (ncId, pid, decision) {
+  var destino = null, nota = null;
+  if (decision === 'devolucion') { var sel = document.getElementById('ncrev-dev-' + pid); destino = sel ? sel.value : null; if (!destino) return ccToast('Elegí la devolución.', 'err'); }
+  if (decision === 'sin_retorno') { nota = prompt('Crédito sin retorno físico: qué se hizo con el stock en Xubio y por qué no vuelve mercadería (obligatorio):'); if (nota === null) return; }
+  if (decision === 'retorno_esperado' || decision === 'economica') { nota = prompt('Nota (opcional):'); if (nota === null) return; }
+  var r = await ncRpc('nc_cobertura_resolver', { p_nc_transaccion_id: ncId, p_producto_xubio_id: pid, p_decision: decision, p_destino_id: destino, p_nota: nota || null });
+  if (!r || r.ok !== true) return alert('⛔ ' + ((r && (r.message || r.code)) || ''));
+  ccToast('Decisión registrada', 'ok');
+  document.querySelectorAll('.vc-modal-bk').forEach(function (m) { if (m.querySelector('#ncped-modal') == null) m.remove(); });
+  ncRevisionModal(ncId); if (typeof ccontrolCargar === 'function') setTimeout(ccontrolCargar, 500); if (_ncPed) ncPedidoRefrescar(_ncPed.pedidoId);
+};
+window.ncTraerRenglones = async function (ncId, facturaId) {
+  ccToast('Consultando Xubio…', 'ok');
+  var r1 = await ncEdge(NC_EDGE_CONSULTA, { op: 'comprobante', id: Number(ncId) });
+  var r2 = facturaId ? await ncEdge(NC_EDGE_CONSULTA, { op: 'comprobante', id: Number(facturaId) }) : { ok: true };
+  if (!r1.ok || !r2.ok) return alert('⛔ ' + ((r1.ok ? r2 : r1).code || '') + ': ' + ((r1.ok ? r2 : r1).message || ''));
+  document.querySelectorAll('.vc-modal-bk').forEach(function (m) { if (m.querySelector('#ncped-modal') == null) m.remove(); });
+  ncRevisionModal(ncId);
+};
+
+
+// ═══ v13.244.0 — RESOLVER = COMPLETAR LO PENDIENTE (rev4) ══════════════════════════════════════════
+function ncPendienteBoton(p) {
+  if (esContador()) return '';
+  var ref = p.ref == null ? '' : String(p.ref);
+  switch (p.accion) {
+    case 'crear_nc_o_resolver': return '<button class="cc-btn verde" style="padding:3px 8px;" onclick="ncCrearDesdeIncidencia(\'' + ccEsc(ref) + '\')">🧾 Crear NC</button><button class="cc-btn gris" style="padding:3px 8px;" onclick="ncIncidenciaResolverUI(\'' + ccEsc(ref) + '\')">Resolver sin NC</button>';
+    case 'revisar_nc': case 'verificar_nc': return '<button class="cc-btn azul" style="padding:3px 8px;" onclick="ncRevisionModal(' + Number(ref) + ')">Revisar NC</button>';
+    case 'recibir': return (typeof rolActual !== 'undefined' && (rolActual === 'dueno' || rolActual === 'operaciones')) ? '<span class="cc-meta">Depósito (Ventas) · </span><button class="cc-btn gris" style="padding:3px 8px;" onclick="ncRecepcionAdminModal(\'' + ccEsc(ref) + '\')">Recibir en su lugar (con nota)</button>' : '<span class="cc-meta">lo recibe Depósito en Ventas</span>';
+    case 'crear_nc_o_no_corresponde': return '<button class="cc-btn gris" style="padding:3px 8px;" onclick="ncDevAdmin(\'' + ccEsc(ref) + '\', \'nc\', \'no_corresponde\')">No corresponde NC</button>';
+    case 'stock': return '<button class="cc-btn gris" style="padding:3px 8px;" onclick="ncDevAdmin(\'' + ccEsc(ref) + '\', \'stock\', \'ajustado\')">Stock ajustado</button><button class="cc-btn gris" style="padding:3px 8px;" onclick="ncDevAdmin(\'' + ccEsc(ref) + '\', \'stock\', \'no_corresponde\')">No corresponde</button>';
+    case 'cta_cte': return '<button class="cc-btn gris" style="padding:3px 8px;" onclick="ncDevAdmin(\'' + ccEsc(ref) + '\', \'cc\', \'ajustada\')">Cta cte ajustada</button><button class="cc-btn gris" style="padding:3px 8px;" onclick="ncDevAdmin(\'' + ccEsc(ref) + '\', \'cc\', \'no_corresponde\')">No corresponde</button>';
+    case 'resolver_diferencia': return '<button class="cc-btn azul" style="padding:3px 8px;" onclick="ncDiferenciasModal(\'' + ccEsc(_ncPed.pedidoId) + '\', ' + Number(ref) + ')">Resolver diferencia</button>';
+    case 'obligacion': return ncObligacionBoton({ id: Number(ref), tipo: p.tipo });
+    case 'entrega': return '<span class="cc-meta">el chofer la confirma en Ventas</span>';
+    default: return '';
+  }
+}
+function ncObligacionBoton(o) {
+  if (o.tipo === 'aplicar_nc_xubio') return '<button class="cc-btn verde" style="padding:3px 8px;" onclick="this.closest(\'.vc-modal-bk\').remove();cambiarTab(\'ccontrol\');setTimeout(function(){ncBandejaCargar();ccToast(\'Bandeja de NC → Registrar aplicación (con evidencia)\',\'ok\');},400)">Registrar aplicación</button>';
+  if (o.tipo === 'imputar_cobro') return '<button class="cc-btn verde" style="padding:3px 8px;" onclick="ncPedidoRefrescar(_ncPed.pedidoId);ccToast(\'Usá \\\'Imputar\\\' en el cobro a identificar (Cuenta corriente autorizada)\',\'ok\')">Ir a cobros</button>';
+  if (o.tipo === 'recibir_retorno') return '<span class="cc-meta">Depósito lo recibe en Ventas</span>';
+  return '<button class="cc-btn verde" style="padding:3px 8px;" onclick="ncObligacionCumplirUI(' + Number(o.id) + ')">Registrar cumplida (con evidencia)</button>' +
+         '<button class="cc-btn gris" style="padding:3px 8px;" onclick="ncObligacionCancelarUI(' + Number(o.id) + ')">Cancelar</button>';
+}
+window.ncObligacionCumplirUI = async function (id) {
+  var nota = prompt('Qué se hizo (obligatorio): viaje/entrega de la reposición, transferencia del reintegro, decisión sobre lo que conserva el cliente, etc.'); if (nota === null) return;
+  var ev = prompt('Evidencia (referencia: nro de recibo, foto, viaje, papel firmado). Opcional:'); if (ev === null) return;
+  var r = await ncRpc('obligacion_cumplir', { p_id: id, p_evidencia: ev ? { ref: ev } : null, p_nota: (nota || '').trim() || null });
+  if (!r || r.ok !== true) return alert('⛔ ' + ((r && (r.message || r.code)) || ''));
+  ccToast('Obligación cumplida' + (r.pendientes ? ' · quedan ' + r.pendientes : ''), 'ok');
+  if (_ncPed) ncPedidoRefrescar(_ncPed.pedidoId); if (typeof ccontrolCargar === 'function') setTimeout(ccontrolCargar, 500);
+};
+window.ncObligacionCancelarUI = async function (id) {
+  var nota = prompt('Motivo para cancelar la obligación (obligatorio):'); if (nota === null || !nota.trim()) return;
+  var r = await ncRpc('obligacion_cancelar', { p_id: id, p_nota: nota.trim() });
+  if (!r || r.ok !== true) return alert('⛔ ' + ((r && (r.message || r.code)) || ''));
+  ccToast('Obligación cancelada', 'ok'); if (_ncPed) ncPedidoRefrescar(_ncPed.pedidoId);
+};
+window.ncDevAdmin = async function (devId, campo, valor) {
+  var nota = null;
+  if (campo === 'nc' && valor === 'no_corresponde') { nota = prompt('Por qué no corresponde NC para esta devolución (obligatorio):'); if (nota === null || !nota.trim()) return; }
+  var r = await ncRpc('carga_retorno_admin', { p_id: devId, p_campo: campo, p_valor: valor, p_numero: null, p_nota: nota });
+  if (!r || r.ok !== true) return alert('⛔ ' + ((r && (r.message || r.code)) || ''));
+  ccToast('Registrado' + (r.conciliado ? ' · devolución conciliada' : ''), 'ok'); if (_ncPed) ncPedidoRefrescar(_ncPed.pedidoId);
+};
+// diferencias de recepción: responsable, evidencia, seguimiento, resolución
+window.ncDiferenciasModal = async function (pedidoId, soloId) {
+  var difs = await ncRpc('retorno_diferencias_json', { p_pedido_id: pedidoId, p_viaje_id: null, p_solo_abiertas: false });
+  if (!Array.isArray(difs)) difs = [];
+  var h = '<h3>⚖️ Diferencias de recepción · ' + ccEsc(pedidoId) + '</h3>' + (difs.length ? '' : '<div class="cc-meta">Sin diferencias.</div>');
+  difs.forEach(function (d) {
+    if (soloId && Number(d.id) !== Number(soloId) && d.estado === 'resuelta') return;
+    h += '<div style="margin-top:8px;padding:8px;border:1.5px solid ' + (d.estado === 'resuelta' ? '#C8E6C9' : '#FFB74D') + ';border-radius:8px;background:' + (d.estado === 'resuelta' ? '#F1F8E9' : '#FFF8F0') + ';">' +
+      '<b>' + ccEsc(d.tipo) + '</b> · ' + ccEsc(d.producto || '') + (d.calibre ? ' ' + ccEsc(d.calibre) : '') + ' · esperado ' + ccEsc(d.esperado) + ' / recibido ' + ccEsc(d.recibido) + (d.condicion && d.condicion !== 'buena' ? ' · condición <b>' + ccEsc(d.condicion) + '</b>' : '') +
+      ' · <b>' + ccEsc(d.estado) + '</b> · responsable <b>' + ccEsc(d.responsable) + '</b>' +
+      '<div class="cc-meta">hecho ' + ccHora(d.hecho_at) + ' · registrado ' + ccHora(d.registrado_at) + ' por ' + ccEsc(d.registrado_por || '') + (d.evidencia && d.evidencia.length ? ' · evidencia: ' + ccEsc(JSON.stringify(d.evidencia)) : ' · <span style="color:#B71C1C">sin evidencia</span>') + '</div>' +
+      ((d.seguimiento || []).length ? '<div class="cc-meta">' + d.seguimiento.map(function (sg) { return ccHora(sg.at) + ' ' + ccEsc(sg.por || '') + ': ' + ccEsc(sg.nota || '') + (sg.responsable ? ' [' + ccEsc(sg.responsable) + ']' : '') + (sg.resolucion ? ' → ' + ccEsc(sg.resolucion) : ''); }).join('<br>') + '</div>' : '') +
+      (d.resolucion ? '<div class="cc-meta">Resolución: ' + ccEsc(d.resolucion) + (d.destino_unidades ? ' · unidades: <b>' + ccEsc(_difDestinoTxt(d.destino_unidades)) + '</b>' + (['a_stock', 'reasignada', 'error_registro'].indexOf(d.destino_unidades) >= 0 ? '' : ' (no vuelven al stock disponible)') : '') + '</div>' : '');
+    if (d.estado !== 'resuelta' && !esContador()) {
+      h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center;">' +
+        '<select id="dif-resp-' + d.id + '" style="padding:5px;border:1.5px solid #E8DCC8;border-radius:6px;">' + ['sin_determinar', 'chofer', 'deposito', 'administracion', 'cliente', 'proveedor'].map(function (x) { return '<option value="' + x + '"' + (x === d.responsable ? ' selected' : '') + '>' + x + '</option>'; }).join('') + '</select>' +
+        '<input id="dif-nota-' + d.id + '" placeholder="Seguimiento / qué se averiguó" style="flex:1;min-width:160px;padding:5px;border:1.5px solid #E8DCC8;border-radius:6px;">' +
+        '<input id="dif-ev-' + d.id + '" placeholder="Evidencia (foto, papel, ref)" style="flex:1;min-width:120px;padding:5px;border:1.5px solid #E8DCC8;border-radius:6px;">' +
+        '<select id="dif-dest-' + d.id + '" style="padding:5px;border:1.5px solid #E8DCC8;border-radius:6px;"><option value="">¿qué pasó con las unidades?</option>' +
+          '<option value="a_stock">volvieron sanas a cámara (a stock)</option><option value="reasignada">eran de otro pedido (reasignada)</option>' +
+          '<option value="error_registro">error de registro</option><option value="descarte">se descartaron</option><option value="faltante_confirmado">no volvieron (faltante confirmado)</option></select>' +
+        '<button class="cc-btn azul" onclick="ncDiferenciaActualizar(' + d.id + ', \'en_investigacion\')">Guardar seguimiento</button>' +
+        '<button class="cc-btn verde" onclick="ncDiferenciaActualizar(' + d.id + ', \'resuelta\')">Resolver…</button></div>' +
+        '<div class="cc-meta">Solo "a cámara", "de otro pedido" y "error de registro" devuelven esas unidades al stock disponible. Lo dañado, vencido o no recibido sigue descontado hasta el ajuste en Xubio.</div>';
+    }
+    h += '</div>';
+  });
+  h += '<div style="display:flex;gap:8px;margin-top:12px;"><button class="cc-btn gris" onclick="this.closest(\'.vc-modal-bk\').remove()">Cerrar</button></div>';
+  var bk = vcModal(h); bk.querySelector('.vc-modal').id = 'ncdif-modal';
+};
+function _difDestinoTxt(x) {
+  return ({ a_stock: 'volvieron a cámara', reasignada: 'eran de otro pedido', error_registro: 'error de registro', descarte: 'descartadas', faltante_confirmado: 'no volvieron' })[x] || x;
+}
+window.ncDiferenciaActualizar = async function (id, estado) {
+  var resp = (document.getElementById('dif-resp-' + id) || {}).value || null;
+  var nota = ((document.getElementById('dif-nota-' + id) || {}).value || '').trim() || null;
+  var ev = ((document.getElementById('dif-ev-' + id) || {}).value || '').trim();
+  var resol = null;
+  var dest = ((document.getElementById('dif-dest-' + id) || {}).value || '') || null;
+  if (estado === 'resuelta') {
+    if (!dest) return alert('Elegí qué pasó con las unidades antes de resolver: de eso depende si vuelven al stock disponible.');
+    resol = prompt('Contá qué pasó (queda en el historial de la diferencia):'); if (resol === null || !resol.trim()) return;
+  }
+  var r = await ncRpc('retorno_diferencia_actualizar', { p_id: id, p_estado: estado, p_responsable: resp, p_nota: nota, p_evidencia: ev ? [{ tipo: 'ref', ref: ev }] : null, p_resolucion: resol, p_destino_unidades: dest });
+  if (!r || r.ok !== true) return alert('⛔ ' + ((r && (r.message || r.code)) || ''));
+  ccToast(estado === 'resuelta' ? 'Diferencia resuelta' + (r.restantes_devolucion === 0 ? ' · devolución conciliada' : ' · quedan ' + r.restantes_devolucion) : 'Seguimiento guardado', 'ok');
+  var m = document.getElementById('ncdif-modal'); if (m) m.closest('.vc-modal-bk').remove();
+  ncDiferenciasModal(_ncPed.pedidoId); if (_ncPed) ncPedidoRefrescar(_ncPed.pedidoId);
+};
+// Administración recibe en lugar de Depósito (con nota obligatoria): mismo conteo por producto
+window.ncRecepcionAdminModal = async function (devId) {
+  var fac = _ncPed && _ncPed.fac; var d = ((fac && fac.devoluciones) || []).find(function (x) { return x.id === devId; });
+  if (!d) return ccToast('No encuentro la devolución en la ficha (actualizá).', 'err');
+  var items = d.items || [];
+  var h = '<h3>📦 Recibir en lugar de Depósito</h3><div class="vc-check">Lo normal es que reciba Pancho desde Ventas. Si recibís vos, contá por qué (queda registrado con tu nombre).</div>' +
+    '<table style="width:100%;font-size:13px;border-collapse:collapse;margin-top:6px;"><tr><th style="text-align:left;">Producto</th><th>Esperado</th><th>Recibido</th><th>Condición</th></tr>' +
+    items.map(function (it, i) { return '<tr><td>' + ccEsc(it.producto) + (it.calibre ? ' ' + ccEsc(it.calibre) : '') + '</td><td style="text-align:center;">' + ccEsc(it.esperado) + '</td><td style="text-align:center;"><input type="number" min="0" step="1" id="rad-q-' + i + '" value="' + ccEsc(it.esperado) + '" style="width:64px;padding:4px;border:1.5px solid #E8DCC8;border-radius:6px;text-align:center;"></td>' +
+      '<td style="text-align:center;"><select id="rad-c-' + i + '" style="padding:4px;border:1.5px solid #E8DCC8;border-radius:6px;"><option value="buena">buena</option><option value="danada">dañada</option><option value="vencida">vencida</option><option value="otro">otro</option></select></td></tr>'; }).join('') + '</table>' +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;"><label>Hora real de entrada <input type="datetime-local" id="rad-hecho" style="padding:4px;border:1.5px solid #E8DCC8;border-radius:6px;"></label>' +
+    '<input id="rad-extra" placeholder="Llegó algo que no estaba? producto × cantidad (opcional)" style="flex:1;min-width:200px;padding:5px;border:1.5px solid #E8DCC8;border-radius:6px;"></div>' +
+    '<input id="rad-nota" placeholder="Por qué recibe Administración (obligatorio, mín. 15 letras)" style="width:100%;margin-top:6px;padding:6px;border:1.5px solid #E8DCC8;border-radius:6px;">' +
+    '<label style="display:block;margin-top:6px;font-size:13px;"><input type="checkbox" id="rad-foto"> Sin foto ahora (queda como evidencia pendiente, no se inventa)</label>' +
+    '<div style="display:flex;gap:8px;margin-top:12px;"><button class="cc-btn verde" onclick="ncRecepcionAdminEnviar(\'' + devId + '\', ' + items.length + ', this)">Registrar recepción</button><button class="cc-btn gris" onclick="this.closest(\'.vc-modal-bk\').remove()">Cancelar</button></div>';
+  var bk = vcModal(h); bk.querySelector('.vc-modal').id = 'rad-modal';
+};
+window.ncRecepcionAdminEnviar = async function (devId, n, btn) {
+  var items = [];
+  for (var i = 0; i < n; i++) { var q = Number((document.getElementById('rad-q-' + i) || {}).value); if (!(q >= 0)) return ccToast('Cantidad inválida', 'err'); items.push({ recibido: q, condicion: (document.getElementById('rad-c-' + i) || {}).value || 'buena' }); }
+  var extraTxt = (document.getElementById('rad-extra').value || '').trim(); var extra = [];
+  if (extraTxt) { var m = extraTxt.match(/^(.+?)\s*[x×]\s*(\d+)$/i); if (!m) return ccToast('Formato: producto × cantidad', 'err'); extra.push({ producto: m[1].trim(), cantidad: Number(m[2]), condicion: 'buena' }); }
+  var hecho = document.getElementById('rad-hecho').value ? new Date(document.getElementById('rad-hecho').value).toISOString() : null;
+  var nota = (document.getElementById('rad-nota').value || '').trim(); if (nota.length < 15) return ccToast('La nota es obligatoria (mín. 15 letras).', 'err');
+  btn.disabled = true;
+  var r = await ncRpc('carga_retorno_recibir_conteo', { p_id: devId, p_items: items, p_extra: extra, p_hecho_en: hecho, p_nota: nota, p_foto_pendiente: !!document.getElementById('rad-foto').checked, p_fotos: null, p_request_id: 'admin:rec:' + devId + ':' + Date.now() });
+  btn.disabled = false;
+  if (!r || r.ok !== true) return alert('⛔ ' + ((r && (r.message || r.code)) || ''));
+  alert('✅ ' + (r.message || 'Recepción registrada') + (r.diferencias ? '\n\nDiferencias: ' + r.diferencias + ' → quedan para investigar (responsable, evidencia, seguimiento).' : ''));
+  var mm = document.getElementById('rad-modal'); if (mm) mm.closest('.vc-modal-bk').remove();
+  if (_ncPed) ncPedidoRefrescar(_ncPed.pedidoId);
+};
+// contra boleta: verificar saldo de una factura contra Xubio · imputar cobros
+window.ncFacturaVerificarUI = async function (facturaId, numero, residual) {
+  var saldo = prompt('Saldo pendiente de ' + numero + ' según la cuenta corriente de Xubio (0 si está saldada).\nLo que la app calcula para esa factura: ' + ncMon(residual) + '.\nLos cobros de la app que todavía no llegaron al recibo de Xubio se descuentan solos después:', String(Math.max(0, Math.round(residual || 0)))); if (saldo === null) return;
+  var nota = prompt('Qué verificaste (pantalla de Xubio, recibo, fecha) — obligatorio:'); if (nota === null || !nota.trim()) return;
+  var r = await ncRpc('cta_cte_factura_verificar', { p_factura_transaccion_id: Number(facturaId), p_saldo: Number(saldo), p_nota: nota.trim(), p_fuente: 'xubio_web' });
+  if (!r || r.ok !== true) return alert('⛔ ' + ((r && (r.message || r.code)) || ''));
+  ccToast('Saldo verificado: ' + ncMon(r.saldo_verificado), 'ok'); if (_ncPed) ncPedidoRefrescar(_ncPed.pedidoId);
+};
+window.ncCobroIdentificarUI = async function (imputacionId, monto) {
+  var fcs = ((_ncPed && _ncPed.sit && _ncPed.sit.cta_cte && _ncPed.sit.cta_cte.facturas) || []).filter(function (f) { return f.estado === 'verificada_app' || f.estado === 'verificada_admin'; });
+  if (!fcs.length) return alert('No hay facturas del cliente con saldo verificado. Primero "Verificar saldo (Xubio)" en la factura que corresponda.');
+  var op = prompt('Imputar ' + ncMon(monto) + ' a (escribí el número):\n' + fcs.map(function (f, i) { return (i + 1) + ') ' + f.numero + ' · saldo verificado ' + ncMon(f.saldo_verificado); }).join('\n'), '1'); if (op === null) return;
+  var f = fcs[Number(op) - 1]; if (!f) return;
+  var r = await ncRpc('cobro_a_identificar_imputar', { p_imputacion_id: Number(imputacionId), p_factura_transaccion_id: Number(f.transaccion_id), p_nota: null });
+  if (!r || r.ok !== true) return alert('⛔ ' + ((r && (r.message || r.code)) || ''));
+  ccToast('Imputado a ' + r.factura, 'ok'); if (_ncPed) ncPedidoRefrescar(_ncPed.pedidoId);
+};
+window.ncCobroImputarUI = async function (entregaId) {
+  var ctx = await ncRpc('contra_boleta_contexto', { p_entrega_id: entregaId });
+  if (!ctx || ctx.ok !== true) return alert('⛔ ' + ((ctx && (ctx.message || ctx.code)) || ''));
+  var ops = (ctx.pendientes_verificadas || []).map(function (f) { return { id: f.transaccion_id, label: f.numero + ' · pendiente verificado ' + ncMon(f.saldo_verificado) }; });
+  if (ctx.hoy) ops.push({ id: ctx.hoy.transaccion_id, label: ctx.hoy.numero + ' (la de hoy) ' + ncMon(ctx.hoy.importe) });
+  ops.push({ id: 'a_identificar', label: 'A identificar (saldo en revisión)' });
+  var sin = Number((_ncPed && _ncPed.sit && _ncPed.sit.cobro_sin_imputar) || 0);
+  var op = prompt('Cobro sin imputar: ' + ncMon(sin) + '. ¿A qué factura va? (número)\n' + ops.map(function (o, i) { return (i + 1) + ') ' + o.label; }).join('\n'), '1'); if (op === null) return;
+  var o = ops[Number(op) - 1]; if (!o) return;
+  var monto = prompt('Importe a imputar:', String(Math.round(sin))); if (monto === null) return;
+  var cob = (_ncPed.sit.entrega && _ncPed.sit.entrega.cobros) || {}; var imp = (_ncPed.sit.entrega && _ncPed.sit.entrega.imputado_por_medio) || {};
+  var disp = ['efectivo', 'transferencia', 'cheque'].map(function (m) { return { medio: m, monto: Math.max(0, Number(cob[m] || 0) - Number(imp[m] || 0)) }; }).filter(function (x) { return x.monto > 0.5; });
+  var medio = null;
+  if (disp.length === 1) medio = disp[0].medio;
+  else if (disp.length > 1) {
+    var om = prompt('¿Con qué instrumento se paga? (escribí el número)\n' + disp.map(function (x, i) { return (i + 1) + ') ' + x.medio + ' · disponible ' + ncMon(x.monto); }).join('\n'), '1');
+    if (om === null) return; medio = (disp[Number(om) - 1] || {}).medio; if (!medio) return alert('Instrumento inválido.');
+    if (Number(monto) > (disp[Number(om) - 1] || {}).monto + 0.5) return alert('⛔ En ' + medio + ' quedan ' + ncMon((disp[Number(om) - 1] || {}).monto) + ' sin imputar. Cada instrumento se imputa una sola vez.');
+  } else return alert('⛔ No queda dinero sin imputar en esta entrega.');
+  var r = await ncRpc('entrega_cobro_imputar', { p_entrega_id: entregaId, p_imputaciones: [{ factura_transaccion_id: o.id, monto: Number(monto), medio: medio }], p_request_id: 'admin:imp:' + entregaId + ':' + Date.now() });
+  if (!r || r.ok !== true) return alert('⛔ ' + ((r && (r.message || r.code)) || ''));
+  ccToast(r.message || 'Imputado', 'ok'); if (_ncPed) ncPedidoRefrescar(_ncPed.pedidoId);
+};
+// ── hoja en cola: la base decide (resolución completa); esta pantalla ejecuta el camino de siempre y registra el resultado ──
+var _hojaColaCorriendo = false;
+async function _hojaLeerEstado(pedidoId) {   // v13.245.0: el estado REAL de la hoja, o null si no se pudo leer
+  try {
+    var f = await sbFetch('pedidos_zona?pedido_id=eq.' + encodeURIComponent(pedidoId) + '&select=estado&limit=1');
+    if (!Array.isArray(f) || !f.length) return null;
+    return f[0].estado || null;
+  } catch (e) { return null; }
+}
+async function _hojaAplicar(row) {
+  var p = (typeof todosLosPedidos !== 'undefined' ? todosLosPedidos : []).find(function (x) { return x.pedidoId === row.pedido_id; });
+  var fila = (p && p.fila) || 0;
+  if (row.estado_destino === 'Cancelado') {
+    var vc = await pzCancelacionVerificar(row.pedido_id);
+    if (!vc.puede) return { ok: false, estado_real: row.estado_hoja || '', detalle: 'la base no permite cancelar: ' + (vc.code || '') + ' ' + (vc.message || '') };
+  }
+  try {
+    var params = new URLSearchParams({ accion: 'cambiarEstado', pedidoId: row.pedido_id, fila: fila, estado: row.estado_destino });
+    await fetch(APPS_SCRIPT_URL + '?' + params.toString(), { mode: 'no-cors' });
+  } catch (e) { return { ok: false, estado_real: row.estado_hoja || '', detalle: 'Apps Script no respondió: ' + (e && e.message) }; }
+  // v13.245.0 · no se da por hecho: se LEE el estado real. Si no se puede leer, no es éxito (queda para reintentar).
+  await new Promise(function (ok) { setTimeout(ok, 2500); });
+  var real = await _hojaLeerEstado(row.pedido_id);
+  if (real === null) { real = await _hojaLeerEstado(row.pedido_id); }
+  if (real === null) return { ok: false, estado_real: null, detalle: 'no se pudo leer cómo quedó la hoja (sin conexión o sin fila en pedidos_zona)' };
+  var coincide = String(real).trim().toLowerCase().indexOf(String(row.estado_destino).trim().toLowerCase()) === 0;
+  if (!coincide) return { ok: false, estado_real: real, detalle: 'la hoja quedó en ' + real };
+  if (p) { p.estado = real; try { _estadosCambiados[row.pedido_id] = { estado: real, ts: Date.now() }; } catch (e2) {} }
+  return { ok: true, estado_real: real, detalle: 'verificado en pedidos_zona' };
+}
+window.hojaColaProcesar = async function () {
+  if (_hojaColaCorriendo || !_JWT || esContador()) return;
+  if (typeof rolActual !== 'undefined' && rolActual !== 'dueno' && rolActual !== 'operaciones' && rolActual !== 'cobranzas') return;
+  _hojaColaCorriendo = true;
+  try {
+    if (!_ncCfg) { try { _ncCfg = await ncRpc('nc_config', {}); } catch (e0) {} }
+    if (!_ncCfg || !_ncCfg.resolucion_auto) return;
+    var rows = await ncRpc('pedido_hoja_cola_pendientes', {}); if (!Array.isArray(rows) || !rows.length) return;
+    var n = 0;
+    for (var i = 0; i < rows.length && i < 10; i++) {
+      var res = await _hojaAplicar(rows[i]);
+      var rr = await ncRpc('pedido_hoja_cola_resultado', { p_id: rows[i].id, p_ok: !!res.ok, p_estado_real: res.estado_real || null, p_detalle: res.detalle || null });
+      if (res.ok && rr && rr.ok === true) n++;      // v13.245.0: solo cuenta si la base lo dio por verificado
+      else if (rr && rr.code === 'YA_NO_CORRESPONDE') ccToast('Hoja de ' + rows[i].pedido_id + ': ' + (rr.message || 'ya no correspondía'), 'err');
+    }
+    if (n) { ccToast('Hoja actualizada sola en ' + n + ' pedido(s) (Apps Script + verificación)', 'ok'); if (typeof renderPedidos === 'function') try { renderPedidos(); } catch (e3) {} }
+  } catch (e) { console.warn('[v13.244.0] hoja en cola:', e && e.message); }
+  finally { _hojaColaCorriendo = false; }
+};
+window.hojaColaAplicarUno = async function (id, btn) {
+  if (btn) btn.disabled = true;
+  var rows = await ncRpc('pedido_hoja_cola_pendientes', {}); var row = (Array.isArray(rows) ? rows : []).find(function (r) { return Number(r.id) === Number(id); });
+  if (!row) { if (btn) btn.disabled = false; return ccToast('Ya no está en la cola.', 'ok'); }
+  var res = await _hojaAplicar(row);
+  var rr = await ncRpc('pedido_hoja_cola_resultado', { p_id: row.id, p_ok: !!res.ok, p_estado_real: res.estado_real || null, p_detalle: res.detalle || null });
+  if (btn) btn.disabled = false;
+  if (res.ok && rr && rr.ok === true) ccToast('Hoja → ' + row.estado_destino + ' aplicada y verificada', 'ok');
+  else if (rr && rr.code === 'YA_NO_CORRESPONDE') alert('⛔ NO SE APLICÓ\n\n' + (rr.message || '') + '\n\nQueda a la vista en la ficha del pedido.');
+  else alert('⛔ La hoja NO cambió (queda pendiente para reintentar):\n\n' + (res.detalle || (rr && rr.message) || ''));
+  if (_ncPed) ncPedidoRefrescar(_ncPed.pedidoId); if (typeof ccontrolCargar === 'function') setTimeout(ccontrolCargar, 500);
+};
+// rendición: a qué factura fue cada cobro (contra boleta)
+window.admRendImputLabels = async function (entregas) {
+  try {
+    var ids = (entregas || []).map(function (e) { return e.id; }).filter(Boolean); if (!ids.length) return;
+    var rows = await sbFetch('cta_cte_imputaciones?source=eq.app&entrega_id=in.(' + ids.join(',') + ')&select=entrega_id,factura_numero,importe_aplicado,estado') || [];
+    var by = {}; rows.forEach(function (r) { (by[r.entrega_id] = by[r.entrega_id] || []).push(r); });
+    document.querySelectorAll('[data-rend-imput]').forEach(function (el) {
+      var l = by[el.getAttribute('data-rend-imput')]; if (!l) return;
+      el.innerHTML = ' · <span style="color:#1565C0;">contra boleta → ' + l.map(function (r) { return (r.estado === 'a_identificar' ? 'A IDENTIFICAR' : ccEsc(r.factura_numero || '')) + ' ' + ncMon(r.importe_aplicado); }).join(', ') + '</span>';
+    });
+  } catch (e) {}
+};
+
 // ── ENGANCHES ──────────────────────────────────────────────────────────────
 var _ccPrevCT = null;
 function ccParchearTab() {
@@ -52885,19 +53724,19 @@ function ccParchearTab() {
   _ccPrevCT = cambiarTab;
   cambiarTab = function (t) {
     _ccPrevCT(t);
-    if (t === 'ccontrol') ccCargar();
+    if (t === 'ccontrol') ccontrolCargar();
   };
 }
 function ccInitView() {
   var v = document.getElementById('view-ccontrol');
-  if (v && !v.innerHTML.trim()) v.innerHTML = '<div id="cc-cont"></div>';
+  if (v && !v.innerHTML.trim()) v.innerHTML = '<div id="ccontrol-cont"></div><div id="ccnc-cont"></div>';   // v13.242.0
 }
 function ccBoot() {
   ccInitView();
   ccParchearTab();
   vcParchearRender();
-  ccCargar();                       // primer semáforo + badge
-  setInterval(ccCargar, 5 * 60 * 1000);
+  ccontrolCargar();                       // primer semáforo + badge
+  setInterval(ccontrolCargar, 5 * 60 * 1000);
 }
 if (document.readyState === 'complete' || document.readyState === 'interactive') setTimeout(ccBoot, 1200);
 else document.addEventListener('DOMContentLoaded', function () { setTimeout(ccBoot, 1200); });
@@ -60715,7 +61554,14 @@ async function cv2ciBloque(viajeId) {
     incidencias_abiertas: 'incidencias sin revisar',
     excepciones_abiertas: 'excepciones sin resolver',
     recorrido_sin_finalizar: 'el recorrido todavía no terminó',
-    planilla_firmada_faltante: 'falta la planilla firmada'
+    planilla_firmada_faltante: 'falta la planilla firmada',
+    nc_en_revision: 'NC del viaje que requieren revisión',                       // v13.243.0 (cierre_v2)
+    incidencias_chofer_abiertas: 'incidencias del chofer sin resolver',
+    pedidos_sin_resolver: 'pedidos sin resolución registrada (ver pantalla del pedido)',
+    retornos_esperados_sin_recibir: 'retornos esperados por NC que Depósito no recibió',
+    obligaciones_abiertas: 'obligaciones abiertas (aplicar NC, reposición, reintegro, lo que conserva el cliente…)',   // v13.244.0
+    diferencias_retorno_abiertas: 'diferencias de recepción sin resolver (responsable / evidencia)',
+    cobros_sin_imputar: 'cobros contra boleta sin imputar a una factura'
   };
   el.innerHTML = '<div style="margin:6px 0;padding:8px;border:2px solid #E65100;border-radius:10px;background:#FFF3E0;">' +
     '<b>⏳ Falta para poder cerrar el viaje (' + claves.length + ')</b>' +
@@ -60937,6 +61783,7 @@ async function cv2aCargar(id) {
          '</b> (' + cv2aEsc(t.cliente || '') + ') · ' + est + ' · ' + cv2aEsc(t.motivo) + '<br>' +
          (t.items || []).map(function (i) { return cv2aEsc(i.producto) + ': declarado ' + i.esperado + (i.recibido != null ? ', recibido ' + i.recibido : ''); }).join(' · ') + '<br>' +
          'NC: <b>' + cv2aEsc(t.nc_estado) + (t.nc_numero ? ' ' + cv2aEsc(t.nc_numero) : '') + '</b> · Stock: <b>' + cv2aEsc(t.stock_estado) + '</b> · Cta cte: <b>' + cv2aEsc(t.cc_estado) + '</b>' +
+         (t.nc_estado === 'pendiente' && t.estado !== 'conciliado' && !(typeof esContador === 'function' && esContador()) ? ' <button class="cc-btn azul" onclick="ncCrearDesdePedido(\'' + cv2aEsc(t.pedido_id) + '\')">🧾 Crear NC</button>' : '') +   // v13.242.0: misma pantalla que Control/Pedidos/Facturación
          (t.estado !== 'conciliado' && cfg.tarea_admin ? '<br>' +
            (t.nc_estado === 'pendiente' ? b('nc', 'emitida', 'NC emitida') + b('nc', 'no_corresponde', 'NC no corresponde') : '') +
            (t.stock_estado === 'pendiente' && t.recepcion_estado !== 'pendiente' ? b('stock', 'ajustado', 'Stock ajustado') + b('stock', 'no_corresponde', 'Stock no corresponde') : '') +
@@ -60966,13 +61813,14 @@ async function cv2aCargar(id) {
       : '🔒 Carga cerrada por Depósito: congelada. No se agregan, editan ni sacan pedidos; los nuevos van a la próxima salida.') + '</div>';
   }
   // v13.231.0 — contenedores de la planilla firmada y del cierre administrativo
-  h += '<div id="cv2pf-' + id + '"></div><div id="cv2ci-' + id + '"></div>';
+  h += '<div id="cv2pf-' + id + '"></div><div id="cv2ci-' + id + '"></div><div id="cv2nc-' + id + '"></div>';   // v13.242.0: + NC del viaje
   // v13.232.0 — bandeja de incidencias del manifiesto de ESTE viaje
   h += cv2biBloqueHtml(id);
   el.innerHTML = h;
   setTimeout(function () {
     try { cv2pfBloque(id); } catch (e) { console.warn('[planilla firmada]', e); }
     try { cv2ciBloque(id); } catch (e) { console.warn('[cierre]', e); }
+    try { ncViajeBloque(id); } catch (e) { console.warn('[nc viaje]', e); }   // v13.242.0
   }, 0);
   if (r.congelado) {   // sin "reabrir" ni "sumar pedidos" sobre un viaje que ya salió
     var cont = el.parentElement;
