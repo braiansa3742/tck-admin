@@ -1,5 +1,14 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════════
+     TCK ADMIN — v13.246.0 — 23/09/2026
+     v13.246.0: RENDICIÓN — FIADO DEL CHOFER QUE YA ESTÁ PAGO.
+       · Si el chofer marcó fiado y el cliente ya pagó (la rendición/transferencia llegó tarde),
+         Administración lo pasa a pago en el editor ✎: botones "Ya pagó → Efectivo/Transfer./Cheque"
+         o cargando el importe en el instrumento. El fiado baja solo (nunca sube ni se carga a mano).
+       · La diferencia por factura y rendicion_diferencia dejan de contar doble (fiado + pago).
+       · Queda constancia en rendicion_nota_diferencia (quién, cuándo, cuánto y por qué medio).
+       · Sin cambios en Supabase. DEPLOY: subir como index.html y version.json a 13.246.0.
+     ─────────────────────────────────────────────────────────────────────
      TCK ADMIN — v13.245.0 — 22/09/2026
      v13.245.0: PARCHE DE CIERRE (rev5) — saldos, medios de pago, diferencias y hoja verificada.
        (sobre v13.244.0. Requiere 01/02/03 v3 de rev5 en Supabase.)
@@ -20491,8 +20500,8 @@ function rvAbrir(id){
   var entMarc=(_rvSel._ent||[]).filter(function(e){ return e.rendicion_estado!=='confirmada'; });
   var entSM=(_rvSel._sm||[]).map(function(e){ e._sm=true; return e; });
   _rvEnt=entMarc.concat(entSM);
-  _rvCobro={}; _rvIncluir={}; _rvEdit={}; _rvEfeContado=null;
-  entMarc.forEach(function(e){ _rvCobro[e.id]=_rvParseDet(e); _rvIncluir[e.id]=true; });
+  _rvCobro={}; _rvIncluir={}; _rvEdit={}; _rvEfeContado=null; _rvFiadoOrig={};
+  entMarc.forEach(function(e){ _rvCobro[e.id]=_rvParseDet(e); _rvIncluir[e.id]=true; if(_rvN(_rvCobro[e.id].cuenta_corriente)>0) _rvFiadoOrig[e.id]=_rvN(_rvCobro[e.id].cuenta_corriente); });   // v13.246.0
   // sin marcar: arrancan en cero, NO incluidas (Valen decide), con el editor de formas abierto
   entSM.forEach(function(e){ _rvCobro[e.id]={efectivo:_rvTot(e),transferencia:0,cheque:0,cuenta_corriente:0}; _rvIncluir[e.id]=false; _rvEdit[e.id]=true; });   // v13.123: efectivo precargado ya descuenta devolución
   var tit=document.getElementById('rv-vtit'); if(tit) tit.textContent=(_rvSel.chofer||'')+' · '+_rvFecha(_rvSel.fecha_salida);
@@ -20501,7 +20510,20 @@ function rvAbrir(id){
 
 function rvToggleInc(id){ _rvIncluir[id]=!_rvIncluir[id]; rvRenderPanel(); }
 function rvToggleEdit(id){ _rvEdit[id]=!_rvEdit[id]; rvRenderPanel(); }
-function rvSetCobro(id,instr,val){ _rvCobro[id][instr]=_rvN(String(val).replace(/[^\d.-]/g,'')); rvActualizarVivo(); }
+function rvSetCobro(id,instr,val){ _rvCobro[id][instr]=_rvN(String(val).replace(/[^\d.-]/g,'')); _rvFiadoAjustar(id); rvActualizarVivo(); }
+// v13.246.0 — fiado marcado por el chofer que en realidad ya se pagó. El fiado
+// nunca se carga ni sube: sólo BAJA a medida que Administración registra plata
+// real (efectivo/transfer/cheque). fiado = min(original, esperado − cobrado).
+var _rvFiadoOrig = {};
+function _rvFiadoAjustar(id){
+  var fo=_rvN(_rvFiadoOrig[id]); if(fo<=0) return;
+  var e=_rvEnt.find(function(x){ return x.id===id; }); if(!e) return;
+  var c=_rvCobro[id]; c.cuenta_corriente=Math.max(0, Math.min(fo, _rvTot(e)-_rvCobrado(c)));
+}
+function rvFiadoPagado(id,instr){
+  var c=_rvCobro[id]; if(!c) return; var f=_rvN(c.cuenta_corriente); if(f<=0) return;
+  c[instr]=_rvN(c[instr])+f; _rvFiadoAjustar(id); rvRenderPanel();
+}
 function rvSetContado(v){ _rvEfeContado=_rvN(String(v).replace(/[^\d.-]/g,'')); rvActualizarVivo(); }
 
 // v13.71.0: actualiza SOLO los nodos de resumen sin reconstruir el panel (no destruye
@@ -20602,7 +20624,14 @@ function rvRenderPanel(){
             var _hist=(k==='cuenta_corriente');
             if(_hist && _rvN(c[k])<=0) return '';
             return '<label class="rv-il"><span>'+lbl+'</span><input inputmode="decimal"'+(_hist?' disabled title="Cuenta corriente: sólo consulta. No se puede cargar en una rendición nueva."':'')+' value="'+Math.round(_rvN(c[k])).toLocaleString("es-AR")+'"'+(_hist?'':' oninput="rvSetCobro(\''+e.id+'\',\''+k+'\',this.value)"')+'></label>';
-          }).join('')+'</div>'
+          }).join('')+
+          (_rvN(_rvFiadoOrig[e.id])>0?('<div style="flex-basis:100%;margin-top:6px;font-size:11px;color:#7c2d12;">'+
+            'El chofer lo marcó fiado ('+_rvFmt(_rvFiadoOrig[e.id])+'). '+
+            (_rvN(c.cuenta_corriente)>0
+              ? '¿Ya pagó? Pasalo a: '+['efectivo','transferencia','cheque'].map(function(k){ return '<button onclick="rvFiadoPagado(\''+e.id+'\',\''+k+'\')" style="border:1px solid #1E8449;background:#fff;color:#1E8449;font-weight:800;font-size:11px;border-radius:6px;padding:3px 9px;margin:2px 4px 0 0;cursor:pointer;">'+({efectivo:'Efectivo',transferencia:'Transfer.',cheque:'Cheque'}[k])+'</button>'; }).join('')
+              : '<b style="color:#1E8449;">Registrado como pagado.</b>')+
+          '</div>'):'')+
+          '</div>'
         ):'')+
       '</div>'+
       '<div class="mon"><div class="n">'+_rvFmt(tot)+'</div>'+
@@ -20661,6 +20690,9 @@ async function _rvCerrar(){
       rendicion_monto_recibido:Math.round(cobr),
       rendicion_diferencia:Math.round(cobr+_rvN(c.cuenta_corriente)-tot)
     };
+    // v13.246.0 — constancia cuando Administración pasó a pago un fiado del chofer
+    var _fo=_rvN(_rvFiadoOrig[e.id]), _fp=_fo-_rvN(c.cuenta_corriente);
+    if(_fo>0 && _fp>0) payload.rendicion_nota_diferencia='Chofer marcó fiado '+_rvFmt(_fo)+'; Administración ('+quien+', '+ahora.slice(0,10)+') registró pagado '+_rvFmt(_fp)+' ('+Object.keys(det).join('+')+')'+(_rvN(c.cuenta_corriente)>0?'; sigue fiado '+_rvFmt(c.cuenta_corriente):'');
     if(e._sm){
       // v13.80: el chofer la dejó pendiente; al rendirla la damos por entregada
       payload.estado='entregado';
